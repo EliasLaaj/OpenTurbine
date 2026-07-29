@@ -19,10 +19,10 @@
 //
 //  Producers (Core 1 ECU loop, plus Core-0 config-change logging) only
 //  format events into a static ring buffer guarded by a spinlock —
-//  no LittleFS access on the ECU core. Core 0 (web task tick →
-//  runEviction()) drains the ring to flash and runs eviction. If the
-//  ring overflows, drops are counted and an EVENTS_DROPPED marker is
-//  written when space frees. Web server reads for display/download.
+//  no LittleFS access on the ECU core. Core 0 drains the ring only in
+//  STANDBY/FAULT, because ESP32 flash writes suspend both cores. If the ring
+//  fills during a run, it retains the newest records, counts overwritten
+//  records, and writes an EVENTS_DROPPED marker when storage is safe.
 // ============================================================
 
 class FlightRecorder {
@@ -64,8 +64,8 @@ public:
     static void beginRawDownload();
     static void endRawDownload();
 
-    // Called from Core 0 (web task tick): drains the Core-1 event ring to
-    // flash, evicts when the log is full, and performs deferred clear().
+    // Called from Core 0 only in STANDBY/FAULT: drains the event ring to flash,
+    // evicts when the log is full, and performs deferred clear().
     static void runEviction();
 
 private:

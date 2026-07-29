@@ -1,0 +1,225 @@
+{
+  "format": "openturbine-pcb-profile",
+  "format_version": {"major": 1, "minor": 0},
+  "board": {
+    "id": "openturbine-ecu-s3-v1",
+    "name": "OpenTurbine ECU",
+    "revision": "1.0",
+    "manufacturer": "OpenTurbine",
+    "description": "Official ESP32-S3 OpenTurbine ECU board"
+  },
+  "target": {
+    "chip": "esp32-s3",
+    "minimum_flash_mb": 16,
+    "reviewed_strapping_gpio": [3, 45]
+  },
+  "buses": [
+    {"id": "sensor_i2c", "kind": "i2c", "pins": {"sda": 4, "scl": 5}, "frequency_hz": 400000},
+    {"id": "thermocouple_spi", "kind": "spi", "pins": {"sck": 12, "miso": 13, "mosi": 11}},
+    {"id": "serial_0", "kind": "uart", "pins": {"tx": 43, "rx": 44}}
+  ],
+  "devices": [
+    {"id": "thermocouple_chip_1", "driver": "max31856", "bus": "thermocouple_spi", "select": {"gpio": 14}, "expected": true},
+    {"id": "thermocouple_chip_2", "driver": "max31856", "bus": "thermocouple_spi", "select": {"gpio": 21}, "expected": true},
+    {"id": "adc_chip", "driver": "tla2528", "bus": "sensor_i2c", "address": 16, "expected": true},
+    {"id": "io_expander", "driver": "tca9554", "bus": "sensor_i2c", "address": 32, "expected": true}
+  ],
+  "fixed_functions": {
+    "status_led": {"gpio": 45, "type": "gpio", "active_high": true, "safe_demand": 0},
+    "servo_output_enable": {"gpio": 17, "active_high": false, "safe_demand": 0},
+    "supply_voltage": {
+      "gpio": 10,
+      "divider": 18.6470588235,
+      "reference_mv": 3300,
+      "label": "ECU supply voltage"
+    },
+    "cluster_serial": {"bus": "serial_0"},
+    "mavlink": {"bus": "serial_0"}
+  },
+  "ports": [
+    {
+      "id": "thermocouple_1", "label": "Thermocouple 1", "connector": "Thermocouple 1",
+      "description": "Built-in MAX31856 thermocouple channel",
+      "modes": [{"id": "temperature", "adapter": "spi_thermocouple", "device": "thermocouple_chip_1"}]
+    },
+    {
+      "id": "thermocouple_2", "label": "Thermocouple 2", "connector": "Thermocouple 2",
+      "description": "Built-in MAX31856 thermocouple channel",
+      "modes": [{"id": "temperature", "adapter": "spi_thermocouple", "device": "thermocouple_chip_2"}]
+    },
+
+    {
+      "id": "adc_1", "label": "ADC input 1", "connector": "ADC1 / CN24",
+      "description": "0-5 V analog input; may also act as a voltage-threshold digital switch",
+      "modes": [
+        {"id": "analog", "adapter": "i2c_adc_input", "device": "adc_chip", "channel": 0, "reference_mv": 5000, "limits": {"minimum_mv": 0, "maximum_mv": 5000}},
+        {"id": "digital", "adapter": "i2c_adc_digital_input", "device": "adc_chip", "channel": 0, "reference_mv": 5000}
+      ]
+    },
+    {
+      "id": "adc_2", "label": "ADC input 2", "connector": "ADC2 / CN23",
+      "description": "0-5 V analog input; may also act as a voltage-threshold digital switch",
+      "modes": [
+        {"id": "analog", "adapter": "i2c_adc_input", "device": "adc_chip", "channel": 1, "reference_mv": 5000, "limits": {"minimum_mv": 0, "maximum_mv": 5000}},
+        {"id": "digital", "adapter": "i2c_adc_digital_input", "device": "adc_chip", "channel": 1, "reference_mv": 5000}
+      ]
+    },
+    {
+      "id": "adc_3", "label": "ADC input 3", "connector": "ADC3 / CN17",
+      "description": "0-5 V analog input; may also act as a voltage-threshold digital switch",
+      "modes": [
+        {"id": "analog", "adapter": "i2c_adc_input", "device": "adc_chip", "channel": 2, "reference_mv": 5000, "limits": {"minimum_mv": 0, "maximum_mv": 5000}},
+        {"id": "digital", "adapter": "i2c_adc_digital_input", "device": "adc_chip", "channel": 2, "reference_mv": 5000}
+      ]
+    },
+    {
+      "id": "adc_4", "label": "ADC input 4", "connector": "ADC4 / CN18",
+      "description": "0-5 V analog input; may also act as a voltage-threshold digital switch",
+      "modes": [
+        {"id": "analog", "adapter": "i2c_adc_input", "device": "adc_chip", "channel": 3, "reference_mv": 5000, "limits": {"minimum_mv": 0, "maximum_mv": 5000}},
+        {"id": "digital", "adapter": "i2c_adc_digital_input", "device": "adc_chip", "channel": 3, "reference_mv": 5000}
+      ]
+    },
+    {
+      "id": "adc_5", "label": "ADC input 5", "connector": "ADC5 / CN19",
+      "description": "0-5 V analog input; may also act as a voltage-threshold digital switch",
+      "modes": [
+        {"id": "analog", "adapter": "i2c_adc_input", "device": "adc_chip", "channel": 4, "reference_mv": 5000, "limits": {"minimum_mv": 0, "maximum_mv": 5000}},
+        {"id": "digital", "adapter": "i2c_adc_digital_input", "device": "adc_chip", "channel": 4, "reference_mv": 5000}
+      ]
+    },
+    {
+      "id": "adc_6", "label": "ADC input 6", "connector": "ADC6 / CN20",
+      "description": "0-5 V analog input; may also act as a voltage-threshold digital switch",
+      "modes": [
+        {"id": "analog", "adapter": "i2c_adc_input", "device": "adc_chip", "channel": 5, "reference_mv": 5000, "limits": {"minimum_mv": 0, "maximum_mv": 5000}},
+        {"id": "digital", "adapter": "i2c_adc_digital_input", "device": "adc_chip", "channel": 5, "reference_mv": 5000}
+      ]
+    },
+    {
+      "id": "adc_7", "label": "ADC input 7", "connector": "ADC7 / CN21",
+      "description": "0-5 V analog input; may also act as a voltage-threshold digital switch",
+      "modes": [
+        {"id": "analog", "adapter": "i2c_adc_input", "device": "adc_chip", "channel": 6, "reference_mv": 5000, "limits": {"minimum_mv": 0, "maximum_mv": 5000}},
+        {"id": "digital", "adapter": "i2c_adc_digital_input", "device": "adc_chip", "channel": 6, "reference_mv": 5000}
+      ]
+    },
+    {
+      "id": "adc_8", "label": "ADC input 8", "connector": "ADC8 / CN22",
+      "description": "0-5 V analog input; may also act as a voltage-threshold digital switch",
+      "modes": [
+        {"id": "analog", "adapter": "i2c_adc_input", "device": "adc_chip", "channel": 7, "reference_mv": 5000, "limits": {"minimum_mv": 0, "maximum_mv": 5000}},
+        {"id": "digital", "adapter": "i2c_adc_digital_input", "device": "adc_chip", "channel": 7, "reference_mv": 5000}
+      ]
+    },
+
+    {
+      "id": "servo_input_1", "label": "Servo input 1", "connector": "Servo Input 1",
+      "description": "Logic input for RC pulse, low-speed frequency, or digital state",
+      "modes": [
+        {"id": "rc_pulse", "adapter": "rc_pwm_input", "endpoint": {"gpio": 6}, "limits": {"minimum_hz": 20, "maximum_hz": 500}},
+        {"id": "frequency", "adapter": "pcnt_input", "endpoint": {"gpio": 6}, "limits": {"maximum_hz": 5000}},
+        {"id": "digital", "adapter": "digital_input", "endpoint": {"gpio": 6}}
+      ]
+    },
+    {
+      "id": "servo_input_2", "label": "Servo input 2", "connector": "Servo Input 2",
+      "description": "Logic input for RC pulse, low-speed frequency, or digital state",
+      "modes": [
+        {"id": "rc_pulse", "adapter": "rc_pwm_input", "endpoint": {"gpio": 7}, "limits": {"minimum_hz": 20, "maximum_hz": 500}},
+        {"id": "frequency", "adapter": "pcnt_input", "endpoint": {"gpio": 7}, "limits": {"maximum_hz": 5000}},
+        {"id": "digital", "adapter": "digital_input", "endpoint": {"gpio": 7}}
+      ]
+    },
+    {
+      "id": "servo_input_3", "label": "Servo input 3", "connector": "Servo Input 3",
+      "description": "Logic input for RC pulse, low-speed frequency, or digital state",
+      "modes": [
+        {"id": "rc_pulse", "adapter": "rc_pwm_input", "endpoint": {"gpio": 15}, "limits": {"minimum_hz": 20, "maximum_hz": 500}},
+        {"id": "frequency", "adapter": "pcnt_input", "endpoint": {"gpio": 15}, "limits": {"maximum_hz": 5000}},
+        {"id": "digital", "adapter": "digital_input", "endpoint": {"gpio": 15}}
+      ]
+    },
+    {
+      "id": "servo_input_4", "label": "Servo input 4", "connector": "Servo Input 4",
+      "description": "Logic input for RC pulse, low-speed frequency, or digital state",
+      "modes": [
+        {"id": "rc_pulse", "adapter": "rc_pwm_input", "endpoint": {"gpio": 16}, "limits": {"minimum_hz": 20, "maximum_hz": 500}},
+        {"id": "frequency", "adapter": "pcnt_input", "endpoint": {"gpio": 16}, "limits": {"maximum_hz": 5000}},
+        {"id": "digital", "adapter": "digital_input", "endpoint": {"gpio": 16}}
+      ]
+    },
+    {
+      "id": "high_speed_input_1", "label": "High-speed input 1", "connector": "High Speed Input 1",
+      "description": "Fast pulse input; may also be used as a digital state input",
+      "modes": [
+        {"id": "frequency", "adapter": "pcnt_input", "endpoint": {"gpio": 35}, "limits": {"maximum_hz": 100000}},
+        {"id": "digital", "adapter": "digital_input", "endpoint": {"gpio": 35}}
+      ]
+    },
+    {
+      "id": "high_speed_input_2", "label": "High-speed input 2", "connector": "High Speed Input 2",
+      "description": "Fast pulse input; may also be used as a digital state input",
+      "modes": [
+        {"id": "frequency", "adapter": "pcnt_input", "endpoint": {"gpio": 36}, "limits": {"maximum_hz": 100000}},
+        {"id": "digital", "adapter": "digital_input", "endpoint": {"gpio": 36}}
+      ]
+    },
+
+    {
+      "id": "servo_output_1", "label": "Servo output 1", "connector": "Servo Output 1",
+      "description": "5 V buffered logic output for servo/ESC, PWM, or on/off use",
+      "modes": [
+        {"id": "servo", "adapter": "servo_output", "endpoint": {"gpio": 18}, "safe_demand": 0},
+        {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 18}, "safe_demand": 0},
+        {"id": "digital", "adapter": "digital_output", "endpoint": {"gpio": 18}, "safe_demand": 0}
+      ]
+    },
+    {
+      "id": "servo_output_2", "label": "Servo output 2", "connector": "Servo Output 2",
+      "description": "5 V buffered logic output for servo/ESC, PWM, or on/off use",
+      "modes": [
+        {"id": "servo", "adapter": "servo_output", "endpoint": {"gpio": 8}, "safe_demand": 0},
+        {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 8}, "safe_demand": 0},
+        {"id": "digital", "adapter": "digital_output", "endpoint": {"gpio": 8}, "safe_demand": 0}
+      ]
+    },
+    {
+      "id": "servo_output_3", "label": "Servo output 3", "connector": "Servo Output 3",
+      "description": "5 V buffered logic output for servo/ESC, PWM, or on/off use",
+      "modes": [
+        {"id": "servo", "adapter": "servo_output", "endpoint": {"gpio": 9}, "safe_demand": 0},
+        {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 9}, "safe_demand": 0},
+        {"id": "digital", "adapter": "digital_output", "endpoint": {"gpio": 9}, "safe_demand": 0}
+      ]
+    },
+    {
+      "id": "servo_output_4", "label": "Servo output 4", "connector": "Servo Output 4",
+      "description": "5 V buffered logic output for servo/ESC, PWM, or on/off use",
+      "modes": [
+        {"id": "servo", "adapter": "servo_output", "endpoint": {"gpio": 3}, "safe_demand": 0},
+        {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 3}, "safe_demand": 0},
+        {"id": "digital", "adapter": "digital_output", "endpoint": {"gpio": 3}, "safe_demand": 0}
+      ]
+    },
+
+    {"id": "switch_input_1", "label": "Switch input 1", "connector": "Switch Input 1", "description": "TCA9554 digital switch input", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 0}]},
+    {"id": "switch_input_2", "label": "Switch input 2", "connector": "Switch Input 2", "description": "TCA9554 digital switch input", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 1}]},
+    {"id": "switch_input_3", "label": "Switch input 3", "connector": "Switch Input 3", "description": "TCA9554 digital switch input", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 2}]},
+    {"id": "switch_input_4", "label": "Switch input 4", "connector": "Switch Input 4", "description": "TCA9554 digital switch input", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 3}]},
+
+    {"id": "low_output_1", "label": "Low-current output 1", "connector": "Low Output 1", "description": "TCA9554 low-current digital output; GPIO output is preferred for critical controls", "modes": [{"id": "digital", "adapter": "i2c_digital_output", "device": "io_expander", "channel": 4, "safe_demand": 0}]},
+    {"id": "low_output_2", "label": "Low-current output 2", "connector": "Low Output 2", "description": "TCA9554 low-current digital output; GPIO output is preferred for critical controls", "modes": [{"id": "digital", "adapter": "i2c_digital_output", "device": "io_expander", "channel": 5, "safe_demand": 0}]},
+    {"id": "low_output_3", "label": "Low-current output 3", "connector": "Low Output 3", "description": "TCA9554 low-current digital output; GPIO output is preferred for critical controls", "modes": [{"id": "digital", "adapter": "i2c_digital_output", "device": "io_expander", "channel": 6, "safe_demand": 0}]},
+    {"id": "low_output_4", "label": "Low-current output 4", "connector": "Low Output 4", "description": "TCA9554 low-current digital output; GPIO output is preferred for critical controls", "modes": [{"id": "digital", "adapter": "i2c_digital_output", "device": "io_expander", "channel": 7, "safe_demand": 0}]},
+
+    {"id": "power_output_1", "label": "Power output 1", "connector": "Output 1 / CN14", "description": "20 A low-side MOSFET output; on/off or PWM", "modes": [{"id": "on_off", "adapter": "relay_output", "endpoint": {"gpio": 37}, "safe_demand": 0}, {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 37}, "safe_demand": 0}]},
+    {"id": "power_output_2", "label": "Power output 2", "connector": "Output 2 / CN13", "description": "20 A low-side MOSFET output; on/off or PWM", "modes": [{"id": "on_off", "adapter": "relay_output", "endpoint": {"gpio": 38}, "safe_demand": 0}, {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 38}, "safe_demand": 0}]},
+    {"id": "power_output_3", "label": "Power output 3", "connector": "Output 3 / CN8", "description": "40 A low-side MOSFET output; on/off or PWM", "modes": [{"id": "on_off", "adapter": "relay_output", "endpoint": {"gpio": 41}, "safe_demand": 0}, {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 41}, "safe_demand": 0}]},
+    {"id": "power_output_4", "label": "Power output 4", "connector": "Output 4 / CN7", "description": "40 A low-side MOSFET output; on/off or PWM", "modes": [{"id": "on_off", "adapter": "relay_output", "endpoint": {"gpio": 42}, "safe_demand": 0}, {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 42}, "safe_demand": 0}]},
+    {"id": "power_output_5", "label": "Power output 5", "connector": "Output 5 / CN26", "description": "20 A low-side MOSFET output; on/off or PWM", "modes": [{"id": "on_off", "adapter": "relay_output", "endpoint": {"gpio": 2}, "safe_demand": 0}, {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 2}, "safe_demand": 0}]},
+    {"id": "power_output_6", "label": "Power output 6", "connector": "Output 6 / CN25", "description": "20 A low-side MOSFET output; on/off or PWM", "modes": [{"id": "on_off", "adapter": "relay_output", "endpoint": {"gpio": 1}, "safe_demand": 0}, {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 1}, "safe_demand": 0}]},
+    {"id": "power_output_7", "label": "Power output 7", "connector": "Output 7 / CN12", "description": "20 A low-side MOSFET output; on/off or PWM", "modes": [{"id": "on_off", "adapter": "relay_output", "endpoint": {"gpio": 39}, "safe_demand": 0}, {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 39}, "safe_demand": 0}]},
+    {"id": "power_output_8", "label": "Power output 8", "connector": "Output 8 / CN11", "description": "20 A low-side MOSFET output; on/off or PWM", "modes": [{"id": "on_off", "adapter": "relay_output", "endpoint": {"gpio": 40}, "safe_demand": 0}, {"id": "pwm", "adapter": "pwm_output", "endpoint": {"gpio": 40}, "safe_demand": 0}]}
+  ]
+}

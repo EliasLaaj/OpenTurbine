@@ -5,7 +5,7 @@ labels: [setup-help]
 body:
   - type: input
     id: tool_version
-    attributes: {label: Setup Tool version, placeholder: "e.g. v0.5.24"}
+    attributes: {label: Setup Tool version, placeholder: "e.g. v0.6.0"}
     validations: {required: true}
   - type: input
     id: windows

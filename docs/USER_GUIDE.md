@@ -1,4 +1,4 @@
-# OpenTurbine detailed user guide
+# OpenTurbine 2.0 detailed user guide
 
 OpenTurbine is an open-source ESP32 turbine engine controller with a built-in web interface. It is intended for experimental turbojets, APUs, generators, turboshafts, turboprops, and other small turbine installations—not only aircraft.
 
@@ -15,12 +15,12 @@ The project aims to support the variety found in hobby turbines instead of presc
 1. Connect an ESP32 or supported ESP32-S3 board by USB.
 2. Open `OpenTurbineSetupTool.exe`.
 3. Choose **Clean install / reinstall**. This USB path erases the selected board and is correct for a blank board or an intentional fresh installation on an older board. If the older board still works, first download its complete engine file from Tools; the clean-install path cannot recover erased settings.
-4. Select the detected board and follow the instructions.
+4. Select the detected board. For a clean install, choose **Development board** for the normal GPIO workflow, a compatible bundled **Official OpenTurbine PCB**, or **Custom PCB profile** for a chip-specific profile supplied with a PCB design.
 5. After installation, join the Wi-Fi network shown by the tool and open `http://192.168.4.1`.
 
 For normal upgrades, choose **Update and keep my setup**. That Wi-Fi path backs up the engine settings and updates firmware and web pages without resetting the existing setup.
 
-If the download link says **Not Found**, the first public release has not been published yet. Do not download an installer offered by an unrelated third party. Releases belong at [github.com/elia179/OpenTurbine/releases](https://github.com/elia179/OpenTurbine/releases).
+If a requested download says **Not Found**, that release asset is not published. Do not download an installer offered by an unrelated third party. Official releases belong at [github.com/elia179/OpenTurbine/releases](https://github.com/elia179/OpenTurbine/releases).
 
 ### If Windows blocks the installer
 
@@ -37,25 +37,36 @@ The graphical setup tool is currently Windows-only. Developers and users comfort
 ```bash
 git clone https://github.com/elia179/OpenTurbine.git
 cd OpenTurbine
+python tools/build_web_sources.py
 python tools/gzip_data.py
 
 # Classic ESP32:
 pio run -e esp32dev -t upload
 pio run -e esp32dev -t uploadfs
 
-# Or the supported ESP32-S3 N16R8 target:
+# Or the supported ESP32-S3 DevKitC-1-compatible target (8 MB or larger flash):
 pio run -e esp32s3dev -t upload
 pio run -e esp32s3dev -t uploadfs
 ```
 
 Use only the environment matching the board. The filesystem upload is required because it contains the web interface. Specify `--upload-port` when automatic port detection chooses incorrectly. A partition-table change requires both firmware and filesystem installation over USB.
 
+### Development boards and PCB profiles
+
+A development-board install leaves the dedicated PCB-profile partition erased. Hardware setup then works exactly as the normal manual workflow: choose electrical interfaces, GPIOs, buses, addresses, polarity, and calibration.
+
+A PCB-profile install stores an immutable, chip-specific description of the soldered hardware during the USB clean install. In Hardware, you still add engine purposes such as N1, TOT, throttle input, starter, or oil pump, but **Connected to** offers only compatible labelled connections from that PCB. GPIOs, chip addresses, bus wiring, and fixed polarity are not editable. Calibration and operating ranges remain user settings.
+
+The profile describes what the PCB was designed to contain; live device discovery reports whether supported I²C chips are actually responding. A missing fixed device cannot be selected for a new assignment. Existing dependent assignments remain visible as unhealthy and can be removed to free the rest of the setup. A damaged, wrong-chip, or unrecognized profile locks START instead of falling back to unrelated development-board pins.
+
+Factory reset and Wi-Fi firmware updates preserve the PCB profile. Installing, changing, or removing one requires a USB clean install. A complete engine file containing profile-backed hardware can only be restored to the same PCB profile ID and revision. Custom profile authors should use [`pcb_profiles/README.md`](../pcb_profiles/README.md), validate the source file, and still provide electrical pull resistors that keep dangerous outputs safe during reset and bootloader operation.
+
 ## What you need
 
 ### To install and explore without running an engine
 
 - Windows computer for the setup tool
-- ESP32 development board with at least 4 MB flash, or the supported ESP32-S3 DevKitC-1 N16R8 target
+- ESP32 development board with at least 4 MB flash, or an ESP32-S3 DevKitC-1-compatible board with at least 8 MB flash
 - Data-capable USB cable
 - A phone or computer with Wi-Fi and a browser
 
@@ -104,9 +115,31 @@ ESP32 GPIO is **3.3 V logic and is not 5 V tolerant**. A sensor advertised as �
 | Target | Analog inputs | Important restrictions |
 |---|---|---|
 | Classic ESP32 | Use ADC1 GPIO 32–39 while Wi-Fi is active | GPIO 34–39 are input-only. GPIO 6–11 are normally connected to internal flash. Avoid boot-strapping pins unless the external circuit cannot disturb boot. ADC2 is not reliable while Wi-Fi is active. |
-| Supported ESP32-S3 N16R8 | Use ADC1 GPIO 1–10 | GPIO 19/20 are native USB D−/D+. GPIO 22–25 are not implemented. GPIO 26–32 are normally flash/PSRAM connections. Verify the exact module before using any pin outside the Hardware page choices. |
+| Supported ESP32-S3 DevKitC-1-compatible board | Use ADC1 GPIO 1–10 | GPIO 19/20 are native USB D−/D+. GPIO 22–25 are not implemented. GPIO 26–32 may be flash/PSRAM connections. The universal image needs at least 8 MB flash and does not require PSRAM; verify the exact module and use only Hardware-page choices. |
 
 Never copy a classic ESP32 pin number into an S3 installation without reselecting the target and pins in Hardware.
+
+### Shared I²C devices
+
+OpenTurbine scans its configured SDA/SCL bus at startup and rechecks it while running. The Hardware page only offers a TCA9554, TLA2528, or NAU7802 for a new assignment when that device is responding. Detection does not guess a turbine function: add an input/output card, choose what it measures or controls, then select the detected device and channel.
+
+On a development board, **Shared sensor buses** initially shows a compact
+Enabled/Disabled summary. Choose **Edit buses** only when fitting or changing
+I²C/SPI hardware. The expandable supported-device note lists current bus chips;
+DS18B20 is also listed there for clarity, but it uses its own OneWire GPIO rather
+than the shared I²C/SPI pins. A flashed PCB profile owns bus wiring and presents
+it read-only.
+
+- **TCA9554** adds eight on/off inputs or outputs. Polling always works. When at
+  least one TCA9554 input is installed, its first Hardware card offers one
+  optional shared open-drain INT GPIO; multiple TCA9554 input devices may share
+  that pulled-up line.
+- **TLA2528** adds eight analog inputs. Enter its real reference/supply voltage, valid voltage window, physical scale, and optional input filtering.
+- **NAU7802** adds two bridge/load-cell channels. One chip can measure thrust and torque together when each uses a different channel; both channels share gain and sample rate.
+- If a device stops responding, its saved assignments remain visible as **Disconnected**, but readings become unhealthy and unavailable.
+- A disconnected device card offers **Remove device and assignments** to clear all of its channels, bindings, rules, and newly invalid controller/safety dependencies in one reviewed operation.
+
+Native ESP32 GPIO is strongly recommended for fuel, ignition, starter, shutdown, and other safety-related outputs. If a TCA9554 or its bus is disconnected, the physical expander output may retain its last latch state. OpenTurbine blocks START when an engine-affecting expander output is unavailable and faults an operating engine on loss, but software cannot force a disconnected chip to change state. Use independent hardware shutdown and power isolation.
 
 ### Power and high-current outputs
 
@@ -176,10 +209,14 @@ Sensor supply           -> voltage required by sensor
 - Set pulses per revolution from the actual target geometry and verify displayed RPM with an independent tachometer before enabling overspeed protection.
 - N1 and N2 are independent shafts with independent limits. Never copy an N1 limit into N2, or vice versa, unless the engine manufacturer explicitly specifies that value for that measurement point.
 - Test each input from zero through its expected operating range. A plausible idle reading alone does not prove the pulses-per-revolution setting is correct.
+- The default 5 µs PCNT glitch filter rejects very short electrical spikes without discarding legitimate turbine-speed pulses. Increase it only for a measured noise problem and verify the resulting maximum readable pulse frequency.
+- The PCNT plausibility ceiling is automatic at twice the applicable hard N1 or N2 shutdown speed. There is no separate sensor-maximum field to keep synchronized.
 
 ### TOT/EGT or TIT thermocouple
 
 Thermocouples connect to a supported converter module, not directly to the ESP32. On the Hardware card, choose the actual **Sensor interface**: analog temperature transmitter, MAX6675, MAX31855, or MAX31856. A turbine-gas TOT/EGT or TIT card intentionally does not offer low-temperature NTC or DS18B20 interfaces.
+
+In development-board mode, enable **Shared SPI bus** near the top of Hardware and select SCK, MISO, and optional MOSI once. Each thermocouple card then asks only for its own CS pin. In PCB-profile mode those common pins come from the flashed board profile and are read-only.
 
 ```text
 Thermocouple -> converter module
@@ -191,7 +228,7 @@ Converter supply          -> module-compatible supply
 
 - Several SPI temperature modules may share CLK, MISO, and MOSI, but each requires its own CS.
 - MAX31856 requires MOSI because the ECU configures and verifies the chip.
-- Every displayed SPI pin is required. A red pin field means the device is not ready to save; CLK/MISO/MOSI may be shared by compatible converter cards, but CS must remain unique.
+- The shared bus must be enabled before an SPI device can be added. SCK and MISO are required; MOSI becomes required when a MAX31856 is fitted. Each device's CS must remain unique.
 - Match thermocouple type, polarity, connector metals, and extension wire.
 - Mount the probe at the temperature station whose limit you are configuring.
 
@@ -205,13 +242,17 @@ The built-in NTC datasheet mode assumes:
 
 Enter the real pull-up resistance, NTC R₀, and beta value. For another analog circuit or sensor curve, use four well-spaced known-temperature points on Calibration instead.
 
-### Torque / load-cell sensor
+### Torque, thrust, and load-cell sensors
 
-Choose **Analog 0–3.3 V transmitter** or **HX711 load-cell amplifier** under the torque card's **Sensor interface**. An HX711 requires two GPIOs: DOUT is an ECU input and SCK is an ECU output. Enter the no-load raw count and Nm/count scale from a known applied torque; do not treat the default numbers as a calibration. The ECU mirrors the dedicated HX711 driver's calibrated value and health into the same Hardware registry channel used by the dashboard, rules, and logging.
+Torque can use an **Analog 0–3.3 V transmitter**, **HX711 load-cell amplifier**, or a detected **NAU7802**. An HX711 requires two GPIOs: DOUT is an ECU input and SCK is an ECU output.
+
+For a NAU7802, use Calibration to capture unloaded zero and a known force/mass. Thrust is stored in newtons. Torque uses the calibrated force multiplied by the entered perpendicular lever arm in metres and is stored in newton-metres. The known-load wizard accepts N, kg mass, g, kgf, or lbf and converts them to canonical newtons. Do not treat default scale or zero values as a calibration.
 
 ### DS18B20 temperature sensor
 
 Connect VCC to the sensor’s supported supply, GND to ECU ground, and DATA to the configured pin. A typical three-wire installation uses about a 4.7 kΩ pull-up from DATA to 3.3 V. Avoid parasite-power wiring for a noisy engine installation.
+
+The default is 10-bit resolution, which provides a much faster conversion than 12-bit while retaining adequate low/medium-temperature resolution. Higher resolutions remain selectable when slower updates are acceptable.
 
 ### Current sensor
 
@@ -238,13 +279,13 @@ The web interface is organized in the order a new installation should normally f
 5. **Tools** — test one output at a time with fuel and ignition made safe.
 6. **Dashboard** — perform dry sequences before any fueled attempt.
 
-Settings that cannot apply to the fitted hardware are hidden or ghosted. Use **Essentials**, **All settings**, **Changed**, and **Unavailable** to understand what applies and why.
+Settings that cannot apply to the fitted hardware are hidden or ghosted in normal use. Use **Essentials** for commissioning and **Configured system** for everything that can affect the fitted turbine. **Explore all features** exposes every hardware-dependent value for advance planning: amber-bordered tuning values can be edited and saved, but remain inactive until their stated sensor, output, or controller prerequisite is configured in Hardware. Enable switches and choices that name missing hardware stay locked, so browsing or preparing values cannot arm a feature unexpectedly. **Changed** reviews pending edits; search also finds unavailable features.
 
 ## Complete first-time procedure
 
 This is the literal path from an unopened board to a dry-tested ECU.
 
-1. **Install the firmware.** Download the official setup tool, connect the board with a data-capable USB cable, and choose **Clean install / reinstall**. This erases the selected board, so use it only for a blank board or an intentional fresh installation. The tool detects the ESP32 target; if several connected boards are listed, choose the intended board and confirm the detected target. Wait for both firmware and web files to finish.
+1. **Install the firmware.** Download the official setup tool, connect the board with a data-capable USB cable, and choose **Clean install / reinstall**. This erases the selected board, so use it only for a blank board or an intentional fresh installation. The tool detects the ESP32 target; if several connected boards are listed, choose the intended board and confirm the detected target. Choose Development board, a compatible official PCB, or a chip-matched custom PCB profile as appropriate. Wait for firmware, web files, and any selected profile to finish.
 2. **Power only the ECU.** Keep every actuator/load power supply disconnected. Leave fuel and ignition energy physically isolated.
 3. **Join the ECU Wi-Fi.** A fresh default installation advertises `OpenTurbine` with no password. Join it and open `http://192.168.4.1`. If you later change the profile id, the Wi-Fi name changes with it.
 4. **Acknowledge the safety notice and choose a theme.** Confirm that the Dashboard loads and remains connected.
@@ -273,6 +314,7 @@ Open **Hardware** and describe the actual installation. Do not enable a sensor o
 - Repeatable outputs with the same role are allowed. For example, `Oil Pump 1` can be the main bound pump while `Oil Pump 2` is controlled by rules, sequences, tools, or another oil loop.
 - The standard `AB igniter` inventory output bridges to the existing Igniter 2 / afterburner ignition path when it uses the standard `ab_igniter` or `igniter2_main` ID.
 - Confirm the correct ESP32 target.
+- With a flashed PCB profile, select the labelled **Connected to** port instead of a GPIO. An unavailable fixed I²C port means its chip is not responding; correct the hardware or remove the dependent channel.
 - Assign each GPIO once; resolve every conflict reported by the page.
 - Select the real electrical output type: relay, PWM, servo/ESC, or other offered mode.
 - For output inventory channels, set boot-safe and fault-safe demand deliberately. Relay outputs still switch at the driver boundary, while PWM and servo/ESC outputs preserve proportional demand.
@@ -284,17 +326,17 @@ After reboot, return to Hardware and verify that every saved device and pin is s
 
 ### 2. Essential configuration
 
-Open **Config** and begin with **Essentials**. Use search or **All settings** for deeper applicable tuning, **Changed** to review pending edits, and **Unavailable** to understand missing hardware prerequisites. Example suggestions are editable examples only; they are not safe values for your turbine.
+Open **Config** and begin with **Essentials**. Use **Configured system** for deeper applicable tuning, **Explore all features** to inspect or preconfigure optional hardware values, and **Changed** to review pending edits. Amber-bordered tuning values save for future use but do nothing until Hardware satisfies the displayed prerequisite. Unavailable enable switches and missing-hardware choices remain locked. Search spans both available and unavailable features. Example suggestions are editable examples only; they are not safe values for your turbine.
 
 Review at least:
 
 - Maximum and minimum running shaft RPM
 - Selected engine-temperature source and hard temperature limit
 - Temperature warning/pullback margin
-- Oil prime target, minimum pressure before ignition, running target, and low-oil shutdown threshold
+- Running oil-pressure target and low-oil shutdown threshold. Startup prime target, minimum pressure before ignition, and no-sensor pump duty are set in the Sequence blocks that use them.
 - Throttle opening and closing rate
-- Flameout source and delay
-- Hot-start threshold
+- Flameout source, EGT loss criteria, and confirmation time
+- Pre-start and startup turbine-temperature limits
 - Every fitted optional safety threshold
 
 For a two-shaft engine, also review the hard N2 shutdown limit, N2 gradual-pullback points, governor target/band, any N2-based idle target, and the external-cluster N2 warning. OpenTurbine warns when those values do not leave sensible ordering below the hard trip, but the operator remains responsible for the actual margins.
@@ -320,21 +362,23 @@ The Dashboard N2 gauge uses the hard shutdown limit. `OFF` means the hard N2 saf
 ### Controller and limiter behavior
 
 - **Throttle slew** limits how quickly effective fuel/throttle demand can rise or fall. Verify both directions with the turbine unfueled. Emergency shutdown bypasses normal gradual movement and commands the safe state immediately.
-- **N1, N2, EGT, P1, P2, and torque pullback** are gradual fuel limiters. Each soft point begins intervention and each full point applies its configured authority. When several are active, the lowest permitted fuel ceiling wins. They reduce the chance of reaching a trip but never replace an independent hard safety shutdown.
+- **N1, N2, EGT, P1, P2, and torque protection** is presented as one expandable card per measurement under Config → Engine Limits & Protection. Each card keeps gradual fuel reduction beside its independent hard shutdown. The soft point begins intervention. At the full point, strength 1.0 reaches the configured Minimum Fuel During Gradual Protection; lower strength is gentler and greater than 1 reaches the floor sooner. When several are active, the lowest permitted fuel ceiling wins. Gradual reduction lowers the fuel ceiling; it never replaces the hard shutdown.
 - **Predictive limit protection** projects N1/N2 speed, P1/P2 pressure, selected TOT/TIT, and torque from their measured rise rates, then begins a gentler approach before the current reading reaches the soft point. Start with reactive/simple behavior unless predictive tuning has been validated on the engine.
 - **Sensor timing** is tied to real samples rather than Dashboard/control-loop refreshes. Shaft pulse inputs average over a longer window at low pulse rates and automatically publish faster as speed rises. Pressure, torque, and temperature rates update only when their driver reports a new measurement, so increasing the web refresh rate does not change controller behavior.
 - **Automatic Idle Control** trims fuel near idle using one selected N1, N2, P1, or P2 source. N1/N2 speed control is the normal proven approach; P1/P2 control is explicitly experimental. RPM and pressure sources have separate target, deadband, and disengagement values. Verify the selected sensor is calibrated and that disconnecting it enters reduced-power mode without a fuel increase.
 - **Automatic N2 speed control** uses either fuel or proportional propeller pitch. Start response gains low, verify correction direction with a simulated speed error, and increase gains only while watching for hunting.
 - **Oil-pressure control** adjusts the selected pump to the configured target. Its target must remain above the low-pressure shutdown threshold. Sensor failure uses the configured delay and fallback demand; validate that fallback physically.
 - **Reduced-power mode** caps throttle after its configured digital input or rule requests it. Treat it as a degraded-operation feature, not a substitute for stopping after a mechanical or lubrication fault.
-- **Low-RPM starter support** is manually armed from Tools and assists only in its configured N1 range. Confirm direction, disengagement speed, and automatic disarm at shutdown before using it on a live engine.
-- **Windmilling oil protection** can run the oil pump in STANDBY while N1 or N2 remains above its threshold. Verify the selected shaft, fixed-demand or pressure-target mode, and that the pump releases after rotation stops.
+- **Pulsed Starter Assist** repeatedly applies and releases proportional starter output during `StarterSpin` while healthy N1 remains below its configured threshold. These torque impulses can help Bendix drives and splined couplings engage; once the threshold is reached, normal ramped starter control continues. It needs no runtime arming, never operates in RUNNING, and cancels for that startup attempt if N1 becomes unhealthy. With load power isolated, use the short STANDBY-only Tools test to verify direction and output before a live start.
+- **Windmilling oil protection** can run the oil pump in STANDBY while N1 or N2 remains above its threshold. A zero pressure target uses the configured fixed pump output. A nonzero target uses the normal oil-pressure controller, with that pump output as its minimum floor. Verify the selected shaft, mode, and that the pump releases after rotation stops.
 
 ### Flameout detection and relight
 
-Flameout can use a flame input, N1 underspeed, or a drop in the selected EGT source. Select a source that can distinguish actual combustion loss from normal throttle reduction on the installation.
+Flameout can use a flame input, N1 underspeed, or the selected EGT source. EGT declares possible combustion loss when temperature is below the configured threshold and falling, or when it falls faster than the configured rate; the confirmation time must still expire. Select evidence that can distinguish actual combustion loss from a normal throttle reduction. A dedicated flame sensor is preferred where practical.
 
-Automatic relight always requires healthy N1 feedback to prove adequate windmilling airflow and requires the selected ignition output to be fitted. Configure the minimum N1, attempt count, ignition target, timeout, and recovery evidence. A failed relight proceeds to shutdown. Test relight only on a controlled stand with explicit abort criteria; repeated fuel without ignition can create an explosive accumulation.
+Automatic relight always requires healthy N1 feedback to prove adequate windmilling airflow and requires the selected ignition output to be fitted. Configure an explicit **Minimum N1 for Relight**: the ECU never fires automatic relight below this speed or below **Minimum Running N1**, whichever is higher, regardless of whether flame, N1, or EGT triggered flameout. A normal combustor typically recovers within 1–2 seconds, which is why the default timeout is 2,000 ms; increase it only from verified engine evidence. Configure the attempt count, timeout, and explicit flame/N1/EGT recovery evidence separately. A failed relight proceeds to shutdown. Test relight only on a controlled stand with explicit abort criteria; repeated fuel without ignition can create an explosive accumulation.
+
+The hot-engine interlock checks selected TOT/TIT before START and refuses to begin if it is above **Pre-start EGT Limit**. Once STARTUP begins, the overtemperature guard uses **Startup EGT Limit**; zero makes it inherit the normal selected TOT/TIT hard limit. RUNNING always uses the normal continuous hard limit. This allows a defensible startup allowance without weakening continuous protection. An instantaneous positive EGT-rise rule is intentionally not used because normal light-off produces a rapid rise.
 
 Manual relight and cooldown override are operator tools. They remain subject to fitted-hardware and mode gates but require the same fuel-vapor precautions as a normal start.
 
@@ -345,6 +389,8 @@ Afterburner support is shown only when the corresponding fuel and ignition hardw
 - AB arm is permission, not a fire command.
 - Confirm the AB valve and pump close immediately on STOP or fault.
 - Use flame confirmation or a defensible EGT-rise method where possible.
+- A custom AB ignition sequence must include the explicit confirmation block; select sensor, EGT rise, or the clearly labelled unverified timed mode.
+- In flame-sensor mode, loss of the running AB flame for the configured delay (default 1,000 ms) closes AB fuel only. The main engine remains RUNNING.
 - A zero stabilization EGT cap disables that protection.
 - Test the complete AB shutdown sequence without fuel before any light attempt.
 
@@ -352,7 +398,7 @@ Afterburner support is shown only when the corresponding fuel and ignition hardw
 
 Dashboard health dots show whether fitted sensors are currently usable; a plausible retained number with a red/failed health indication must not be trusted. N1 and N2 gauges show their hard limits, while temperature and oil gauges use their applicable configured thresholds. Optional P1, P2, fuel pressure, fuel flow, torque, oil temperature, battery, current, and shaft-power cards appear only when their sources are fitted.
 
-After a run, the summary reports available duration, peaks, and the minimum healthy oil pressure measured while RUNNING. Use **Logs** to review Event Log fault/configuration records and Session Data CSV channels. Session logging interval and channel selection affect storage use and loop load; record only the channels and loop diagnostics needed for the test. Export important evidence before factory reset or a clean installation.
+After a run, the summary reports available duration, peaks, and the minimum healthy oil pressure measured while RUNNING. Use **Log** to review Event Log fault/configuration records and configure Session Data. CSV row interval, event-snapshot interval, standby snapshots, and all session channel selection—including P1/P2, torque and calculated shaft power, and starter demand—are owned by this page. During engine operation, the newest 64 session rows are retained in RAM and written to flash only after STANDBY/FAULT; if that buffer fills, older rows are dropped so the shutdown/fault tail is preserved. Choose an interval that covers the part of the run you need, and export important evidence before factory reset or a clean installation.
 
 ### 3. Calibration
 
@@ -365,6 +411,7 @@ Calibrate only while the engine is in STANDBY/FAULT and the installation is made
 - **Flame sensor:** capture the no-flame noise floor with the igniter operating. Keep the threshold close enough to detect weak light-off flame. The last-run average is reference information, not an automatic threshold.
 - **Temperature:** use NTC datasheet values or four well-spaced known temperature points.
 - **Current sensors:** use captured zero/reference current or datasheet zero voltage and mV/A sensitivity at the ECU ADC pin.
+- **Oil flow meters:** calibrate main and scavenge meters separately in L/min. Enable monitoring on the matching pump Hardware card and set that pump's own minimum flow.
 
 Never calibrate pressure or flow using an unverified web reading as its own reference.
 
@@ -384,6 +431,7 @@ Confirm that:
 - **Final Startup Checks** enables only the installed N1/N2/P1/P2/oil/EGT/flame evidence your installation requires. Every enabled check must remain valid for the full stable time; starter state is not sensor evidence.
 - STOP closes fuel immediately.
 - Shutdown keeps oil/scavenge/cooling outputs active for as long as the engine requires.
+- Electric drain valves can use explicit Open/Close blocks. Output inversion and physical endpoints remain Hardware settings.
 
 Use dry runs with fuel physically disconnected before a fueled test.
 
@@ -398,8 +446,19 @@ Open **Sequence → Control Rules** for small automations that do not belong in 
 - Hysteresis prevents rapid switching near a threshold. For “above 100 °C” with 5 °C hysteresis, the output turns on above 100 °C and stays on until the input falls to 95 °C.
 - Mapping clamps below/above its input limits and is useful for testing proportional outputs from a potentiometer.
 - Keep one enabled rule per output. Hardware fault-safe behavior still owns faults.
+- A drain valve is an ordinary fitted output here, so it may also follow a switch or sensor rule instead of a sequence block.
 - Give registry channels stable IDs before rules reference them. Removing a referenced source or target is rejected rather than leaving an orphaned automation.
 - After saving, test minimum, midpoint, maximum, mode exit, sensor loss, reboot persistence, and physical output direction.
+
+Add each main or scavenge flow meter inside its pump's **Flow sensing &
+monitoring** subcard in Hardware; it is not a separate top-level input card.
+Select its pulse, analog, or supported I²C signal there and enter its
+pulses-per-litre or analog calibration. Oil-flow monitoring warns when a
+commanded pump remains below its Hardware threshold. It does not shut the
+engine down by default. Enable
+**Config → Shutdown on Confirmed Low Oil Flow** only after both the meter and
+threshold have been tested; the shared confirmation delay is configured beside
+that option.
 
 ### 6. Bench-test outputs
 
@@ -519,7 +578,10 @@ pio run -e esp32dev
 pio run -e esp32s3dev
 ```
 
-Web sources live in `data_src/`; deterministic compressed assets are generated into `data/` with `python tools/gzip_data.py`.
+Editable split web sources live in `data_src/pages/` plus the remaining
+top-level files in `data_src/`. Run `python tools/build_web_sources.py` first,
+then `python tools/gzip_data.py` to produce deterministic LittleFS assets in
+`data/`. The complete local release gate is `python tools/run_release_checks.py`.
 
 ## License
 

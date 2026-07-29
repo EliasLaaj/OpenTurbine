@@ -1,0 +1,60 @@
+{
+  "format": "openturbine-pcb-profile",
+  "format_version": {"major": 1, "minor": 0},
+  "board": {
+    "id": "example-ecu-s3",
+    "name": "Example ESP32-S3 ECU",
+    "revision": "A",
+    "manufacturer": "Example only",
+    "description": "Profile-authoring example; not an official PCB"
+  },
+  "target": {"chip": "esp32-s3", "minimum_flash_mb": 8},
+  "buses": [
+    {"id": "tc_spi", "kind": "spi", "pins": {"sck": 12, "miso": 13, "mosi": -1}},
+    {"id": "sensor_i2c", "kind": "i2c", "pins": {"sda": 8, "scl": 9, "interrupt": 10}, "frequency_hz": 400000},
+    {"id": "cluster_uart", "kind": "uart", "pins": {"tx": 43, "rx": 44}}
+  ],
+  "devices": [
+    {"id": "tc1", "driver": "max6675", "bus": "tc_spi", "select": {"gpio": 14}, "expected": true},
+    {"id": "adc1", "driver": "tla2528", "bus": "sensor_i2c", "address": 16, "expected": true}
+  ],
+  "fixed_functions": {
+    "status_led": {"gpio": 48, "type": "neopixel", "safe_demand": 0},
+    "buzzer": {"gpio": 15, "safe_demand": 0},
+    "cluster_serial": {"bus": "cluster_uart"}
+  },
+  "ports": [
+    {
+      "id": "thermocouple_1",
+      "label": "Thermocouple 1",
+      "connector": "J4",
+      "description": "K-type thermocouple input",
+      "modes": [{"id": "temperature", "adapter": "spi_thermocouple", "device": "tc1"}]
+    },
+    {
+      "id": "servo_pulse_in_1",
+      "label": "Servo / pulse input 1",
+      "connector": "J7",
+      "modes": [
+        {"id": "servo_pwm", "adapter": "rc_pwm_input", "endpoint": {"gpio": 16}, "limits": {"minimum_hz": 20, "maximum_hz": 500}},
+        {"id": "frequency", "adapter": "pcnt_input", "endpoint": {"gpio": 16}, "limits": {"maximum_hz": 20000}},
+        {"id": "digital", "adapter": "digital_input", "endpoint": {"gpio": 16}}
+      ]
+    },
+    {
+      "id": "adc_1",
+      "label": "ADC 1",
+      "connector": "J8 pin 1",
+      "modes": [
+        {"id": "analog", "adapter": "i2c_adc_input", "device": "adc1", "channel": 0, "reference_mv": 3300, "limits": {"minimum_mv": 0, "maximum_mv": 3300}},
+        {"id": "switch", "adapter": "i2c_adc_digital_input", "device": "adc1", "channel": 0, "reference_mv": 3300}
+      ]
+    },
+    {
+      "id": "servo_out_1",
+      "label": "Servo output 1",
+      "connector": "J9",
+      "modes": [{"id": "servo", "adapter": "servo_output", "endpoint": {"gpio": 17}, "safe_demand": 0}]
+    }
+  ]
+}

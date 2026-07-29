@@ -1,5 +1,6 @@
 # OpenTurbine partition table — OTA-capable, 4 MB flash
-# 1.5625 MiB OTA slots leave 768 KiB for LittleFS. This preserves room for
+# 1.5625 MiB OTA slots leave 704 KiB for LittleFS after the PCB-profile and
+# coredump partitions. This preserves room for
 # web assets, flight-recorder compaction, configuration, and the 150 KiB log
 # reserve. A partition-table change requires a USB clean install, not OTA.
 # Name,   Type, SubType, Offset,   Size,     Flags
@@ -7,5 +8,6 @@ nvs,      data, nvs,     0x9000,   0x5000,
 otadata,  data, ota,     0xe000,   0x2000,
 app0,     app,  ota_0,   0x10000,  0x190000,
 app1,     app,  ota_1,   0x1A0000, 0x190000,
-littlefs, data, littlefs,0x330000, 0xC0000,
+pcbprof,  data, 0x40,    0x330000, 0x10000,
+littlefs, data, littlefs,0x340000, 0xB0000,
 coredump, data, coredump,0x3F0000, 0x10000,

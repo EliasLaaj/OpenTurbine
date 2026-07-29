@@ -3,10 +3,72 @@
 package main
 
 import (
+	"encoding/binary"
+	"encoding/json"
+	"hash/crc32"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestBuildCustomPCBProfileContainer(t *testing.T) {
+	root := t.TempDir()
+	catalog := `{"chip":"esp32-s3","gpio":[8,9,10,16,17],"input_only_gpio":[],"strapping_gpio":[]}`
+	writeTestFile(t, filepath.Join(root, "pcb_profiles", "targets", "esp32-s3.json"), catalog)
+	source := `{
+	  "format":"openturbine-pcb-profile",
+	  "format_version":{"major":1,"minor":0},
+	  "board":{"id":"test-s3-pcb","name":"Test S3 PCB","revision":"A"},
+	  "target":{"chip":"esp32-s3"},
+	  "buses":[{"id":"sensor_i2c","kind":"i2c","pins":{"sda":8,"scl":9}}],
+	  "devices":[{"id":"adc","driver":"tla2528","bus":"sensor_i2c","address":16}],
+	  "fixed_functions":{
+	    "servo_output_enable":{"gpio":17,"active_high":false,"safe_demand":0},
+	    "supply_voltage":{"gpio":10,"divider":11.0,"reference_mv":3300}
+	  },
+	  "ports":[
+	    {"id":"servo_out_1","label":"Servo output 1","modes":[
+	      {"id":"servo","adapter":"servo_output","endpoint":{"gpio":16},"safe_demand":0}
+	    ]},
+	    {"id":"adc_1","label":"ADC input 1","modes":[
+	      {"id":"analog","adapter":"i2c_adc_input","device":"adc","channel":0,"reference_mv":5000},
+	      {"id":"switch","adapter":"i2c_adc_digital_input","device":"adc","channel":0,"reference_mv":5000}
+	    ]}
+	  ]
+	}`
+	sourcePath := filepath.Join(root, "test.otpcb.json")
+	writeTestFile(t, sourcePath, source)
+	pkg := &Package{Root: root, Manifest: Manifest{Targets: map[string]ManifestTarget{
+		"esp32s3dev": {PCBProfile: PCBProfilePartition{Address: "0x610000", Size: 65536}},
+	}}}
+	path, warnings, err := buildCustomPCBProfile(pkg, "esp32s3dev", sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(path)
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	container, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(container) < 33 || string(container[:4]) != "OTPB" ||
+		container[4] != 1 || container[5] != 1 || container[8] != 2 ||
+		container[9] != 1 || binary.LittleEndian.Uint16(container[10:12]) != 32 {
+		t.Fatalf("bad OTPB header: %x", container[:32])
+	}
+	length := int(binary.LittleEndian.Uint32(container[12:16]))
+	if length != len(container)-32 ||
+		binary.LittleEndian.Uint32(container[16:20]) != crc32.ChecksumIEEE(container[32:]) {
+		t.Fatal("payload length or CRC does not match container")
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(container[32:], &decoded); err != nil ||
+		decoded["format"] != "openturbine-pcb-profile" {
+		t.Fatalf("invalid JSON payload: %v", err)
+	}
+}
 
 func TestParseDetectedBoardRejectsC3(t *testing.T) {
 	board, err := parseDetectedBoard("COM7", "Chip is ESP32-C3 (revision v0.4)", nil)
@@ -132,6 +194,48 @@ func TestPackageDownloadRejectsPlainHTTP(t *testing.T) {
 		filepath.Join(t.TempDir(), "package.zip"), nil)
 	if err == nil {
 		t.Fatal("plain HTTP package URL must be rejected before any request is made")
+	}
+}
+
+func TestManifestCompatibilityUsesMinimumToolVersion(t *testing.T) {
+	base := Manifest{
+		Version:                 "2.0.0",
+		PackageSchema:           requiredPackageSchema,
+		SetupToolVersion:        "9.9.9",
+		MinimumSetupToolVersion: packageCompatibilityVersion,
+	}
+	if err := validateManifestCompatibility(base); err != nil {
+		t.Fatalf("current stable client must accept a compatible package: %v", err)
+	}
+	base.MinimumSetupToolVersion = "0.5.24"
+	if err := validateManifestCompatibility(base); err != nil {
+		t.Fatalf("newer client must accept an older compatible baseline: %v", err)
+	}
+	base.MinimumSetupToolVersion = "0.6.1"
+	if err := validateManifestCompatibility(base); err == nil {
+		t.Fatal("client must reject a package that requires a newer setup tool")
+	}
+}
+
+func TestVersionAtLeast(t *testing.T) {
+	tests := []struct {
+		current, minimum string
+		want             bool
+	}{
+		{"0.6.0", "0.6.0", true},
+		{"0.6.1", "0.6.0", true},
+		{"0.10.0", "0.9.9", true},
+		{"0.6", "0.6.0", true},
+		{"0.5.24", "0.6.0", false},
+	}
+	for _, tc := range tests {
+		got, err := versionAtLeast(tc.current, tc.minimum)
+		if err != nil || got != tc.want {
+			t.Fatalf("versionAtLeast(%q, %q) = %v, %v; want %v", tc.current, tc.minimum, got, err, tc.want)
+		}
+	}
+	if _, err := versionAtLeast("0.6.0-beta", "0.6.0"); err == nil {
+		t.Fatal("non-numeric compatibility versions must be rejected")
 	}
 }
 

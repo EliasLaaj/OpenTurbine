@@ -5,10 +5,14 @@ Run this after editing any HTML/JS/CSS file, then do: pio run -t uploadfs
 """
 import gzip, os
 
+from build_web_sources import main as build_web_sources
+
 SRC = os.path.join(os.path.dirname(__file__), "..", "data_src")
 DST = os.path.join(os.path.dirname(__file__), "..", "data")
 
 EXTS = {".html", ".js", ".css"}
+
+build_web_sources()
 
 for fname in os.listdir(SRC):
     if os.path.splitext(fname)[1] not in EXTS:

@@ -8,6 +8,105 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ---
 
+## [2.0.0] — 2026-07-29
+
+### Added
+- Main and scavenge oil pumps can each use a dedicated calibrated flow meter and minimum-flow monitor. Confirmed underflow is warning-only by default, with an explicit Config option for shutdown. Electric drain valves are first-class relay/PWM/servo outputs available to both sequencer Open/Close blocks and Control Rules.
+- Optional immutable flash-time PCB profiles provide chip-specific named ports, fixed buses/devices, labelled connector choices, and capability-filtered engine-purpose assignment while leaving an erased profile partition in the existing generic development-board GPIO mode. The Windows setup tool offers Development board, compatible official PCB, and custom profile choices in that order.
+- One automatically scanned shared I²C bus now supports TCA9554 binary I/O, TLA2528 analog inputs, and dual-channel NAU7802 load cells. New assignments can select only live detected hardware; disconnected saved devices retain their setup and offer one reviewed removal action for all channels and dependencies.
+- Thrust is a first-class calibrated input in newtons across the dashboard, rules, session logging, MAVLink, cluster telemetry, and the load-cell calibration wizard. NAU7802 torque calibration supports known force plus lever arm.
+- Pulsed Starter Assist now provides configurable ON/OFF proportional-starter impulses inside `StarterSpin` for Bendix-drive, splined-coupling, and similar low-speed engagement problems. It latches complete at the configured N1 threshold, cancels on unhealthy N1, and includes a short STANDBY-only commissioning test.
+- Config now offers **Essentials**, **Configured system**, **Explore all features**, and **Changed** views. Explore reveals every optional value for advance planning: amber-bordered tuning values can be edited and saved while remaining inactive until Hardware satisfies their displayed prerequisite. Missing-hardware choices and unavailable enable switches stay locked. Normal commissioning views stay focused on fitted hardware.
+- Automatic Idle can use N1, N2, P1, or P2 feedback. Shaft-speed control remains the normal proven method; pressure feedback is explicitly experimental and uses pressure-specific target, deadband, and disengagement settings.
+- Startup temperature protection now has separate pre-start and active-start limits. A zero startup limit safely inherits the normal selected TOT/TIT hard limit.
+
+### Changed
+- Shaft PCNT inputs now use a 5 µs glitch filter, and new DS18B20 temperature channels default to 10-bit conversion.
+- Development-board I²C and SPI wiring is configured once in a top-level Shared Sensor Buses section. Thermocouple cards now keep only their unique CS/device settings, PCB profiles own bus pins read-only, and adding a bus-backed device clearly requires enabling its bus first.
+- PCNT speed plausibility now follows twice the applicable N1/N2 hard shutdown speed automatically; the redundant user-entered pulse-sensor minimum/maximum RPM fields are removed.
+- TLA2528 inputs reuse the normal voltage validity, scaling, filtering, stale-data, telemetry and health paths. A single NAU7802 can serve torque and thrust on its two channels with shared gain/sample rate and non-blocking channel scheduling.
+- Configuration schema version 9 replaces the former RUNNING-mode low-RPM starter-support fields and the obsolete EGT-drop/rise-rate hot-start model; this major release intentionally does not migrate that behavior.
+- Config field units, unavailable-state explanations, narrow-screen save controls, and save recap layout are more consistent and touch-friendly, including 320–420 px screens and high browser zoom.
+- Pulsed starter timing is owned by a dependency-free sequencer state machine with compile-time timing, cancellation, reset, and `millis()` wraparound checks.
+- EGT flameout evidence now means temperature is below a threshold and falling, or is falling faster than a separately configured rate. Automatic relight uses an explicit minimum firing speed and recovery threshold with no hidden `Min RPM + 5%` fallback.
+- Session-data intervals, standby snapshots, and channel selection now live together on Log. Binary control-rule outputs are presented as On/Off.
+- Gradual N1/N2/EGT/P1/P2/torque protection now has one predictable authority model: at the full-reduction threshold, strength 1.0 reaches the user-configured minimum-fuel floor. Simple current-value and advanced rate-predictive modes remain selectable.
+- Config groups throttle response separately from gradual protection and places oil, pressure/torque, cooldown, combustion/startup, and auxiliary confirmation settings beside the limits or subsystem they affect.
+- Hardware is now the single enable for the external cluster. Oil fallback and windmilling modes are described as explicit fixed-output versus pressure-regulated paths, glow preheat explains its Hardware/Sequence ownership, and N2 governor gains are displayed as understandable percentage-per-second corrections.
+- Startup oil-pressure targets, ignition-pressure minimums, and no-sensor startup duty now live only in the Sequence blocks that use them. Hardware exposes discoverable **Show all controllers** and **Show all safeties** views with visible prerequisites and clear N2 fuel/prop-pitch behavior.
+- Automatic relight defaults to a 2,000 ms ignition window for a normal combustor. Tool safety-confirmation suppression now applies consistently to the full Tools page and is restored from Tool settings.
+- Session CSV logging adds shaft torque with calculated power and starter output demand.
+- The universal ESP32-S3 image now uses an 8 MB-safe partition layout with
+  two 3 MB OTA slots and about 1.8 MB of LittleFS. It runs unchanged on 16 MB
+  modules and prevents a standard N8 dev board from being erased before a
+  16 MB-only filesystem write fails.
+- Setup Tool 0.6.0 is the stable Windows flasher baseline. It checks and
+  downloads the latest signed firmware/dashboard package on launch and accepts
+  later schema-3 releases according to their declared minimum tool version, so
+  ordinary firmware updates no longer require users to download a new EXE.
+
+### Removed
+- Removed the manually armed, continuously applied RUNNING-mode starter aid and its hidden re-engagement hysteresis. Starter assistance is now startup-only and requires no runtime arming.
+
+### Fixed
+- Config, Calibration, Sequence, and Control Rules now recognize valid shared-I²C channels as fitted hardware instead of incorrectly requiring a native GPIO. This restores NAU7802/TLA2528 configuration and calibration surfaces and allows I²C drain valves and other expansion outputs in sequences.
+- Tools now bench-tests non-core TCA9554 outputs as well as native outputs. Binary expansion outputs use an explicit ON test; proportional registry outputs default to 50% and expose an editable 0–100% commissioning demand.
+- Shared sensor buses now use a compact Enabled/Disabled summary. **Edit buses** opens wiring, discovery, and a current supported-device list without leaving permanent setup text walls on the normal Hardware page.
+- PCB-profile outputs are parked from the immutable catalog before filesystem/config loading; a damaged or wrong-target profile leaves generic pins untouched and locks START. Profile-backed wet-glow pilot fuel and physical/analog afterburner command inputs now drive the real runtime paths instead of retaining legacy raw-GPIO assumptions.
+- Missing I²C inputs become unhealthy instead of retaining believable stale data. Missing engine-affecting TCA9554 outputs block START and fault an operating engine because their physical latch state cannot be guaranteed.
+- P1-only and P2-only installations can configure Automatic Idle without an unrelated RPM sensor.
+- Search can find unavailable features by their purpose and descriptive terms, including Bendix starter assistance.
+- Unavailable optional features remain absent from normal configured views; Explore permits harmless future-value tuning while keeping activation controls and missing-hardware selector choices locked.
+- Hardware save failures now identify the rejected area in plain language, and removing then re-adding an output no longer fills the confirmation recap with irrelevant driver-default fields.
+- P1/P2 shutdown descriptions explicitly identify high-pressure trips, sequence final-state values and action buttons wrap cleanly, custom/unavailable outputs are distinguishable, and repeated per-tool confirmation dialogs can be suppressed and restored in the same browser.
+- Pressure/torque hard trips now require healthy feedback; pressure-based idle clears stale rate history after feedback loss; additional oil loops honor the configured fallback delay; and cooldown oil regulation no longer changes behavior with ECU loop frequency.
+- Startup temperature and flame confirmation count only newly arrived sensor samples. Binary flame detectors accept valid rail-level ON/OFF states instead of misclassifying a strong flame as a wiring fault.
+- Afterburner EGT-rise confirmation now enforces its configured time window, custom ignition sequences require an explicit sensor/EGT/timed confirmation block, and flame-sensor mode shuts down only the afterburner after a configurable 1,000 ms running flame-loss delay.
+- Oil-pump overcurrent timing is ghosted unless current sensing is fitted, and incomplete afterburner installations can no longer expose unrelated editable tuning fields.
+- Hardware changes now disarm Pulsed Starter Assist if its starter, proportional output mode, or N1 feedback is removed, while preserving its tuning values for possible later reuse. The resulting engine file remains immediately editable instead of failing the next unrelated Config save.
+- Dashboard effective-fuel telemetry now includes the final Reduced-Power cap after afterburner fuel coordination, matching the physical main-fuel output. Generic binary inputs are described as On/Off rather than internal 0/1 values.
+- Hot-start prevention faults now identify the protection by name and show both measured temperature and the configured pre-start limit.
+- Automatic relight ignition now uses the higher of its configured firing threshold and Minimum Running N1, so a permissive relight value cannot fire below the engine's self-sustaining airflow floor.
+- Assigned TCA9554 outputs are parked before the full I²C discovery scan and
+  retain a low-rate runtime heartbeat, so a steady-demand expander disconnect
+  is detected during operation instead of remaining falsely healthy.
+- Web JSON buffers now detect required size before serialization; truncated
+  telemetry and rollback snapshots fail explicitly, and the bounded serializer
+  no longer has a recursive failure path.
+- Classic ESP32 large API responses now use a reserved response workspace after
+  serialization releases its temporary JSON tree. Repeated Hardware, Config,
+  and telemetry reads no longer fragment heap into truncated responses, and a
+  full fitted-hardware save streams Hardware and Settings independently to the
+  atomic engine-file replacement.
+- Rejected Hardware edits now validate against the live registry under the
+  STANDBY apply gate and restore the staged prior profile before returning an
+  error. A rollback failure explicitly schedules a safe reboot instead of
+  continuing with partially parsed hardware.
+- The pitch governor synchronizes to the sequencer's live propeller demand when
+  RUNNING begins, preventing a first-correction jump toward fine pitch.
+- Boot loading filters Hardware and Settings independently from the unified
+  engine file. Oversized/corrupt files preserve their evidence and inhibit
+  START instead of exhausting Classic ESP32 heap or silently running defaults.
+- Sequence and command-queue allocation failures now produce explicit,
+  repairable START-readiness faults rather than undefined or serial-only
+  behavior.
+- Returning to STANDBY now cancels every temporary Tools-page actuator timer,
+  so resetting a fault cannot leave an invisible busy state that blocks the
+  next test or START after all outputs have already been parked.
+- The two fixed web-transfer workspaces are now reserved once from internal
+  heap before Wi-Fi starts instead of consuming 32 KB of statically linkable
+  Classic ESP32 DRAM. Allocation failure is explicit and locks START.
+- A deterministic configuration-fuzz audit now loads 24 mixed native/SPI/I²C
+  installations across all seven web pages at desktop and mobile sizes,
+  catching crashes, failed requests, duplicate IDs, broken controls, and
+  leaked invalid values before release.
+- CI and tagged-release builds now use the same universal 8 MB S3 partition
+  layout as the installer package, enforce linker-memory headroom on both
+  targets, regenerate the public Config reference, and run the control,
+  engine-setup, and I²C audits before publication.
+
+---
+
 ## [1.9.10] — 2026-07-22
 
 ### Added
@@ -29,6 +128,10 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ### Fixed
 
+- All LittleFS and NVS persistence is now deferred until STANDBY or FAULT. Active runs retain the newest session rows and flight-recorder events in bounded RAM queues, so ESP32 flash-cache suspension cannot stall engine control; any overwritten evidence is counted explicitly.
+- AsyncTCP's priority-10 worker is pinned to Core 0 instead of pre-empting the Core-1 engine loop. The web-polling session HIL reduced the observed active-loop maximum from intermittent 44–98 ms stalls to 3.154 ms.
+- Session CSVs are exposed for download only after the run has ended and the queued file has been completely written and closed.
+- A dedicated pilot-fuel output is no longer overwritten by wet-glow handling unless wet-glow pilot fuel is actually selected; standalone pilot-fuel and dedicated wet-glow-fuel ownership are independently regression-checked.
 - Full engine-file restore now parses and stages hardware/settings independently and validates the registry in bounded STANDBY scratch space, allowing large unified configurations to restore even after a long Classic ESP32 browser session without requiring another large contiguous heap allocation.
 - P1/P2 pullback and hard-trip fields now follow the selected pressure unit and are locked when their sensor is not fitted; factory-reset confirmation input stays inside its dialog on narrow screens.
 - Rapid page navigation now finishes load-blocking assets, drains or aborts page-owned API reads, closes page-local WebSockets, briefly reuses unchanged configuration reads, and promptly reaps stale clients; legitimate Wi-Fi ACK stalls get a 10-second window without allowing abandoned transfers to exhaust the Classic ESP32 TCP pool.

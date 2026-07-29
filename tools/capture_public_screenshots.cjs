@@ -22,6 +22,8 @@ async function installPublicExample(page) {
 
   hardware.profile_id = 'public-single-shaft-example';
   hardware.profile_desc = 'Example single-shaft turbine';
+  hardware.spi = { enabled: true, clk_pin: 18, miso_pin: 19, mosi_pin: -1 };
+  hardware.i2c = { enabled: false, sda_pin: -1, scl_pin: -1, interrupt_pin: -1, frequency_hz: 400000 };
   hardware.channel_registry.inputs = hardware.channel_registry.inputs.filter(channel => keepInput.has(channel.id));
   hardware.channel_registry.outputs = hardware.channel_registry.outputs.filter(channel => keepOutput.has(channel.id));
   const inputPins = { n1_main: 34, tot_main: -1, oil_pressure_main: 32, oil_temperature: 33, battery_voltage: 35, operator_throttle: 4 };
@@ -47,13 +49,13 @@ async function installPublicExample(page) {
   Object.keys(hardware.actuators).forEach(key => { hardware.actuators[key].enabled = false; });
   Object.assign(hardware.actuators, {
     throttle: { enabled: true, pin: 21, type: 0, min_us: 1000, max_us: 2000, inverted: false, ledc_freq: 50, ledc_bits: 16 },
-    starter: { enabled: true, pin: 22, type: 0, min_us: 1000, max_us: 2000, inverted: false, ledc_freq: 50, ledc_bits: 16, low_rpm_support_enabled: false },
+    starter: { enabled: true, pin: 22, type: 0, min_us: 1000, max_us: 2000, inverted: false, ledc_freq: 50, ledc_bits: 16 },
     oil_pump: { enabled: true, pin: 23, type: 1, active_h: true, min_us: 1000, max_us: 2000, freq_hz: 5000, res_bits: 10, has_current: false, current_pin: -1 },
     fuel_sol: { enabled: true, pin: 25, active_h: true },
     igniter: { enabled: true, pin: 26, active_h: true, pwm: false, dwell_ms: 50, rest_ms: 100, coil: false, has_current: false, current_pin: -1 },
     cool_fan: { enabled: true, pin: 27, type: 1, active_h: true, min_us: 1000, max_us: 2000, freq_hz: 5000, res_bits: 10 }
   });
-  hardware.controllers = { oil_loop: true, throttle_slew: true, dynamic_idle: true, governor: false };
+  hardware.controllers = { oil_loop: true, dynamic_idle: true, governor: false };
   hardware.safety = { overspeed: true, n2_overspeed: false, overtemp: true, low_oil: true, oil_zero: true, flameout: true, hot_start: true, oil_temp_high: true, fuel_press_low: false, batt_low: true, surge: false };
   hardware.startup_seq = ['OilPrime', 'StarterSpin', 'IgniterOn', 'FuelOpen', 'TempConfirm', 'IgniterOff', 'Spool', 'SafetyHold'];
   hardware.startup_delay_ms = [0, 0, 0, 0, 0, 0, 0, 0];
@@ -68,10 +70,10 @@ async function installPublicExample(page) {
   Object.assign(settings.engine, { rpm_limit: 100000, n2_rpm_limit: 0, min_rpm: 45000, tot_limit: 720, tot_cooldown_target: 110, tot_safe_margin: 40 });
   Object.assign(settings.oil, { startup_pressure: 1.8, startup_min_bar: 1.2, running_min: 1.4, map_min: 2.0, map_max: 3.0, use_throttle_map: true, adjust_scale: 0.08, min_pct: 18, failsafe_delay_ms: 500, failsafe_pct: 55 });
   Object.assign(settings.throttle, { ramp_up_ms: 1800, ramp_down_ms: 700, fuel_pump_min_pct: 12, idle_max_pct: 28, expo: 0.7 });
-  Object.assign(settings.dynamic_idle, { target_rpm: 58000, deadband_rpm: 400, rpm_limit: 68000, i_gain: 0.08, i_max: 0.12, use_n2: false });
+  Object.assign(settings.dynamic_idle, { source: 0, target_rpm: 58000, deadband_rpm: 400, rpm_limit: 68000, i_gain: 0.08, i_max: 0.12 });
   Object.assign(settings.sequence.startup, { pre_ign_rpm: 8000, starter_demand: 0.5, starter_timeout_ms: 12000, temp_confirm_target: 120, temp_confirm_timeout: 7000, rpm_target: 50000, rpm_timeout_ms: 18000, safety_hold_ms: 3000, final_check_rpm: 48000 });
   Object.assign(settings.sequence.shutdown, { rpm_drop_threshold: 8000, rpm_drop_timeout_ms: 20000, cooldown_timeout_ms: 60000, cooldown_use_starter: true, cooldown_use_oil: true, cooldown_starter_pct: 10, cooldown_oil_pct: 30 });
-  Object.assign(settings.safety, { check_interval_ms: 20, flameout_shutdown_ms: 1200, tot_rise_rate_limit_deg_s: 80, oil_temp_limit_c: 110, batt_volt_min_v: 10.8 });
+  Object.assign(settings.safety, { check_interval_ms: 20, flameout_shutdown_ms: 1200, flameout_egt_below_c: 300, flameout_egt_fall_rate_c_s: 50, oil_temp_limit_c: 110, batt_volt_min_v: 10.8 });
   settings.relight.enabled = false;
   settings.rules = [{ enabled: true, name: 'Oil cooling fan', kind: 0, sensor: 0, source: 'oil_temp', op: 0, threshold: 85, hysteresis: 5,
     actuator: 0, target: '', on_value: 1, off_value: 0, input_min: 0, input_max: 1, output_min: 0, output_max: 1, mode_mask: 4 }];
@@ -82,7 +84,7 @@ async function installPublicExample(page) {
 async function setRunState(page, patch = {}) {
   await page.request.post(`${base}/__sim/scenario/full`);
   await page.request.post(`${base}/__sim/data`, { data: {
-    mode: 'RUNNING', fw_version: '1.9.3', uptime_s: 847, last_event: 'RUNNING',
+    mode: 'RUNNING', fw_version: '2.0.0', uptime_s: 847, last_event: 'RUNNING',
     n1: 58200, n2: 0, tot: 592, oil: 2.35, oil_temp: 74, batt_voltage: 12.4,
     throttle_demand: 0.36, throttle_input_us: 1360, throttle_input_norm: 0.36, rc_throttle_norm: 0.36,
     oil_demand: 2.3, oil_pct: 41, flame: true, max_n1: 61400, max_tot: 628, max_oil_temp: 76,

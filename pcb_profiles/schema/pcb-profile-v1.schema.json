@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openturbine.dev/schema/pcb-profile-v1.schema.json",
+  "title": "OpenTurbine PCB Profile",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["format", "format_version", "board", "target", "ports"],
+  "properties": {
+    "format": {"const": "openturbine-pcb-profile"},
+    "format_version": {
+      "type": "object",
+      "required": ["major", "minor"],
+      "properties": {
+        "major": {"const": 1},
+        "minor": {"type": "integer", "minimum": 0, "maximum": 255}
+      }
+    },
+    "board": {
+      "type": "object",
+      "required": ["id", "name", "revision"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 47},
+        "revision": {"type": "string", "minLength": 1, "maxLength": 15},
+        "manufacturer": {"type": "string", "maxLength": 31},
+        "description": {"type": "string", "maxLength": 95}
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["chip"],
+      "properties": {
+        "chip": {"enum": ["esp32", "esp32-s3"]},
+        "minimum_flash_mb": {"type": "integer", "minimum": 4, "maximum": 32},
+        "reviewed_strapping_gpio": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0, "maximum": 48}
+        }
+      }
+    },
+    "buses": {"type": "array", "maxItems": 8, "items": {"$ref": "#/$defs/bus"}},
+    "devices": {"type": "array", "maxItems": 24, "items": {"$ref": "#/$defs/device"}},
+    "fixed_functions": {
+      "type": "object",
+      "properties": {
+        "status_led": {"$ref": "#/$defs/fixedOutput"},
+        "buzzer": {"$ref": "#/$defs/fixedOutput"},
+        "servo_output_enable": {"$ref": "#/$defs/fixedEnable"},
+        "supply_voltage": {"$ref": "#/$defs/fixedAnalogInput"},
+        "cluster_serial": {"$ref": "#/$defs/fixedSerial"},
+        "mavlink": {"$ref": "#/$defs/fixedSerial"}
+      }
+    },
+    "ports": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 48,
+      "items": {"$ref": "#/$defs/port"}
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,23}$"},
+    "bus": {
+      "type": "object",
+      "required": ["id", "kind", "pins"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "kind": {"enum": ["i2c", "spi", "uart", "onewire"]},
+        "pins": {"type": "object"},
+        "frequency_hz": {"type": "integer", "minimum": 1}
+      }
+    },
+    "device": {
+      "type": "object",
+      "required": ["id", "driver"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "driver": {"$ref": "#/$defs/id"},
+        "bus": {"$ref": "#/$defs/id"},
+        "address": {"type": "integer", "minimum": 0, "maximum": 127},
+        "select": {"type": "object"},
+        "expected": {"type": "boolean"}
+      }
+    },
+    "mode": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "adapter"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "adapter": {"$ref": "#/$defs/id"},
+        "device": {"$ref": "#/$defs/id"},
+        "channel": {"type": "integer", "minimum": 0, "maximum": 255},
+        "endpoint": {"type": "object"},
+        "limits": {"type": "object"},
+        "reference_mv": {"type": "number", "minimum": 1000, "maximum": 5500},
+        "active_high": {"type": "boolean"},
+        "pull": {"enum": ["none", "up", "down"]},
+        "safe_demand": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "port": {
+      "type": "object",
+      "required": ["id", "label", "modes"],
+      "properties": {
+        "id": {"$ref": "#/$defs/id"},
+        "label": {"type": "string", "minLength": 1, "maxLength": 31},
+        "connector": {"type": "string", "maxLength": 23},
+        "description": {"type": "string", "maxLength": 79},
+        "modes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/mode"}
+        }
+      }
+    },
+    "fixedOutput": {
+      "type": "object",
+      "required": ["gpio", "safe_demand"],
+      "properties": {
+        "gpio": {"type": "integer"},
+        "active_high": {"type": "boolean"},
+        "type": {"enum": ["gpio", "neopixel"]},
+        "safe_demand": {"const": 0}
+      }
+    },
+    "fixedSerial": {
+      "type": "object",
+      "required": ["bus"],
+      "properties": {"bus": {"$ref": "#/$defs/id"}}
+    },
+    "fixedEnable": {
+      "type": "object",
+      "required": ["gpio", "active_high", "safe_demand"],
+      "properties": {
+        "gpio": {"type": "integer"},
+        "active_high": {"type": "boolean"},
+        "safe_demand": {"const": 0}
+      }
+    },
+    "fixedAnalogInput": {
+      "type": "object",
+      "required": ["gpio", "divider"],
+      "properties": {
+        "gpio": {"type": "integer"},
+        "divider": {"type": "number", "minimum": 1, "maximum": 100},
+        "label": {"type": "string", "minLength": 1, "maxLength": 31}
+      }
+    }
+  }
+}

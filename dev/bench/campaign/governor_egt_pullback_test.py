@@ -10,8 +10,8 @@ rig = BenchRig(); dut = rig.dut; dc = rig.dcfg; t = rig.t
 dut.ensure_mode_standby()
 dc.multi(lambda hw: (hw.__setitem__("has_two_shaft", True),
                      hw["sensors"]["n2_rpm"].update(enabled=True, pin=8, ppr=1.0),
-                     hw["controllers"].update(governor=True, dynamic_idle=False, throttle_slew=True)),
-         check=lambda hw: hw.get("has_two_shaft") and hw["controllers"]["governor"] and hw["controllers"]["throttle_slew"])
+                     hw["controllers"].update(governor=True, dynamic_idle=False)),
+         check=lambda hw: hw.get("has_two_shaft") and hw["controllers"]["governor"])
 print("cfg:", dc.patch_cfg({
     "governor": {"target_rpm": 40000, "band_rpm": 500, "kp": 0.003},
     "throttle": {"ramp_up_ms": 400, "ramp_down_ms": 400,

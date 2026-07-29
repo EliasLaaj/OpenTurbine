@@ -96,12 +96,16 @@ public:
         // Guard: rpmHardLimit must be strictly above rpmSoftLimit — equal limits
         // would cause division by zero and NaN throttle demand.
         const float unrestrictedTarget = target;
-        auto applyPullback = [&](float value, float soft, float hard, float authority) {
+        auto applyPullback = [&](float value, float soft, float hard) {
             if (hard <= soft || value <= soft) return;
             float over = constrain((value - soft) / (hard - soft), 0.0f, 1.0f);
             float floor = constrain(minPullbackThrottle, 0.0f, unrestrictedTarget);
-            float reduction = over * authority * pullbackStrength;
-            const float ceiling = constrain(unrestrictedTarget - reduction, floor, unrestrictedTarget);
+            // All sources use the same predictable authority: at the configured
+            // full-reduction point, strength 1.0 reaches the user-set floor.
+            // Lower strength is gentler; greater than 1 reaches the floor sooner.
+            const float reduction = (unrestrictedTarget - floor) * over * pullbackStrength;
+            const float ceiling =
+                constrain(unrestrictedTarget - reduction, floor, unrestrictedTarget);
             target = fminf(target, ceiling); // the most restrictive active limiter wins
         };
 
@@ -154,14 +158,14 @@ public:
                 }
             }
         }
-        if (n1PullbackEnabled && ed.n1Healthy) applyPullback(n1val, rpmSoftLimit, rpmHardLimit, 0.30f);
-        if (n2PullbackEnabled && ed.n2Healthy) applyPullback(n2val, n2SoftLimit, n2HardLimit, 0.40f);
+        if (n1PullbackEnabled && ed.n1Healthy) applyPullback(n1val, rpmSoftLimit, rpmHardLimit);
+        if (n2PullbackEnabled && ed.n2Healthy) applyPullback(n2val, n2SoftLimit, n2HardLimit);
         if (egtPullbackEnabled && Config::primaryEgtHealthy(ed)) {
-            applyPullback(egtVal, totSoftLimit, totHardLimit, 0.20f);
+            applyPullback(egtVal, totSoftLimit, totHardLimit);
         }
-        if (p1PullbackEnabled && ed.p1Healthy) applyPullback(p1val, p1SoftLimit, p1HardLimit, 0.35f);
-        if (p2PullbackEnabled && ed.p2Healthy) applyPullback(p2val, p2SoftLimit, p2HardLimit, 0.35f);
-        if (torquePullbackEnabled && ed.torqueHealthy) applyPullback(torqueVal, torqueSoftLimit, torqueHardLimit, 0.40f);
+        if (p1PullbackEnabled && ed.p1Healthy) applyPullback(p1val, p1SoftLimit, p1HardLimit);
+        if (p2PullbackEnabled && ed.p2Healthy) applyPullback(p2val, p2SoftLimit, p2HardLimit);
+        if (torquePullbackEnabled && ed.torqueHealthy) applyPullback(torqueVal, torqueSoftLimit, torqueHardLimit);
 
         // Guard: if rampMs is 0 (instant) or dt is 0 (same-millisecond tick),
         // dividing would produce Inf or NaN.  Treat 0 ms ramp as instant (maxStep=1).

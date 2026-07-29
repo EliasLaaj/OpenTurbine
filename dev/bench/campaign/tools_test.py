@@ -32,10 +32,10 @@ toggle_test("toggle bench_mode",   "TOGGLE_BENCH_MODE",   "bench_mode")
 toggle_test("toggle dynamic_idle", "TOGGLE_DYNAMIC_IDLE", "dynamic_idle_enabled")
 toggle_test("toggle limp_mode",    "TOGGLE_LIMP_MODE",    "limp_mode")
 
-# ── 2. STARTER_ASSIST rejected outside RUNNING ──────────────────────
-code, resp = dut.command("STARTER_LOW_RPM_SUPPORT", iParam=1)
-rec("starter support rejected in STANDBY", code != 200 or not dut.data().get("starter_low_rpm_support_active"),
-    "code=%s" % code)
+# ── 2. Pulsed-assist test rejected when hardware is absent ─────────
+code, resp = dut.command("PULSED_STARTER_ASSIST_TEST")
+rec("reject pulsed assist (unconfigured)", code != 200,
+    "code=%s err=%r" % (code, resp.get("error")))
 
 # ── 3. Configured actuator self-tests drive the pin ─────────────────
 def selftest_drives(name, cmd, sig, telem_key, ledc=False):

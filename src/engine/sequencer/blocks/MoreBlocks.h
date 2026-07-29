@@ -54,7 +54,8 @@ private:
 //  Useful between relight attempts, before hot restart, or as a
 //  post-cooldown verification step.  On timeout → CONTINUES
 //  (does not abort — operator is waiting for thermal settle).
-//  If the selected EGT source is unhealthy, completes immediately.
+//  If EGT is unavailable, waits until timeout; startup then aborts, while
+//  non-startup use completes so shutdown cannot be trapped forever.
 // ============================================================
 class WaitTOTCool : public IBlock {
 public:

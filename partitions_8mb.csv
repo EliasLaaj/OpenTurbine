@@ -1,0 +1,11 @@
+# OpenTurbine partition table — OTA-capable, universal 8 MB ESP32-S3 baseline
+# Also safe on 16 MB modules. Two 3 MB app slots leave ample growth above the
+# current firmware while retaining ~1.8 MB for LittleFS logs and web assets.
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x300000,
+app1,     app,  ota_1,   0x310000, 0x300000,
+pcbprof,  data, 0x40,    0x610000, 0x10000,
+littlefs, data, littlefs,0x620000, 0x1D0000,
+coredump, data, coredump,0x7F0000, 0x10000,

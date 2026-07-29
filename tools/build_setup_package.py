@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import re
 import shutil
@@ -56,7 +57,7 @@ TARGETS = {
     "esp32s3dev": {
         "chip": "ESP32-S3",
         "bootloader_address": "0x0000",
-        "partition_csv": "partitions_16mb.csv",
+        "partition_csv": "partitions_8mb.csv",
     },
 }
 COMMON_FLASH = [
@@ -64,8 +65,18 @@ COMMON_FLASH = [
     ("0xe000", "boot_app0.bin"),
     ("0x10000", "firmware.bin"),
 ]
-PACKAGE_SCHEMA = 2
-SETUP_TOOL_VERSION = "0.5.26"
+PACKAGE_SCHEMA = 3
+SETUP_TOOL_VERSION = "0.6.0"
+MINIMUM_SETUP_TOOL_VERSION = "0.6.0"
+
+
+def load_profile_tool():
+    spec = importlib.util.spec_from_file_location("openturbine_pcb_profile", ROOT / "tools" / "pcb_profile.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load tools/pcb_profile.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def read_version() -> str:
@@ -187,8 +198,12 @@ def stage_package(stage: Path, esptool: Path, cp210x: str | None, ch340: str | N
         "recommended": True,
         "package_schema": PACKAGE_SCHEMA,
         "setup_tool_version": SETUP_TOOL_VERSION,
+        "minimum_setup_tool_version": MINIMUM_SETUP_TOOL_VERSION,
         "targets": {},
     }
+    profile_tool = load_profile_tool()
+    for target_file in sorted((ROOT / "pcb_profiles" / "targets").glob("*.json")):
+        copy_required(target_file, stage / "pcb_profiles" / "targets" / target_file.name, missing)
 
     for env, meta in TARGETS.items():
         env_stage = stage / env
@@ -205,6 +220,8 @@ def stage_package(stage: Path, esptool: Path, cp210x: str | None, ch340: str | N
             copy_required(ROOT / "data" / name, web_stage / name, missing)
 
         littlefs_address = partition_offset(meta["partition_csv"], "littlefs")
+        profile_address = partition_offset(meta["partition_csv"], "pcbprof")
+        profile_partition_bytes = partition_size(meta["partition_csv"], "pcbprof")
         app_partition_bytes = partition_size(meta["partition_csv"], "app0")
         firmware_path = env_build / "firmware.bin"
         firmware_bytes = firmware_path.stat().st_size if firmware_path.exists() else 0
@@ -223,6 +240,26 @@ def stage_package(stage: Path, esptool: Path, cp210x: str | None, ch340: str | N
         usb_flash = [{"address": meta["bootloader_address"], "file": "bootloader.bin"}]
         usb_flash.extend({"address": address, "file": filename} for address, filename in COMMON_FLASH)
         usb_flash.append({"address": littlefs_address, "file": "littlefs.bin"})
+        official_profiles = []
+        expected_profile_chip = "esp32-s3" if env == "esp32s3dev" else "esp32"
+        for source in sorted((ROOT / "pcb_profiles" / "official").glob("*.otpcb.json")):
+            profile = json.loads(source.read_text(encoding="utf-8"))
+            if profile.get("target", {}).get("chip") != expected_profile_chip:
+                continue
+            binary = profile_tool.build_container(profile, official=True)
+            if len(binary) > profile_partition_bytes:
+                raise RuntimeError(f"{source} is larger than the {env} PCB-profile partition")
+            file_name = source.name.removesuffix(".json") + ".bin"
+            destination = stage / env / "pcb_profiles" / file_name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(binary)
+            official_profiles.append({
+                "id": profile["board"]["id"],
+                "name": profile["board"]["name"],
+                "revision": profile["board"]["revision"],
+                "file": f"pcb_profiles/{file_name}",
+                "sha256": hashlib.sha256(binary).hexdigest(),
+            })
         manifest["targets"][env] = {
             "chip": meta["chip"],
             "firmware_ota": "firmware.bin",
@@ -230,6 +267,11 @@ def stage_package(stage: Path, esptool: Path, cp210x: str | None, ch340: str | N
             "app_partition_bytes": app_partition_bytes,
             "web_assets": "web_assets",
             "usb_flash": usb_flash,
+            "pcb_profile": {
+                "address": profile_address,
+                "size": profile_partition_bytes,
+                "official_profiles": official_profiles,
+            },
         }
 
     if missing:

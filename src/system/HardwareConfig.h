@@ -20,7 +20,7 @@
 
 class HardwareConfig {
 public:
-    static constexpr uint8_t CHANNEL_REGISTRY_VERSION = 1;
+    static constexpr uint8_t CHANNEL_REGISTRY_VERSION = 2;
 #if defined(OT_PLATFORM_ESP32S3)
     static ChannelRegistry channelRegistry;
 #else
@@ -69,6 +69,22 @@ public:
     static bool hasOilTemp;       // engine oil temperature sensor
     static bool hasBattVoltage;   // bus / battery voltage monitor
     static bool hasTorque;        // torque sensor (turboshaft / dynamometer)
+    static bool hasThrust;        // calibrated load-cell thrust input
+
+    // One shared I2C bus. Recognized devices are discovered automatically;
+    // only assigned channels are persisted in ChannelRegistry.
+    static bool     i2cEnabled;
+    static int      i2cSdaPin;
+    static int      i2cSclPin;
+    static int      i2cInterruptPin;
+    static uint32_t i2cFrequencyHz;
+
+    // One shared SPI bus. Devices retain only their own CS and any
+    // device-specific auxiliary pins; PCB profiles may fix these bus pins.
+    static bool     spiEnabled;
+    static int      spiSckPin;
+    static int      spiMisoPin;
+    static int      spiMosiPin;
 
     // ── Sensor pins & params ──────────────────────────────────
     static int   n1RpmPin;
@@ -107,7 +123,7 @@ public:
     static int   oilTempMiso;       // SPI MISO (-1 for NTC / DS18B20)
     static int   oilTempMosi;       // SPI MOSI (-1 for non-MAX31856)
     static char  oilTempTcType[4];  // thermocouple type for MAX31856: "K","J","N","T"…
-    static int   oilTempResolution; // DS18B20 resolution bits: 9, 10, 11, or 12 (default 12)
+    static int   oilTempResolution; // DS18B20 resolution bits: 9, 10, 11, or 12 (default 10)
     static float ntcBeta;           // NTC B coefficient (default 3950)
     static float ntcR0;             // NTC resistance at reference temp in Ω (default 10000)
     static float ntcRFixed;         // pull-up resistor in Ω (default 10000)
@@ -182,7 +198,6 @@ public:
     static int   starterLedcBits;
     static float starterPwmMinPct;
     static float starterPwmMaxPct;
-    static bool  starterLowRpmSupportEnabled; // allow optional starter support while RUNNING
 
     // oilPumpType: 0=servo, 1=ledc_pwm, 2=onoff
     static int   oilPumpPin;
@@ -333,6 +348,7 @@ public:
     static int   mavlinkIntervalMs;    // telemetry send interval (ms)
 
     static int   statusLedPin;
+    static bool  statusLedActiveH;
     static int   statusLedType;        // 0=plain GPIO, 1=NeoPixel/RGB data LED
     static int   statusLedMode;        // NeoPixel only: 0=blink pattern, 1=state color
     static uint32_t statusLedStandbyColor;
@@ -349,7 +365,6 @@ public:
 
     // ── Controller feature flags ──────────────────────────────
     static bool hasOilLoop;
-    static bool hasThrottleSlew;
     static bool hasDynamicIdle;
 
     static constexpr int MAX_OIL_LOOPS = 2;
@@ -373,7 +388,7 @@ public:
     static bool safetyLowOil;
     static bool safetyOilZero;
     static bool safetyFlameout;
-    static bool safetyHotStart;   // abort startup if selected EGT is above hotStartTotThreshold
+    static bool safetyHotStart;   // reject START if selected EGT is above preStartEgtLimitC
     static bool safetyTitOvertemp;  // TIT (turbine inlet temp) overtemp shutdown
     static bool safetyOilTempHigh;  // oil temperature overtemp shutdown
     static bool safetyFuelPressLow; // fuel pressure below minimum shutdown
@@ -492,7 +507,7 @@ public:
 
     // ── Singleton accessor ────────────────────────────────────
     // All members are static; instance() lets callers use the
-    // convenient  auto& hw = HardwareConfig::instance(); hw.xxx  pattern
+    // convenient `auto& hw = HardwareConfig::instance(); hw.xxx` pattern
     // without changing every call site to HardwareConfig::xxx directly.
     static HardwareConfig& instance() {
         static HardwareConfig _s;
@@ -502,6 +517,9 @@ public:
     // ── API ───────────────────────────────────────────────────
     static void load();                      // call at boot after LittleFS.begin()
     static bool save();                      // write current values → ecu_config.json hardware section
+    // Atomically write current Hardware and Settings while holding only one
+    // large JSON section in heap at a time.
+    static bool saveUnified();
     static void applyDefaults();             // restore defaults (mirrors hardware_profile.h)
 
     // Serialize to / from JSON
@@ -509,7 +527,9 @@ public:
     static void   toJson(JsonDocument& doc, bool redactPassword = false);
     static bool   validateJson(const char* json, size_t len);
     static bool   validateJson(const JsonDocument& doc, ChannelRegistry* registryWorkspace = nullptr);
-    static bool   fromJson(const char* json, size_t len);
+    static const char* lastValidationError();
+    static bool   fromJson(const char* json, size_t len,
+                           ChannelRegistry* validationWorkspace = nullptr);
     // Apply a document already accepted by validateJson(), without writing
     // storage. The full-engine restore path uses this to avoid a second large
     // validation allocation while several transaction documents are resident.

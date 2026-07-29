@@ -1,0 +1,135 @@
+<!-- Source template. Run tools/build_web_sources.py after editing this file or page modules. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101012">
+<title>OpenTurbine — Config</title>
+<link rel="stylesheet" href="/style.css?v=20260723a">
+<style>
+:root{--bg:#101012;--surface:#17171a;--surface-2:#1d1d20;--surface-3:#262629;--border:#313135;--border-light:#42424a;--text:#f5f5f7;--text-2:#cecdd4;--dim:#a0a0a8;--green:#33cf7a;--red:#ff4d5f;--yellow:#ffcf4d;--blue:#5ab8ca;--accent:#ee7620;--font-ui:system-ui,-apple-system,'Segoe UI',sans-serif;--font-mono:'SF Mono','Menlo','Consolas',monospace}
+*,*::before,*::after{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:14px;line-height:1.5}nav{height:48px;display:flex;align-items:center;padding:0 1.25rem;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}nav a{height:48px;line-height:48px;padding:0 .9rem;color:var(--dim);text-decoration:none;text-transform:uppercase;letter-spacing:.06em;font-size:.75rem;font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}nav a.active{color:var(--text);border-bottom-color:var(--accent)}.conn-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-left:auto}.conn-dot.connected{background:var(--green);box-shadow:0 0 6px var(--green)}.conn-dot.disconnected{background:var(--red)}.conn-label{font-size:.63rem;color:var(--dim);margin-left:.4rem;text-transform:uppercase;letter-spacing:.05em}main{padding:1.5rem;max-width:920px;margin:0 auto}button{font-family:var(--font-ui);font-size:.78rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;min-height:44px;padding:.42rem 1.1rem;border-radius:6px;border:1px solid var(--border-light);background:var(--surface-3);color:var(--text-2);cursor:pointer}button:hover{color:var(--text);background:var(--surface-2)}button:disabled{opacity:.3;cursor:default}button.primary{background:var(--accent);border-color:var(--accent);color:#2b1405}.view-toggle{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface-2)}.view-toggle button{border:0;border-radius:0;background:transparent}.view-toggle button.active{background:var(--accent);color:#2b1405}select,input{font-family:var(--font-mono);font-size:.82rem;padding:.32rem .55rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)}input[type=checkbox]{width:auto;accent-color:var(--accent)}.cfg-section{background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:1rem 1.2rem;margin-bottom:.85rem}.cfg-title{font-size:.68rem;font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.7rem}.cfg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:.75rem}.cfg-field{display:flex;flex-direction:column;gap:.22rem;min-width:0}.cfg-label{font-size:.65rem;color:var(--dim);text-transform:uppercase;letter-spacing:.07em;font-weight:700}.cfg-desc{font-size:.72rem;color:var(--dim);line-height:1.45}.cfg-field input,.cfg-field select{width:100%;max-width:100%}.cfg-field input:focus,.cfg-field select:focus{outline:none;border-color:var(--accent)}.cfg-field input:disabled,.cfg-field select:disabled{opacity:.45}.error-banner{border-radius:9px;padding:.7rem 1rem;margin-bottom:.85rem;font-size:.82rem;background:color-mix(in srgb,var(--red) 8%,transparent);border:1px solid color-mix(in srgb,var(--red) 40%,transparent);color:var(--red)}.save-bar{position:sticky;bottom:0;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:1rem;display:flex;align-items:center;gap:.75rem;margin-top:1rem}.save-bar a{color:var(--dim)}.save-msg{font-size:.78rem;color:var(--dim)}.live-val{font-size:.72rem;color:var(--accent);margin-left:.5rem}.field-changed{border-color:var(--yellow)!important;box-shadow:0 0 0 1px var(--yellow)}.save-recap-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:999}.save-recap-card{width:min(720px,92vw);max-height:82vh;background:var(--surface);border:1px solid var(--border-light);border-radius:9px;overflow:hidden}.save-recap-header,.save-recap-footer{display:flex;align-items:center;gap:.7rem;padding:.85rem 1rem;border-bottom:1px solid var(--border)}.save-recap-footer{border-top:1px solid var(--border);border-bottom:0;justify-content:flex-end}.save-recap-body{padding:1rem;overflow:auto;max-height:55vh}.save-recap-subtitle{padding:.75rem 1rem;color:var(--dim);font-size:.78rem;border-bottom:1px solid var(--border)}@media(max-width:700px){main{padding:1rem}.cfg-grid{grid-template-columns:minmax(0,1fr)}.save-bar{position:static;flex-wrap:wrap}nav{overflow-x:auto}.conn-dot{margin-left:.75rem}}
+</style>
+<style>
+/* Configuration workspace */
+main{max-width:1380px;padding:1.1rem 1.5rem 5.5rem}
+.cfg-workspace{position:sticky;top:48px;z-index:80;margin:-1.1rem 0 .8rem;padding:.9rem 0 .65rem;background:linear-gradient(180deg,var(--bg) 82%,transparent)}
+.cfg-workspace-card{background:linear-gradient(135deg,var(--surface-2),var(--surface));border:1px solid var(--border);border-radius:14px;padding:.85rem 1rem;box-shadow:0 14px 38px rgba(0,0,0,.2)}
+.cfg-workspace-head{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;margin-bottom:.8rem}.cfg-workspace-title{margin:0;font-size:1.05rem;letter-spacing:.02em}.cfg-status{font-size:.68rem;padding:.2rem .55rem;border:1px solid var(--border);border-radius:999px;color:var(--dim);background:var(--surface)}
+.cfg-header-actions{display:flex;align-items:center;gap:.45rem;margin-left:auto;flex-wrap:wrap}.unit-controls{display:flex;align-items:center;gap:.3rem;color:var(--dim);font-size:.7rem}.unit-controls button,.compact-action{min-height:34px;padding:.28rem .65rem;font-size:.69rem}.compact-action{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:6px;background:var(--surface-3);color:var(--dim);text-decoration:none}.compact-action:hover{color:var(--text);border-color:var(--border-light)}
+.cfg-search-wrap{position:relative}.cfg-search{width:100%;height:48px;padding:.65rem 5.2rem .65rem 2.7rem!important;border-color:var(--border-light);background:var(--bg);font-family:var(--font-ui);font-size:.92rem}.cfg-search:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}.cfg-search-icon{position:absolute;left:.95rem;top:50%;transform:translateY(-50%);color:var(--dim);font-size:1rem;pointer-events:none}.cfg-search-key{position:absolute;right:.75rem;top:50%;transform:translateY(-50%);font:600 .68rem var(--font-mono);color:var(--dim);border:1px solid var(--border);border-radius:4px;padding:.08rem .35rem}
+.cfg-toolbar{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-top:.7rem}.cfg-filters{display:flex;gap:.35rem;overflow:auto}.cfg-filter{min-height:34px;padding:.28rem .72rem;border-radius:999px;font-size:.68rem;white-space:nowrap;text-transform:none;letter-spacing:.01em}.cfg-filter.active{background:var(--accent);border-color:var(--accent);color:#271306}.cfg-result-count{margin-left:auto;font-size:.72rem;color:var(--dim)}
+.preset-panel{margin:.75rem 0 1rem;border:1px solid var(--border);border-radius:10px;background:var(--surface)}.preset-panel>summary{cursor:pointer;list-style:none;padding:.75rem 1rem;font-weight:700;color:var(--text-2)}.preset-panel>summary::-webkit-details-marker{display:none}.preset-panel>summary::after{content:'›';float:right;color:var(--dim);transform:rotate(90deg)}.preset-panel[open]>summary::after{transform:rotate(-90deg)}.preset-body{display:flex;align-items:center;gap:.7rem;flex-wrap:wrap;padding:0 1rem 1rem}.preset-body select{min-height:40px;flex:1;min-width:260px}.preset-note{font-size:.72rem;color:var(--yellow);flex-basis:100%}
+.config-group{display:block;margin-bottom:.75rem;border:1px solid var(--border);border-radius:13px;background:var(--surface);overflow:hidden}.config-group.group-changed{border-color:var(--yellow);box-shadow:0 0 0 2px color-mix(in srgb,var(--yellow) 16%,transparent)}.config-group>summary{display:flex;align-items:center;gap:.65rem;min-height:78px;padding:.85rem 1rem;cursor:pointer;list-style:none;user-select:none}.config-group>summary::-webkit-details-marker{display:none}.config-group>summary:hover{background:color-mix(in srgb,var(--surface-3) 45%,transparent)}.group-heading{display:block;min-width:0;flex:1}.group-title,.group-desc{display:block}.group-title{font-size:.88rem;font-weight:750}.group-desc{font-size:.72rem;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.group-meta{font-size:.68rem;color:var(--dim);white-space:nowrap}.group-chevron{font-size:1.15rem;color:var(--dim);transition:transform .15s}.config-group[open] .group-chevron{transform:rotate(90deg)}.group-content{padding:0 .8rem .8rem;border-top:1px solid var(--border)}
+.cfg-section{background:transparent;border:0;border-radius:0;padding:.85rem .25rem .2rem;margin:0}.cfg-section+.cfg-section{border-top:1px solid var(--border)}.cfg-title{font-size:.72rem;color:var(--text-2);margin:0 0 .65rem;display:flex;align-items:center;gap:.45rem}.cfg-title-count{font-size:.63rem;color:var(--dim);font-weight:500;letter-spacing:0;text-transform:none}.cfg-grid{grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:.65rem}
+.cfg-field{position:relative;gap:.38rem;padding:.75rem;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);transition:border-color .15s,opacity .15s,transform .15s}.cfg-field:hover{border-color:var(--border-light)}.cfg-field.search-hit{border-color:color-mix(in srgb,var(--accent) 65%,var(--border));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 18%,transparent)}.cfg-field-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.65rem;min-width:0}.cfg-label{font-size:.68rem;color:var(--text-2);letter-spacing:.055em;min-height:1.05rem;min-width:0}.cfg-field input,.cfg-field select{min-height:42px;font-size:.86rem;background:var(--bg)}.cfg-field input[type=checkbox]{width:22px;height:22px;min-height:22px;align-self:flex-start}.cfg-help{font-size:.69rem;color:var(--dim)}.cfg-help summary{cursor:pointer;display:inline;color:var(--dim);list-style:none}.cfg-help summary::-webkit-details-marker{display:none}.cfg-help summary::before{content:'ⓘ ';color:var(--accent)}.cfg-help[open] summary{color:var(--text-2)}.cfg-desc{padding-top:.35rem;font-size:.72rem;line-height:1.45}.field-level{flex:0 0 auto;font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;color:var(--blue)}.cfg-empty{padding:2.5rem 1rem;text-align:center;border:1px dashed var(--border-light);border-radius:12px;color:var(--dim)}
+.cfg-field.cfg-field-inactive{border-color:color-mix(in srgb,var(--yellow) 58%,var(--border));box-shadow:inset 3px 0 0 color-mix(in srgb,var(--yellow) 68%,transparent);background:color-mix(in srgb,var(--yellow) 4%,var(--surface-2))}.cfg-field.cfg-field-inactive:not(.inactive-editable){opacity:.62}.cfg-inactive-badge{display:none;flex:0 0 auto;padding:.08rem .36rem;border:1px solid color-mix(in srgb,var(--yellow) 55%,transparent);border-radius:999px;color:var(--yellow);font-size:.55rem;font-weight:750;letter-spacing:.055em;text-transform:uppercase}.cfg-field.cfg-field-inactive .cfg-inactive-badge{display:inline-flex}.cfg-inactive-note{display:none;color:var(--yellow);font-size:.65rem;line-height:1.35}.cfg-field.cfg-field-inactive .cfg-inactive-note{display:block}.cfg-field.cfg-field-inactive.inactive-editable{opacity:1;border-color:color-mix(in srgb,var(--yellow) 82%,var(--border));box-shadow:inset 3px 0 0 var(--yellow),0 0 0 1px color-mix(in srgb,var(--yellow) 10%,transparent)}
+.cfg-explore-note{display:none;margin-top:.7rem;padding:.55rem .7rem;border:1px solid color-mix(in srgb,var(--yellow) 45%,var(--border));border-radius:8px;background:color-mix(in srgb,var(--yellow) 6%,var(--surface));color:var(--text-2);font-size:.71rem;line-height:1.45}.cfg-explore-note strong{color:var(--yellow)}.cfg-workspace.explore-active .cfg-explore-note{display:block}
+.save-bar{position:fixed;z-index:90;left:50%;bottom:14px;transform:translateX(-50%);width:min(1340px,calc(100% - 2rem));padding:.65rem .8rem;border-radius:12px;box-shadow:0 16px 45px rgba(0,0,0,.45)}.save-bar .save-spacer{flex:1}.save-change-count{font-size:.76rem;color:var(--text-2);font-weight:650}.save-bar:not(.is-dirty) .save-change-count{color:var(--dim)}.save-bar a{font-size:.72rem}.save-msg{margin-left:auto}.filter-hidden{display:none!important}
+.cfg-section.feature-unavailable{border:1px dashed color-mix(in srgb,var(--yellow) 52%,var(--border-light));border-radius:9px;margin:.6rem 0;padding:.75rem}.cfg-section.feature-unavailable>.cfg-title{cursor:pointer;margin:0}.cfg-section.feature-unavailable>.cfg-title::after{content:'Inactive with current hardware — show prerequisites and saved values';margin-left:auto;color:var(--yellow);font-size:.62rem;text-transform:none;letter-spacing:0}.cfg-section.feature-unavailable>.cfg-grid,.cfg-section.feature-unavailable>div:not(.cfg-title){display:none}.cfg-section.feature-unavailable.unavailable-open>.cfg-grid,.cfg-section.feature-unavailable.search-reveal>.cfg-grid,.config-explore .cfg-section.feature-unavailable>.cfg-grid{display:grid}.cfg-section.feature-unavailable.unavailable-open>div:not(.cfg-title):not(.cfg-grid),.cfg-section.feature-unavailable.search-reveal>div:not(.cfg-title):not(.cfg-grid),.config-explore .cfg-section.feature-unavailable>div:not(.cfg-title):not(.cfg-grid){display:block}.config-explore .cfg-section.feature-unavailable>.cfg-title{margin-bottom:.65rem}.config-explore .cfg-section.feature-unavailable>.cfg-title::after{content:'Inactive with current hardware — values are editable but will not operate yet'}
+.protection-stack{display:grid;gap:.6rem}.protection-card{border:1px solid var(--border);border-radius:10px;background:var(--surface-2);overflow:hidden}.protection-card>summary{display:flex;align-items:center;gap:.75rem;min-height:62px;padding:.7rem .8rem;cursor:pointer;list-style:none}.protection-card>summary::-webkit-details-marker{display:none}.protection-card>summary:hover{background:color-mix(in srgb,var(--surface-3) 45%,transparent)}.protection-card-title{display:block;font-weight:750;color:var(--text-2)}.protection-card-desc{display:block;font-size:.7rem;color:var(--dim)}.protection-card-chevron{margin-left:auto;color:var(--dim);font-size:1.05rem}.protection-card[open] .protection-card-chevron{transform:rotate(90deg)}.protection-card .cfg-grid{padding:.7rem;border-top:1px solid var(--border)}
+@media(max-width:700px){main{padding:.85rem .75rem 7.6rem}.cfg-workspace{position:relative;top:auto;margin:-.85rem 0 .75rem;padding:.75rem 0 .55rem;background:var(--bg)}.cfg-workspace-card{padding:.75rem;border-radius:11px}.cfg-workspace-head{margin-bottom:.6rem}.cfg-header-actions{margin-left:0;width:100%}.cfg-search{height:44px}.cfg-toolbar{flex-wrap:wrap}.cfg-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;overflow:visible}.cfg-filter{width:100%;padding:.28rem .4rem}.cfg-result-count{display:none}.config-group>summary{min-height:68px;padding:.7rem}.group-desc{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.group-meta{display:none}.group-content{padding:0 .55rem .55rem}.cfg-grid{grid-template-columns:minmax(0,1fr)}.save-bar{bottom:8px;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.45rem}.save-bar:not(.is-dirty){display:none}.save-bar .save-change-count{grid-column:1/-1}.save-bar .save-spacer,.save-bar a,.save-msg{display:none}.save-bar button{min-width:0;padding:.42rem .7rem}.preset-body select{min-width:100%}.save-recap-card{width:calc(100vw - 1rem);max-height:92vh}.save-recap-header,.save-recap-footer{flex-wrap:wrap}.save-recap-body{padding:.65rem;max-height:62vh;overflow-x:auto}}
+</style>
+<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+<script src="/ui_dialog.js?v=20260723a"></script>
+</head>
+<body>
+<nav>
+  <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
+  <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
+  <a href="/config.html" class="active" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
+  <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
+  <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
+  <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
+  <a href="/tools.html" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
+  <span id="conn" class="conn-dot disconnected"></span><span id="conn-label" class="conn-label">Disconnected</span>
+</nav>
+<main>
+  <div class="cfg-workspace">
+    <div class="cfg-workspace-card">
+      <div class="cfg-workspace-head">
+        <h1 class="cfg-workspace-title">Configuration</h1>
+        <span id="cfg-lock-badge" class="cfg-status">—</span>
+        <span id="cfg-state-badge" class="cfg-status" aria-live="polite">Loading</span>
+        <div class="cfg-header-actions">
+          <div class="unit-controls">Units
+            <button id="unit-temp-btn" onclick="setConfigTempUnit(tempUnit()==='C'?'F':'C')">°C</button>
+            <button id="unit-press-btn" onclick="setConfigPressUnit(pressUnit()==='bar'?'psi':'bar')">bar</button>
+          </div>
+          <a id="dev-mode-tools-link" href="/tools.html#card-dev-mode" class="btn compact-action" title="Developer Mode and its safety warning are managed from Tools.">Developer controls</a>
+        </div>
+      </div>
+      <div class="cfg-search-wrap">
+        <span class="cfg-search-icon" aria-hidden="true">⌕</span>
+        <input id="cfg-search" class="cfg-search" type="search" autocomplete="off" placeholder="Search limits, oil, relight, N2, telemetry…" aria-label="Search configuration settings">
+        <span class="cfg-search-key">/</span>
+      </div>
+      <div class="cfg-toolbar">
+        <div class="cfg-filters" role="group" aria-label="Configuration filter">
+          <button id="btn-view-basic" class="cfg-filter active" aria-pressed="true" title="Common limits and operating settings for the hardware currently fitted." onclick="setWorkspaceFilter('essential')">Essentials</button>
+          <button id="btn-view-expert" class="cfg-filter" aria-pressed="false" title="Every setting that applies to the currently configured system." onclick="setWorkspaceFilter('configured')">Configured system</button>
+          <button id="btn-view-explore" class="cfg-filter" aria-pressed="false" title="Discover every OpenTurbine feature, including unavailable features and their prerequisites." onclick="setWorkspaceFilter('explore')">Explore all features</button>
+          <button id="btn-filter-changed" class="cfg-filter" aria-pressed="false" onclick="setWorkspaceFilter('changed')">Changed</button>
+        </div>
+        <span id="cfg-result-count" class="cfg-result-count" aria-live="polite">Loading settings…</span>
+      </div>
+      <div class="cfg-explore-note"><strong>Planning future hardware:</strong> amber-bordered tuning values are editable and save normally, but the ECU will not use them until their prerequisites are configured. Enable switches and choices for missing hardware stay locked, so exploring cannot arm a feature unexpectedly.</div>
+    </div>
+  </div>
+  <div id="lock-warn" class="error-banner" style="display:none">Warning: engine is running - config is locked. Stop the engine to edit (live editing requires Dev Mode enabled beforehand, from Tools while in STANDBY).</div>
+
+  <!-- ── Engine Type Presets ──────────────────────────────────── -->
+  <details id="preset-bar" class="preset-panel">
+    <summary>Review an engine example</summary>
+    <div class="preset-body">
+    <select id="preset-sel" onchange="applyPreset(this.value)">
+      <option value="">— Choose an example to review —</option>
+      <optgroup label="RC Jet">
+        <option value="kj66">Small RC Jet ~60N (KJ-66 / T-62 style, ~120k RPM)</option>
+        <option value="med_jet">Medium RC Jet ~200N (AM, Wren 75+, ~90k RPM)</option>
+        <option value="large_jet">Large RC Jet ~400N+ example (~100k RPM)</option>
+      </optgroup>
+      <optgroup label="APU / Turboshaft">
+        <option value="apu_small">Small APU (Garrett GTP30, ~80k RPM)</option>
+        <option value="turboshaft">Turboshaft / Power Turbine (configure N2 governor in Hardware)</option>
+      </optgroup>
+      <optgroup label="Turbocharger Turbine">
+        <option value="turbocharger">Example turbocharger-based gas turbine</option>
+      </optgroup>
+    </select>
+    <span class="preset-note" id="preset-note">Examples only. Verify every proposed value against your engine documentation and test data before saving.</span>
+    </div>
+  </details>
+
+  <div id="cfg-form"><p style="color:var(--dim);font-size:.85rem">Loading config…</p></div>
+
+  <!-- ── Save-recap modal ─────────────────────────────────── -->
+  <div class="save-recap-backdrop" id="save-recap-modal" style="display:none" onclick="if(event.target===this)_cancelSaveRecap()">
+    <div class="save-recap-card">
+      <div class="save-recap-header">
+        <span>Review Changes</span>
+        <button onclick="_cancelSaveRecap()" title="Close">✕</button>
+      </div>
+      <div class="save-recap-subtitle" id="save-recap-subtitle"></div>
+      <div class="save-recap-body" id="save-recap-body"></div>
+      <div class="save-recap-footer">
+        <button onclick="_cancelSaveRecap()">Cancel</button>
+        <button class="primary" id="save-recap-confirm-btn" onclick="_doSave()">Save to device</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="save-bar">
+    <span id="save-change-count" class="save-change-count" aria-live="polite">No unsaved changes</span>
+    <span class="save-spacer"></span>
+    <button id="btn-discard" onclick="reloadConfigPage()" disabled>Discard</button>
+    <button id="btn-save" class="primary" onclick="saveConfig()" disabled>Save to device</button>
+    <a href="/tools.html" style="color:var(--dim)">Full engine file backup / restore</a>
+    <span class="save-msg" id="save-msg"></span>
+  </div>
+</main>
+
+<script src="/app.js?v=20260722b"></script>
+<!-- OT_PAGE_SCRIPTS -->
+</body>
+</html>

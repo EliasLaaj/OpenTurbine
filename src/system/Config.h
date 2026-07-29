@@ -142,8 +142,8 @@ public:
     // Flameout source: 0=auto, 1=flame sensor, 2=N1 below threshold, 3=selected EGT drop.
     static int   flameoutSource;
     static float flameoutN1MinRpm;
-    static float flameoutTotDropC;
-    static float totRiseRateLimitDegPerSec;  // °C/s — 0 = disabled
+    static float flameoutEgtBelowC;          // °C; EGT-source flameout low-temperature threshold
+    static float flameoutEgtFallRateCPerSec; // °C/s magnitude; rapid cooling can independently declare flameout
     static float titLimit;                   // °C TIT hard limit when TIT is the selected EGT source (0 = disabled)
     static float oilTempLimit;              // °C oil temp limit (0 = disabled)
     static float fuelPressMin;             // bar minimum fuel pressure (0 = disabled)
@@ -195,8 +195,11 @@ public:
     static bool     logStandby;          // include periodic flight-log snapshots while idle
 
     // ── Starter assist ────────────────────────────────────────
-    static float starterLowRpmSupportPct;           // starter demand while support is engaged
-    static float starterLowRpmSupportDisengageRpm;  // support disengages above this N1 speed
+    static bool     starterAssistEnabled;
+    static float    starterAssistPwmPct;
+    static float    starterAssistUntilRpm;
+    static uint32_t starterAssistOnMs;
+    static uint32_t starterAssistOffMs;
 
     // ── Starter slew rate & demand ───────────────────────────
     static float starterStartupRampPctPerSec; // starter ramp rate during the startup crank step
@@ -208,6 +211,8 @@ public:
     // ── Oil controller deadband ───────────────────────────────
     static float oilPressureDeadband;    // bar: suppress output change when |error| < this
     static uint32_t oilPumpOvercurrentDelayMs; // continuous overcurrent before shutdown
+    static uint32_t oilPumpUnderflowDelayMs;   // continuous low/no flow before confirmed fault
+    static bool shutdownOnOilUnderflow;        // false = warn only; true = fault shutdown
 
     // ── Standby oil feed (windmill protection) ────────────────
     static int   standbyOilSource;       // 0=N1, 1=N2, 2=either shaft
@@ -267,7 +272,8 @@ public:
     static bool  spoolCutStarterEnOnExit;     // de-assert starter enable relay on spool exit (default true)
 
     // ── Hot start protection ──────────────────────────────────
-    static float hotStartTotThreshold;   // °C; abort startup if selected EGT is above this (0 = disabled)
+    static float preStartEgtLimitC;      // °C; reject START if selected EGT is already above this (0 = disabled)
+    static float startupEgtLimitC;       // °C; hard selected-EGT limit in STARTUP (0 = use normal EGT limit)
 
     // ── Post-stop oil scavenge ────────────────────────────────
     static int   finalStopOilScavengeMs; // extra scavenge-pump runtime after the main oil pump stops (0 = off)
@@ -295,6 +301,7 @@ public:
     static int   abTotRiseWindowMs;    // time window for selected EGT rise
     static int   abAssumeIgnitedMs;    // timed mode: wait this long then assume lit
     static int   abFlameTimeoutMs;     // overall timeout to confirm flame before fault
+    static int   abFlameLossDelayMs;   // running AB flame-loss dwell before AB-only shutdown
     // Running
     static float abLightupPumpPct;      // AB pump demand used by ABPumpOn during light-up
     static float abPumpMinPct;         // AB pump minimum % when running
@@ -313,13 +320,13 @@ public:
     static float n2WarnRpm;              // N2 warning threshold for ClusterSerial
     static float totWarnC;               // selected-EGT warning threshold for cluster (°C); 0 = use primary limit - safe margin
     static float oilWarnBar;             // Oil pressure warning threshold for cluster (bar); 0 = use oilRunningMin
-    static bool  clusterEnabled;         // Enable cluster serial output at runtime
 
     static int   effectiveEgtSource();           // 0=none, 1=TOT, 2=TIT
     static bool  primaryEgtHealthy(const EngineData& ed);
     static float primaryEgtC(const EngineData& ed);
     static float primaryEgtLimitC();
     static const char* primaryEgtLabel();
+    static float effectiveRelightMinRpm();       // never below configured minimum running N1
     static float applyFuelPumpMinimum(float demand01);
 
     // ── RC PWM input calibration ──────────────────────────────
@@ -379,6 +386,9 @@ public:
     static constexpr uint32_t SLOG_OIL_CURRENT  = 1u << 21;
     static constexpr uint32_t SLOG_WET_GLOW     = 1u << 22; // wet-glow fuel output %
     static constexpr uint32_t SLOG_OIL_TEMP     = 1u << 23; // oil/gearbox/coolant temp C
+    static constexpr uint32_t SLOG_TORQUE       = 1u << 24; // torque Nm + calculated shaft power W
+    static constexpr uint32_t SLOG_STARTER      = 1u << 25; // starter demand %
+    static constexpr uint32_t SLOG_THRUST       = 1u << 26; // calibrated thrust N
     static constexpr uint32_t SLOG_DEFAULT = SLOG_N1 | SLOG_TOT | SLOG_OIL;
     static uint32_t sessionLogMask;
     static uint32_t sessionLogIntervalMs;  // session CSV row interval (default 1000 = 1 Hz)
@@ -447,7 +457,7 @@ public:
     static char    loadWarning[192];
 
     // ── Config version ────────────────────────────────────────
-    static constexpr uint8_t CONFIG_VERSION = 7;
+    static constexpr uint8_t CONFIG_VERSION = 9;
 
     // ── API ───────────────────────────────────────────────────
     static void load();
@@ -460,9 +470,9 @@ public:
                                            bool prevFuelPress, bool prevBatt,
                                            bool prevSurge, bool prevHotStart);
     static void requestSave();   // Core 1: mark save needed, zero file I/O
-    static bool flushPendingSave(); // Core 0: perform deferred save; returns true if it ran
+    static bool flushPendingSave(); // Core 0 in STANDBY/FAULT: perform deferred save
     static void requestRuntimeStatsSave(); // Core 1: persist hour meter through NVS
-    static bool flushPendingRuntimeStats(); // Core 0: perform deferred NVS write
+    static bool flushPendingRuntimeStats(); // Core 0 in STANDBY/FAULT: deferred NVS write
     static void loadRuntimeStats(); // merge per-engine NVS hour meter after profile load
     static void clearRuntimeStats(); // factory reset current engine's hour meter
     // Guarded RMW helpers for the persisted counters (called from the Core 1
@@ -484,6 +494,9 @@ public:
     static bool validateJson(const JsonDocument& doc);
     static bool fromJson(const char* json, size_t len);
     static bool fromJson(const JsonDocument& doc);  // PATCH merge variant
+    // Applies a validated settings document, releases its heap before the
+    // unified-file write, and reloads the on-disk values if the write fails.
+    static bool applyJsonAndSaveReleasing(JsonDocument& doc);
     static bool applyJsonRuntimeOnly(const JsonDocument& doc); // no flash write; restore staging only
 
 private:

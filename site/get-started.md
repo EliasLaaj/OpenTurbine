@@ -11,7 +11,7 @@ lede: The normal installation does not require Git, PlatformIO or source-code co
 
 You need:
 
-- A Classic ESP32 board with at least 4 MB flash, or an ESP32-S3 DevKitC-1 N16R8.
+- A Classic ESP32 board with at least 4 MB flash, or an ESP32-S3 DevKitC-1-compatible board with at least 8 MB flash. The universal S3 image runs on 8 MB and 16 MB modules and does not require PSRAM.
 - A Windows computer.
 - A USB **data cable**. A charge-only cable can power the board but cannot install firmware.
 

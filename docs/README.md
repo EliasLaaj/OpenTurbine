@@ -1,8 +1,12 @@
-# Developer and beta documentation
+# OpenTurbine 2.0 developer and validation documentation
 
 The repository root [`README.md`](../README.md) is a concise user gateway. The detailed current user procedure is [`USER_GUIDE.md`](USER_GUIDE.md); public summaries live in the Pages site under `site/`.
 
 This directory contains material for people developing, validating, packaging, or integrating OpenTurbine.
+
+For installations upgrading from a pre-2.0 build, read
+[`V2_MIGRATION.md`](V2_MIGRATION.md) before restoring or reusing an engine
+configuration.
 
 ## Product principles
 
@@ -36,6 +40,7 @@ This directory contains material for people developing, validating, packaging, o
 ## Release engineering
 
 - [`SETUP_TOOL.md`](SETUP_TOOL.md) — building and packaging the Windows setup tool and release assets
+- [`V2_MIGRATION.md`](V2_MIGRATION.md) — intentional compatibility break, clean-install guidance, and v2 commissioning review
 - [`WINDOWS_FLASHER_INSTALL.md`](WINDOWS_FLASHER_INSTALL.md) — legacy focused SmartScreen/download troubleshooting; normal installation lives in [`USER_GUIDE.md`](USER_GUIDE.md)
 - [`../CHANGELOG.md`](../CHANGELOG.md) — version history
 
@@ -64,10 +69,12 @@ This directory contains material for people developing, validating, packaging, o
 Before publishing a release:
 
 1. Confirm the **Release checks** GitHub Actions workflow passes. It runs every browser audit, both firmware/filesystem builds, and the Windows installer tests/build on clean hosted machines.
-2. Locally, `npm ci` followed by `npm run audit:ui` runs every `tools/ui_*.cjs` audit.
-3. Build firmware and LittleFS for `esp32dev` and `esp32s3dev`.
-4. Run `go test ./...` and rebuild the setup tool from `tools/setup_tool/`.
-5. Build the recommended ZIP with complete CP210x and CH340 driver packages.
-6. Test USB installation on a blank board and Wi-Fi update on an installed ECU.
-7. Perform the physical ECU bench campaign required by the changed control paths.
-8. Publish `OpenTurbineSetupTool.exe`, `OpenTurbine_Recommended.zip`, and their SHA-256 files under the exact stable asset names used by the root README.
+2. Locally, run `python tools/run_release_checks.py`. This rebuilds split web sources and compressed assets, validates public content, runs all `tools/ui_*.cjs` audits (including mixed-configuration fuzzing), runs firmware/safety/setup tests, builds both targets and filesystems, and enforces image/linker budgets.
+3. After a visible UI change, run `node tools/capture_public_screenshots.cjs` and visually inspect every updated image in `site/assets/images/`. The fixture is simulated and must remain free of user data.
+4. Build firmware and LittleFS for `esp32dev` and `esp32s3dev`.
+5. Run `go test ./...` and rebuild the setup tool from `tools/setup_tool/`.
+6. Build the recommended ZIP with complete CP210x and CH340 driver packages.
+7. Test USB installation on a blank board and Wi-Fi update on an installed ECU.
+8. Perform the physical ECU bench campaign required by the changed control paths.
+9. Confirm the firmware, package manifest, changelog, release title, and website all identify `2.0.0`.
+10. Publish `OpenTurbineSetupTool.exe`, `OpenTurbine_Recommended.zip`, and their SHA-256 files under the exact stable asset names used by the root README.

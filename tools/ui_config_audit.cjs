@@ -18,6 +18,7 @@ function auditConfigStructure() {
   const root = path.resolve(__dirname, '..');
   const configSource = fs.readFileSync(path.join(root, 'data_src', 'config.html'), 'utf8');
   const sequenceSource = fs.readFileSync(path.join(root, 'data_src', 'sequence.html'), 'utf8');
+  const logSource = fs.readFileSync(path.join(root, 'data_src', 'log.html'), 'utf8');
   const toolsSource = fs.readFileSync(path.join(root, 'data_src', 'tools.html'), 'utf8');
   const configCpp = fs.readFileSync(path.join(root, 'src', 'system', 'Config.cpp'), 'utf8');
   const schema = readConstExpression(configSource, 'const SCHEMA = ', '\n];');
@@ -45,12 +46,14 @@ function auditConfigStructure() {
   for (const key of ['pb_p1s', 'pb_p1h', 'pb_p2s', 'pb_p2h', 'sf_p1t', 'sf_p2t']) {
     assert.equal(fields.find(candidate => candidate.key === key)?.unitType, 'press', `${key} must follow the selected pressure unit`);
   }
-  for (const key of ['sl_p1', 'sl_p2']) {
-    assert.equal(fields.find(candidate => candidate.key === key)?.basic, true, `${key} must be discoverable in Essentials`);
-  }
+  for (const bit of ['p1', 'p2', 'torque', 'starter'])
+    assert.match(logSource, new RegExp(`data-bit="${bit}"`), `${bit.toUpperCase()} logging must be configured on the Log page`);
+  assert.equal(fields.some(field => field.pathText.startsWith('session_log.')), false,
+    'Session logging settings must not be duplicated on Config');
   assert.match(sequenceSource, /rule-mode-standby-/, 'Control rules must expose Standby as an active state');
   assert.doesNotMatch(sequenceSource, /rule-mode-all-|All operating states/, 'Control rules must not hide states behind an all-operating shortcut');
   assert.match(sequenceSource, /Output when switch is ON/, 'Binary rules must use direct ON/OFF output values');
+  assert.match(sequenceSource, />On<\/option><option value="0"/, 'Binary outputs must be presented as On/Off choices');
   assert.match(sequenceSource, /ruleUnit\(sensor\) === '0\/1' \? 0\.5/, 'Binary rules must store a fixed midpoint threshold');
 
   const firmwareToolKeys = [...new Set(
@@ -261,11 +264,41 @@ async function goto(page, route, waitSelector) {
       };
     });
     assert.deepEqual(typeGroups, {
-      mainFuel:[5,6], starter:[4,5,6], oilPump:[4,5,6], fuelFlow:[2,1],
-      abFlame:[0,1], tempInterfaces:true, torqueHx711:true
+      mainFuel:[5,6], starter:[4,5,6,11], oilPump:[4,5,6,11], fuelFlow:[2,1,9],
+      abFlame:[0,1,8,9], tempInterfaces:true, torqueHx711:true
     });
-    results.push('hardware type selectors show the correct servo/PWM/relay, thermocouple, torque, fuel-flow, and AB input fields');
+    results.push('hardware type selectors show compatible native and shared-I2C actuator, temperature, load, flow, and flame fields');
 
+    const i2cRemoval = await page.evaluate(() => {
+      cfg.i2c = {...(cfg.i2c || {}), enabled:true};
+      cfg._i2c_discovery = {bus_active:true, devices:[]};
+      renderI2cDiscovery();
+      const before = (registryRoot().inputs || []).some(c => c.purpose === 'thrust' && Number(c.i2c_address) === 42);
+      const newTotDrivers = registryDriverOptions('input', 1, 'temperature', 'tot');
+      const savedThrustDrivers = registryDriverOptions('input', 10, 'thrust', 'thrust');
+      const action = [...document.querySelectorAll('#i2c-discovery button')]
+        .find(button => /Remove device/.test(button.textContent) &&
+          /NAU7802|0x2A/i.test(button.closest('.hw-item-card')?.textContent || ''));
+      if (action) action.click();
+      const modalListsThrust = /Thrust/.test(document.getElementById('registry-remove-body')?.textContent || '');
+      confirmRegistryRemoveChannel();
+      return {
+        before,
+        action:!!action,
+        modalListsThrust,
+        removed:!(registryRoot().inputs || []).some(c => c.purpose === 'thrust'),
+        cannotChooseMissingTla:!newTotDrivers.includes('TLA2528'),
+        savedMissingNauVisible:savedThrustDrivers.includes('NAU7802') && savedThrustDrivers.includes('Disconnected')
+      };
+    });
+    assert.deepEqual(i2cRemoval, {
+      before:true, action:true, modalListsThrust:true, removed:true,
+      cannotChooseMissingTla:true, savedMissingNauVisible:true
+    });
+    results.push('disconnected I2C hardware cannot be newly selected and can remove all saved channel dependencies in one action');
+
+    await reset(page);
+    await goto(page, 'hardware.html', '#f-profile-id');
     await patchHardware(page, { platform: 'esp32s3' });
     await goto(page, 'hardware.html', '#f-profile-id');
     const s3Pins = await page.evaluate(() => ({
@@ -344,6 +377,12 @@ async function goto(page, route, waitSelector) {
     await page.locator('#cfg-search').fill('');
     assert.ok(await page.locator('.cfg-help').count() > 100,
       'Long engineering help should remain available through progressive disclosure');
+    const incompleteHelp = await page.evaluate(() => Array.from(document.querySelectorAll('.cfg-field')).flatMap(field => {
+      const help = (field.querySelector('.cfg-desc')?.textContent || '').trim();
+      const label = (field.querySelector('.cfg-label')?.textContent || '').trim();
+      return !help || /^(undefined|null|value|setting)$/i.test(help) ? [label] : [];
+    }));
+    assert.deepEqual(incompleteHelp, [], `Every Config field needs meaningful help; incomplete: ${incompleteHelp.join(', ')}`);
     results.push('config workspace groups settings and searches field metadata without losing detailed help');
     const n2RelationshipWarnings = await page.evaluate(() => {
       const setNumber = (key, value) => { const el = document.getElementById('cf-' + key); if (el) el.value = String(value); };
@@ -354,21 +393,27 @@ async function goto(page, route, waitSelector) {
       setNumber('n2_rpm_limit', 30000);
       setCheck('pb_n2e', true); setNumber('pb_n2s', 30000); setNumber('pb_n2h', 32000);
       setNumber('gv_tr', 29000); setNumber('gv_bd', 1500);
+      setNumber('rpm_limit', 50000);
+      setCheck('pb_n1e', true); setNumber('pb_n1s', 50000); setNumber('pb_n1h', 52000);
       setNumber('di_src', 1); setNumber('di_tr', 30000);
       setNumber('cl_n2', 30000);
-      setNumber('rpm_limit', 100000); setNumber('so_src', 0);
+      hwCfg.safety.hot_start = true;
+      setNumber('tot_limit', 650); setNumber('sf_hs', 700); setNumber('sf_st', 0);
+      setNumber('so_src', 0);
       setNumber('so_rl', 500000); setNumber('so_fp', 0); setNumber('so_fb', 0);
       runValidation();
       return Array.from(document.querySelectorAll('.cfg-inline-warn')).map(el => el.textContent);
     });
     const n2WarningDetail = JSON.stringify(n2RelationshipWarnings);
     assert.ok(n2RelationshipWarnings.some(text => /pullback/i.test(text)), n2WarningDetail);
+    assert.ok(n2RelationshipWarnings.some(text => /N1 pullback/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /Governor target/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /Idle target/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /Cluster N2 warning/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /windmilling oil protection can never activate/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /both zero/i.test(text)), n2WarningDetail);
-    results.push('config warns about unsafe N2 relationships and unusable windmilling-oil settings');
+    assert.ok(n2RelationshipWarnings.some(text => /Pre-start EGT maximum/i.test(text)), n2WarningDetail);
+    results.push('config warns about unsafe shaft, hot-start and windmilling-oil relationships');
     await goto(page, 'config.html', '#cf-tot_limit');
     assert.equal(await page.locator('#dev-mode-tools-link').getAttribute('href'), '/tools.html#card-dev-mode');
     assert.equal(await page.locator('#btn-dev-mode').count(), 0,
@@ -377,7 +422,7 @@ async function goto(page, route, waitSelector) {
       assert.equal(await shown(page, selector), true, `${selector} should be available in Essentials for fitted AB hardware`);
     }
     assert.equal(await shown(page, '#ab-run-section'), false,
-      'specialist afterburner running-fuel tuning belongs under All settings');
+      'specialist afterburner running-fuel tuning belongs under Configured system');
     assert.equal(await page.locator('#cf-ab_pcm option[value="2"]').isDisabled(), true,
       'a stale hidden input pin must not enable Dedicated AB Input unless that trigger source is active');
     assert.match(await page.locator('#cf-ab_tt').evaluate(el => el.closest('.cfg-field')?.title || ''), /Hardware.*Afterburner trigger and arm/i);
@@ -448,12 +493,19 @@ async function goto(page, route, waitSelector) {
     assert.match(await page.locator('#ot-dialog-message').textContent(), /Hardware assignments and sequences are not changed/i);
     await page.locator('#ot-dialog-confirm').click();
     await page.locator('#btn-save').click();
+    // The full-system fixture deliberately carries a relight firing value below
+    // Minimum Running N1. A preset may therefore surface the safety warning
+    // before showing the normal change recap.
+    if (await page.locator('#ot-app-dialog.show').isVisible())
+      await page.locator('#ot-dialog-confirm').click();
     await page.waitForSelector('#save-recap-modal', {state:'visible'});
     const presetRecap = await page.locator('#save-recap-body').textContent();
     assert.match(presetRecap, /Engine Protection Limits\s*\/\s*Maximum N1 Speed/i);
     assert.match(presetRecap, /Automatic Idle Control\s*\/\s*Idle Target/i);
+    assert.match(presetRecap, /Engine Protection Limits\s*\/\s*Begin N1 Throttle Reduction/i);
+    assert.match(presetRecap, /Engine Protection Limits\s*\/\s*Full Temperature Reduction/i);
     assert.doesNotMatch(presetRecap, /live:/i);
-    assert.match(await page.locator('#save-recap-subtitle').textContent(), /6 fields/i);
+    assert.match(await page.locator('#save-recap-subtitle').textContent(), /12 fields/i);
     await page.locator('#save-recap-confirm-btn').click();
     await page.waitForFunction(() => /Saved/i.test(document.querySelector('#save-msg')?.textContent || ''));
     const afterPresetConfig = await (await page.request.get(`${base}/api/config`)).json();
@@ -517,7 +569,7 @@ async function goto(page, route, waitSelector) {
     await patchData(page, { has_fuel_flow: true, fuel_flow_type: 0, throttle_input_type: 'servo', throttle_input_us: 1500, idle_input_type: 'servo', idle_input_us: 1300 });
     await page.reload();
     await page.waitForSelector('#oil-press-cal-row', { state: 'attached' });
-    await page.waitForFunction(() => /us|µs|Âµs/.test(document.querySelector('#cal-th-raw')?.textContent || ''), null, { timeout: 5000 });
+    await page.waitForFunction(() => /us|µs/.test(document.querySelector('#cal-th-raw')?.textContent || ''), null, { timeout: 5000 });
     assert.equal(await shown(page, '#fuelflow-cal-row'), true);
     assert.equal(await shown(page, '#throttle-cal-row'), true);
     assert.equal(await shown(page, '#idle-cal-row'), true);
@@ -528,6 +580,7 @@ async function goto(page, route, waitSelector) {
     await reset(page);
     await goto(page, 'log.html', '#tab-session');
     await page.locator('#tab-session').click();
+    await page.locator('#session-save-btn:not([disabled])').waitFor();
     assert.equal(await disabled(page, 'input[data-bit="n2"]'), false);
     assert.equal(await disabled(page, 'input[data-bit="ab"]'), false);
     assert.equal(await disabled(page, 'input[data-bit="prop"]'), false);

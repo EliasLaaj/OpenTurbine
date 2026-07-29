@@ -1,4 +1,4 @@
-# OpenTurbine Beta Readiness Plan
+# OpenTurbine 2.0 release and beta-readiness plan
 
 This checklist is the working plan for making the firmware and web UI coherent
 enough for external beta testers. It focuses on user experience, supported
@@ -35,6 +35,9 @@ hardware combinations, dependency gates, and release-facing documentation.
 - Glow plug with and without current sensing.
 - Thermocouple choices: MAX6675, MAX31855, MAX31856.
 - Oil temperature choices: NTC, DS18B20, thermocouple.
+- Shared-I²C choices: TCA9554 digital I/O, TLA2528 analog input, NAU7802 torque/thrust.
+- Development-board, official-PCB-profile, and custom-PCB-profile installation paths.
+- Separate main/scavenge oil-flow monitors and electric drain valve.
 - AB trigger choices: manual, throttle threshold, switch, dedicated ADC/RC input.
 - AB pump command choices: fixed, follows main throttle, dedicated AB input.
 - Cluster serial TX-only and two-way RX.
@@ -70,7 +73,7 @@ hardware combinations, dependency gates, and release-facing documentation.
 - Hardware save: changed fields are highlighted, conflicts are named, save
   recap is clear, reboot behavior is clear.
 - Config save: units convert correctly, validation errors are actionable, and
-  Normal/Advanced mode is understandable.
+  Essentials/Configured/Explore/Changed views are understandable.
 - Unified import/export: full engine file restore rejects crossed hardware and
   settings sections.
 - Factory reset: restores one complete factory engine file and makes the user
@@ -109,6 +112,8 @@ hardware combinations, dependency gates, and release-facing documentation.
 - UI beta release audit.
 - UI pre-hardware UX audit.
 - UI cross-platform GPIO audit.
+- UI PCB-profile audit.
+- Deterministic mixed native/SPI/I²C configuration fuzz audit.
 - `pio run -e esp32dev`.
 - `pio run -e esp32s3dev`.
 - `pio run -e esp32dev -t buildfs`.
@@ -123,4 +128,24 @@ hardware combinations, dependency gates, and release-facing documentation.
 4. Fix confirmed product bugs first; update audit scripts when they expose stale
    assumptions.
 5. Update README and docs after behavior is stable.
-6. Run the verification set and record any remaining beta risks.
+6. Run `python tools/run_release_checks.py` and record any remaining physical
+   hardware risks that software tests cannot close.
+
+## 2.0.0 Release-Candidate Result — 2026-07-29
+
+- `python tools/run_release_checks.py` passed all nine browser/UI audit
+  programs, 85 safety source checks, 16 representative turbine matrices,
+  I²C/load-cell audits, setup-package Python tests, setup-tool Go tests, both
+  firmware builds, both LittleFS builds, and both linker/image budgets.
+- Normal orientation (ESP32-S3 ECU, Classic ESP32 OTBench) passed the final
+  ten-profile web/HIL run 10/10, physical safety fault injection 10/10, and
+  session logging 2/2. Each campaign restored the saved engine file.
+- Reversed orientation (Classic ESP32 ECU, ESP32-S3 OTBench) passed reachable
+  pin functions 11/11, digital thermocouple/load-cell behavior 9/9, and
+  overspeed/physical-STOP fuel isolation 2/2.
+- Rejected Hardware JSON was confirmed to leave the active hardware profile
+  byte-for-byte unchanged and keep the ECU in STANDBY.
+- Remaining qualification boundaries are explicit: this bench does not contain
+  a turbine, fuel system, ignition energy, loaded starter, oil circuit, or
+  calibrated production sensors. It cannot replace guarded staged commissioning
+  and an independent physical emergency-stop/fuel-isolation path.

@@ -23,7 +23,24 @@ PUBLIC_ROUTES = [
     "troubleshooting/index.html", "safety/index.html", "faq/index.html", "developers/index.html",
     "about/index.html", "404.html",
 ]
-MARKDOWN_SOURCES = [ROOT / "README.md", ROOT / "docs/README.md", ROOT / "docs/USER_GUIDE.md"]
+MARKDOWN_SOURCES = [
+    ROOT / "README.md",
+    ROOT / "docs/README.md",
+    ROOT / "docs/USER_GUIDE.md",
+    ROOT / "docs/V2_MIGRATION.md",
+    ROOT / "docs/SETUP_TOOL.md",
+    ROOT / "docs/OTC_CLUSTER_PROTOCOL.md",
+    ROOT / "docs/BETA_USER_GUIDE.md",
+    ROOT / "docs/WINDOWS_FLASHER_INSTALL.md",
+    ROOT / "examples/README.md",
+    ROOT / "examples/cluster/README.md",
+    ROOT / "pcb_profiles/README.md",
+]
+CURRENT_GUIDANCE_SOURCES = [
+    *MARKDOWN_SOURCES,
+    ROOT / "hardware_profile.h",
+    ROOT / "examples/OTCClusterClient.h",
+]
 REQUIRED_IMAGES = [
     "hero-dashboard.png", "hardware-page.png", "config-page.png", "calibration-page.png",
     "sequence-page.png", "control-rules-page.png", "tools-page.png",
@@ -214,6 +231,23 @@ def main() -> int:
     parser.add_argument("--built", type=Path)
     args = parser.parse_args()
     errors: list[str] = []
+    version_header = (ROOT / "src/system/version.h").read_text(encoding="utf-8")
+    version_match = re.search(r'#define\s+OT_VERSION\s+"([^"]+)"', version_header)
+    if not version_match:
+        fail(errors, "firmware version is missing from src/system/version.h")
+        firmware_version = ""
+    else:
+        firmware_version = version_match.group(1)
+    project_data = (SITE / "_data/project.yml").read_text(encoding="utf-8")
+    site_version_match = re.search(r'(?m)^version:\s*["\']?([^"\'\s]+)', project_data)
+    if not site_version_match or site_version_match.group(1) != firmware_version:
+        fail(errors, "site project version does not match the firmware version")
+    if firmware_version:
+        display_version = firmware_version.rsplit(".", 1)[0]
+        if f"OpenTurbine {display_version}" not in (ROOT / "README.md").read_text(encoding="utf-8"):
+            fail(errors, "root README does not identify the current firmware version")
+        if f"## [{firmware_version}]" not in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"):
+            fail(errors, "changelog has no entry for the current firmware version")
     for name in PUBLIC_PAGES:
         path = SITE / name
         if not path.is_file():
@@ -241,6 +275,16 @@ def main() -> int:
     for banned in ("google-analytics", "googletagmanager", "plausible.io", "matomo.js", "facebook pixel", "hotjar"):
         if banned in public_text.lower():
             fail(errors, f"public content contains tracking reference: {banned}")
+    current_guidance = public_text + "\n" + "\n".join(
+        path.read_text(encoding="utf-8") for path in CURRENT_GUIDANCE_SOURCES
+    )
+    for obsolete in (
+        "Config > Cluster > Enable",
+        "first public release has not been published",
+        "N16R8",
+    ):
+        if obsolete in current_guidance:
+            fail(errors, f"current guidance contains obsolete v1-era instruction: {obsolete}")
     for image in REQUIRED_IMAGES:
         if not (SITE / "assets/images" / image).is_file():
             fail(errors, f"required public image is missing: {image}")

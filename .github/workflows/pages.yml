@@ -7,6 +7,9 @@ on:
       - site/**
       - docs/**
       - README.md
+      - data_src/config.html
+      - data_src/pages/config-schema.js
+      - tools/generate_site_config_reference.cjs
       - tools/validate_public_content.py
       - .github/workflows/pages.yml
   pull_request:
@@ -14,6 +17,9 @@ on:
       - site/**
       - docs/**
       - README.md
+      - data_src/config.html
+      - data_src/pages/config-schema.js
+      - tools/generate_site_config_reference.cjs
       - tools/validate_public_content.py
       - .github/workflows/pages.yml
   workflow_dispatch:
@@ -31,8 +37,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
       - uses: actions/configure-pages@v5
+      - name: Generate Config field reference
+        run: |
+          node tools/generate_site_config_reference.cjs
+          git diff --exit-code -- site/_includes/generated-config-fields.html
       - name: Validate public content
         run: python3 tools/validate_public_content.py
       - name: Build with Jekyll

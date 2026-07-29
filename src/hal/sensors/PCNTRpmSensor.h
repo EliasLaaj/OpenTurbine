@@ -49,8 +49,8 @@ public:
         esp_err_t err = pcnt_new_unit(&unitCfg, &_unit);
         if (err != ESP_OK) return _fail("allocation", err);
 
-        // Glitch filter: ignore pulses shorter than 1000 ns (1 µs)
-        pcnt_glitch_filter_config_t flt = { .max_glitch_ns = 1000 };
+        // Glitch filter: ignore pulses shorter than 5000 ns (5 us).
+        pcnt_glitch_filter_config_t flt = { .max_glitch_ns = 5000 };
         err = pcnt_unit_set_glitch_filter(_unit, &flt);
         if (err != ESP_OK) return _fail("glitch filter", err);
 
@@ -146,7 +146,7 @@ public:
     // Configurable health thresholds — set from applyConfig() via Hardware.h
     float jumpThreshold  = 0.40f;  // fraction of rpmLimit per second → JUMP fault
     int   zeroStuckLimit = 5;      // ticks at UPDATE_INTERVAL_MS before ZERO_STUCK fault
-    float rpmLimit       = 60000.0f; // engine RPM limit — used to scale jumpThreshold
+    float rpmLimit       = 120000.0f; // sensor plausibility ceiling (normally 2x hard shutdown)
 
 private:
     static constexpr int           H_LIM              = 30000;
@@ -206,7 +206,9 @@ private:
         // free power turbine) and never triggers on sensor noise. This replaces
         // a fixed 2000 RPM, which left a detection gap for any shaft that idles
         // below 2000 RPM — a dead sensor dropping it to zero was never flagged.
-        const float runningRpm = fmaxf(rpmLimit * 0.03f, 200.0f);
+        // rpmLimit is the 2x-hard-limit sensor plausibility ceiling. Health
+        // tuning remains referenced to the real hard limit (half that value).
+        const float runningRpm = fmaxf(rpmLimit * 0.015f, 200.0f);
         // Preserve the historical zero-stuck delay in milliseconds even as
         // the adaptive RPM sample window changes with pulse rate.
         int requiredZeros = zeroStuckLimit > 0
@@ -220,10 +222,10 @@ private:
         // deliberately NOT flagged unhealthy, so it can never suppress the
         // raw-reading overspeed trip.
 
-        // Implausible jump: max allowed RPM/s = jumpThreshold × rpmLimit.
-        // e.g. jumpThreshold=0.40, rpmLimit=100000 → 40000 RPM/s max rate.
+        // Implausible jump remains scaled from the actual hard shutdown,
+        // which is half the automatic sensor plausibility ceiling.
         if (_prevRpm > 500.0f && rpm > 0) {
-            float maxDeltaRpm = jumpThreshold * rpmLimit * (dt / 1000.0f);
+            float maxDeltaRpm = jumpThreshold * (rpmLimit * 0.5f) * (dt / 1000.0f);
             // A short adaptive window has a coarser one-pulse RPM quantum.
             // Permit two counts of unavoidable window-edge quantization so a
             // steady pulse train cannot alternate into a false JUMP fault.

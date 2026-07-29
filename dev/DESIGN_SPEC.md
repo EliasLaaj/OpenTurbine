@@ -1,11 +1,11 @@
 # OpenTurbine (OT) — Architecture & Design Specification
 
-Version: 1.5
+Version: 2.0
 License: MIT
 
 ---
 
-> **Status:** architecture notes. The current firmware stores complete
+> **Status:** OpenTurbine 2.0 architecture notes. The current firmware stores complete
 > per-engine hardware and settings in `ecu_config.json`, edited through the web
 > UI. Keep this file aligned with `README.md`, `hardware_profile.h`, and the
 > web UI text.
@@ -35,7 +35,7 @@ OpenTurbine/
 ├── platformio.ini
 ├── hardware_profile.h          ← compile-time factory defaults / profile identity
 ├── partitions.csv              ← 4 MB OTA layout (esp32dev)
-├── partitions_16mb.csv         ← 16 MB OTA layout (esp32s3dev)
+├── partitions_8mb.csv          ← universal 8 MB OTA layout (esp32s3dev; safe on 16 MB)
 ├── README.md
 ├── CHANGELOG.md
 ├── LICENSE
@@ -125,6 +125,23 @@ OpenTurbine/
 `hardware_profile.h` supplies the compile-time default topology used to generate
 `ecu_config.json` on first boot and factory reset; after that the saved engine
 file is the source of truth and normal setup is done on the web Hardware page.
+
+The saved `ChannelRegistry` is the canonical installed-device inventory. One
+allocation-free `I2CDeviceManager` owns the shared Wire bus, performs startup
+discovery plus incremental runtime verification, and services TCA9554,
+TLA2528, and NAU7802 channels without blocking the control loop. Discovery is
+not configuration: only a responding device may receive a new assignment.
+Unchanged missing assignments may remain saved for diagnosis/removal, but are
+unhealthy at runtime. Loss of an engine-affecting TCA9554 output blocks START
+or faults an operating engine because software cannot guarantee the state of a
+disconnected output latch.
+
+Development-board hardware JSON also owns one canonical shared SPI bus
+(`spi.enabled`, `sck_pin`, `miso_pin`, `mosi_pin`). SPI device channels persist
+their unique chip-select and device options; common pins are normalized from
+the bus before runtime adapters are built. PCB profiles override both shared
+I2C and SPI pins at boot. Adding an I2C/SPI-backed channel while its bus is
+disabled is rejected by the UI and hardware validation.
 
 The **shipped default** is a deliberately minimal simple turbojet — throttle and
 idle inputs, throttle/fuel-pump ESC, oil pump, one igniter, START/STOP buttons,
@@ -216,7 +233,6 @@ sequence) — it is illustrative, not the default.
 
 // ── Controllers ───────────────────────────────────────────────
 #define OT_HAS_OIL_LOOP           // P-controller: OIL_PRESS → OIL_PUMP
-#define OT_HAS_THROTTLE_SLEW      // Rate-limiter on throttle output
 #define OT_HAS_DYNAMIC_IDLE       // Closed-loop idle RPM hold
 
 // ── Safety sources ────────────────────────────────────────────
@@ -468,13 +484,17 @@ All gains and thresholds come from ecu_config.json.
 
 ### ThrottleSlew
 Rate-limits changes to throttle output. Separate up/down ramp rates from config.
-Safety pullback: reduces output if N1 > RPM_LIMIT*0.95 or TOT approaching limit.
+Optional N1, N2, selected EGT, P1, P2, and torque pullbacks share configured
+soft/full thresholds, strength, and minimum-fuel floor. Simple mode reacts to
+current samples. Predictive mode projects only rising rates from each source's
+sample sequence and timestamp. At the full threshold, strength 1.0 reaches the
+configured floor; the most restrictive active ceiling wins.
 
 ### DynamicIdle (optional)
-Reads RPM source (N1 or N2, declared in hardware_profile.h).
-Adjusts idle floor to hold TGT_RPM. Asymmetric ramp rates (up slower than down).
-Deadband prevents micro-corrections. Disengages above DYNAMIC_IDLE_RPM_LIMIT.
-All parameters from ecu_config.json.
+Reads one selected N1, N2, P1, or P2 source. N1/N2 are the normal supported
+approach; pressure control is explicitly experimental. Adjusts the idle floor
+with asymmetric rates, bounded integral/learned trim, source-specific deadband,
+and a disengagement limit. Feedback loss clears controller and rate state.
 
 ---
 
@@ -529,7 +549,8 @@ All parameters from ecu_config.json.
       "flame_required_count": 3,
       "temp_confirm_target": 200,
       "temp_confirm_timeout": 10000,
-      "hot_start_tot_threshold": 0,
+      "pre_start_egt_limit_c": 150,
+      "startup_egt_limit_c": 0,
       "rpm_target": 32000,
       "rpm_timeout_ms": 12000,
       "safety_hold_ms": 1000,
@@ -567,8 +588,8 @@ All parameters from ecu_config.json.
     "egt_source": 0,
     "flameout_source": 0,
     "flameout_n1_min_rpm": 0,
-    "flameout_tot_drop_c": 80,
-    "tot_rise_rate_limit_deg_s": 0,
+    "flameout_egt_below_c": 300,
+    "flameout_egt_fall_rate_c_s": 50,
     "tit_limit_c": 0,
     "oil_temp_limit_c": 120,
     "fuel_press_min_bar": 0,
@@ -579,9 +600,9 @@ All parameters from ecu_config.json.
     "enabled": false,
     "confirm_source": 0,
     "min_rpm": 30000,
-    "confirm_rpm": 0,
+    "confirm_rpm": 35000,
     "tot_rise_c": 30,
-    "relight_timeout_ms": 10000
+    "relight_timeout_ms": 2000
   },
   "standby_oil": {
     "source": 0,
@@ -655,8 +676,13 @@ All parameters from ecu_config.json.
 
 ## 11. Flight Recorder
 
-Persistent ring buffer stored in LittleFS (`/logs/events.json`).
-Written by ECU loop only. Web server reads for display/download.
+The ECU loop and configuration paths format events into a bounded static RAM
+ring. Core 0 drains that ring to the persistent LittleFS log
+(`/logs/events.json`) only in STANDBY/FAULT. If an active run fills the RAM
+ring, the oldest pending event is overwritten so the newest shutdown/fault
+context is retained; the loss counter and a later `EVENTS_DROPPED` marker make
+the truncation explicit. The web server reads the closed persistent log for
+display/download.
 
 ### Event types logged
 - `BOOT` — boot count, profile ID
@@ -685,14 +711,18 @@ Full log downloadable as JSON from web UI. Individual run summaries shown in log
 
 ### Threading model
 ```
-Core 1 (Arduino loop, priority HIGH):
+Core 1 (Arduino loop, priority 1):
   sensors → EngineData → controllers → sequencer → safety → actuators → watchdog
   CommandQueue::drain() at top of each loop tick
+  Session and event evidence is appended to bounded RAM queues
 
-Core 0 (FreeRTOS WiFi task, managed by ESP-IDF):
+Core 0:
+  OpenTurbine web task, priority 8
+  AsyncTCP network callbacks, priority 10, explicitly pinned here
   AsyncWebServer handles HTTP requests
   WebSocket responds to browser pull frames; Dashboard and Calibration pull near 3 Hz
   CommandQueue::push() when commands received from UI
+  LittleFS/NVS queues are persisted only while the ECU is in STANDBY/FAULT
 ```
 
 `EngineData` values are `volatile` — Core 0 reads are safe without mutex.
@@ -720,7 +750,7 @@ GET   /api/log       → full flight recorder log (JSON)
 GET   /api/log/csv   → log as CSV download
 GET    /api/log/raw   → raw flight recorder log file (STANDBY-only, standby logging off)
 GET   /api/session/list → list of available per-run session CSVs
-GET   /api/session/log → current or selected per-run session CSV
+GET   /api/session/log → latest or selected completed per-run session CSV
 DELETE /api/session/all → delete all per-run session CSVs
 POST  /api/command   → queue a command (FuelPrime, IGNtest, etc.)
 POST  /api/start     → queue START command
@@ -783,7 +813,7 @@ For each configured analog input:
 - All wizards show exactly what to do, no BT command typing
 
 **Config (`/config`)**
-- Settings fields grouped by section with Normal / Advanced views
+- Settings grouped by purpose with Essentials, Configured system, Explore all features, and Changed views
 - Fields show current value, units, validation warnings, and hardware dependency state
 - Config locked during active engine modes unless Dev Mode is active
 - Save to device button with change recap
@@ -1202,4 +1232,4 @@ The actuator object never reads `EngineData` directly.
 
 ---
 
-*End of specification — OpenTurbine v1.5*
+*End of specification — OpenTurbine v2.0*

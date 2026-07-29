@@ -153,6 +153,8 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(inputAddChoices['TOT / EGT']?.description || '', /MAX31855.*default/i);
     assert.match(inputAddChoices['TIT']?.description || '', /MAX31855.*default/i);
     assert.match(inputAddChoices['AB flame']?.description || '', /afterburner.*flame/i);
+    assert.equal(inputAddChoices['Main oil-pump flow'], undefined, 'main oil flow belongs inside the oil-pump card');
+    assert.equal(inputAddChoices['Scavenge-pump flow'], undefined, 'scavenge flow belongs inside the scavenge-pump card');
     await page.locator('#registry-add-modal button[onclick="closeRegistryAddDialog()"]' ).click();
 
     await page.locator('button[onclick="addRegistryChannel(\'output\')"]').click();
@@ -173,7 +175,15 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(outputAddChoices['Afterburner fuel pump']?.description || '', /afterburner manifold/i);
     assert.match(outputAddChoices['Afterburner fuel shutoff valve']?.description || '', /admits fuel|normally closed/i);
     await page.locator('#registry-add-modal button[onclick="closeRegistryAddDialog()"]' ).click();
-    results.push('add-device catalog blocks duplicate single-instance hardware and explains why');
+    assert.equal(await page.locator('#registry-inputs .registry-card[data-registry-id="oil_flow"]').count(), 0);
+    const oilPumpCard = page.locator('#registry-outputs .registry-card[data-registry-id="oil_pump"]');
+    await oilPumpCard.locator('button', {hasText:'Edit'}).click();
+    assert.match((await oilPumpCard.textContent()).trim(), /Flow sensing & monitoring.*Main oil-pump flow sensor.*Pulses \/ litre.*Minimum flow.*Oil System/is);
+    assert.match((await oilPumpCard.textContent()).trim(), /Current sensing.*Calibration page/is);
+    assert.equal(await oilPumpCard.locator('a[href="/config.html#cf-oil_mm"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/config.html#cf-so_rl"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/sequence.html#tab-startup"]').count(), 1);
+    results.push('add-device catalog blocks duplicates while pump-owned flow and current sensors stay in their actuator cards');
 
     const flameUsers = await page.evaluate(() => ({
       main: registryCurrentUsers('input', 'flame_main'),
@@ -287,7 +297,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       cluster_serial: { enabled: false, tx_pin: -1, rx_pin: -1 },
       mavlink: { enabled: false, tx_pin: -1 },
       buzzer: { enabled: false, pin: -1 },
-      controllers: { oil_loop:false, throttle_slew:false, dynamic_idle:false, governor:false },
+      controllers: { oil_loop:false, dynamic_idle:false, governor:false },
       safety: { overspeed:false, overtemp:false, low_oil:false, oil_zero:false, flameout:false, hot_start:false, oil_temp_high:false, fuel_press_low:false, batt_low:false, surge:false },
       di_channels: [
         { pin: -1, role: 'none' },
@@ -300,7 +310,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await goto(page, 'hardware.html', '#f-profile-desc');
     await page.waitForFunction(() => /Loaded|Converted/i.test(document.querySelector('#save-msg')?.textContent || ''));
     assert.match(await text(page, '#save-msg'), /Loaded|Converted/i);
-    assert.match(await text(page, '#hardware-controllers-summary'), /2 available to enable/i);
+    assert.match(await text(page, '#hardware-controllers-summary'), /Fuel response.*Automatic with Main Fuel.*1 more available to enable/is);
     assert.match(await text(page, '#hardware-safety-summary'), /5 available to enable/i);
     const profileDescription = page.locator('#f-profile-desc');
     const originalDescription = await profileDescription.inputValue();
@@ -317,7 +327,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await page.locator('button', { hasText: '+ Add input' }).click();
     await page.getByRole('button', { name: /N2 speed/i }).click();
     const draftedN2 = page.locator('#registry-inputs .registry-card').last();
-    assert.match(await page.locator('#hardware-controllers-summary').textContent(), /2 available to enable/i);
+    assert.match(await page.locator('#hardware-controllers-summary').textContent(), /Fuel response.*1 more available to enable/is);
     const gpio32Option = draftedN2.locator('select').nth(2).locator('option[value="32"]');
     assert.equal(await gpio32Option.isDisabled(), false);
     assert.doesNotMatch(await gpio32Option.textContent(), /AB flame/i);
@@ -327,7 +337,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       return /GPIO 35/.test(card?.textContent || '') && /Ready/.test(card?.textContent || '');
     });
     assert.match(await draftedN2.textContent(), /N2 Speed.*GPIO 35.*Ready/is);
-    assert.match(await page.locator('#hardware-controllers-summary').textContent(), /3 available to enable/i);
+    assert.match(await page.locator('#hardware-controllers-summary').textContent(), /Fuel response.*2 more available to enable/is);
     assert.equal(await page.locator('#btn-save').isDisabled(), false);
     await page.locator('button', { hasText: '+ Add output' }).click();
     await page.getByRole('button', { name: /AB igniter/i }).click();
@@ -385,13 +395,47 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     const mainFuelFaultFallback = mainFuelCard.locator('input[onchange*="force_safe_on_fault"]');
     await mainFuelFaultFallback.check();
     assert.equal(await mainFuelCard.evaluate(el => el.classList.contains('field-changed')), true);
+    const faultFallbackChanges = await page.evaluate(() => _buildChanges());
+    assert.match(JSON.stringify(faultFallbackChanges), /Main Fuel Pump.*Force safe state on fault.*Disabled.*Enabled/is);
+    const saveDialogs = [];
+    const captureSaveDialog = async dialog => {
+      saveDialogs.push(dialog.message());
+      await dialog.dismiss();
+    };
+    page.on('dialog', captureSaveDialog);
     await page.locator('#btn-save').click();
-    await page.waitForSelector('#save-recap-modal', { state: 'visible' });
+    await page.waitForTimeout(250);
+    const hiddenSaveState = await page.evaluate(() => ({
+      message: document.getElementById('save-msg')?.textContent || '',
+      buttonDisabled: !!document.getElementById('btn-save')?.disabled,
+      appDialog: document.getElementById('ot-dialog-message')?.textContent || '',
+      appDialogVisible: document.getElementById('ot-app-dialog')?.classList.contains('show') || false
+    }));
+    assert.equal(await page.locator('#save-recap-modal').isVisible(), true,
+      `save recap stayed hidden; state: ${JSON.stringify(hiddenSaveState)}; preflight dialog: ${saveDialogs.join(' | ') || 'none'}`);
+    page.off('dialog', captureSaveDialog);
     assert.match(await text(page, '#save-recap-body'), /Main Fuel Pump.*Force safe state on fault.*Disabled.*Enabled/is);
     await page.locator('#save-recap-modal button', { hasText: 'Cancel' }).click();
     await page.reload();
     await page.waitForSelector('#registry-outputs .registry-card');
-    results.push('outputs hide internal IDs, put device behavior first, and default fault overrides off');
+    const normalizedReaddRecap = await page.evaluate(() => {
+      const outputs = cfg.channel_registry.outputs;
+      const index = outputs.findIndex(channel => channel.purpose === 'main_fuel');
+      const old = outputs[index];
+      outputs[index] = {
+        id: old.id, name: old.name, purpose:'main_fuel', role:'fuel',
+        driver:old.driver, pin:-1, min:old.min, max:old.max,
+        invert:false, safe_demand:0, force_safe_on_fault:false
+      };
+      return _registryDiffRows('output').map(row => row.label);
+    });
+    assert.ok(normalizedReaddRecap.length <= 4, 're-adding a device should recap only meaningful active fields');
+    assert.doesNotMatch(normalizedReaddRecap.join(' '), /pulse|analog|voltage divider|torque|hx711|temp/i,
+      're-added output recap must omit irrelevant sensor/interface defaults');
+    assert.match(await page.evaluate(() => friendlyHardwareSaveError({detail:'channel registry contents'})), /device card.*invalid|incomplete/i);
+    await page.reload();
+    await page.waitForSelector('#registry-outputs .registry-card');
+    results.push('outputs hide internal IDs, normalize re-added-device recaps, and explain rejected device data');
 
     const stopCard = page.locator('#builtin-inputs .hw-item-card[data-workflow-key="stop"]');
     await stopCard.locator('button', { hasText: 'Edit' }).click();
@@ -474,6 +518,10 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await page.locator('#btn-view-expert').click();
     await page.locator('#cf-rpm_limit').fill('96000');
     await page.locator('#btn-save').click();
+    // The full-system fixture intentionally includes a relight threshold below
+    // Minimum Running N1, so acknowledge that safety warning before the recap.
+    if (await page.locator('#ot-app-dialog.show').isVisible())
+      await page.locator('#ot-dialog-confirm').click();
     await page.waitForSelector('#save-recap-modal', { state: 'visible' });
     assert.match(await text(page, '#save-recap-subtitle'), /updated on the device/i);
     assert.doesNotMatch(await text(page, '#save-recap-subtitle'), /reboot/i);
@@ -510,20 +558,101 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.deepEqual(unavailableState, { overspeed:false, overtemp:false, lowOil:false, oilLoop:false, dynamicIdle:false });
     await page.locator('#btn-edit-safety').click();
     await page.locator('#btn-edit-controllers').click();
+    await page.evaluate(() => {
+      cfg.i2c = {...(cfg.i2c || {}), enabled:false};
+      cfg.spi = {...(cfg.spi || {}), enabled:false};
+      document.getElementById('en-i2c').checked = false;
+      document.getElementById('en-spi').checked = false;
+      applyActuatorVisibility();
+    });
+    assert.equal(await page.locator('#hardware-buses-panel').isVisible(), true,
+      'shared bus setup must remain visible after workflow views re-render');
+    assert.equal(await page.locator('#hardware-buses-summary').isVisible(), true);
+    assert.match(await text(page, '#hardware-buses-summary'), /I2C bus.*Disabled.*SPI bus.*Disabled/is);
+    assert.equal(await page.locator('#hardware-i2c-card').isVisible(), false,
+      'bus pin details should stay collapsed until the user chooses Edit buses');
+    assert.equal(await page.locator('#hardware-spi-card').isVisible(), false,
+      'bus pin details should stay collapsed until the user chooses Edit buses');
+    await page.locator('#btn-edit-buses').click();
+    assert.equal(await page.locator('#hardware-i2c-card').isVisible(), true,
+      'Edit buses must expose disabled I2C setup');
+    assert.equal(await page.locator('#hardware-spi-card').isVisible(), true,
+      'Edit buses must expose disabled SPI setup');
+    assert.doesNotMatch(await text(page, '#hardware-i2c-card'), /TCA9554 interrupt GPIO/i,
+      'TCA9554-specific interrupt wiring does not belong in general I2C bus settings');
+    await page.evaluate(() => {
+      const inputs = registryRoot().inputs;
+      inputs.push({
+        id:'audit_tca_input', name:'Audit TCA input', role:'digital_switch',
+        purpose:'digital_switch', driver:8, i2c_address:32, device_channel:0,
+        pin:-1, min:0, max:1, active_high:true, pullup:false, pulldown:false,
+        invert:false
+      });
+      _registryEditOpen.add(registryEditKey('input', inputs.length - 1));
+      renderRegistryInventory();
+    });
+    const tcaInputCard = page.locator('#registry-inputs .registry-card').filter({hasText:'Audit TCA input'});
+    assert.match((await tcaInputCard.textContent()).trim(), /Shared TCA9554 interrupt GPIO.*first installed TCA9554 input/is,
+      'the optional shared INT line should appear on the installed TCA9554 input card');
+    assert.equal(await page.evaluate(() => {
+      cfg.i2c.interrupt_pin = 10;
+      const index = registryRoot().inputs.findIndex(row => row.id === 'audit_tca_input');
+      updateRegistryChannel('input', index, 'driver', 0);
+      return cfg.i2c.interrupt_pin;
+    }), -1, 'the hidden shared interrupt pin must clear when the last TCA9554 input is changed');
+    await page.evaluate(() => {
+      registryRoot().inputs = registryRoot().inputs.filter(row => row.id !== 'audit_tca_input');
+      _registryEditOpen.clear();
+      renderRegistryInventory();
+    });
+    await page.locator('#supported-bus-devices summary').click();
+    const supportedBusText = await text(page, '#supported-bus-devices');
+    assert.match(supportedBusText, /TCA9554.*TLA2528.*NAU7802/is);
+    assert.match(supportedBusText, /MAX6675.*MAX31855.*MAX31856/is);
+    assert.match(supportedBusText, /DS18B20.*OneWire/is);
     assert.ok(await page.locator('#hardware-safety-summary input:disabled').count() >= 3);
     assert.ok(await page.locator('#hardware-controllers-summary input:disabled').count() >= 2);
-    results.push('safety/controller dependencies visibly ghost when required hardware is absent');
+    assert.match(await text(page, '#btn-edit-safety'), /Done editing/i);
+    assert.match(await text(page, '#btn-edit-controllers'), /Done editing/i);
+    assert.match(await text(page, '#hardware-safety-summary'), /Not available yet:/i);
+    assert.match(await text(page, '#hardware-controllers-summary'), /N2 commands fuel|Prop Pitch output makes pitch primary/i);
+    const setupGuide = await text(page, '#shaft-control-setup-guide');
+    assert.match(setupGuide, /N2-controlled idle.*Main Fuel.*N2 Speed.*Automatic idle control/is);
+    assert.match(setupGuide, /Turboprop.*Prop Pitch.*pitch primary.*fuel.*fallback/is);
+    assert.match(setupGuide, /Generator or turboshaft.*commands main fuel/is);
+    assert.equal(await page.locator('#shaft-control-setup-guide a[href="/config.html#idle-control-cfg-section"]').count(), 1);
+    assert.equal(await page.locator('#shaft-control-setup-guide a[href="/config.html#governor-cfg-section"]').count(), 2);
+    assert.match(await text(page, '#protection-setup-guide'), /Combustion and startup.*Auxiliary protection/is);
+    assert.equal(await page.locator('#hardware-safety-summary a[href="/config.html#cf-sf_bv"]').count(), 1);
+    assert.match(await text(page, '#hardware-requirements-summary'), /Add a Main Fuel Pump.*Required before the ECU can run an engine/is);
+    results.push('compact bus, controller and safety editors expose setup details and prerequisites on demand');
+
+    await goto(page, 'config.html#cf-sf_bv', '#cf-sf_bv');
+    assert.equal(await page.locator('.cfg-field.deep-link-target[data-key="sf_bv"]').count(), 1);
+    assert.equal(await page.locator('#cf-sf_bv').isVisible(), true);
+    assert.equal(await page.locator('#cf-sf_bv').evaluate(el => el.closest('.config-group')?.open), true);
+    results.push('cross-page links reveal, open, and highlight their exact Config field');
+
+    await reset(page);
+    await goto(page, 'calibration.html#p2-cal-row', '#p2-cal-row');
+    assert.equal(await page.locator('#p2-cal-row.deep-link-target').count(), 1);
+    assert.equal(await page.locator('#p2-cal-row').isVisible(), true);
+    await goto(page, 'sequence.html#tab-afterburner', '#tab-afterburner');
+    assert.equal(await page.locator('#tab-afterburner.deep-link-target').count(), 1);
+    assert.equal(await page.locator('#tab-afterburner').isVisible(), true);
+    assert.equal(await page.locator('#tab-btn-afterburner').evaluate(el => el.classList.contains('active')), true);
+    results.push('Calibration and Sequence links reveal and highlight the matching fitted-device workflow');
 
     await reset(page);
     await patchHardware(page, { cluster_serial: { enabled: false, tx_pin: -1, rx_pin: -1 } });
-    await goto(page, 'config.html', '#cf-cl_en');
-    assert.equal(await page.locator('#cf-cl_en').isDisabled(), true);
-    assert.match(await page.locator('#cf-cl_en').evaluate(el => el.closest('.cfg-field')?.title || ''), /not fitted|Hardware/i);
+    await goto(page, 'config.html', '#cf-cl_n1');
+    assert.equal(await page.locator('#cf-cl_en').count(), 0, 'cluster transmission must have only the Hardware enable');
+    assert.equal(await page.locator('#cf-cl_n1').isVisible(), false, 'cluster thresholds stay hidden when cluster hardware is disabled');
     await goto(page, 'hardware.html', '#hardware-comms-summary');
     await page.locator('#btn-edit-comms').click();
     assert.match(await text(page, '#hardware-comms-summary'), /Cluster TX GPIO|Cluster RX GPIO|TX-only/i);
     assert.ok(await page.locator('#hardware-comms-summary option[value="-1"]').count() >= 1);
-    results.push('cluster TX-only/two-way setup exposes the right gates and telemetry-only RX option');
+    results.push('cluster Hardware enable is authoritative and TX-only/two-way setup exposes the telemetry RX option');
 
     await reset(page);
     const timerOnlyHardware = (await (await page.request.get(`${base}/api/hardware`)).json());
@@ -535,6 +664,9 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       }
     });
     await goto(page, 'sequence.html', '#add-startup-sel');
+    assert.equal(await page.locator('#tab-startup > .add-row > button').count(), 2);
+    assert.doesNotMatch(await text(page, '#tab-startup > .add-row'), /compressor pressure|pressure rise|stable pressure/i);
+    assert.match(await text(page, '#tab-startup > .add-row'), /Add block.*Custom block/is);
     assert.equal(await page.locator('#add-startup-sel option[value="OilPrime"]').count(), 1);
     for (const block of ['StarterSpin','Spool','SafetyHold','WaitTOTCool']) {
       assert.equal(await page.locator(`#add-startup-sel option[value="${block}"]`).count(), 0, `${block} should not be offered without the feedback it requires`);

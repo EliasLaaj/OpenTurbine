@@ -63,7 +63,8 @@ static void _writeLed(int pin, bool on) {
                     (uint8_t)(((c & 0xFFu) * S3_RGB_LEVEL) / 255u));
         return;
     }
-    digitalWrite(pin, on ? HIGH : LOW);
+    const bool level = HardwareConfig::statusLedActiveH ? on : !on;
+    digitalWrite(pin, level ? HIGH : LOW);
 }
 
 static uint32_t _colorForMode(SysMode mode) {
@@ -212,7 +213,10 @@ inline void off() {
     int pin = _statusPin();
     if (pin >= 0) {
         if (_isRgbStatusLed(pin)) rgbLedWrite((uint8_t)pin, 0, 0, 0);
-        else { pinMode(pin, OUTPUT); digitalWrite(pin, LOW); }
+        else {
+            pinMode(pin, OUTPUT);
+            digitalWrite(pin, HardwareConfig::statusLedActiveH ? LOW : HIGH);
+        }
     }
 #if defined(OT_PLATFORM_ESP32S3)
     // Only clear the onboard addressable LED when the configured status LED

@@ -1,0 +1,96 @@
+{
+  "timestamp": "2026-07-29T15:24:10",
+  "firmware": "2.0.0",
+  "firmware_after": "2.0.0",
+  "firmware_match": true,
+  "rows": [
+    {
+      "name": "MAIN_OIL_REMAINS_ON_DURING_FINAL_STOP_DELAY",
+      "ok": true,
+      "detail": {
+        "running_oil_pct": 100,
+        "before": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 1.0,
+          "level": 1
+        },
+        "during_delay": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 1.0,
+          "level": 1
+        },
+        "scavenge": {
+          "level": 0
+        }
+      }
+    },
+    {
+      "name": "SCAVENGE_OVERRUN_STARTS_ONLY_AFTER_MAIN_OIL_STOPS",
+      "ok": true,
+      "detail": {
+        "telemetry": {
+          "mode": "SHUTDOWN",
+          "oil_pct": 0,
+          "oil_scavenge_on": true,
+          "seq_wait_reason": "Scavenge: 1029 ms remaining"
+        },
+        "main_output": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 0.0,
+          "level": 0
+        },
+        "scavenge_output": {
+          "level": 1
+        }
+      }
+    },
+    {
+      "name": "SHUTDOWN_WAITS_FOR_SCAVENGE_THEN_STANDBY_FORCES_OFF",
+      "ok": true,
+      "detail": {
+        "elapsed_s": 2.047,
+        "mode": "STANDBY",
+        "main_output": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 0.0,
+          "level": 0
+        },
+        "scavenge_output": {
+          "level": 0
+        }
+      }
+    },
+    {
+      "name": "COOLDOWN_OVERRIDE_CANCELS_UNMATCHED_SCAVENGE_SEQUENCE",
+      "ok": true,
+      "detail": {
+        "active": {
+          "telemetry": "TimedDelay",
+          "output": {
+            "level": 1
+          }
+        },
+        "skipped": {
+          "event": "Cooldown skipped by operator",
+          "output": {
+            "level": 0
+          }
+        },
+        "after_old_deadline": {
+          "mode": "STANDBY",
+          "block": "",
+          "scavenge": false,
+          "output": {
+            "level": 0
+          }
+        }
+      }
+    }
+  ],
+  "restored": true,
+  "error": null
+}

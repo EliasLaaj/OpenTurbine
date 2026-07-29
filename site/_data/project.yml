@@ -1,4 +1,5 @@
 name: OpenTurbine
+version: "2.0.0"
 status: Experimental
 default_ip: 192.168.4.1
 windows_asset_name: OpenTurbineSetupTool.exe
@@ -9,4 +10,4 @@ pages_url: https://elia179.github.io/OpenTurbine/
 social_preview: /assets/images/social-preview.png
 supported_targets:
   - Classic ESP32 with at least 4 MB flash
-  - ESP32-S3 DevKitC-1 N16R8 target
+  - ESP32-S3 DevKitC-1-compatible board with at least 8 MB flash

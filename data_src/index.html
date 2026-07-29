@@ -5,16 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine</title>
-<link rel="stylesheet" href="/style.css?v=20260722a">
+<link rel="stylesheet" href="/style.css?v=20260723a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <script src="/theme.js?v=20260722g"></script>
-<script src="/ui_dialog.js?v=20260722g"></script>
+<script src="/ui_dialog.js?v=20260723a"></script>
 </head>
 <body data-page="dashboard">
 <nav>
   <a href="/" class="active" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune limits, controllers, logging, telemetry, and hardware-dependent settings.">Config</a>
+  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
@@ -93,15 +93,15 @@
     <button onclick="this.parentElement.style.display='none';window._cfgLoadWarnDismissed=true" style="background:none;border:none;color:var(--yellow);font-size:1.2rem;cursor:pointer;margin-left:.8rem;line-height:1">&times;</button>
   </div>
 
-  <!-- Profile ID mismatch banner -->
+  <!-- Engine-name mismatch banner -->
   <div id="profile-mismatch-banner" style="display:none">
-    <strong>⚠ Profile ID Mismatch — Engine operations locked</strong>
+    <strong>⚠ Engine Name Mismatch — Engine operations locked</strong>
     The hardware and settings sections in <code>ecu_config.json</code> identify different engines.
     The ECU will not run with mixed engine data.<br>
     <b>How to fix:</b> restore one complete engine file from <a href="/tools.html" style="color:var(--yellow)">Tools</a>,
-    or save the Hardware page to synchronize its Profile ID into settings.
+    or save the Hardware page to synchronize its engine name into settings.
   </div>
-  <div id="profile-error" class="error-banner" style="display:none">Profile ID mismatch — engine operations locked</div>
+  <div id="profile-error" class="error-banner" style="display:none">Engine name mismatch — engine operations locked</div>
 
   <!-- Fault/abort description card -->
   <div id="fault-card" style="display:none">
@@ -263,6 +263,11 @@
       <div class="value small" id="torque">—</div>
       <div class="peak-val">power: <span id="turbo-power">—</span> kW</div>
       <canvas class="sparkline" id="torque-sparkline"></canvas>
+    </div>
+    <div class="card" id="thrust-card" style="display:none">
+      <div class="label">Thrust N <span id="thrust-health" class="dot"></span></div>
+      <div class="value small" id="thrust">—</div>
+      <div class="sub">Calibrated load-cell thrust</div>
     </div>
     <div class="card" id="glow-current-card" style="display:none">
       <div class="label">Glow Plug Current <span id="glow-hot-dot" class="dot" title="Hot"></span></div>
@@ -433,6 +438,7 @@
       <div class="gauge-bar-wrap"><div class="gauge-bar" id="oil-output-gauge-bar" style="width:0%"></div></div>
       <div class="oil-sub" id="oil-startup-setting-note" style="display:none">startup OilPumpOn setting: <span id="oil-startup-setting">—</span>% (Sequence)</div>
       <div class="oil-sub" id="oil-failsafe-note" style="display:none;color:var(--red)">⚠ sensor failsafe</div>
+      <div class="oil-sub" id="oil-flow-warning-note" style="display:none;color:var(--warning)">⚠ monitored oil flow low or unavailable</div>
       <div class="oil-sub" id="standby-oil-feed-note" style="display:none;color:var(--accent)" title="Windmilling protection is running the oil pump because a shaft is still turning while the engine is in standby.">● windmilling oil protection active</div>
     </div>
     <div class="card small" style="grid-column:1/-1" title="Most recent state transition or ECU event. Full event history with timestamps is available on the Log page.">

@@ -60,6 +60,11 @@ public:
 
         switch (flameMode) {
             case 0: // dedicated sensor
+                if (!ed.abFlameHealthy) {
+                    clearWaitReason();
+                    Serial.println("[AB] FlameConfirm fault: flame sensor unavailable");
+                    return BlockResult::Fault;
+                }
                 if (ed.abFlameOn) {
                     clearWaitReason();
                     Serial.println("[AB] FlameConfirm: sensor detected flame");
@@ -89,6 +94,12 @@ public:
                     Serial.printf("[AB] FlameConfirm: EGT rose %.1f C - confirmed\n",
                                   (double)rise);
                     return BlockResult::Complete;
+                }
+                if (totRiseWindowMs > 0 &&
+                    elapsed >= (unsigned long)totRiseWindowMs) {
+                    clearWaitReason();
+                    Serial.println("[AB] FlameConfirm fault: EGT did not rise within configured window");
+                    return BlockResult::Fault;
                 }
                 // Baseline is fixed at onEnter snapshot — no per-tick ratcheting.
                 // Per-sample updates caused noise sensitivity: a momentary dip in

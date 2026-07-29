@@ -28,22 +28,21 @@ namespace FeedbackRequirements {
                (HardwareConfig::hasN1Rpm && Config::minRpm > 0.0f) ||
                (HardwareConfig::safetyFlameout && effectiveFlameoutSource() == 2) ||
                (HardwareConfig::hasDynamicIdle && HardwareConfig::hasN1Rpm && Config::idleSource == 0) ||
-               (HardwareConfig::hasThrottleSlew && HardwareConfig::hasN1Rpm && Config::pullbackN1Enabled &&
+               (HardwareConfig::hasThrottle && HardwareConfig::hasN1Rpm && Config::pullbackN1Enabled &&
                 Config::pullbackN1HardRpm > Config::pullbackN1SoftRpm);
     }
 
     inline bool n2ForProtectionOrControl() {
         return HardwareConfig::safetyN2Overspeed || HardwareConfig::hasGovernor ||
                (HardwareConfig::hasDynamicIdle && HardwareConfig::hasN2Rpm && Config::idleSource == 1) ||
-               (HardwareConfig::hasThrottleSlew && HardwareConfig::hasN2Rpm && Config::pullbackN2Enabled &&
+               (HardwareConfig::hasThrottle && HardwareConfig::hasN2Rpm && Config::pullbackN2Enabled &&
                 Config::pullbackN2HardRpm > Config::pullbackN2SoftRpm);
     }
 
     inline bool egtForProtectionOrControl() {
         return HardwareConfig::safetyOvertemp || HardwareConfig::safetyHotStart ||
-               (Config::effectiveEgtSource() != 0 && Config::totRiseRateLimitDegPerSec > 0.0f) ||
                (HardwareConfig::safetyFlameout && effectiveFlameoutSource() == 3) ||
-               (HardwareConfig::hasThrottleSlew && Config::effectiveEgtSource() != 0 && Config::pullbackEgtEnabled &&
+               (HardwareConfig::hasThrottle && Config::effectiveEgtSource() != 0 && Config::pullbackEgtEnabled &&
                 Config::pullbackEgtHardC > Config::pullbackEgtSoftC);
     }
 

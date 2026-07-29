@@ -36,14 +36,14 @@ public:
     float         flameoutShutdownMs   = 3000.0f;
     int           flameoutSource       = 0;
     float         flameoutN1MinRpm     = 0.0f;
-    float         flameoutTotDropC     = 80.0f;
+    float         flameoutEgtBelowC    = 300.0f;
+    float         flameoutEgtFallRateCPerSec = 50.0f;
     unsigned long checkIntervalMs      = 100;
     uint32_t      lowOilConfirmMs      = 500;
     uint32_t      oilZeroConfirmMs     = 100;
     uint32_t      oilTempConfirmMs     = 1000;
     uint32_t      fuelPressConfirmMs   = 500;
     uint32_t      battLowConfirmMs     = 1000;
-    float         totRiseRateLimit     = 0.0f;   // °C/s — 0 = disabled
 
     void begin(ShutdownFn enterShutdown, ShutdownFn enterFault) {
         _enterShutdown    = enterShutdown;
@@ -52,15 +52,11 @@ public:
         _flameoutMs       = 0;
         _relightStartMs   = 0;
         _relightStartEgt  = 0.0f;
-        _runningEgtRef    = -1.0f;
-        _refDemand        = 0.0f;
         _startupSpooled   = false;
         _overspeedPending = false;
         _n2OverspeedPending = false;
         _resetDwellConfirmations();
-        _resetEgtRing();
         _resetSurge();
-        _refWindowOpen    = false;
     }
 
     // Allow external callers (e.g. DI fault handler) to inject a fault code
@@ -74,7 +70,7 @@ public:
 
         // Mode bookkeeping runs BEFORE the skip/bench gate: mode transitions
         // must reset detection state even while checks are skipped, otherwise
-        // a stale _flameoutMs/_runningEgtRef from a previous run survives into
+        // a stale _flameoutMs from a previous run survives into
         // the next one and the first un-skipped tick trips instantly (stale
         // absolute timestamp = zero confirmation time).
         SysMode m = ed.mode;
@@ -83,13 +79,9 @@ public:
             _flameoutMs     = 0;
             _relightStartMs = 0;
             _relightStartEgt = 0.0f;
-            _runningEgtRef   = -1.0f;
-            _refDemand       = 0.0f;
-            _resetEgtRing();
-            _refWindowOpen   = false;
             _overspeedPending = false;
             _n2OverspeedPending = false;
-            _resetDwellConfirmations();
+            _resetDwellConfirmations(m != SysMode::SHUTDOWN);
             _lastCheckMs = 0;
             _lastEgt        = -1.0f;
             _lastEgtMs      = 0;
@@ -104,6 +96,9 @@ public:
             }
             ed.surgeDetected = false;
             _resetSurge();
+            // Scavenge pumps commonly run only during shutdown. Keep their
+            // flow warning useful there, but never request a second shutdown.
+            if (m == SysMode::SHUTDOWN) _checkOilFlow(ed, m);
             return;
         }
 
@@ -115,16 +110,6 @@ public:
             _resetDwellConfirmations();
             _lastCheckMs = 0;
             _resetSurge();
-            return;
-        }
-
-        // Hot start aborts if the configured engine temperature source is still too high.
-        const bool hotStartEgt = Config::primaryEgtHealthy(ed)
-                              && Config::primaryEgtC(ed) > Config::hotStartTotThreshold;
-        if (HardwareConfig::safetyHotStart && m == SysMode::STARTUP
-            && Config::hotStartTotThreshold > 0 && hotStartEgt)
-        {
-            _trigger("HOT_START");
             return;
         }
 
@@ -169,17 +154,20 @@ public:
         // Independent hard trips for pressure and shaft torque. These do not
         // depend on the gradual fuel limiter being enabled.
         const unsigned long hardNow = millis();
-        if (_confirmed(HardwareConfig::hasP1 && Config::p1TripLimit > 0.0f &&
+        if (_confirmed(HardwareConfig::hasP1 && ed.p1Healthy &&
+                       Config::p1TripLimit > 0.0f &&
                        ed.p1 > Config::p1TripLimit, hardNow,
                        Config::pressureTorqueTripConfirmMs, _p1TripSinceMs)) {
             _trigger("P1_HIGH"); return;
         }
-        if (_confirmed(HardwareConfig::hasP2 && Config::p2TripLimit > 0.0f &&
+        if (_confirmed(HardwareConfig::hasP2 && ed.p2Healthy &&
+                       Config::p2TripLimit > 0.0f &&
                        ed.p2 > Config::p2TripLimit, hardNow,
                        Config::pressureTorqueTripConfirmMs, _p2TripSinceMs)) {
             _trigger("P2_HIGH"); return;
         }
-        if (_confirmed(HardwareConfig::hasTorque && Config::torqueTripLimit > 0.0f &&
+        if (_confirmed(HardwareConfig::hasTorque && ed.torqueHealthy &&
+                       Config::torqueTripLimit > 0.0f &&
                        ed.torque > Config::torqueTripLimit, hardNow,
                        Config::pressureTorqueTripConfirmMs, _torqueTripSinceMs)) {
             _trigger("TORQUE_HIGH"); return;
@@ -216,6 +204,7 @@ public:
                 return;
             }
         }
+        if (_checkOilFlow(ed, m)) return;
 
         unsigned long now = fastNow;
         if (now - _lastCheckMs < checkIntervalMs) return;
@@ -225,7 +214,6 @@ public:
         // flameout timer so a stale absolute timestamp can't trip with zero
         // fresh confirmation time.
         if (_lastCheckMs != 0 && now - _lastCheckMs > CHECK_GAP_RESET_MS) {
-            _resetEgtRing();
             _lastEgt         = -1.0f;
             _lastEgtMs       = 0;
             ed.totRiseRate   = 0.0f;
@@ -250,10 +238,6 @@ public:
             _lastEgtMs = egtMs;
             _lastEgtSampleSeq = egtSeq;
 
-            if (totRiseRateLimit > 0.0f && ed.totRiseRate > totRiseRateLimit) {
-                _trigger("TOT_RISE");
-                return;
-            }
         } else if (!Config::primaryEgtHealthy(ed)) {
             _lastEgt   = -1.0f;
             _lastEgtMs = 0;
@@ -261,8 +245,12 @@ public:
             ed.totRiseRate = 0.0f;
         }
 
-        const float primaryLimit = Config::primaryEgtLimitC();
-        if (HardwareConfig::safetyOvertemp && primaryLimit > 0.0f &&
+        float primaryLimit = Config::primaryEgtLimitC();
+        if (m == SysMode::STARTUP && Config::startupEgtLimitC > 0.0f)
+            primaryLimit = Config::startupEgtLimitC;
+        if (HardwareConfig::safetyOvertemp
+            && (m == SysMode::STARTUP || m == SysMode::RUNNING)
+            && primaryLimit > 0.0f &&
             Config::primaryEgtHealthy(ed) && Config::primaryEgtC(ed) > primaryLimit) {
             _trigger("OVERTEMP");
             return;
@@ -288,7 +276,6 @@ public:
             return;
         }
 
-        _updateFlameoutReference(ed);
         if (HardwareConfig::safetyFlameout &&
             m == SysMode::RUNNING && ed.flameMonitorActive && _flameoutSourceUsable()) {
             if (_flameoutLost(ed)) {
@@ -297,7 +284,7 @@ public:
                 if ((now - _flameoutMs) > (unsigned long)flameoutShutdownMs) {
                     // Relight path: enabled, armed, N1 still viable
                     bool n1Ok = HardwareConfig::hasN1Rpm && ed.n1Healthy
-                             && ed.n1Rpm >= Config::relightMinRpm;
+                             && ed.n1Rpm >= Config::effectiveRelightMinRpm();
                     bool relightIgnitionOk = false;
                     switch (Config::relightIgnitionTarget) {
                         case 1: relightIgnitionOk = HardwareConfig::hasIgniter2; break;
@@ -313,7 +300,7 @@ public:
                         } else {
                             // Relight window: check N1 still viable and timeout not expired
                             bool stillViable = HardwareConfig::hasN1Rpm && ed.n1Healthy
-                                            && ed.n1Rpm >= Config::relightMinRpm;
+                                            && ed.n1Rpm >= Config::effectiveRelightMinRpm();
                             bool timedOut    = Config::relightTimeoutMs > 0
                                            && (now - _relightStartMs) > (unsigned long)Config::relightTimeoutMs;
                             if (!stillViable || timedOut) {
@@ -435,24 +422,17 @@ public:
                 _trigger("UNDERSPEED");
                 return;
             }
-            if (!ed.n1Healthy && FeedbackRequirements::n1ForProtectionOrControl() && !ed.limpMode) {
-                // Brief ZERO_GLITCH samples are tolerated at the sensor
-                // (RpmHealth::isTrustworthy — PCNTRpmSensor holds the last real
-                // reading), so this only latches on persistent sensor faults.
-                ed.limpMode = true;  // RPM sensor lost → limp
-                strncpy(ed.lastEvent, "LIMP: N1 feedback lost", sizeof(ed.lastEvent) - 1);
-            }
-        }
-        if (HardwareConfig::hasN2Rpm && FeedbackRequirements::n2ForProtectionOrControl() &&
-            m == SysMode::RUNNING && !ed.n2Healthy && !ed.limpMode) {
-            ed.limpMode = true;
-            strncpy(ed.lastEvent, "LIMP: N2 feedback lost", sizeof(ed.lastEvent) - 1);
         }
 
         // If an enabled hard protection loses its sensor, do not silently
-        // remove that protection. Enter the configurable degraded-mode cap;
-        // the operator can still explicitly override limp when appropriate.
+        // remove that protection. ThrottleSlew freezes fuel increases at once;
+        // confirmation prevents one quantised JUMP sample from latching the
+        // persistent Reduced-Power Mode.
         if (m == SysMode::RUNNING && !ed.limpMode) {
+            const bool n1Blind = HardwareConfig::hasN1Rpm &&
+                FeedbackRequirements::n1ForProtectionOrControl() && !ed.n1Healthy;
+            const bool n2Blind = HardwareConfig::hasN2Rpm &&
+                FeedbackRequirements::n2ForProtectionOrControl() && !ed.n2Healthy;
             bool protectionBlind =
                 (HardwareConfig::safetyOvertemp && Config::effectiveEgtSource() != 0 && !Config::primaryEgtHealthy(ed)) ||
                 ((HardwareConfig::safetyLowOil || HardwareConfig::safetyOilZero) && HardwareConfig::hasOilPress && !ed.oilHealthy) ||
@@ -473,10 +453,18 @@ public:
                     !reg.ownsCoreOutput(c) && ed.registryOutputDemand[i] > 0.001f &&
                     !ed.registryOutputCurrentHealthy[i]) protectionBlind = true;
             }
-            if (protectionBlind) {
+            const bool feedbackBlind = n1Blind || n2Blind || protectionBlind;
+            if (_confirmed(feedbackBlind, millis(), FEEDBACK_LOSS_CONFIRM_MS,
+                           _feedbackBlindSinceMs)) {
                 ed.limpMode = true;
-                strncpy(ed.lastEvent, "LIMP: safety sensor lost", sizeof(ed.lastEvent) - 1);
+                const char* reason = n1Blind ? "LIMP: N1 feedback lost"
+                    : n2Blind ? "LIMP: N2 feedback lost"
+                    : "LIMP: safety sensor lost";
+                strncpy(ed.lastEvent, reason, sizeof(ed.lastEvent) - 1);
+                ed.lastEvent[sizeof(ed.lastEvent) - 1] = '\0';
             }
+        } else if (m != SysMode::RUNNING || ed.limpMode) {
+            _feedbackBlindSinceMs = 0;
         }
         if (HardwareConfig::hasN1Rpm && minRpm > 0.0f && m == SysMode::STARTUP && ed.n1Healthy) {
             // Track once N1 reaches minRpm so we know the engine has spooled through
@@ -495,26 +483,11 @@ private:
     static constexpr uint8_t SURGE_BUF = 10; // ~1 s of N1 samples at 100 ms interval
     // ≥2 (typically 3) fresh 100 ms RPM sensor samples must confirm overspeed.
     static constexpr unsigned long OVERSPEED_CONFIRM_MS = 250;
-    // Flameout EGT-reference follow-down (source 3): the reference may only
-    // follow EGT to a lower operating point when commanded power has dropped
-    // by DEMAND_DROP CUMULATIVELY since the reference was last baselined
-    // (_refDemand) — the physical discriminator between a throttle-back
-    // (EGT settles lower, demand dropped) and a flameout at constant power
-    // (EGT decays, demand unchanged). Cumulative-since-baseline catches
-    // arbitrarily slow ramps (a windowed rate test cannot); DEMAND_DROP
-    // stays above governor dither.
-    static constexpr float         DEMAND_DROP      = 0.10f; // fraction of full-scale demand
-    // EGT stability is judged over honest wall time — |ΔEGT| across a ~2 s
-    // snapshot ring — never per-tick rates: the default MAX6675 updates every
-    // 250 ms while checks run at 100 ms, so consecutive ticks can read the
-    // identical value and any rate test would call moving EGT "settled".
-    // 2.0 °C over ~2 s ≈ 1 °C/s, and is comfortably above the 0.25 °C
-    // quantization of the thermocouple converters.
-    static constexpr uint8_t       EGT_RING_SLOTS     = 4;
-    static constexpr unsigned long EGT_RING_SAMPLE_MS = 500;  // 4 × 500 ms ≈ 2 s baseline
-    static constexpr float         EGT_STABLE_BAND    = 2.0f; // °C over the ring span
+    // Fuel increases are blocked immediately; only the persistent degraded
+    // mode latch is delayed to reject isolated unhealthy samples.
+    static constexpr unsigned long FEEDBACK_LOSS_CONFIRM_MS = 500;
     // A hole in monitoring longer than this (skip-safety toggle, stall)
-    // invalidates EGT history and any in-progress detection timestamps.
+    // invalidates EGT rate history and any in-progress detection timestamps.
     static constexpr unsigned long CHECK_GAP_RESET_MS = 1500;
 
     ShutdownFn    _enterShutdown  = nullptr;
@@ -528,19 +501,14 @@ private:
     float         _lastEgt        = -1.0f;   // for dEGT/dt calculation
     unsigned long _lastEgtMs      = 0;
     uint32_t      _lastEgtSampleSeq = 0;
-    float         _runningEgtRef  = -1.0f;
-    float         _refDemand      = 0.0f;    // throttleDemand captured when the ref was (re)baselined
-    bool          _refWindowOpen  = false;   // follow-down window latched open until EGT re-stabilizes
-    float         _egtRing[EGT_RING_SLOTS] = {}; // rolling ~2 s EGT snapshots for the stability test
-    uint8_t       _egtRingIdx     = 0;
-    uint8_t       _egtRingCount   = 0;
-    unsigned long _egtRingLastMs  = 0;
     bool          _overspeedPending = false; // raw reading above rpmLimit, confirming
     unsigned long _overspeedSinceMs = 0;     // millis() when the overspeed reading began
     bool          _n2OverspeedPending = false;
     unsigned long _n2OverspeedSinceMs = 0;
     unsigned long _oilOvercurrentSinceMs = 0;
     unsigned long _registryOvercurrentSinceMs[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
+    unsigned long _oilUnderflowSinceMs[2] = {};
+    bool          _oilUnderflowWarned[2] = {};
     unsigned long _lowOilSinceMs = 0;
     unsigned long _oilZeroSinceMs = 0;
     unsigned long _oilTempSinceMs = 0;
@@ -549,6 +517,7 @@ private:
     unsigned long _p1TripSinceMs = 0;
     unsigned long _p2TripSinceMs = 0;
     unsigned long _torqueTripSinceMs = 0;
+    unsigned long _feedbackBlindSinceMs = 0;
     bool          _startupSpooled = false;   // true once N1 ≥ minRpm during STARTUP
     float         _n1Buf[SURGE_BUF] = {};   // circular buffer for surge detection
     uint8_t       _n1BufIdx       = 0;
@@ -564,9 +533,69 @@ private:
         return now - sinceMs >= delayMs;
     }
 
-    void _resetDwellConfirmations() {
+    bool _checkOilFlow(EngineData& ed, SysMode mode) {
+        // Optional supervision is attached independently to the main and
+        // scavenge pump outputs. Missing/unhealthy feedback means flow cannot
+        // be trusted. The default remains a warning; shutdown is opt-in and
+        // applies only while starting or running.
+        const auto& reg = HardwareConfig::channelRegistry;
+        const unsigned long now = millis();
+        bool anyUnderflow = false;
+        for (uint8_t i = 0; i < reg.outputCount; ++i) {
+            const auto& c = reg.outputs[i];
+            const int8_t slot = !strcmp(c.purpose, "oil_pump") ? 0
+                                : !strcmp(c.purpose, "scavenge_pump") ? 1 : -1;
+            if (slot < 0) continue;
+            const char* inputPurpose = slot == 0 ? "oil_flow" : "scavenge_flow";
+            bool underflow = false;
+            if (c.installed && c.hasFlowMonitor && c.minimumFlow > 0.0f &&
+                ed.registryOutputDemand[i] > 0.001f) {
+                int8_t inputIndex = -1;
+                for (uint8_t j = 0; j < reg.inputCount; ++j)
+                    if (reg.inputs[j].installed && !strcmp(reg.inputs[j].purpose, inputPurpose)) {
+                        inputIndex = (int8_t)j;
+                        break;
+                    }
+                underflow = inputIndex < 0 ||
+                            !ed.registryInputHealthy[(uint8_t)inputIndex] ||
+                            ed.registryInputValue[(uint8_t)inputIndex] < c.minimumFlow;
+            }
+            anyUnderflow = anyUnderflow || underflow;
+            if (!underflow) {
+                _oilUnderflowSinceMs[(uint8_t)slot] = 0;
+                _oilUnderflowWarned[(uint8_t)slot] = false;
+                continue;
+            }
+            if (_oilUnderflowSinceMs[(uint8_t)slot] == 0) {
+                _oilUnderflowSinceMs[(uint8_t)slot] = now;
+                snprintf(ed.lastEvent, sizeof(ed.lastEvent), "WARNING: %s low/no flow",
+                         c.name[0] ? c.name : c.id);
+            } else if (now - _oilUnderflowSinceMs[(uint8_t)slot] >= Config::oilPumpUnderflowDelayMs) {
+                if (!_oilUnderflowWarned[(uint8_t)slot]) {
+                    snprintf(ed.lastEvent, sizeof(ed.lastEvent), "WARNING: %s flow fault",
+                             c.name[0] ? c.name : c.id);
+                    _oilUnderflowWarned[(uint8_t)slot] = true;
+                }
+                if (Config::shutdownOnOilUnderflow &&
+                    (mode == SysMode::STARTUP || mode == SysMode::RUNNING)) {
+                    ed.oilFlowWarningActive = true;
+                    _trigger("OIL_FLOW_LOW");
+                    return true;
+                }
+            }
+        }
+        ed.oilFlowWarningActive = anyUnderflow;
+        return false;
+    }
+
+    void _resetDwellConfirmations(bool resetOilFlow = true) {
         _oilOvercurrentSinceMs = 0;
         memset(_registryOvercurrentSinceMs, 0, sizeof(_registryOvercurrentSinceMs));
+        if (resetOilFlow) {
+            memset(_oilUnderflowSinceMs, 0, sizeof(_oilUnderflowSinceMs));
+            memset(_oilUnderflowWarned, 0, sizeof(_oilUnderflowWarned));
+            EngineData::instance().oilFlowWarningActive = false;
+        }
         _lowOilSinceMs = 0;
         _oilZeroSinceMs = 0;
         _oilTempSinceMs = 0;
@@ -575,6 +604,7 @@ private:
         _p1TripSinceMs = 0;
         _p2TripSinceMs = 0;
         _torqueTripSinceMs = 0;
+        _feedbackBlindSinceMs = 0;
     }
 
     void _resetSurge() {
@@ -582,12 +612,6 @@ private:
         _n1BufCount = 0;
         _surgeConfirmWindows = 0;
         _lastSurgeN1SampleSeq = 0;
-    }
-
-    void _resetEgtRing() {
-        _egtRingIdx    = 0;
-        _egtRingCount  = 0;
-        _egtRingLastMs = 0;
     }
 
     int _effectiveFlameoutSource() const {
@@ -607,117 +631,6 @@ private:
         }
     }
 
-    void _updateFlameoutReference(const EngineData& ed) {
-        if (_effectiveFlameoutSource() != 3) {
-            _runningEgtRef = -1.0f;
-            return;
-        }
-        // Reference is only meaningful in RUNNING — the startup EGT spike
-        // would otherwise poison it and read normal post-start EGT as a drop.
-        // Resetting the ring here also means it starts filling at RUNNING
-        // entry, so the first stability verdict is ≥ 2 s into the run.
-        if (ed.mode != SysMode::RUNNING) {
-            _runningEgtRef = -1.0f;
-            _refDemand     = 0.0f;
-            _refWindowOpen = false;
-            _resetEgtRing();
-            return;
-        }
-
-        if (!Config::primaryEgtHealthy(ed)) {
-            // Snapshots from before a sensor dropout must not fake stability
-            // once it recovers.
-            _resetEgtRing();
-            return;
-        }
-        float egt = Config::primaryEgtC(ed);
-
-        // Rolling ~2 s snapshot ring; "stable" = the reading moved less than
-        // EGT_STABLE_BAND across the whole span. Two-sided by construction,
-        // immune to duplicate sensor reads and converter quantization.
-        unsigned long now = millis();
-        if (_egtRingLastMs == 0 || now - _egtRingLastMs >= EGT_RING_SAMPLE_MS) {
-            _egtRing[_egtRingIdx] = egt;
-            _egtRingIdx = (uint8_t)((_egtRingIdx + 1) % EGT_RING_SLOTS);
-            if (_egtRingCount < EGT_RING_SLOTS) _egtRingCount++;
-            _egtRingLastMs = now;
-        }
-        // Once full, _egtRingIdx points at the oldest slot (~2 s ago).
-        const bool stable = (_egtRingCount >= EGT_RING_SLOTS)
-                         && fabsf(egt - _egtRing[_egtRingIdx]) < EGT_STABLE_BAND;
-
-        // First seed after RUNNING entry: only from truly settled EGT. The
-        // handoff can arrive mid-spike — on the rising side as easily as the
-        // decaying tail (Spool completes on N1, not EGT) — and seeding or
-        // ratcheting on a transient peak would read the settle to steady
-        // idle EGT as a flameout drop. Until seeded, source 3 is
-        // deliberately blind (_flameoutLost needs _runningEgtRef >= 0);
-        // UNDERSPEED / a flame sensor cover that window when fitted.
-        if (_runningEgtRef < 0.0f) {
-            if (stable) {
-                _runningEgtRef = egt;
-                _refDemand     = ed.throttleDemand;
-            }
-            return;
-        }
-
-        // Follow-down window: opens when commanded power has dropped
-        // DEMAND_DROP below the demand captured at the last baseline —
-        // CUMULATIVE since baseline, so an arbitrarily slow ramp qualifies
-        // once it has travelled 0.10 in total. This is the physical
-        // discriminator: a throttle-back lowers EGT with lowered demand, a
-        // flameout lowers EGT with demand unchanged. The window latches open
-        // until EGT is stable again (a lagged probe settles long after the
-        // demand change, and demand wiggle after a chop must not strand a
-        // high reference against a still-falling probe); it also un-freezes
-        // an in-progress detection — if the operator really pulled power,
-        // the drop is not a flameout. KNOWN, DOCUMENTED LIMITATION: a
-        // flameout during/shortly after an acknowledged throttle reduction
-        // is masked while the window is open (long for heavily lagged
-        // probes). With N1 fitted, UNDERSPEED is the backstop; in an
-        // EGT-only build nothing detects that case — config validation
-        // emits a warning saying exactly that.
-        if (!_refWindowOpen && ed.throttleDemand < _refDemand - DEMAND_DROP) {
-            _refWindowOpen = true;
-        }
-        if (_refWindowOpen) {
-            if (egt < _runningEgtRef) _runningEgtRef = egt;
-            if (stable) {
-                // Re-baseline at the new operating point: close the window
-                // and re-arm detection.
-                _runningEgtRef = egt;
-                _refDemand     = ed.throttleDemand;
-                _refWindowOpen = false;
-            }
-            return;
-        }
-
-        // Ratchet up — but only to a SETTLED higher operating point. An
-        // acceleration overshoot peak is transient (never stable) and must
-        // not be captured: against a peak-ratcheted reference, the settle
-        // back to steady EGT at held demand would read as a flameout drop.
-        // While EGT is above the reference, _flameoutLost is false anyway.
-        if (egt > _runningEgtRef) {
-            if (stable) {
-                _runningEgtRef = egt;
-                _refDemand     = ed.throttleDemand;
-            }
-            return;
-        }
-
-        // Constant commanded power, EGT at or below the reference: stay
-        // frozen so a genuine flameout accumulates the full drop regardless
-        // of probe lag (any real flameout falls far faster than the
-        // stability band of ~1 °C/s until the drop is essentially
-        // complete). Slow thermal/ambient drift is absorbed only while no
-        // detection is in progress — a constant-power detection can never
-        // be re-baselined away.
-        if (stable && _flameoutMs == 0) {
-            _runningEgtRef = egt;
-            _refDemand     = ed.throttleDemand;
-        }
-    }
-
     bool _flameoutLost(const EngineData& ed) const {
         switch (_effectiveFlameoutSource()) {
             case 1:
@@ -726,10 +639,15 @@ private:
                 float threshold = flameoutN1MinRpm > 0.0f ? flameoutN1MinRpm : minRpm;
                 return HardwareConfig::hasN1Rpm && ed.n1Healthy && ed.n1Rpm < threshold;
             }
-            case 3:
-                return Config::primaryEgtHealthy(ed) && _runningEgtRef >= 0.0f
-                    && flameoutTotDropC > 0.0f
-                    && Config::primaryEgtC(ed) <= (_runningEgtRef - flameoutTotDropC);
+            case 3: {
+                if (!Config::primaryEgtHealthy(ed)) return false;
+                const float egt = Config::primaryEgtC(ed);
+                const bool belowAndFalling = flameoutEgtBelowC > 0.0f
+                    && egt <= flameoutEgtBelowC && ed.totRiseRate < 0.0f;
+                const bool fallingRapidly = flameoutEgtFallRateCPerSec > 0.0f
+                    && ed.totRiseRate <= -flameoutEgtFallRateCPerSec;
+                return belowAndFalling || fallingRapidly;
+            }
             default:
                 return false;
         }
@@ -773,6 +691,9 @@ private:
         else if (strcmp(code, "OIL_PUMP_OVERCURRENT") == 0) desc =
             "Oil pump current remained above its configured limit.\n"
             "What to do: Check the pump, driver, wiring, oil viscosity and current-sensor calibration before restarting.";
+        else if (strcmp(code, "OIL_FLOW_LOW") == 0) desc =
+            "A monitored oil pump did not produce the configured minimum flow for the confirmation time.\n"
+            "What to do: Check oil level, pump operation, filters, lines and flow-meter calibration before restarting.";
         else if (strcmp(code, "FLAMEOUT")   == 0) desc =
             "Flameout: combustion was lost according to the configured flameout source, and relight was not possible.\n"
             "What to do: Check fuel supply, fuel valve, and the selected flameout sensor/source. "
@@ -785,10 +706,6 @@ private:
             "Hot start aborted: exhaust temperature was still too high to start safely.\n"
             "What to do: Wait for the engine to cool further before attempting another start. "
             "Increase the cool-down time if this keeps happening.";
-        else if (strcmp(code, "TOT_RISE")      == 0) desc =
-            "EGT rate-of-rise too fast: temperature is climbing dangerously quickly.\n"
-            "What to do: Check for fuel enrichment issues, throttle calibration, "
-            "and confirm the EGT rise-rate limit in Config is appropriate for your engine.";
         else if (strcmp(code, "TIT_OVERTEMP")  == 0) desc =
             "Turbine inlet temperature (TIT) exceeded the safety limit.\n"
             "What to do: Allow full cool-down. Check combustion system, fuel flow, and "

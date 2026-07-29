@@ -54,7 +54,7 @@
     - ECU TX is required
     - ECU RX is optional; commands are newline ASCII, ACK comes back as binary
     - Baud is configured on the OpenTurbine Hardware page
-    - Hardware page fits the port; Config > Cluster > Enable controls runtime streaming
+    - Fitting Cluster Data on the Hardware page enables runtime streaming
 
   Frame parser:
     - Looks for binary frames beginning with "OT"
@@ -146,6 +146,7 @@ public:
     F_DI2,
     F_DI3,
     F_DI4,
+    F_THRUST_N,
   };
 
   enum SysMode : uint8_t {
@@ -210,6 +211,7 @@ public:
   float p2Bar = 0;
   float battV = 0;
   float torqueNm = 0;
+  float thrustN = 0;
   float powerW = 0;
   float throttlePct = 0;
   float starterPct = 0;
@@ -279,6 +281,7 @@ public:
   bool hasP2 = false;
   bool hasBatt = false;
   bool hasTorque = false;
+  bool hasThrust = false;
   bool hasPower = false;
   bool hasThrottle = false;
   bool hasStarter = false;
@@ -569,6 +572,7 @@ private:
       case F_P2_BAR: hasP2 = true; break;
       case F_BATT_V: hasBatt = true; break;
       case F_TORQUE_NM: hasTorque = true; break;
+      case F_THRUST_N: hasThrust = true; break;
       case F_POWER_W: hasPower = true; break;
       case F_THROTTLE_PCT: hasThrottle = true; break;
       case F_STARTER_PCT: hasStarter = true; break;
@@ -595,6 +599,7 @@ private:
       case F_P2_BAR: p2Bar = v; break;
       case F_BATT_V: battV = v; break;
       case F_TORQUE_NM: torqueNm = v; break;
+      case F_THRUST_N: thrustN = v; break;
       case F_POWER_W: powerW = v; break;
       case F_THROTTLE_PCT: throttlePct = v; break;
       case F_STARTER_PCT: starterPct = v; break;

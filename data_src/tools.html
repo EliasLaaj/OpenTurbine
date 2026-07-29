@@ -4,10 +4,10 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Tools</title>
-<link rel="stylesheet" href="/style.css?v=20260722a">
+<link rel="stylesheet" href="/style.css?v=20260723a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <script src="/theme.js?v=20260722g"></script>
-<script src="/ui_dialog.js?v=20260722g"></script>
+<script src="/ui_dialog.js?v=20260723a"></script>
 <style>
 .test-settings-card{width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .test-settings-head,.test-settings-foot{flex:0 0 auto;padding:1rem}
@@ -21,7 +21,7 @@
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune limits, controllers, logging, telemetry, and hardware-dependent settings.">Config</a>
+  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
@@ -35,7 +35,7 @@
       <p class="page-subtitle">Standby-only tests, diagnostics, backups, software updates and device maintenance.</p>
     </div>
     <div class="page-heading-actions">
-      <button id="btn-test-settings" onclick="openTestSettings()" title="Edit durations and proportional output levels for fitted bench-test hardware.">Test settings</button>
+      <button id="btn-test-settings" onclick="openTestSettings()" title="Edit actuator-test durations, output levels, and the shared safety confirmation preference.">Tool settings</button>
     </div>
   </div>
   <div id="tools-status-row" style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.1rem">
@@ -46,7 +46,7 @@
 
   <div id="test-settings-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:1000;align-items:center;justify-content:center;padding:1rem" onclick="if(event.target===this)closeTestSettings()">
     <div class="test-settings-card">
-      <div class="test-settings-head"><div><b>Bench-test settings</b><div style="font-size:.72rem;color:var(--dim)">Only fitted testable hardware is shown. Settings do not run an actuator.</div></div><button onclick="closeTestSettings()" title="Close">✕</button></div>
+      <div class="test-settings-head"><div><b>Tool settings</b><div style="font-size:.72rem;color:var(--dim)">Settings do not run an actuator. Test durations are saved on the ECU; the confirmation preference is saved in this browser.</div></div><button onclick="closeTestSettings()" title="Close">✕</button></div>
       <div class="test-settings-scroll"><div id="test-settings-body" style="display:grid;grid-template-columns:minmax(0,1fr);gap:.65rem;padding:.8rem 0"></div></div>
       <div class="test-settings-foot"><div style="display:flex;gap:.6rem;justify-content:flex-end"><button onclick="closeTestSettings()">Cancel</button><button class="primary" onclick="saveTestSettings()">Save settings</button></div>
       <div id="test-settings-status" style="font-size:.75rem;color:var(--dim);margin-top:.4rem"></div></div>
@@ -95,6 +95,8 @@ const TOOLS = [
   { id:'IGN_TEST',            name:'Igniter 1 Test',     durationMs:2000, configKey:'tools.ign_test_ms',      desc:'Fires igniter 1 - verify spark visually.', visibleIf: hw => !!hw?.actuators?.igniter?.enabled },
   { id:'IGN2_TEST',           name:'AB Igniter Test',    durationMs:2000, configKey:'tools.ign2_test_ms',     desc:'Fires the afterburner / pilot igniter output — verify spark visually.', visibleIf: hw => !!hw?.actuators?.igniter2?.enabled },
   { id:'START_TEST',          name:'Starter Test',       durationMs:2000, configKey:'tools.start_test_ms',    desc:'Spins starter at configured demand - verify motor turns.', visibleIf: hw => !!hw?.actuators?.starter?.enabled },
+  { id:'PULSED_STARTER_ASSIST_TEST', name:'Pulsed Starter Assist Test', durationMs:500, desc:'Runs one configured assist pulse in STANDBY. Use it to verify starter direction and pulse output before allowing the startup sequence to use the feature.',
+    visibleIf: hw => !!(cfgData?.starter_control?.pulsed_assist_enabled && hw?.actuators?.starter?.enabled && Number(hw?.actuators?.starter?.type ?? 0) !== 2 && hw?.sensors?.n1_rpm?.enabled) },
   { id:'FUEL_SOL_TEST',       name:'Solenoid Click',     durationMs:1000, configKey:'tools.fuel_sol_test_ms', desc:'Brief solenoid pulse - audible click to confirm valve.', visibleIf: hw => !!hw?.actuators?.fuel_sol?.enabled },
   { id:'IDLE_TEST',           name:'Minimum Fuel Output Test', durationMs:3000, configKey:'tools.idle_test_ms', desc:'Moves the fuel/throttle output to the calibrated minimum reliable fuel-pump output so you can verify pump operation.', visibleIf: hw => !!hw?.actuators?.throttle?.enabled },
   // ── Conditionally visible actuator tests (shown only when hardware is fitted) ──
@@ -109,13 +111,11 @@ const TOOLS = [
   { id:'AB_PUMP_TEST',     name:'AB Fuel Pump Test',    durationMs:2000, configKey:'tools.ab_pump_test_ms', desc:'Runs the afterburner fuel pump at the configured demand.', visibleIf: hw => !!hw?.actuators?.ab_pump?.enabled },
   { id:'PROP_PITCH_TEST',  name:'Prop Pitch Test',      durationMs:3000, configKey:'tools.prop_pitch_test_ms', desc:'Moves prop pitch output to configured position.', visibleIf: hw => !!hw?.actuators?.prop_pitch?.enabled },
   // ── Toggle tools ─────────────────────────────────────────────
-  { id:'TOGGLE_DYNAMIC_IDLE', name:'Automatic Idle Speed Control', durationMs:0, modes:['STANDBY','RUNNING'], desc:'Turns automatic idle-speed holding on or off for the next or current run. Available only when enabled in Hardware with fuel output and RPM feedback.', toggleKey:'dynamic_idle_enabled',
+  { id:'TOGGLE_DYNAMIC_IDLE', name:'Automatic Idle Control', durationMs:0, modes:['STANDBY','RUNNING'], desc:'Turns automatic idle holding on or off for the next or current run. N1/N2 shaft speed is the normal proven feedback; P1/P2 pressure feedback is experimental.', toggleKey:'dynamic_idle_enabled',
     visibleIf: hw => !!(hw?.controllers?.dynamic_idle && hw?.actuators?.throttle?.enabled &&
-      (hw?.sensors?.n1_rpm?.enabled || hw?.sensors?.n2_rpm?.enabled)) },
+      (hw?.sensors?.n1_rpm?.enabled || hw?.sensors?.n2_rpm?.enabled || hw?.sensors?.p1?.enabled || hw?.sensors?.p2?.enabled)) },
   { id:'TOGGLE_LIMP_MODE',    name:'Reduced-Power Mode', durationMs:0, modes:['STANDBY','RUNNING'], desc:'Restricts maximum main-fuel output for the next or current run. The ECU also turns this same mode on if feedback required by an enabled safety protection or shaft controller is lost.', toggleKey:'limp_mode',
     visibleIf: hw => !!hw?.actuators?.throttle?.enabled },
-  { id:'STARTER_LOW_RPM_SUPPORT', name:'Low-RPM Starter Support', durationMs:0, modes:['RUNNING'], desc:'Arm optional starter support for this run. The starter engages at the configured output when N1 is low, turns off above the configured disengage speed, and disarms automatically at shutdown. Configure it under Config > Low-RPM Starter Support.', toggleKey:'starter_low_rpm_support_active',
-    visibleIf: hw => !!(hw?.actuators?.starter?.enabled && hw?.actuators?.starter?.low_rpm_support_enabled && hw?.sensors?.n1_rpm?.enabled) },
 ];
 
 let activeId    = null;
@@ -125,6 +125,7 @@ let engineMode  = null;
 let liveData    = {};
 let hwCfg       = {};
 let cfgData     = {};
+const TOOL_CONFIRMATION_SKIP_KEY = 'ot_tool_confirmations_skip_all';
 let toolsTelemetryTimer = null;
 let toolsTelemetryInFlight = false;
 function escHtml(value){
@@ -207,19 +208,25 @@ function syncRegistryOutputTools(){
     .filter(b=>CORE_REGISTRY_BINDING_KEYS.has(String(b?.key||'')))
     .map(b=>String(b?.channel||'')));
   outs.forEach((c,i)=>{
-    if(!c||c.pin==null||Number(c.pin)<0) return;
+    const driver=Number(c?.driver);
+    const hasPhysicalEndpoint=driver===11
+      ? Number(c?.i2c_address)>=0&&Number(c?.device_channel)>=0
+      : c?.pin!=null&&Number(c.pin)>=0;
+    if(!c||!hasPhysicalEndpoint) return;
     if(CORE_REGISTRY_OUTPUT_IDS.has(String(c.id||''))||coreBound.has(String(c.id||''))) return;
-    const relay=Number(c.driver)===4;
+    const relay=driver===4||driver===11;
     const displayName=registryToolDisplayName(c,i);
     TOOLS.push({
       id:'REGISTRY_OUTPUT_TEST_'+i,
       cmd:'REGISTRY_OUTPUT_TEST',
       name:displayName+' Test',
       durationMs:3000,
-      desc:'Bench-test '+displayName+' at '+(relay?'ON':'100%')+' for 3 s.',
+      desc:'Bench-test '+displayName+' at '+(relay?'ON':'50%')+' for 3 s.',
       registryOutput:true,
+      relayOutput:relay,
+      testDemandPct:relay?100:50,
       iParam:i,
-      fParam:1.0,
+      fParam:relay?1.0:0.5,
       visibleIf:()=>true
     });
   });
@@ -227,6 +234,15 @@ function syncRegistryOutputTools(){
 function openTestSettings(){
   if(engineMode!=='STANDBY'&&engineMode!=='FAULT'){alert('Bench-test settings can only be changed in STANDBY or FAULT.');return;}
   const body=document.getElementById('test-settings-body'); let html='';
+  let alwaysConfirm=true;
+  try{alwaysConfirm=localStorage.getItem(TOOL_CONFIRMATION_SKIP_KEY)!=='1';}catch(_){}
+  html+=`<div class="tool-card" style="margin:0">
+    <div class="tool-name">Actuator safety confirmation</div>
+    <label class="tool-desc" style="display:flex;align-items:flex-start;gap:.55rem;margin-top:.45rem;cursor:pointer">
+      <input id="tool-always-confirm" type="checkbox" ${alwaysConfirm?'checked':''} style="margin-top:.15rem">
+      <span>Show one safety confirmation before every actuator test. Turning this off suppresses confirmations for the entire Tools page on this browser, not one tool at a time.</span>
+    </label>
+  </div>`;
   TOOLS.filter(t=>t.durationMs>0&&(!t.visibleIf||t.visibleIf(hwCfg))).forEach(t=>{
     const durationKey=t.configKey?.split('.')[1]; if(!durationKey)return;
     const ms=Number(cfgData?.tools?.[durationKey]??t.durationMs);
@@ -246,6 +262,11 @@ async function saveTestSettings(){
   }
   const r=await fetch('/api/config',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({tools:toolsPatch})});
   const d=await r.json().catch(()=>({})); if(!r.ok||d.ok===false){document.getElementById('test-settings-status').textContent='Save failed: '+(d.error||d.reason||r.status);return;}
+  try{
+    if(document.getElementById('tool-always-confirm')?.checked) localStorage.removeItem(TOOL_CONFIRMATION_SKIP_KEY);
+    else localStorage.setItem(TOOL_CONFIRMATION_SKIP_KEY,'1');
+    Object.keys(localStorage).filter(key=>key.startsWith('ot_tool_confirmation_skip:')).forEach(key=>localStorage.removeItem(key));
+  }catch(_){}
   cfgData.tools={...(cfgData.tools||{}),...toolsPatch};
   TOOLS.forEach(t=>{const k=t.configKey?.split('.')[1];if(k&&toolsPatch[k]!=null)t.durationMs=toolsPatch[k];});
   renderTools(); document.getElementById('test-settings-status').textContent='Saved.'; setTimeout(closeTestSettings,500);
@@ -271,6 +292,9 @@ function renderTools() {
       ${!isToggle ? `<div class="prog-track"><div class="prog-fill" id="prog-${t.id}"></div></div>` : ''}
       <div class="tool-footer">
         <div class="tool-desc">${safeDesc}${t.id === 'TOGGLE_LIMP_MODE' ? ' <span id="limp-cap-inline" style="color:var(--yellow)"></span>' : ''}</div>
+        ${t.registryOutput && !t.relayOutput ? `<label class="tool-time" style="display:flex;align-items:center;gap:.35rem;white-space:nowrap">Test output
+          <input id="demand-${t.id}" type="number" min="0" max="100" step="1" value="${Number(t.testDemandPct??50)}"
+                 style="width:4.5rem;min-height:34px;padding:.25rem .4rem" aria-label="${safeName} test output percentage">%</label>` : ''}
         ${!isToggle ? `<div class="tool-time" id="time-${t.id}">${Number((t.durationMs/1000).toFixed(2))} s</div>` : ''}
         <button id="btn-${t.id}" onclick="runTool('${t.id}')" disabled>
           ${isToggle ? 'Toggle' : 'Run'}
@@ -448,7 +472,9 @@ function renderTools() {
     </div>
     <div class="tool-footer">
       <div class="tool-desc" style="color:var(--dim)">
-        Unlocks Bench Mode for dry sequence and actuator testing.
+        Unlocks Bench Mode for dry sequence runs, live configuration changes,
+        and development-only safety diagnostics. Normal timed actuator checks
+        below remain available in STANDBY with confirmation.
         <b style="color:var(--red)">Never enable during engine operation.</b>
       </div>
       <button id="btn-dev-mode" onclick="toggleDevMode()" class="danger">Enable Dev Mode</button>
@@ -492,22 +518,32 @@ async function runTool(id) {
   const tool = TOOLS.find(t => t.id === id);
   if (!tool) return;
 
-  if (tool.durationMs > 0) {
+  let skipConfirmation = false;
+  try { skipConfirmation = localStorage.getItem(TOOL_CONFIRMATION_SKIP_KEY) === '1'; } catch (_) {}
+  if (tool.durationMs > 0 && !skipConfirmation) {
     const seconds = (tool.durationMs / 1000).toFixed(tool.durationMs % 1000 ? 1 : 0);
     const confirmed = await OTDialog.confirm(
       `${tool.name} will energize its fitted output for ${seconds} s.\n\n${tool.desc}\n\nConfirm the engine is in a safe test state, fuel and ignition risks are controlled, and all moving hardware is clear.`,
-      { title:`Run ${tool.name}?`, confirmText:'Energize output', danger:true }
+      {
+        title:`Run ${tool.name}?`,
+        confirmText:'Energize output',
+        danger:true,
+        checkboxLabel:'Do not ask again for actuator tools on this browser',
+        rememberKey:TOOL_CONFIRMATION_SKIP_KEY
+      }
     );
     if (!confirmed) return;
+    updateToolConfirmationReset();
   }
 
   const payload = { cmd: tool.cmd || id };
   if (tool.iParam !== undefined) payload.iParam = tool.iParam;
-  if (tool.fParam !== undefined) payload.fParam = tool.fParam;
-  // Low-RPM starter support is a stateful arm/disarm command.
-  // iParam carries the DESIRED state (1 = arm, 0 = disarm).
-  if (id === 'STARTER_LOW_RPM_SUPPORT') payload.iParam = liveData?.starter_low_rpm_support_active ? 0 : 1;
-
+  if (tool.registryOutput && !tool.relayOutput) {
+    const input = document.getElementById('demand-' + tool.id);
+    const pct = Math.max(0, Math.min(100, Number(input?.value ?? tool.testDemandPct ?? 50)));
+    tool.testDemandPct = pct;
+    payload.fParam = pct / 100;
+  } else if (tool.fParam !== undefined) payload.fParam = tool.fParam;
   postToolCommand(payload).then(d => {
     if (tool.durationMs === 0) {
       setState(id, 'Toggled', 'done');
@@ -516,6 +552,22 @@ async function runTool(id) {
     }
     startProgress(tool);
   }).catch(e => alert('Tool command failed: ' + (e && e.message ? e.message : e)));
+}
+
+function updateToolConfirmationReset() {
+  const checkbox = document.getElementById('tool-always-confirm');
+  if (!checkbox) return;
+  try { checkbox.checked = localStorage.getItem(TOOL_CONFIRMATION_SKIP_KEY) !== '1'; }
+  catch (_) { checkbox.checked = true; }
+}
+
+function resetToolConfirmations() {
+  try {
+    localStorage.removeItem(TOOL_CONFIRMATION_SKIP_KEY);
+    Object.keys(localStorage).filter(key => key.startsWith('ot_tool_confirmation_skip:'))
+      .forEach(key => localStorage.removeItem(key));
+  } catch (_) {}
+  updateToolConfirmationReset();
 }
 
 // ── Extra Cooldown start / stop ───────────────────────────────
@@ -831,6 +883,17 @@ function syncDynamicToolText() {
   const setDesc = (id, text) => { const t = tool(id); if (t) t.desc = text; };
 
   setDesc('START_TEST', `Output: starter ${outputText('starter', tools.start_test_pct ?? 30)} for ${sec(tools.start_test_ms ?? 2000)} s.`);
+  const assist = cfgData?.starter_control || {};
+  const assistTool = tool('PULSED_STARTER_ASSIST_TEST');
+  if (assistTool) {
+    const onMs = Number(assist.pulsed_assist_on_ms ?? 500);
+    const enableDelayMs = hwCfg?.actuators?.starter_en?.enabled
+      ? Number(hwCfg.actuators.starter_en.delay_ms ?? 0) : 0;
+    assistTool.durationMs = onMs + enableDelayMs;
+    assistTool.desc = `Output: one starter pulse at ${pctText(assist.pulsed_assist_pwm_pct ?? 15)} for ${sec(onMs)} s` +
+      (enableDelayMs ? ` after the ${sec(enableDelayMs)} s starter-enable delay.` : '.') +
+      ' It stops automatically; use it to verify direction and output before startup.';
+  }
   setDesc('FUEL_SOL_TEST', `Output: main fuel shutoff OPEN for ${sec(tools.fuel_sol_test_ms ?? 1000)} s.`);
   const minSpin = Number(cfgData?.throttle?.fuel_pump_min_pct ?? 0);
   setDesc('IDLE_TEST', minSpin > 0
@@ -884,6 +947,7 @@ loadToolConfig().then(({cfg, hw}) => {
   renderTools();
   startToolsTelemetry();
 });
+updateToolConfirmationReset();
 
 async function fetchJsonWithTimeout(url, ms = 8000) {
   const controller = new AbortController();

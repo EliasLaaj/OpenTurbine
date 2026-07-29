@@ -23,6 +23,7 @@ public:
 
     void onEnter() override {
         _entryMs       = millis();
+        _lastTickMs    = _entryMs;
         _oilWarnLogged = false;
         auto& ed = EngineData::instance();
 
@@ -55,10 +56,17 @@ public:
         // Pressure-fed oil system: regulate pump to target pressure
         if (HardwareConfig::hasOilPump && HardwareConfig::hasOilPress && Config::cooldownUseOilPump) {
             if (ed.oilHealthy) {
+                const unsigned long now = millis();
+                float dt = (now - _lastTickMs) / 1000.0f;
+                _lastTickMs = now;
+                if (dt <= 0.0f || dt > 0.25f) dt = 1.0f / 400.0f;
                 float err = oilPressureTarget - ed.oilPressure;
-                float adj = constrain(err * 0.15f, -5.0f, 5.0f);
+                // Preserve the historical 400 Hz tuning while making the
+                // accumulated correction independent of the ECU loop rate.
+                float adj = constrain(err * 0.15f * (dt * 400.0f), -5.0f, 5.0f);
                 ed.oilPumpPct = constrain(ed.oilPumpPct + adj, 5.0f, 100.0f);
             } else {
+                _lastTickMs = millis();
                 // Sensor unhealthy: fall back to the fixed no-sensor duty rather
                 // than regulating on a bad reading — a failed-high sensor would
                 // drive the pump to the 5% clamp during hot spindown.
@@ -94,6 +102,7 @@ public:
 
 private:
     unsigned long _entryMs       = 0;
+    unsigned long _lastTickMs    = 0;
     bool          _skip          = false;
     bool          _oilWarnLogged = false;
 };

@@ -30,7 +30,7 @@ enum class OTCommand : uint8_t {
     TOGGLE_DEV_MODE,      // standby-only toggle; enables live Config edits and bench diagnostics
     TOGGLE_BENCH_MODE,    // bench/debug: all sequencer waits proceed on timer, safety skipped
     EXTRA_COOLDOWN,       // toggle: run configured cooldown actuators in standby until timeout
-    STARTER_LOW_RPM_SUPPORT, // iParam: 1=arm, 0=disarm — optional starter support while RUNNING
+    PULSED_STARTER_ASSIST_TEST, // one configured ON pulse; STANDBY only
     CLEAR_LOG,
     AB_FIRE,              // manual afterburner ignition (from web UI)
     AB_STOP,              // manual afterburner shutdown (from web UI)

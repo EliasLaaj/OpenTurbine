@@ -29,13 +29,14 @@
 // ============================================================
 
 #include <Arduino.h>
+#include <Wire.h>
 #include <string.h>    // strtok, strcmp, snprintf
 #include <strings.h>   // strcasecmp
 #include <stdlib.h>    // atoi, atof
 #include "soc/gpio_reg.h"  // GPIO_OUT_W1TS_REG / GPIO_IN1_REG for fast ISR pin access
 #include "driver/ledc.h"   // raw ESP-IDF LEDC: explicit per-timer control so N1/N2 are independent
 
-static const char* OTBENCH_VER = "0.6";
+static const char* OTBENCH_VER = "0.9";
 
 // ── Signal kinds ─────────────────────────────────────────────
 enum Kind {
@@ -103,6 +104,132 @@ static Signal SIGNALS[] = {
 static const int NUM_SIGNALS = sizeof(SIGNALS) / sizeof(SIGNALS[0]);
 
 static const float VREF = 3.3f;
+
+#if !defined(OTBENCH_S3)
+// ── Shared-I2C accessory emulator ─────────────────────────────
+// Reuses the existing START and STOP jumpers as SDA/SCL during the test, so
+// the complete ECU I2C stack can be exercised without changing bench wiring:
+//   DUT GPIO13 (SDA) <-> tester GPIO13
+//   DUT GPIO15 (SCL) <-> tester GPIO14
+// Only one slave is active at a time, matching the serial test campaign.
+enum I2cEmuMode : uint8_t { I2C_EMU_OFF, I2C_EMU_TCA9554, I2C_EMU_TLA2528, I2C_EMU_NAU7802 };
+static I2cEmuMode g_i2cEmuMode = I2C_EMU_OFF;
+static volatile uint8_t g_i2cReg = 0;
+static volatile uint8_t g_i2cRegs[32] = {};
+static volatile uint8_t g_i2cPhase = 0;
+static volatile uint16_t g_tlaRaw = 2048;
+static volatile int32_t g_nauRaw = 0;
+static constexpr int I2C_EMU_SDA = 13;
+static constexpr int I2C_EMU_SCL = 14;
+
+static void i2cEmuReceive(int count) {
+    if (count <= 0 || !Wire.available()) return;
+    const uint8_t first = Wire.read();
+    --count;
+    if (g_i2cEmuMode == I2C_EMU_TLA2528 &&
+        (first == 0x08 || first == 0x10)) {
+        if (count > 0 && Wire.available()) {
+            g_i2cReg = Wire.read();
+            --count;
+        }
+        if (first == 0x08 && count > 0 && Wire.available()) {
+            g_i2cRegs[g_i2cReg & 0x1F] = Wire.read();
+            --count;
+        }
+    } else {
+        g_i2cReg = first;
+        while (count-- > 0 && Wire.available()) {
+            uint8_t value = Wire.read();
+            const uint8_t writtenReg = g_i2cReg;
+            if (g_i2cEmuMode == I2C_EMU_NAU7802 && writtenReg == 0x02)
+                value &= (uint8_t)~0x04U;  // finish internal calibration immediately
+            g_i2cRegs[g_i2cReg & 0x1F] = value;
+            g_i2cReg = (uint8_t)(g_i2cReg + 1U);
+        }
+        if (g_i2cEmuMode == I2C_EMU_NAU7802) {
+            // Power-ready and conversion-ready remain asserted after reset or
+            // power-up writes; the ECU still performs its real init sequence.
+            g_i2cRegs[0x00] |= 0x28U;
+        }
+    }
+    while (Wire.available()) Wire.read();
+}
+
+static void i2cEmuRequest() {
+    if (g_i2cEmuMode == I2C_EMU_TLA2528 && g_i2cReg == 0x11) {
+        const uint16_t wireValue = (uint16_t)(g_tlaRaw & 0x0FFFU) << 4;
+        Wire.write((uint8_t)(wireValue >> 8));
+        Wire.write((uint8_t)wireValue);
+        return;
+    }
+    if (g_i2cEmuMode == I2C_EMU_NAU7802) {
+        // The classic ESP32 slave HAL dispatches receive/request callbacks
+        // from a task. Back-to-back STOP-separated master transactions can
+        // therefore expose the previous register pointer. Model the exact
+        // NAU7802 request order instead: three PU/status reads and one CTRL2
+        // calibration read during initialization, then each channel produces
+        // PU, 24-bit sample, and CTRL2 channel-select transactions.
+        if (g_i2cPhase < 3) {
+            Wire.write((uint8_t)0x28);  // PUR + CR
+            g_i2cPhase = (uint8_t)(g_i2cPhase + 1U);
+        } else if (g_i2cPhase == 3) {
+            Wire.write((uint8_t)0x00);  // calibration complete, no error
+            g_i2cPhase = 4;
+        } else {
+            const uint8_t operational = (uint8_t)((g_i2cPhase - 4) % 3);
+            if (operational == 0) {
+                Wire.write((uint8_t)0x28);  // conversion ready
+            } else if (operational == 1) {
+                const uint32_t raw = (uint32_t)g_nauRaw & 0x00FFFFFFUL;
+                Wire.write((uint8_t)(raw >> 16));
+                Wire.write((uint8_t)(raw >> 8));
+                Wire.write((uint8_t)raw);
+            } else {
+                Wire.write((uint8_t)0x00);  // channel-select CTRL2 read
+            }
+            g_i2cPhase = (uint8_t)(g_i2cPhase + 1U);
+        }
+        return;
+    }
+    Wire.write(g_i2cRegs[g_i2cReg & 0x1F]);
+}
+
+static void i2cEmuStop() {
+    if (g_i2cEmuMode != I2C_EMU_OFF) Wire.end();
+    g_i2cEmuMode = I2C_EMU_OFF;
+    // Restore the two ordinary active-low switch outputs in their safe state.
+    pinMode(I2C_EMU_SDA, INPUT);
+    pinMode(I2C_EMU_SCL, INPUT);
+}
+
+static bool i2cEmuBegin(I2cEmuMode mode, int32_t value) {
+    i2cEmuStop();
+    memset((void*)g_i2cRegs, 0, sizeof(g_i2cRegs));
+    uint8_t address = 0;
+    if (mode == I2C_EMU_TCA9554) {
+        address = 0x20;
+        g_i2cRegs[0x00] = (uint8_t)value;
+        g_i2cRegs[0x03] = 0xFF;
+    } else if (mode == I2C_EMU_TLA2528) {
+        address = 0x10;
+        g_i2cRegs[0x00] = 0x80;  // device-status signature used by discovery
+        g_tlaRaw = (uint16_t)constrain(value, 0L, 4095L);
+    } else if (mode == I2C_EMU_NAU7802) {
+        address = 0x2A;
+        g_i2cRegs[0x00] = 0x28;  // power-ready + conversion-ready
+        g_nauRaw = constrain(value, -8388351L, 8388350L);
+    } else {
+        return false;
+    }
+    g_i2cReg = 0;
+    g_i2cPhase = 0;
+    Wire.onReceive(i2cEmuReceive);
+    Wire.onRequest(i2cEmuRequest);
+    if (!Wire.begin(address, I2C_EMU_SDA, I2C_EMU_SCL, 400000)) return false;
+    g_i2cEmuMode = mode;
+    return true;
+}
+#endif
 
 // ── LEDC (raw ESP-IDF) — each FREQ_OUT / SERVO_OUT gets its OWN timer+channel ──
 // The Arduino ledcAttach/ledcWriteTone wrappers kept reusing a single timer, so N1
@@ -213,7 +340,7 @@ static void IRAM_ATTR totCsISR() {
 }
 static void IRAM_ATTR totSckISR() {        // advance one bit per rising edge
     if (g_totBit < 0) return;
-    g_totBit--;
+    g_totBit = (int8_t)(g_totBit - 1);
     if (g_totBit >= 0) misoWrite(g_totEnabled ? ((g_totWord >> g_totBit) & 1) : 1);
 }
 
@@ -376,14 +503,20 @@ static void emuSetThermocouple(EmuMode mode, const char* value) {
 }
 
 static void emuSetHx711(const char* value) {
-    emuBegin(EMU_HX711);
     int32_t counts = (int32_t)strtol(value, nullptr, 0);
     if (counts > 8388607) counts = 8388607;
     if (counts < -8388608) counts = -8388608;
+    if (g_emuMode != EMU_HX711) emuBegin(EMU_HX711);
+    // A new bench value is the next conversion, not a chip disconnect.
+    // Rebuilding the interrupt emulator can race an in-progress DUT read and
+    // strand DOUT high. Replace the sample atomically on the live interface.
+    noInterrupts();
+    emuDataWrite(true);
     g_hxWord = (uint32_t)counts & 0xFFFFFFu;
     g_hxPulse = 0;
     g_hxWaiting = false;
     emuDataWrite(false);
+    interrupts();
 }
 #endif
 
@@ -481,6 +614,10 @@ static bool applyOutput(const Signal& s, const char* valStr, String& err) {
             if (hz < 1.0f) {
                 ledcSetDuty(ch, 0);                                    // stop -> line low
             } else {
+                // A digital-sensor emulator may temporarily repurpose this
+                // GPIO and release it as an input. Reattach the original LEDC
+                // channel whenever frequency output resumes.
+                ledcSetupSignal(sigIndex(s), s, ch);
                 if (!ledcConfigureFrequencyTimer(ch, hz)) {
                     err = "frequency outside LEDC timer range";
                     return false;
@@ -620,11 +757,51 @@ static void handleLine(char* line) {
     if (strcasecmp(cmd, "RESET") == 0) {
 #if defined(OTBENCH_S3)
         if (g_emuMode != EMU_NONE) emuStop();
+#else
+        i2cEmuStop();
 #endif
         for (int i = 0; i < NUM_SIGNALS; i++) safeState(SIGNALS[i]);
         Serial.println("OK");
         return;
     }
+#if !defined(OTBENCH_S3)
+    if (strcasecmp(cmd, "I2CEMU") == 0) {
+        char* kind = strtok(nullptr, " \t");
+        char* val  = strtok(nullptr, " \t");
+        if (!kind) {
+            Serial.println("ERR usage: I2CEMU <TCA9554|TLA2528|NAU7802|OFF|STATUS> <value>");
+            return;
+        }
+        if (!strcasecmp(kind, "OFF")) {
+            i2cEmuStop();
+            Serial.println("OK");
+            return;
+        }
+        if (!strcasecmp(kind, "STATUS")) {
+            Serial.printf("OK mode=%u reg=%02X phase=%u tca_in=%02X tca_out=%02X tla=%u nau=%ld\n",
+                          (unsigned)g_i2cEmuMode, (unsigned)g_i2cReg,
+                          (unsigned)g_i2cPhase,
+                          (unsigned)g_i2cRegs[0], (unsigned)g_i2cRegs[1],
+                          (unsigned)g_tlaRaw, (long)g_nauRaw);
+            return;
+        }
+        if (!val) {
+            Serial.println("ERR emulator value required");
+            return;
+        }
+        I2cEmuMode mode = I2C_EMU_OFF;
+        if (!strcasecmp(kind, "TCA9554")) mode = I2C_EMU_TCA9554;
+        else if (!strcasecmp(kind, "TLA2528")) mode = I2C_EMU_TLA2528;
+        else if (!strcasecmp(kind, "NAU7802")) mode = I2C_EMU_NAU7802;
+        else {
+            Serial.println("ERR unknown I2C emulator");
+            return;
+        }
+        if (i2cEmuBegin(mode, strtol(val, nullptr, 0))) Serial.println("OK");
+        else Serial.println("ERR I2C emulator start failed");
+        return;
+    }
+#endif
 #if defined(OTBENCH_S3)
     if (strcasecmp(cmd, "EMU") == 0) {
         char* kind = strtok(nullptr, " \t");

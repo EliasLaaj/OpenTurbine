@@ -33,7 +33,9 @@
 
 class WebServer {
 public:
-    static void begin();
+    // False means the fixed web workspace could not be reserved. The caller
+    // must retain this as a START-readiness fault after hardware init.
+    static bool begin();
     static void tick();
     static bool otaInProgress();
     // True while a hardware/config save has scheduled the apply-reboot.

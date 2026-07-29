@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
 
 const port = 8767;
 const base = `http://127.0.0.1:${port}`;
-const BAD_VISIBLE_INTERNAL = /\b(operator_thrott|operator_throttle|user_throttle|generic_pwm_output|generic_pwm_duty_input|main_fuel_output|primary_n1|primary_egt|faultDemand|Fault demand|Semantic role|Binding key)\b/i;
+const BAD_VISIBLE_INTERNAL = /\b(operator_thrott|operator_throttle|user_throttle|generic_pwm_output|generic_pwm_duty_input|main_fuel_output|primary_n1|primary_egt|faultDemand|Fault demand|Semantic role|Binding key|undefined)\b/i;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -92,7 +92,7 @@ const setups = [
       has_afterburner: false, has_two_shaft: false,
       sensors: { n1_rpm: { enabled: false }, tot: { enabled: false }, oil_press: { enabled: false }, flame: { enabled: false }, throttle_input: { enabled: true, rc_pwm: false }, idle_input: { enabled: true, rc_pwm: false } },
       actuators: { throttle: { enabled: true, type: 0 }, oil_pump: { enabled: true, type: 1, freq_hz: 5000, res_bits: 10 }, igniter: { enabled: true, pwm: false }, starter: { enabled: false }, fuel_sol: { enabled: false } },
-      controllers: { oil_loop: false, throttle_slew: true, dynamic_idle: false, governor: false },
+      controllers: { oil_loop: false, dynamic_idle: false, governor: false },
       safety: { overspeed: false, overtemp: false, low_oil: false, oil_zero: false, flameout: false, hot_start: false },
       channel_registry: baseRegistry
     },
@@ -106,7 +106,7 @@ const setups = [
       has_afterburner: false, has_two_shaft: false,
       sensors: { n1_rpm: { enabled: true, pin: 34 }, tot: { enabled: true, chip: 'max31855' }, oil_press: { enabled: true }, flame: { enabled: true } },
       actuators: { starter: { enabled: true, type: 5 }, fuel_sol: { enabled: true }, oil_pump: { enabled: true, type: 1, freq_hz: 5000 } },
-      controllers: { oil_loop: true, throttle_slew: true, dynamic_idle: true, governor: false },
+      controllers: { oil_loop: true, dynamic_idle: true, governor: false },
       safety: { overspeed: true, overtemp: true, low_oil: true, oil_zero: true, flameout: true, hot_start: true },
       channel_registry: merge(clone(baseRegistry), {
         inputs: [regIn('n1_main', 'N1 Speed', 'n1_speed', 'speed', 2, 34, { pulses_per_unit: 1 }), regIn('tot_main', 'Main TOT', 'tot', 'temperature', 1, -1, { temp_interface: 2, spi_clk: 18, spi_cs: 5, spi_miso: 19 }), regIn('oil_pressure_main', 'Oil Pressure', 'oil_pressure', 'pressure', 1, 32)],
@@ -139,7 +139,7 @@ const setups = [
       has_two_shaft: false,
       sensors: { n1_rpm: { enabled: true }, n2_rpm: { enabled: true }, tot: { enabled: true } },
       actuators: { prop_pitch: { enabled: true, type: 0, min_us: 980, max_us: 2020 }, throttle: { enabled: true, type: 0 } },
-      controllers: { governor: true, dynamic_idle: true, throttle_slew: true },
+      controllers: { governor: true, dynamic_idle: true },
       channel_registry: merge(clone(baseRegistry), {
         inputs: [regIn('n1_main', 'N1 Speed', 'n1_speed', 'speed', 2, 34), regIn('n2_main', 'N2 Speed', 'n2_speed', 'speed', 2, 35), regIn('tot_main', 'TOT', 'tot', 'temperature', 1, -1, { temp_interface: 2, spi_clk: 18, spi_cs: 5, spi_miso: 19 })],
         outputs: [regOut('prop_pitch', 'Prop Pitch', 'prop_pitch', 'prop_pitch', 6, 16)]
@@ -228,8 +228,191 @@ const setups = [
         outputs: [regOut('starter_enable', 'Starter Enable Servo', 'starter_enable', 'starter_en', 6, 22), regOut('starter', 'Starter PWM', 'starter', 'starter', 5, 23), regOut('oil_pump_main', 'Oil Pump', 'oil_pump', 'oil_pump', 5, 24, { has_current: true, current_pin: 12 })]
       })
     },
-    config: { starter_control: { low_rpm_support_pct: 18, low_rpm_support_disengage_rpm: 21000 }, calibration: { p1_raw_min: 200, p1_raw_max: 3800 } },
+    config: { starter_control: { pulsed_assist_enabled: true, pulsed_assist_pwm_pct: 18, pulsed_assist_until_rpm: 21000, pulsed_assist_on_ms: 500, pulsed_assist_off_ms: 250 }, calibration: { p1_raw_min: 200, p1_raw_max: 3800 } },
     commands: [{ cmd: 'START_TEST', fParam: 0.35 }]
+  },
+  {
+    id: 'fuel_governed_generator',
+    title: 'Generator or turboshaft with N2 commanding fuel',
+    hardware: {
+      sensors: { n1_rpm: { enabled: true }, n2_rpm: { enabled: true }, tot: { enabled: true } },
+      actuators: { throttle: { enabled: true, type: 0 }, prop_pitch: { enabled: false } },
+      controllers: { governor: true, dynamic_idle: false },
+      safety: { overspeed: true, n2_overspeed: true, overtemp: true },
+      channel_registry: {
+        version: 1,
+        inputs: [
+          regIn('n1_main', 'N1 Speed', 'n1_speed', 'speed', 2, 34),
+          regIn('n2_main', 'Generator Speed', 'n2_speed', 'speed', 2, 35),
+          regIn('tot_main', 'Main TOT', 'tot', 'temperature', 1, -1,
+            { temp_interface: 2, spi_clk: 18, spi_cs: 5, spi_miso: 19 })
+        ],
+        outputs: [regOut('main_fuel', 'Main Fuel Pump', 'main_fuel', 'fuel', 6, 21)],
+        bindings: [
+          { key: 'primary_n1', channel: 'n1_main' },
+          { key: 'primary_n2', channel: 'n2_main' },
+          { key: 'primary_egt', channel: 'tot_main' },
+          { key: 'main_fuel_output', channel: 'main_fuel' }
+        ]
+      }
+    },
+    config: {
+      engine: { rpm_limit: 90000, n2_rpm_limit: 32000, tot_limit: 700 },
+      governor: { target_rpm: 28000, band_rpm: 300, kp: 0.0002, pitch_kp: 0 },
+      throttle: { fuel_pump_min_pct: 12 }
+    },
+    commands: [{ cmd: 'IDLE_TEST' }]
+  },
+  {
+    id: 'n2_idle_turboshaft',
+    title: 'Free-turbine installation using N2 for automatic idle',
+    hardware: {
+      sensors: { n1_rpm: { enabled: true }, n2_rpm: { enabled: true }, tot: { enabled: true } },
+      actuators: { throttle: { enabled: true, type: 0 } },
+      controllers: { governor: false, dynamic_idle: true },
+      safety: { overspeed: true, n2_overspeed: true, overtemp: true },
+      channel_registry: {
+        version: 1,
+        inputs: [
+          regIn('n1_main', 'N1 Speed', 'n1_speed', 'speed', 2, 34),
+          regIn('n2_main', 'N2 Speed', 'n2_speed', 'speed', 2, 35),
+          regIn('tot_main', 'Main TOT', 'tot', 'temperature', 1, -1,
+            { temp_interface: 2, spi_clk: 18, spi_cs: 5, spi_miso: 19 })
+        ],
+        outputs: [regOut('main_fuel', 'Main Fuel Pump', 'main_fuel', 'fuel', 6, 21)],
+        bindings: [
+          { key: 'primary_n1', channel: 'n1_main' },
+          { key: 'primary_n2', channel: 'n2_main' },
+          { key: 'primary_egt', channel: 'tot_main' },
+          { key: 'main_fuel_output', channel: 'main_fuel' }
+        ]
+      }
+    },
+    config: {
+      engine: { rpm_limit: 90000, n2_rpm_limit: 30000, tot_limit: 700 },
+      dynamic_idle: { source: 1, target_rpm: 9000, deadband_rpm: 250, rpm_limit: 14000 },
+      throttle: { fuel_pump_min_pct: 10, idle_max_pct: 38 }
+    },
+    commands: [{ cmd: 'TOGGLE_DYNAMIC_IDLE' }]
+  },
+  {
+    id: 'pressure_torque_protected_test_turbine',
+    title: 'Instrumented development turbine with P1, P2 and torque fuel protection',
+    hardware: {
+      sensors: { n1_rpm: { enabled: true }, tot: { enabled: true }, p1: { enabled: true }, p2: { enabled: true }, torque: { enabled: true } },
+      actuators: { throttle: { enabled: true, type: 0 } },
+      controllers: { dynamic_idle: false, governor: false },
+      safety: { overspeed: true, overtemp: true },
+      channel_registry: {
+        version: 1,
+        inputs: [
+          regIn('n1_main', 'N1 Speed', 'n1_speed', 'speed', 2, 34),
+          regIn('tot_main', 'Main TOT', 'tot', 'temperature', 1, -1,
+            { temp_interface: 2, spi_clk: 18, spi_cs: 5, spi_miso: 19 }),
+          regIn('p1_main', 'Compressor Inlet P1', 'p1_pressure', 'pressure', 1, 32),
+          regIn('p2_main', 'Compressor Outlet P2', 'p2_pressure', 'pressure', 1, 33),
+          regIn('torque_main', 'Output Shaft Torque', 'torque', 'torque', 10, -1,
+            { i2c_address: 42, device_channel: 0, load_cell_gain: 128, load_cell_rate: 80 })
+        ],
+        outputs: [regOut('main_fuel', 'Main Fuel Pump', 'main_fuel', 'fuel', 6, 21)],
+        bindings: [
+          { key: 'primary_n1', channel: 'n1_main' },
+          { key: 'primary_egt', channel: 'tot_main' },
+          { key: 'main_fuel_output', channel: 'main_fuel' }
+        ]
+      }
+    },
+    config: {
+      safety: { p1_trip_bar: 2.2, p2_trip_bar: 4.8, torque_trip_nm: 90 },
+      throttle: {
+        pullback_p1: true, pullback_p1_soft_bar: 1.7, pullback_p1_hard_bar: 2.0,
+        pullback_p2: true, pullback_p2_soft_bar: 3.8, pullback_p2_hard_bar: 4.4,
+        pullback_torque: true, pullback_torque_soft_nm: 70, pullback_torque_hard_nm: 82,
+        pullback_min_pct: 15, rpm_limiter_mode: 1
+      }
+    },
+    commands: [{ cmd: 'SET_THROTTLE_PCT', fParam: 0.6 }]
+  },
+  {
+    id: 'dual_egt_research_turbine',
+    title: 'Development turbine using TIT as the primary gas-temperature limit',
+    hardware: {
+      sensors: { n1_rpm: { enabled: true }, tot: { enabled: true }, tit: { enabled: true } },
+      actuators: { throttle: { enabled: true, type: 0 } },
+      controllers: {},
+      safety: { overspeed: true, overtemp: true, hot_start: true },
+      channel_registry: {
+        version: 1,
+        inputs: [
+          regIn('n1_main', 'N1 Speed', 'n1_speed', 'speed', 2, 34),
+          regIn('tot_main', 'Outlet Temperature', 'tot', 'temperature', 1, -1,
+            { temp_interface: 2, spi_clk: 18, spi_cs: 5, spi_miso: 19 }),
+          regIn('tit_main', 'Turbine Inlet Temperature', 'tit', 'temperature', 1, -1,
+            { temp_interface: 2, spi_clk: 18, spi_cs: 17, spi_miso: 19 })
+        ],
+        outputs: [regOut('main_fuel', 'Main Fuel Pump', 'main_fuel', 'fuel', 6, 21)],
+        bindings: [
+          { key: 'primary_n1', channel: 'n1_main' },
+          { key: 'primary_egt', channel: 'tit_main' },
+          { key: 'main_fuel_output', channel: 'main_fuel' }
+        ]
+      }
+    },
+    config: { safety: { egt_source: 2, tit_limit_c: 980, startup_egt_limit_c: 1050 }, engine: { tot_limit: 720 } },
+    commands: [{ cmd: 'SET_THROTTLE_PCT', fParam: 0.35 }]
+  },
+  {
+    id: 'windmilling_oil_free_turbine',
+    title: 'Free turbine with fixed-output windmilling oil protection',
+    hardware: {
+      sensors: { n1_rpm: { enabled: false }, n2_rpm: { enabled: true }, oil_press: { enabled: false } },
+      actuators: { throttle: { enabled: true, type: 0 }, oil_pump: { enabled: true, type: 1, freq_hz: 5000 } },
+      controllers: { oil_loop: false, dynamic_idle: false, governor: false },
+      channel_registry: {
+        version: 1,
+        inputs: [regIn('n2_main', 'Free Turbine Speed', 'n2_speed', 'speed', 2, 35)],
+        outputs: [
+          regOut('main_fuel', 'Main Fuel Pump', 'main_fuel', 'fuel', 6, 21),
+          regOut('oil_pump_main', 'Oil Pump', 'oil_pump', 'oil_pump', 5, 23)
+        ],
+        bindings: [
+          { key: 'primary_n2', channel: 'n2_main' },
+          { key: 'main_fuel_output', channel: 'main_fuel' }
+        ]
+      }
+    },
+    config: { standby_oil: { source: 1, rpm_limit: 600, feed_pct: 35, feed_bar: 0 } },
+    commands: [{ cmd: 'OIL_PRIME' }]
+  },
+  {
+    id: 'dry_sump_flow_monitored_turbine',
+    title: 'Dry-sump turbine with two oil-flow monitors and drain valve',
+    hardware: {
+      sensors: { oil_press: { enabled: false } },
+      actuators: {
+        oil_pump: { enabled: true, type: 1, freq_hz: 5000 },
+        oil_scavenge_pump: { enabled: true, type: 1, freq_hz: 5000 }
+      },
+      channel_registry: {
+        version: 2,
+        inputs: [
+          regIn('oil_flow', 'Main Oil Flow', 'oil_flow', 'flow', 2, 34, { pulses_per_unit: 900 }),
+          regIn('scavenge_flow', 'Scavenge Flow', 'scavenge_flow', 'flow', 9, -1,
+            { i2c_address: 16, device_channel: 1, analog_zero_mv: 500, analog_mv_per_unit: 1000 })
+        ],
+        outputs: [
+          regOut('oil_pump_main', 'Oil Pump', 'oil_pump', 'oil_pump', 5, 23,
+            { has_flow_monitor: true, minimum_flow_l_min: 0.35 }),
+          regOut('scavenge_pump', 'Scavenge Pump', 'scavenge_pump', 'scavenge_pump', 5, 26,
+            { has_flow_monitor: true, minimum_flow_l_min: 0.25 }),
+          regOut('drain_valve', 'Drain Valve', 'drain_valve', 'valve', 11, -1,
+            { i2c_address: 32, device_channel: 7, invert: true })
+        ],
+        bindings: []
+      }
+    },
+    config: { oil_advanced: { pump_underflow_delay_ms: 3000, shutdown_on_underflow: true } },
+    commands: []
   }
 ];
 
@@ -244,6 +427,7 @@ const setups = [
 
   try {
     for (const setup of setups) {
+      let extraToolCommands = 0;
       await api('POST', '/__sim/reset');
       const state = await api('GET', '/__sim/state');
       const hardware = merge(clone(state.hardware), setup.hardware);
@@ -267,7 +451,7 @@ const setups = [
           const card = cards.find(card => /^Main Fuel Pump$/i.test((card.querySelector('strong')?.textContent || '').trim()));
           return card ? card.innerText : '';
         });
-        assert.match(mainFuelUsage, /Controller: smooth fuel\/throttle movement/, 'main fuel should name its actual controller user');
+        assert.match(mainFuelUsage, /Controller: fuel response & limit protection/, 'main fuel should name its automatic protection user');
         assert.match(mainFuelUsage, /Core firmware: controller binding/, 'main fuel should name its controller binding');
         const removeDialogText = await page.evaluate(() => {
           const cards = Array.from(document.querySelectorAll('#registry-outputs .registry-card'));
@@ -279,7 +463,7 @@ const setups = [
           return text;
         });
         assert.match(removeDialogText, /currently used by/i, 'remove dialog should talk about current users');
-        assert.match(removeDialogText, /Controller: smooth fuel\/throttle movement/, 'remove dialog should include specific controller user');
+        assert.match(removeDialogText, /Controller: fuel response & limit protection/, 'remove dialog should include specific controller user');
         assert.doesNotMatch(removeDialogText, /known references/i, 'remove dialog should not use vague reference wording');
       }
       if (setup.id === 'analog_rpm_and_servo_enable') {
@@ -306,15 +490,93 @@ const setups = [
         assert.match(bindingText, /Main fuel pump output/);
         assert.doesNotMatch(bindingText, /operator_throttle|main_fuel_output/, 'advanced controller links should use plain labels');
       }
+      if (setup.id === 'dry_sump_flow_monitored_turbine') {
+        const pageText = await page.locator('#registry-inputs, #registry-outputs').allTextContents();
+        const combined = pageText.join(' ');
+        assert.match(combined, /Main oil-pump flow sensor/i);
+        assert.match(combined, /Scavenge-pump flow sensor/i);
+        assert.equal(await page.locator('#registry-inputs .registry-card[data-registry-id="oil_flow"]').count(), 0,
+          'main oil flow sensor should live inside its pump card');
+        assert.equal(await page.locator('#registry-inputs .registry-card[data-registry-id="scavenge_flow"]').count(), 0,
+          'scavenge flow sensor should live inside its pump card');
+        assert.match(combined, /Drain Valve/);
+        assert.match(combined, /Flow sensing & monitoring/);
+      }
       await page.goto(`${base}/config.html#${setup.id}`);
       await page.waitForSelector('#btn-save');
       await assertVisibleTextClean(page, `${setup.id} config`);
+      if (setup.id === 'fuel_governed_generator') {
+        const governorState = await page.evaluate(() => ({
+          visible: !!document.querySelector('#governor-cfg-section')?.offsetParent,
+          filterHidden: document.querySelector('#governor-cfg-section')?.classList.contains('filter-hidden'),
+          controller: !!hwCfg.controllers?.governor,
+          internalAvailable: _hasGovernorCfg,
+          n2Inputs: (hwCfg.channel_registry?.inputs || []).filter(c => c.purpose === 'n2_speed').length,
+          fuelOutputs: (hwCfg.channel_registry?.outputs || []).filter(c => c.purpose === 'main_fuel').length
+        }));
+        assert.equal(governorState.visible, true, JSON.stringify(governorState));
+        assert.equal(await page.locator('#cf-gv_tr').inputValue(), '28000');
+        assert.equal(await page.locator('#cf-gv_pk').isDisabled(), true,
+          'fuel-governed generator should not expose inactive prop-pitch tuning');
+      }
+      if (setup.id === 'n2_idle_turboshaft') {
+        const idleState = await page.evaluate(() => ({
+          visible: !!document.querySelector('#idle-control-cfg-section')?.offsetParent,
+          filterHidden: document.querySelector('#idle-control-cfg-section')?.classList.contains('filter-hidden'),
+          controller: !!hwCfg.controllers?.dynamic_idle,
+          hardwareUnavailable: document.querySelector('#idle-control-cfg-section')?.dataset.hardwareUnavailable,
+          reason: document.querySelector('#idle-control-cfg-section')?.dataset.inactiveReason,
+          n2Inputs: (hwCfg.channel_registry?.inputs || []).filter(c => c.purpose === 'n2_speed').length,
+          fuelOutputs: (hwCfg.channel_registry?.outputs || []).filter(c => c.purpose === 'main_fuel').length
+        }));
+        assert.equal(idleState.visible, true, JSON.stringify(idleState));
+        assert.equal(await page.locator('#cf-di_src').inputValue(), '1');
+        assert.match(await page.locator('#cf-di_src option:checked').textContent(), /N2 output-shaft speed/i);
+      }
+      if (setup.id === 'pressure_torque_protected_test_turbine') {
+        await page.locator('#btn-view-explore').click();
+        for (const key of ['pb_p1e','pb_p2e','pb_tqe']) {
+          assert.equal(await page.locator(`#cf-${key}`).isDisabled(), false, `${key} should be available`);
+          assert.equal(await page.locator(`#cf-${key}`).isChecked(), true, `${key} should remain enabled`);
+        }
+        const limiterHelp = await page.locator('#engine-limits').textContent();
+        assert.doesNotMatch(limiterHelp, /\bundefined\b/i);
+      }
+      if (setup.id === 'dual_egt_research_turbine') {
+        assert.equal(await page.locator('#cf-eg_src').inputValue(), '2');
+        assert.equal(await page.locator('#cf-sf_tit').isDisabled(), false);
+        assert.equal(await page.locator('#cf-tot_limit').isDisabled(), true);
+      }
+      if (setup.id === 'windmilling_oil_free_turbine') {
+        await page.locator('#btn-view-expert').click();
+        assert.equal(await page.locator('#cf-so_src').inputValue(), '1');
+        assert.equal(await page.locator('#cf-so_fp').inputValue(), '35');
+        assert.equal(await page.locator('#cf-so_fb').inputValue(), '0');
+      }
+      if (setup.id === 'dry_sump_flow_monitored_turbine') {
+        await page.locator('#btn-view-expert').click();
+        assert.equal(await page.locator('#cf-oil_ufd').isDisabled(), false);
+        assert.equal(await page.locator('#cf-oil_ufs').isDisabled(), false);
+        assert.equal(await page.locator('#cf-oil_ufs').isChecked(), true);
+      }
       await page.goto(`${base}/calibration.html#${setup.id}`);
       await page.waitForFunction(() => document.body.textContent.includes('Calibration'));
       await assertVisibleTextClean(page, `${setup.id} calibration`);
+      if (setup.id === 'pressure_torque_protected_test_turbine') {
+        assert.equal(await page.locator('#torque-cal-row').isVisible(), true,
+          'NAU7802 torque channel must remain fitted on Calibration');
+        assert.equal(await page.locator('#torque-loadcell-wizard').isVisible(), true);
+        assert.match(await page.locator('#torque-loadcell-wizard').textContent(), /NAU7802.*Capture zero.*known load/is);
+      }
       await page.goto(`${base}/sequence.html#${setup.id}`);
       await page.waitForSelector('#rules-list', { state: 'attached' });
       await assertVisibleTextClean(page, `${setup.id} sequence`);
+      if (setup.id === 'dry_sump_flow_monitored_turbine') {
+        const startupOptions = await page.locator('#add-startup-sel').textContent();
+        const shutdownOptions = await page.locator('#add-shutdown-sel').textContent();
+        assert.match(startupOptions, /Open Drain Valve/);
+        assert.match(shutdownOptions, /Close Drain Valve/);
+      }
       if (setup.id === 'rc_pwm_generic_rules') {
         await page.evaluate(() => switchTab('rules'));
         await page.waitForSelector('#rule-unit-0');
@@ -327,6 +589,44 @@ const setups = [
       await page.goto(`${base}/tools.html#${setup.id}`);
       await page.waitForSelector('#btn-test-settings');
       await assertVisibleTextClean(page, `${setup.id} tools`);
+      if (setup.id === 'rc_pwm_generic_rules') {
+        const fanTool = page.locator('.tool-card').filter({hasText:'Telemetry Fan Test'});
+        assert.equal(await fanTool.count(), 1, 'generic proportional registry output needs a Tools test');
+        const demand = fanTool.getByRole('spinbutton', {name:/test output percentage/i});
+        assert.equal(await demand.inputValue(), '50');
+        await demand.fill('25');
+        await page.evaluate(() => localStorage.setItem('ot_tool_confirmations_skip_all', '1'));
+        await api('POST', '/__sim/data', {mode:'STANDBY'});
+        await page.waitForFunction(() => {
+          const card = Array.from(document.querySelectorAll('.tool-card')).find(item => /Telemetry Fan Test/.test(item.textContent || ''));
+          return card && !card.querySelector('button')?.disabled;
+        });
+        await fanTool.getByRole('button', {name:'Run'}).click();
+        await page.waitForTimeout(100);
+        const toolState = await api('GET', '/__sim/state');
+        const command = toolState.commands.at(-1);
+        assert.equal(command.cmd, 'REGISTRY_OUTPUT_TEST');
+        assert.equal(command.fParam, 0.25, 'proportional registry-output test must use the chosen commissioning demand');
+        extraToolCommands++;
+      }
+      if (setup.id === 'dry_sump_flow_monitored_turbine') {
+        const drainTool = page.locator('.tool-card').filter({hasText:'Drain Valve Test'});
+        assert.equal(await drainTool.count(), 1, 'I2C drain-valve output needs a Tools test');
+        assert.equal(await drainTool.getByRole('spinbutton').count(), 0, 'binary output test should present ON/OFF semantics');
+        await page.evaluate(() => localStorage.setItem('ot_tool_confirmations_skip_all', '1'));
+        await api('POST', '/__sim/data', {mode:'STANDBY'});
+        await page.waitForFunction(() => {
+          const card = Array.from(document.querySelectorAll('.tool-card')).find(item => /Drain Valve Test/.test(item.textContent || ''));
+          return card && !card.querySelector('button')?.disabled;
+        });
+        await drainTool.getByRole('button', {name:'Run'}).click();
+        await page.waitForTimeout(100);
+        const toolState = await api('GET', '/__sim/state');
+        const command = toolState.commands.at(-1);
+        assert.equal(command.cmd, 'REGISTRY_OUTPUT_TEST');
+        assert.equal(command.fParam, 1, 'binary drain-valve test must command ON');
+        extraToolCommands++;
+      }
       if (setup.id === 'rc_pwm_generic_rules') {
         await page.goto(`${base}/#${setup.id}`);
         await page.waitForSelector('[data-registry-output-id="generic_pwm_output"]');
@@ -361,7 +661,7 @@ const setups = [
       const saved = await api('GET', '/__sim/state');
       assert.equal(saved.hardware.profile_id, setup.id);
       assert.equal(saved.settings.profile_id, setup.id);
-      assert.equal(saved.commands.length, setup.commands.length, `${setup.id} command count`);
+      assert.equal(saved.commands.length, setup.commands.length + extraToolCommands, `${setup.id} command count`);
       const registry = saved.hardware.channel_registry || {};
       assert.ok(Array.isArray(registry.inputs), `${setup.id} registry inputs missing`);
       assert.ok(Array.isArray(registry.outputs), `${setup.id} registry outputs missing`);

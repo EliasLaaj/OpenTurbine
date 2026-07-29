@@ -1,4 +1,4 @@
-# Hardware device model and UI plan
+# OpenTurbine 2.0 hardware device model
 
 The Hardware page is device-first. A user chooses what a channel does, then
 chooses how that device is electrically connected. Internal signal semantics
@@ -40,14 +40,16 @@ references.
 | Oil temperature | analog transmitter, NTC divider, DS18B20, optional thermocouple | degrees C |
 | Coolant temperature | analog transmitter, NTC divider, DS18B20 | degrees C |
 | Intake / ambient temperature | analog transmitter, NTC divider, DS18B20 | degrees C |
-| Oil pressure | ADC transmitter | bar |
-| Compressor inlet pressure (P1) | ADC transmitter | bar |
-| Compressor discharge pressure (P2) | ADC transmitter | bar |
-| Coolant pressure | ADC transmitter | bar |
-| Fuel pressure | ADC transmitter | bar |
-| Fuel flow | pulse/frequency, ADC transmitter | litres/min |
-| Flame sensor | digital switch or ADC intensity | normalized 0..1 |
-| Torque | ADC transmitter | Nm |
+| Oil pressure | native ADC or TLA2528 transmitter | bar |
+| Compressor inlet pressure (P1) | native ADC or TLA2528 transmitter | bar |
+| Compressor discharge pressure (P2) | native ADC or TLA2528 transmitter | bar |
+| Coolant pressure | native ADC or TLA2528 transmitter | bar |
+| Fuel pressure | native ADC or TLA2528 transmitter | bar |
+| Fuel flow | pulse/frequency, native ADC or TLA2528 transmitter | litres/min |
+| Main/scavenge oil flow | pulse/frequency, native ADC or TLA2528 transmitter | litres/min |
+| Flame sensor | native/TCA9554 digital switch or native/TLA2528 ADC intensity | normalized 0..1 |
+| Torque | native ADC transmitter, HX711, or NAU7802 load cell | Nm |
+| Thrust | NAU7802 load cell | N |
 | Battery voltage | ADC through divider | volts |
 | Throttle input | ADC, RC pulse width, frequency, PWM duty | normalized 0..1 |
 | Idle input | digital, ADC, RC pulse width, frequency, PWM duty | normalized 0..1 |
@@ -75,14 +77,15 @@ external resistor is not the same thing as an imprecise internal GPIO pull.
 | --- | --- | --- |
 | Main fuel / throttle ESC | PWM, servo/ESC | electrical range, minimum reliable run calibration |
 | Fuel pump | relay, PWM, servo/ESC | electrical range, minimum reliable run calibration, current sensor |
-| Oil pump | relay, PWM, servo/ESC | electrical range, controller minimum, current sensor |
+| Oil pump | relay, PWM, servo/ESC | electrical range, controller minimum, current sensor, optional dedicated flow monitor |
 | Coolant pump | relay, PWM, servo/ESC | electrical range, minimum reliable run calibration, current sensor |
-| Scavenge pump / cooling fan | relay, PWM, servo/ESC | electrical range, minimum reliable run calibration, current sensor |
+| Scavenge pump / cooling fan | relay, PWM, servo/ESC | electrical range, minimum reliable run calibration, current sensor, optional dedicated scavenge-flow monitor |
 | Starter | relay, PWM, servo/ESC | electrical range, current sensor |
 | Air starter | relay | polarity, current sensor when useful |
 | Pilot gas / start-fuel solenoid | relay | polarity, current sensor when useful |
 | Air or fuel purge valve | relay | polarity, current sensor when useful |
-| Fuel shutoff / starter enable / valves | relay | polarity, current sensor when useful |
+| Electric drain valve | relay, PWM, servo/ESC | electrical range and inversion; sequencer and control-rule command |
+| Fuel shutoff / starter enable / valves | native relay or TCA9554 output where permitted | polarity, current sensor when useful |
 | Igniter / AB igniter | relay or PWM | simple on/off, dwell/rest igniter, current-limited coil, current sensor |
 | Glow plug | relay or PWM | dry glow or wet glow with pilot-fuel subcard, current sensor |
 | Prop pitch | PWM or servo/ESC | electrical range, inversion, current sensor |
@@ -98,6 +101,11 @@ remain sequencer/rules outputs until a dedicated controller is justified. The
 air-starter role uses the existing airstarter sequence blocks and test command.
 This keeps the hardware inventory complete without adding unrelated tuning
 controls to a basic installation.
+
+Main and scavenge flow meters are separate `flow` inputs calibrated in L/min.
+Each pump output independently enables its monitor and minimum acceptable flow.
+Low or missing feedback is warning-only by default. A Config safety option may
+turn a confirmed underflow into a shutdown after the shared confirmation delay.
 
 ## Dashboard presentation
 
@@ -133,38 +141,22 @@ minimum-spin calibration retains its safety deadband: a below-minimum command
 becomes off rather than being silently raised. Changing an endpoint marks the
 operational calibration stale.
 
-## Delivery plan
+## V2 implementation invariants
 
-### Phase 1 — channel foundation and understandable cards
-
-- Persist an explicit purpose independently of the internal semantic family.
-- Add coolant-temperature and coolant-pump purposes.
-- Add PWM-duty input sampling and input inversion.
-- Keep generic I/O strictly normalized and automation-only.
-- Drive signal-type choices, ranges, pull controls, and conversion fields from
-  the selected purpose.
-- Preserve and surface current-sensor, igniter-dwell, coil-dwell, and wet-glow
-  subcards.
-- Migrate existing registry cards by stable ID and current role without
-  breaking stored rule/sequencer references.
-
-### Phase 2 — purpose bindings and operational calibration
-
-- Make core bindings an automatic consequence of selecting N1, N2, TOT,
-  throttle, main fuel, and other singleton purposes; reject duplicate singleton
-  ownership with a clear card-level error.
-- Put pump minimum-reliable-run calibration on the device card, retain the
-  electrical range separately, and display the calculated signal.
-- Mark pump calibration stale when the signal type or endpoints change.
-- Generalize the oil-controller minimum wording so it remains distinct from a
-  motor's reliable-running threshold.
-
-### Phase 3 — coolant behavior and verification
-
-- Keep coolant temperature and coolant pump available to rules/sequences by
-  default; add a simple temperature controller only if a real installation
-  needs it, rather than making the basic Hardware page more complex.
-- Add configuration round-trip, driver validation, normalized-I/O, PWM-duty,
-  NTC orientation, current-sensor, and migration tests.
-- Run both ESP32 and ESP32-S3 firmware builds plus browser UI audits and a
-  rendered Hardware-page inspection.
+- The channel registry is the canonical fitted-hardware inventory. Legacy
+  singleton objects may mirror core channels internally but must never become a
+  second user-facing enable.
+- A valid physical endpoint is native GPIO, a complete SPI/OneWire endpoint, or
+  an available I²C device/channel. Config, Calibration, Sequence, Rules, Tools,
+  logging, and telemetry must use the same definition.
+- Development boards expose editable shared buses. PCB profiles own immutable
+  bus/device routing and expose only compatible labelled ports.
+- Hardware enables activation; Explore may edit harmless future tuning values
+  but cannot activate a feature whose required hardware is absent.
+- Every non-core physical output must be commissionable from Tools in STANDBY.
+  Binary tests command ON; proportional tests use an explicit bounded demand.
+- Removing a channel or disconnected I²C device must remove or disable every
+  dependent binding, controller, safety, rule, and sequence reference in one
+  reviewed operation.
+- Both ESP32 targets build from the same behavior sources. Platform-specific
+  differences are limited to capabilities, pins, memory, and hardware backends.

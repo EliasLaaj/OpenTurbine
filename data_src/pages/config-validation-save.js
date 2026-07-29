@@ -1,0 +1,597 @@
+// ── Cross-parameter inline validation warnings ────────────────
+// Called after renderForm() and after any field edit.
+// Reads values directly from the form inputs so they stay in sync.
+function runValidation() {
+  // Helper: read a numeric value from a form field by SCHEMA key
+  function fv(key) {
+    const el = document.getElementById('cf-' + key);
+    if (!el) return undefined;
+    const v = parseFloat(el.value);
+    return isNaN(v) ? undefined : v;
+  }
+
+  // Build warnings list: { sectionTitle, message }
+  const warnings = [];
+
+  // Pre-ignition RPM comes from the loaded config (sequence.html param, not a config-form field)
+  const preIgnRpmVal   = (cfg?.sequence?.startup?.pre_ign_rpm) ?? undefined;
+  const spoolRpmTarget = (cfg?.sequence?.startup?.rpm_target)  ?? undefined;
+
+  // Flame sensor threshold lives in calibration settings rather than
+  // the visible config form, so validation reads it from the loaded config.
+
+  const idleTargetRpm  = fv('di_tr');          // dynamic_idle.target_rpm
+  const rpmLimit       = fv('rpm_limit');
+  const n2RpmLimit     = fv('n2_rpm_limit');
+
+  // Compute startup values from cfg (these live in sequence/hardware, not config form)
+  const startupCfg  = cfg?.sequence?.startup ?? {};
+  const computedPreIgnRpm     = startupCfg.pre_ign_rpm     ?? preIgnRpmVal;
+  const computedSpoolRpmTarget= startupCfg.rpm_target      ?? spoolRpmTarget;
+  const computedFlameThresh   = cfg?.calibration?.flame_threshold;
+  const hasFlameHw = hasRegistryInput('flame');
+
+  // 1. preIgnRpm > spoolRpmTarget
+  if (computedPreIgnRpm !== undefined && computedSpoolRpmTarget !== undefined
+      && computedPreIgnRpm > computedSpoolRpmTarget) {
+    warnings.push({
+      section: 'Engine Protection Limits',
+      key:     'warn-preignrpm',
+      msg:     '⚠ Pre-ignition RPM is above spool target — engine will never reach spool'
+    });
+  }
+
+  // 2. flameThreshold > 3500
+  if (hasFlameHw && computedFlameThresh !== undefined && computedFlameThresh > 3500) {
+    warnings.push({
+      section: 'Combustion & Startup Protection',
+      key:     'warn-flamehigh',
+      msg:     '⚠ Flame threshold very high — detection may be unreliable'
+    });
+  }
+
+  // 3. flameThreshold < 100 and > 0
+  if (hasFlameHw && computedFlameThresh !== undefined && computedFlameThresh > 0 && computedFlameThresh < 100) {
+    warnings.push({
+      section: 'Combustion & Startup Protection',
+      key:     'warn-flamelow',
+      msg:     '⚠ Flame threshold very low — false detections likely'
+    });
+  }
+
+  // 4. Idle target must remain below the shaft limit it actually uses.
+  const idleSource = Number(document.getElementById('cf-di_src')?.value || 0);
+  const idleComparisonLimit = idleSource === 1 ? n2RpmLimit : (idleSource === 0 ? rpmLimit : 0);
+  if (idleTargetRpm !== undefined && idleComparisonLimit !== undefined &&
+      idleComparisonLimit > 0 && idleTargetRpm >= idleComparisonLimit) {
+    warnings.push({
+      section: 'Automatic Idle Control',
+      key:     'warn-idlelimit',
+      msg:     '⚠ Idle target is at or above the selected shaft hard limit.'
+    });
+  }
+
+  const n1PullbackEnabled = !!document.getElementById('cf-pb_n1e')?.checked;
+  const n1PullbackSoft = fv('pb_n1s'), n1PullbackFull = fv('pb_n1h');
+  if (n1PullbackEnabled && rpmLimit > 0 &&
+      ((n1PullbackSoft > 0 && n1PullbackSoft >= rpmLimit) ||
+       (n1PullbackFull > 0 && n1PullbackFull >= rpmLimit))) {
+    warnings.push({section:'Engine Protection Limits', key:'warn-n1-pullback-trip',
+      msg:'⚠ N1 pullback starts or reaches full authority at/above the hard N1 shutdown limit. Set both pullback points below the trip.'});
+  }
+
+  const governorTargetNow = fv('gv_tr');
+  if (hwCfg.controllers?.governor && hasRegistryInput('n2_speed') &&
+      !(governorTargetNow > 0)) {
+    warnings.push({section:'Automatic N2 Speed Control', key:'warn-governor-zero',
+      msg:'⚠ Automatic N2 speed control is enabled in Hardware, but Target N2 RPM is 0. The controller remains inactive until a rated target is entered.'});
+  }
+
+  const standbySourceNow = Number(document.getElementById('cf-so_src')?.value || 0);
+  const standbyRpmNow = fv('so_rl') || 0;
+  const standbyLimitsNow = standbySourceNow === 0 ? [rpmLimit || 0] :
+                           standbySourceNow === 1 ? [n2RpmLimit || 0] :
+                           [rpmLimit || 0, n2RpmLimit || 0];
+  const usableStandbyLimitsNow = standbyLimitsNow.filter(v => v > 0);
+  if (usableStandbyLimitsNow.length && usableStandbyLimitsNow.every(limit => standbyRpmNow >= limit)) {
+    warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-rpm',
+      msg:'⚠ Start threshold is at/above every selected shaft limit, so windmilling oil protection can never activate.'});
+  }
+  if ((fv('so_fp') || 0) <= 0 && (fv('so_fb') || 0) <= 0) {
+    warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-output',
+      msg:'⚠ Pump output and pressure target are both zero; this protection would command no oil.'});
+  }
+
+  // N2 control targets should leave operating margin below the independent trip.
+  if (hwCfg.safety?.n2_overspeed && n2RpmLimit > 0) {
+    const pbEnabled = !!document.getElementById('cf-pb_n2e')?.checked;
+    const pbSoft = fv('pb_n2s'), pbFull = fv('pb_n2h');
+    if (pbEnabled && ((pbSoft > 0 && pbSoft >= n2RpmLimit) ||
+                      (pbFull > 0 && pbFull >= n2RpmLimit))) {
+      warnings.push({section:'Engine Protection Limits', key:'warn-n2-pullback-trip',
+        msg:'⚠ N2 pullback starts or reaches full authority at/above the hard N2 shutdown limit. Set both pullback points below the trip.'});
+    }
+    const govTarget = fv('gv_tr'), govBand = fv('gv_bd') || 0;
+    if (hwCfg.controllers?.governor && govTarget > 0 && govTarget + govBand >= n2RpmLimit) {
+      warnings.push({section:'Automatic N2 Speed Control', key:'warn-n2-governor-trip',
+        msg:'⚠ Governor target plus its no-correction band reaches the hard N2 shutdown limit. Leave operating margin below the trip.'});
+    }
+    const n2Warn = fv('cl_n2');
+    if (n2Warn > 0 && n2Warn >= n2RpmLimit) {
+      warnings.push({section:'External Instrument Cluster Display', key:'warn-n2-cluster-trip',
+        msg:'⚠ Cluster N2 warning is at/above the hard shutdown limit, so the display may not warn before the ECU trips.'});
+    }
+  }
+
+  const egtSourceVal = Number((document.getElementById('cf-eg_src') || {}).value || cfg?.safety?.egt_source || 0);
+  const hasTotHw = hasRegistryInput('tot');
+  const hasTitHw = hasRegistryInput('tit');
+  const effectiveEgt = egtSourceVal === 1 && hasTotHw ? 1 :
+                       egtSourceVal === 2 && hasTitHw ? 2 :
+                       hasTotHw ? 1 :
+                       hasTitHw ? 2 : 0;
+
+  // 5. Safety-zero: selected EGT limit = 0 disables overtemperature protection
+  const totLimitVal = fv('tot_limit');
+  const totLimitCanonical = totLimitVal !== undefined ? _fieldFromDisplay(_fieldDef('tot_limit') || {}, totLimitVal) : undefined;
+  const titLimitVal = fv('sf_tit');
+  const titLimitCanonical = titLimitVal !== undefined ? _fieldFromDisplay(_fieldDef('sf_tit') || {}, titLimitVal) : undefined;
+  const activeEgtLimit = effectiveEgt === 1 ? totLimitVal : (effectiveEgt === 2 ? titLimitVal : 0);
+  const startupEgtLimit = fv('sf_st') || activeEgtLimit || 0;
+  const preStartEgtLimit = fv('sf_hs') || 0;
+  if (hwCfg.safety?.hot_start && preStartEgtLimit > 0 && startupEgtLimit > 0 &&
+      preStartEgtLimit >= startupEgtLimit) {
+    warnings.push({section:'Combustion & Startup Protection', key:'warn-prestart-egt-limit',
+      msg:'⚠ Pre-start EGT maximum is at/above the startup hard EGT limit. Lower the pre-start value so a hot engine is blocked before START.'});
+  }
+  if (effectiveEgt === 1 && totLimitCanonical !== undefined && Math.abs(totLimitCanonical) < 0.001) {
+    warnings.push({
+      section: 'Engine Protection Limits',
+      key:     'warn-tot-zero',
+      msg:     '⚠ TOT Limit is 0 - overtemperature protection is DISABLED for the selected engine temperature source.'
+    });
+  }
+  if (effectiveEgt === 2 && titLimitCanonical !== undefined && Math.abs(titLimitCanonical) < 0.001) {
+    warnings.push({
+      section: 'Engine Protection Limits',
+      key:     'warn-tit-zero',
+      msg:     '⚠ TIT Limit is 0 - overtemperature protection is DISABLED for the selected engine temperature source.'
+    });
+  }
+
+  // 6. Safety-zero: oil running min = 0 disables oil pressure fault
+  const oilRunningVal = fv('oil_rm');
+  if (oilRunningVal !== undefined && oilRunningVal === 0) {
+    warnings.push({
+      section: 'Oil System',
+      key:     'warn-oil-zero',
+      msg:     '⚠ Running Oil Min is 0 — oil pressure fault protection is DISABLED. Set a value to protect the engine.'
+    });
+  }
+
+  // Clear all existing inline warnings
+  document.querySelectorAll('.cfg-inline-warn').forEach(el => el.remove());
+
+  // Render each warning below the relevant section title
+  warnings.forEach(w => {
+    // Find the cfg-section whose cfg-title text matches the section name
+    const sections = document.querySelectorAll('.cfg-section');
+    let targetSection = null;
+    sections.forEach(sec => {
+      if (sec.dataset.section === w.section) {
+        targetSection = sec;
+      }
+    });
+    if (!targetSection) return;
+    const titleEl = targetSection.querySelector('.cfg-title');
+    if (!titleEl) return;
+    // Avoid duplicate
+    if (targetSection.querySelector('[data-warnkey="' + w.key + '"]')) return;
+    const div = document.createElement('div');
+    div.className = 'cfg-inline-warn';
+    div.setAttribute('data-warnkey', w.key);
+    div.style.cssText = 'font-size:.75rem;color:var(--yellow);background:rgba(255,196,0,.08);border:1px solid rgba(255,196,0,.3);border-radius:5px;padding:.28rem .65rem;margin:.3rem 0 .4rem;line-height:1.4';
+    div.textContent = w.msg;
+    titleEl.insertAdjacentElement('afterend', div);
+    const group = targetSection.closest('.config-group');
+    if (group) group.open = true;
+  });
+}
+
+// Hook runValidation into all number inputs after form render
+function hookValidation() {
+  document.querySelectorAll('#cfg-form input[type="number"]').forEach(inp => {
+    inp.addEventListener('input', runValidation);
+  });
+}
+
+// ── Save validation ───────────────────────────────────────────
+async function validateBeforeSave(cfg) {
+  const errors = [];
+  const warns  = [];
+
+  function gv(obj, ...keys) {
+    return keys.reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);
+  }
+
+  const rpmLimit   = gv(cfg, 'engine', 'rpm_limit');
+  const n2RpmLimit = gv(cfg, 'engine', 'n2_rpm_limit');
+  const minRpm     = gv(cfg, 'engine', 'min_rpm');
+  const idleTarget = gv(cfg, 'dynamic_idle', 'target_rpm');
+  const idleSource = Number(gv(cfg, 'dynamic_idle', 'source') || 0);
+  const hasN1 = hasRegistryInput('n1_speed');
+  const hasN2 = hasRegistryInput('n2_speed');
+  const hasP1 = hasRegistryInput('p1_pressure');
+  const hasP2 = hasRegistryInput('p2_pressure');
+  const hasFlame = hasRegistryInput('flame');
+  const hasAnyIdleRpm = hasN1 || hasN2;
+
+  if (hasN1 && rpmLimit !== undefined && minRpm !== undefined && minRpm >= rpmLimit)
+    errors.push('Min RPM (' + minRpm + ') must be below RPM Limit (' + rpmLimit + ').');
+  if (hwCfg.safety?.n2_overspeed && (!hasN2 || !(Number(n2RpmLimit) > 0)))
+    errors.push('N2 overspeed safety requires a fitted N2 RPM input and a Maximum N2 Speed above 0.');
+  const idleSourceAvailable = [hasN1, hasN2, hasP1, hasP2][idleSource] === true;
+  if (hwCfg.controllers?.dynamic_idle && !idleSourceAvailable)
+    errors.push('Automatic Idle feedback source is not configured. Choose an available N1, N2, P1, or P2 source before saving.');
+
+  const assistEnabled = !!gv(cfg, 'starter_control', 'pulsed_assist_enabled');
+  const starter = registryOutputByPurpose('starter');
+  if (assistEnabled && (!starter || Number(starter.driver) === 4 || !hasN1))
+    errors.push('Pulsed Starter Assist requires a proportional servo/PWM starter and an N1 speed input.');
+  const assistThreshold = Number(gv(cfg, 'starter_control', 'pulsed_assist_until_rpm') || 0);
+  const starterTarget = Number(gv(cfg, 'sequence', 'startup', 'pre_ign_rpm') || 0);
+  if (assistEnabled && starterTarget > 0 && assistThreshold >= starterTarget)
+    warns.push('Pulsed Starter Assist threshold is at or above the StarterSpin target. Normal ramped starter control will not run before the block completes.');
+
+  if (gv(cfg, 'relight', 'enabled')) {
+    const relightMin = Number(gv(cfg, 'relight', 'min_rpm') || 0);
+    const relightConfirm = Number(gv(cfg, 'relight', 'confirm_rpm') || 0);
+    const relightConfirmSource = Number(gv(cfg, 'relight', 'confirm_source') || 0);
+    const flameoutSource = Number(gv(cfg, 'safety', 'flameout_source') || 0);
+    const effectiveConfirmSource = relightConfirmSource || flameoutSource || (hasFlame ? 1 : (hasN1 ? 2 : 0));
+    if (relightMin <= 0)
+      errors.push('Automatic relight requires an explicit Minimum N1 to Fire Relight Ignition above 0 RPM.');
+    if (effectiveConfirmSource === 2 && relightConfirm <= 0)
+      errors.push('N1-based relight confirmation requires an explicit N1 Recovery Confirmation above 0 RPM.');
+    const minimumRunningN1 = Number(gv(cfg, 'engine', 'min_rpm') || 0);
+    const effectiveRelightMin = Math.max(relightMin, minimumRunningN1);
+    if (relightMin > 0 && minimumRunningN1 > 0 && relightMin < minimumRunningN1)
+      warns.push(`Minimum N1 to fire relight is below Minimum Running N1. The ECU will use ${Math.round(minimumRunningN1)} RPM as the automatic-relight floor.`);
+    if (effectiveConfirmSource === 2 && relightConfirm < effectiveRelightMin)
+      warns.push('N1 recovery confirmation is below the effective speed allowed to fire relight ignition. Normally set recovery at or above that firing floor.');
+  }
+
+  if (hasAnyIdleRpm && idleTarget !== undefined && minRpm !== undefined && idleTarget < minRpm)
+    warns.push('Idle target RPM (' + idleTarget + ') is below Min RPM (' + minRpm + '). Engine may fault at idle.');
+
+  if (hwCfg.safety?.n2_overspeed && Number(n2RpmLimit) > 0) {
+    const pbN2Enabled = !!gv(cfg, 'throttle', 'pullback_n2');
+    const pbN2Soft = Number(gv(cfg, 'throttle', 'pullback_n2_soft_rpm') || 0);
+    const pbN2Full = Number(gv(cfg, 'throttle', 'pullback_n2_hard_rpm') || 0);
+    if (pbN2Enabled && ((pbN2Soft > 0 && pbN2Soft >= n2RpmLimit) ||
+                        (pbN2Full > 0 && pbN2Full >= n2RpmLimit)))
+      warns.push('N2 pullback should begin and reach full authority below Maximum N2 Speed (' + n2RpmLimit + ' RPM), otherwise the hard shutdown can occur before gradual reduction is effective.');
+    const governorTarget = Number(gv(cfg, 'governor', 'target_rpm') || 0);
+    const governorBand = Number(gv(cfg, 'governor', 'band_rpm') || 0);
+    if (hwCfg.controllers?.governor && governorTarget > 0 && governorTarget + governorBand >= n2RpmLimit)
+      warns.push('Governor target plus no-correction band (' + (governorTarget + governorBand) + ' RPM) reaches Maximum N2 Speed (' + n2RpmLimit + ' RPM). Leave operating margin below the hard trip.');
+    if (hwCfg.controllers?.dynamic_idle && idleSource === 1 && Number(idleTarget) >= n2RpmLimit)
+      warns.push('N2-based idle target (' + idleTarget + ' RPM) is at or above Maximum N2 Speed (' + n2RpmLimit + ' RPM).');
+    const clusterN2Warn = Number(gv(cfg, 'cluster', 'n2_warn_rpm') || 0);
+    if (clusterN2Warn > 0 && clusterN2Warn >= n2RpmLimit)
+      warns.push('Cluster N2 warning (' + clusterN2Warn + ' RPM) is at or above Maximum N2 Speed (' + n2RpmLimit + ' RPM), so the display may not warn before shutdown.');
+  }
+  const pbN1Enabled = !!gv(cfg, 'throttle', 'pullback_n1');
+  const pbN1Soft = Number(gv(cfg, 'throttle', 'pullback_n1_soft_rpm') || 0);
+  const pbN1Full = Number(gv(cfg, 'throttle', 'pullback_n1_hard_rpm') || 0);
+  if (pbN1Enabled && Number(rpmLimit) > 0 &&
+      ((pbN1Soft > 0 && pbN1Soft >= rpmLimit) ||
+       (pbN1Full > 0 && pbN1Full >= rpmLimit)))
+    warns.push('N1 pullback should begin and reach full authority below Maximum N1 Speed (' + rpmLimit + ' RPM), otherwise the hard shutdown can occur before gradual reduction is effective.');
+  const governorTarget = Number(gv(cfg, 'governor', 'target_rpm') || 0);
+  if (hwCfg.controllers?.governor && hasN2 && governorTarget <= 0)
+    warns.push('Automatic N2 speed control is enabled in Hardware, but Target N2 RPM is 0. The governor remains inactive until you enter the rated output-shaft speed.');
+
+  // Windmilling oil protection must be able to trigger and command oil.
+  const standbySource = Number(gv(cfg, 'standby_oil', 'source') || 0);
+  const standbyRpm = Number(gv(cfg, 'standby_oil', 'rpm_limit') || 0);
+  const standbyPct = Number(gv(cfg, 'standby_oil', 'feed_pct') || 0);
+  const standbyBar = Number(gv(cfg, 'standby_oil', 'feed_bar') || 0);
+  const sourceLimits = standbySource === 0 ? [Number(rpmLimit) || 0] :
+                       standbySource === 1 ? [Number(n2RpmLimit) || 0] :
+                       [Number(rpmLimit) || 0, Number(n2RpmLimit) || 0];
+  const usableLimits = sourceLimits.filter(v => v > 0);
+  if (usableLimits.length && usableLimits.every(limit => standbyRpm >= limit))
+    warns.push('Windmilling-oil start threshold (' + standbyRpm + ' RPM) is at or above every selected shaft limit. The protective oil pump can never start; use a threshold well below normal shaft speed.');
+  if (standbyPct <= 0 && standbyBar <= 0)
+    warns.push('Windmilling-oil protection commands neither pump output nor pressure. Set a protective pump percentage or pressure target, or it will run without delivering oil.');
+
+  // Oil system cross-checks
+  const oilRunning   = gv(cfg, 'oil', 'running_min');
+  const oilStartup   = gv(cfg, 'oil', 'startup_min_bar');
+  const oilMapMin    = gv(cfg, 'oil', 'map_min');
+  const oilMapMax    = gv(cfg, 'oil', 'map_max');
+  if (oilStartup !== undefined && oilRunning !== undefined && oilStartup > oilRunning)
+    warns.push('Oil Arm Minimum (' + oilStartup + ' bar) is higher than Running Min (' + oilRunning + ' bar). The engine would fault immediately after spool.');
+  if (oilMapMin !== undefined && oilMapMax !== undefined && oilMapMin > oilMapMax)
+    errors.push('Running Oil (' + oilMapMin + ' bar) is greater than Map Max (' + oilMapMax + ' bar). Swap them.');
+  if (oilMapMin !== undefined && oilRunning !== undefined && oilMapMin < oilRunning)
+    warns.push('Running Oil (' + oilMapMin + ' bar) is below Running Min (' + oilRunning + ' bar). The running oil setpoint should be at or above the fault threshold.');
+
+  // EGT / temperature cross-checks
+  const totLimit    = gv(cfg, 'engine', 'tot_limit');
+  const titLimit    = gv(cfg, 'safety', 'tit_limit_c');
+  const totMargin   = gv(cfg, 'engine', 'tot_safe_margin');
+  const totCooldown = gv(cfg, 'engine', 'tot_cooldown_target');
+  const sourcePref = gv(cfg, 'safety', 'egt_source') || 0;
+  const hasTotHw = hasRegistryInput('tot');
+  const hasTitHw = hasRegistryInput('tit');
+  const primaryLimit = sourcePref === 1 && hasTotHw ? totLimit :
+                       sourcePref === 2 && hasTitHw ? titLimit :
+                       hasTotHw ? totLimit :
+                       hasTitHw ? titLimit : undefined;
+  const primaryLabel = sourcePref === 2 && hasTitHw ? 'TIT' :
+                       sourcePref === 1 && hasTotHw ? 'TOT' :
+                       hasTotHw ? 'TOT' : (hasTitHw ? 'TIT' : 'EGT');
+  if (primaryLimit !== undefined && totMargin !== undefined && totMargin >= primaryLimit)
+    errors.push('EGT Soft Margin (' + totMargin + '°) must be less than selected ' + primaryLabel + ' limit (' + primaryLimit + '°).');
+  if (totCooldown !== undefined && primaryLimit !== undefined && totCooldown >= primaryLimit)
+    warns.push('Cooldown EGT target (' + totCooldown + '°) is at or above selected ' + primaryLabel + ' limit (' + primaryLimit + '°). Cooldown will never complete.');
+  const preStartLimit = Number(gv(cfg, 'sequence', 'startup', 'pre_start_egt_limit_c') || 0);
+  const separateStartupLimit = Number(gv(cfg, 'sequence', 'startup', 'startup_egt_limit_c') || 0);
+  const effectiveStartupLimit = separateStartupLimit > 0 ? separateStartupLimit : Number(primaryLimit || 0);
+  if (hwCfg.safety?.hot_start && preStartLimit > 0 && effectiveStartupLimit > 0 &&
+      preStartLimit >= effectiveStartupLimit)
+    warns.push('Pre-Start EGT Maximum (' + preStartLimit + '°) is at/above the startup hard EGT limit (' + effectiveStartupLimit + '°). Lower it so a hot engine is blocked before START.');
+
+  // AB pump range — backend rejects max < min; name the fields before submit
+  const abPmn = gv(cfg, 'afterburner', 'pump_min_pct');
+  const abPmx = gv(cfg, 'afterburner', 'pump_max_pct');
+  if (abPmn !== undefined && abPmx !== undefined && abPmx < abPmn)
+    errors.push('Afterburner Fuel Pump Max % (' + abPmx + ') is below Min % (' + abPmn + '). Swap them.');
+
+  // Throttle pullback ordering — backend rejects hard limits at/below the
+  // soft/start limit; catch each pair here with a named message.
+  const pbPairs = [
+    ['throttle', 'pullback_n1_soft_rpm',  'throttle', 'pullback_n1_hard_rpm',  'N1 Pullback Start', 'N1 Pullback Full'],
+    ['throttle', 'pullback_n2_soft_rpm',  'throttle', 'pullback_n2_hard_rpm',  'N2 Pullback Start', 'N2 Pullback Full'],
+    ['throttle', 'pullback_egt_soft_c',   'throttle', 'pullback_egt_hard_c',   'EGT Pullback Start', 'EGT Pullback Full'],
+  ];
+  pbPairs.forEach(([s1, k1, s2, k2, l1, l2]) => {
+    const soft = gv(cfg, s1, k1), full = gv(cfg, s2, k2);
+    if (soft !== undefined && full !== undefined && soft > 0 && full > 0 && full <= soft)
+      errors.push(l2 + ' (' + full + ') must be above ' + l1 + ' (' + soft + ').');
+  });
+
+  // Safety-zero checks: 0 = disabled in SafetyMonitor - warn loudly
+  if (primaryLimit !== undefined && primaryLimit === 0)
+    warns.push(primaryLabel + ' Limit is 0 - overtemperature protection is DISABLED. The engine will not shut down on over-temperature.');
+  if (oilRunning !== undefined && oilRunning === 0)
+    warns.push('Running Oil Min is 0 — oil pressure fault protection is DISABLED. The engine will not shut down on oil loss.');
+
+  if (hasActualAfterburnerHardware() &&
+      Number(gv(cfg, 'afterburner', 'flame_mode')) === 2) {
+    warns.push('Afterburner uses a timed assumption with no flame verification. A failed light-up can continue feeding fuel.');
+    if (Number(gv(cfg, 'afterburner', 'stabilize_max_tot')) === 0)
+      warns.push('Afterburner timed assumption is combined with disabled stabilization EGT protection. Fit flame/EGT feedback or configure a verified stabilization limit.');
+  }
+
+  if (errors.length) {
+    alert('Cannot save — fix these errors:\n\n' + errors.map(e => '• ' + e).join('\n'));
+    return false;
+  }
+  if (warns.length) {
+    return await OTDialog.confirm('Warnings:\n\n' + warns.map(w => '• ' + w).join('\n'), {
+      title:'Review safety warnings', confirmLabel:'Save anyway', danger:true
+    });
+  }
+  return true;
+}
+
+// ── Save ──────────────────────────────────────────────────────
+// Stage 1: collect form values into cfg, validate, then show recap modal.
+async function saveConfig() {
+  if (isLocked) { alert('Config is locked - stop the engine first. (Live editing requires Dev Mode enabled beforehand, from Tools while in STANDBY.)'); return; }
+
+  // Read form values into cfg (needed so _buildChanges has current cfg for validation)
+  SCHEMA.forEach(sec => {
+    sec.fields.forEach(f => {
+      const el = document.getElementById('cf-' + f.key);
+      if (!el) return;
+      if (f.type === 'checkbox') {
+        setPath(cfg, f.path, el.checked);
+      } else {
+        let v = parseFloat(el.value);
+        if (!isNaN(v)) {
+          v = _fieldFromDisplay(f, v);
+          setPath(cfg, f.path, v);
+        }
+      }
+    });
+  });
+
+  // Run hard validation first (errors block save entirely)
+  if (!await validateBeforeSave(cfg)) return;
+
+  // Build the change list for the recap
+  const changes = _buildChanges();
+  if (!changes.length) {
+    // Nothing differs from snapshot — skip recap and save directly
+    _doSave();
+    return;
+  }
+
+  const modal    = document.getElementById('save-recap-modal');
+  const body     = document.getElementById('save-recap-body');
+  const subtitle = document.getElementById('save-recap-subtitle');
+  const inactiveChanges = changes.filter(change => change.inactive);
+  subtitle.textContent = changes.length + ' field' + (changes.length > 1 ? 's' : '') +
+    ' will be updated on the device.' +
+    (inactiveChanges.length
+      ? ` ${inactiveChanges.length} amber-marked value${inactiveChanges.length === 1 ? ' is' : 's are'} being saved for future hardware and will remain inactive for now.`
+      : '');
+
+  const rows = changes.map(c =>
+    `<tr>
+      <td>${_escHtml(c.label)}${c.inactive ? '<br><span style="color:var(--yellow);font-size:.68rem">Inactive with current hardware</span>' : ''}</td>
+      <td class="val-was">${_escHtml(c.was)}</td>
+      <td class="val-now">${_escHtml(c.now)}</td>
+    </tr>`
+  ).join('');
+  body.innerHTML =
+    `<table class="save-recap-table">
+      <thead><tr><th>Setting</th><th>Was</th><th>Now</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  modal.style.display = 'flex';
+}
+
+function _cancelSaveRecap() {
+  document.getElementById('save-recap-modal').style.display = 'none';
+  const cb = document.getElementById('save-recap-confirm-btn');
+  if (cb) cb.disabled = false;
+}
+
+// Stage 2: user confirmed — actually send to device.
+function _doSave() {
+  const cb = document.getElementById('save-recap-confirm-btn');
+  if (cb) cb.disabled = true;
+  document.getElementById('save-recap-modal').style.display = 'none';
+  const saveMsg = document.getElementById('save-msg');
+  saveMsg.textContent = 'Saving…';
+  saveMsg.style.color = '';
+  fetch('/api/config', {
+    method: 'PATCH',
+    body: JSON.stringify(cfg),
+    headers: { 'Content-Type': 'application/json' }
+  }).then(async r => {
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) throw new Error(d.error || d.reason || ('HTTP ' + r.status));
+    return d;
+  }).then(d => {
+    if (d.ok) {
+      if (window.OTSetup) OTSetup.mark('config');
+      _clearDirty();
+      saveMsg.textContent = (d.warn ? 'Saved — ' + d.warn : '✓ Saved — ' + new Date().toLocaleTimeString());
+      saveMsg.style.color = d.warn ? 'var(--yellow)' : 'var(--green)';
+      if (cb) cb.disabled = false;
+    } else {
+      saveMsg.textContent = '✗ ' + JSON.stringify(d);
+      saveMsg.style.color = '#f55';
+      if (cb) cb.disabled = false;
+    }
+  }).catch(e => {
+    saveMsg.textContent = '✗ ' + e;
+    saveMsg.style.color = '#f55';
+    if (cb) cb.disabled = false;
+  });
+}
+
+// ── Engine type presets ───────────────────────────────────────
+// Each example proposes reviewable Config-page values; only Save performs PATCH.
+// Hardware pins are NOT touched — user handles those in hardware.html.
+const PRESETS = {
+  kj66: {
+    desc: 'Small RC Jet ~60N (KJ-66 style)',
+    patch: {
+      engine: { rpm_limit: 120000, min_rpm: 35000, tot_limit: 870, tot_safe_margin: 30, tot_cooldown_target: 150 },
+      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 115000, pullback_n1_hard_rpm: 119000, pullback_egt: true, pullback_egt_soft_c: 820, pullback_egt_hard_c: 860 },
+      dynamic_idle: { target_rpm: 45000 }
+    }
+  },
+  med_jet: {
+    desc: 'Medium RC Jet ~200N',
+    patch: {
+      engine: { rpm_limit: 90000, min_rpm: 28000, tot_limit: 800, tot_safe_margin: 30, tot_cooldown_target: 150 },
+      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 85000, pullback_n1_hard_rpm: 89000, pullback_egt: true, pullback_egt_soft_c: 750, pullback_egt_hard_c: 790 },
+      dynamic_idle: { target_rpm: 35000 }
+    }
+  },
+  large_jet: {
+    desc: 'Large RC Jet ~400N+, approximately 100,000 RPM',
+    patch: {
+      engine: { rpm_limit: 100000, min_rpm: 30000, tot_limit: 750, tot_safe_margin: 50, tot_cooldown_target: 150 },
+      throttle: { ramp_up_ms: 600, ramp_down_ms: 800, pullback_n1: true, pullback_n1_soft_rpm: 95000, pullback_n1_hard_rpm: 100000, pullback_egt: true, pullback_egt_soft_c: 700, pullback_egt_hard_c: 750 },
+      dynamic_idle: { target_rpm: 44000, rpm_limit: 60000 },
+      safety: { flameout_egt_below_c: 300, flameout_egt_fall_rate_c_s: 50 },
+      standby_oil: { source: 0, rpm_limit: 1000, feed_pct: 25, feed_bar: 0 },
+      sequence: { startup: { pre_start_egt_limit_c: 150, startup_egt_limit_c: 0 } }
+    }
+  },
+  apu_small: {
+    desc: 'Small APU (Garrett GTP30 style)',
+    patch: {
+      engine: { rpm_limit: 80000, min_rpm: 20000, tot_limit: 700, tot_safe_margin: 30, tot_cooldown_target: 100 },
+      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 75000, pullback_n1_hard_rpm: 79000, pullback_egt: true, pullback_egt_soft_c: 650, pullback_egt_hard_c: 690 },
+      dynamic_idle: { target_rpm: 25000 }
+    }
+  },
+  turboshaft: {
+    desc: 'Turboshaft / Power Turbine',
+    patch: {
+      engine: { rpm_limit: 50000, min_rpm: 10000, tot_limit: 650, tot_safe_margin: 30, tot_cooldown_target: 80 },
+      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 47000, pullback_n1_hard_rpm: 49500, pullback_egt: true, pullback_egt_soft_c: 600, pullback_egt_hard_c: 640 },
+      dynamic_idle: { target_rpm: 15000 }
+    }
+  },
+  turbocharger: {
+    desc: 'Basic Turbocharger Gas Turbine (recommended starting point)',
+    patch: {
+      engine: { rpm_limit: 65000, min_rpm: 8000, tot_limit: 650, tot_safe_margin: 50, tot_cooldown_target: 80 },
+      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 60000, pullback_n1_hard_rpm: 64500, pullback_egt: true, pullback_egt_soft_c: 600, pullback_egt_hard_c: 640 },
+      oil:    { startup_pressure: 1.5, startup_min_bar: 0.8, running_min: 1.8, map_min: 2.0, map_max: 2.8 },
+      dynamic_idle: { target_rpm: 15000 },
+      glow_plug: { preheat_ms: 12000, preheat_max_pct: 80, hold_pct: 30 },
+      safety: { flameout_shutdown_ms: 4000 }
+    }
+  }
+};
+
+async function applyPreset(key) {
+  const sel = document.getElementById('preset-sel');
+  if (!key) return;
+  const preset = PRESETS[key];
+  if (!preset) { sel.value = ''; return; }
+  if (!await OTDialog.confirm('Load "' + preset.desc + '" as editable example suggestions?\n\nThese values are NOT verified for your turbine. They only change Config fields that are currently available for the fitted hardware, and do not reach the ECU unless you review and explicitly save them. Hardware assignments and sequences are not changed.', {
+    title:'Load unverified example values', confirmLabel:'Load suggestions'
+  })) {
+    sel.value = ''; return;
+  }
+  // Apply only fields represented on this Config page and currently usable
+  // with the fitted hardware. Presets never mutate sequence data or settings
+  // that the user cannot review here.
+  let applied = 0;
+  let skipped = 0;
+  SCHEMA.forEach(sec => sec.fields.forEach(f => {
+    const proposed = getPath(preset.patch, f.path);
+    if (proposed === undefined) return;
+    const el = document.getElementById('cf-' + f.key);
+    if (!el || el.disabled) { skipped++; return; }
+    setPath(cfg, f.path, proposed);
+    applied++;
+  }));
+  if (!applied) {
+    const note = document.getElementById('preset-note');
+    if (note) {
+      note.textContent = 'No values from this example apply to the currently fitted hardware.';
+      note.style.color = 'var(--yellow)';
+    }
+    sel.value = '';
+    return;
+  }
+  // Repopulate the form and indicate unsaved changes
+  renderForm();
+  _applyAllVisibility();
+  hookValidation();
+  runValidation();
+  _markDirty();
+  const saveMsg = document.getElementById('save-msg');
+  if (saveMsg) { saveMsg.textContent = '⚠ Example suggestions loaded — unverified and unsaved'; saveMsg.style.color = 'var(--yellow)'; }
+  const note = document.getElementById('preset-note');
+  if (note) {
+    note.textContent = '⚠ "' + preset.desc + '" examples loaded. Verify every changed value before saving.' +
+      (skipped ? ' ' + skipped + ' hardware-dependent suggestion' + (skipped === 1 ? ' was' : 's were') + ' skipped.' : '');
+    note.style.color = 'var(--yellow)';
+  }
+  sel.value = '';
+}

@@ -25,7 +25,7 @@ SESSION_FIELDS = (
 def session_cfg(**enabled):
     cfg = {key: False for key in SESSION_FIELDS}
     cfg.update(enabled)
-    cfg["interval_ms"] = 100
+    cfg["interval_ms"] = 250
     return {"session_log": cfg}
 
 
@@ -65,15 +65,27 @@ def main():
         deadline = time.time() + 10
         last = {}
         active_path = ""
+        max_active_loop_exec_ms = 0.0
         while time.time() < deadline:
             last = q.dut.data()
             active_path = last.get("session_log_path") or active_path
+            max_active_loop_exec_ms = max(
+                max_active_loop_exec_ms,
+                float(last.get("loop_exec_max_ms") or 0.0),
+            )
             web_samples += 1
             time.sleep(0.2)
         q.recover()
 
+        completed_path = ""
+        for _ in range(30):
+            completed = q.dut.data()
+            completed_path = completed.get("session_log_path") or ""
+            if completed_path:
+                break
+            time.sleep(0.2)
         csv_text = ""
-        if active_path:
+        if completed_path:
             with urllib.request.urlopen("http://192.168.4.1/api/session/log", timeout=10) as response:
                 csv_text = response.read().decode("utf-8")
         lines = [line for line in csv_text.splitlines() if line.strip()]
@@ -81,21 +93,25 @@ def main():
             "t_ms,mode,n1_rpm,thr_pct,loop_hz,loop_exec_avg_ms,loop_exec_max_ms"
         )
         enabled_ok = (
-            bool(active_path) and header_ok and len(lines) >= 20 and web_samples >= 25 and
+            not active_path and bool(completed_path) and header_ok and
+            len(lines) >= 20 and web_samples >= 25 and max_active_loop_exec_ms < 20.0 and
             last.get("session_logger_healthy") is True and
             int(last.get("session_dropped_rows") or 0) == 0
         )
         rows.append({
-            "name": "ENABLED_LOGGING_RECORDS_WHILE_WEB_STAYS_RESPONSIVE",
+            "name": "ENABLED_LOGGING_DEFERS_FLASH_AND_STAYS_RESPONSIVE",
             "ok": enabled_ok,
             "active_path": active_path,
+            "completed_path": completed_path,
             "csv_lines": len(lines),
             "web_samples": web_samples,
+            "max_active_loop_exec_ms": max_active_loop_exec_ms,
             "logger_healthy": last.get("session_logger_healthy"),
             "dropped_rows": last.get("session_dropped_rows"),
         })
-        print(f"[{'PASS' if enabled_ok else 'FAIL'}] ENABLED_LOGGING_RECORDS_WHILE_WEB_STAYS_RESPONSIVE: "
-              f"samples={web_samples} rows={max(0, len(lines) - 1)}")
+        print(f"[{'PASS' if enabled_ok else 'FAIL'}] ENABLED_LOGGING_DEFERS_FLASH_AND_STAYS_RESPONSIVE: "
+              f"samples={web_samples} rows={max(0, len(lines) - 1)} "
+              f"max_loop={max_active_loop_exec_ms:.3f}ms")
     except Exception as exc:  # noqa: BLE001
         error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
         print("ERROR:", error)

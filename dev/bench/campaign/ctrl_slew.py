@@ -9,7 +9,7 @@ def fix(hw):
     hw["sensors"]["throttle_input"].update(enabled=True, pin=4, rc_pwm=False)
     hw["actuators"]["throttle"].update(enabled=True, type=0, min_us=1000, max_us=2000)
     hw["actuators"]["status_led"]["enabled"] = False
-    hw["controllers"].update(throttle_slew=True, dynamic_idle=False, oil_loop=False, governor=False)
+    hw["controllers"].update(dynamic_idle=False, oil_loop=False, governor=False)
     for k in hw["safety"]:
         hw["safety"][k] = False
     hw["startup_delay_ms"] = [0, 400, 0, 0, 400, 0, 400]

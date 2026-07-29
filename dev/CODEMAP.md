@@ -1,6 +1,6 @@
 # OpenTurbine ECU — CODEMAP
 
-Current high-level source map for the firmware and web stack. Line counts are
+Current OpenTurbine 2.0 high-level source map for the firmware and web stack. Line counts are
 approximate and intended for orientation only. Project is a turbine ECU on
 ESP32 / ESP32-S3 running Arduino-ESP32 (IDF5). Wireless web UI is the primary
 tuning surface.
@@ -38,6 +38,7 @@ src/
                                                ABCheckReady, ABIgnite, ABFlameConfirm, ABStabilize, etc.)
   hal/
     sensors/  — PCNTRpmSensor, MAX6675/31855/31856, DS18B20, NTC, AnalogLinear/Poly/Threshold
+    i2c/      — shared-bus discovery/health plus TCA9554, TLA2528 and NAU7802 service
     actuators/ — ServoActuator, LEDCActuator, RelayActuator
     RCInput.h  — interrupt-driven RC PWM decoder (2 IRAM ISRs)
   system/
@@ -45,20 +46,20 @@ src/
     HardwareConfig.{h,cpp}                   — topology (pins, types, sequence names, profile) — LittleFS JSON
     CommandQueue.{h,cpp}                     — FreeRTOS queue (depth 16) of OTPacket
     Watchdog.h                               — TWDT 5 s, single subscriber
-    FlightRecorder.{h,cpp}                   — persistent NDJSON ring (2200 records, 20 % evict)
-    SessionLogger.{h,cpp}                    — per-run CSV with deferred Core 0 writes
+    FlightRecorder.{h,cpp}                   — bounded RAM event tail; persistent NDJSON ring
+    SessionLogger.{h,cpp}                    — bounded per-run RAM tail; safe-state CSV persistence
     RulesEngine.h                            — up to 8 sensor→actuator threshold rules
     ClusterSerial.{h,cpp}                    — OTC framed external display/device protocol (UART1)
     MAVLinkOutput.h                          — TX-only MAVLink v1 HEARTBEAT / NAMED_VALUE_FLOAT / STATUSTEXT
-    web/WebServer.{h,cpp}                    — ~1810 lines: HTTP+WS+OTA+captive portal
+    web/WebServer.{h,cpp}                    — HTTP+WS+OTA+captive portal and safe-state persistence
   platform/esp32/
     PlatformInit.h                           — boot sequence (LittleFS, ADC config, Preferences, reset reason)
     StatusLED.h                              — millis-based blink FSM
 data/                — gzipped HTML/CSS/JS UI (served by WebServer)
 hardware_profile.h   — compile-time defaults for pins/features (overridden at runtime by HardwareConfig)
-partitions.csv       — 4 MB OTA layout for esp32dev (nvs / otadata / app0 0x180000 / app1 0x180000 / littlefs 0xE0000)
-partitions_16mb.csv  — 16 MB OTA layout for esp32s3dev (3 MB app slots, ~9.9 MB littlefs)
-platformio.ini       — esp32dev + esp32s3dev; -DCONFIG_ASYNC_TCP_USE_WDT=0 (workaround)
+partitions.csv       — 4 MB esp32dev layout (dual 0x190000 apps, PCB profile, 0xB0000 LittleFS, coredump)
+partitions_8mb.csv   — universal 8 MB OTA layout for esp32s3dev (3 MB app slots, ~1.8 MB littlefs; safe on 16 MB)
+platformio.ini       — esp32dev + esp32s3dev; AsyncTCP pinned to Core 0 and excluded from TWDT
 ```
 
 ---
@@ -69,9 +70,9 @@ platformio.ini       — esp32dev + esp32s3dev; -DCONFIG_ASYNC_TCP_USE_WDT=0 (wo
 
 | Task | Where created | Core | Prio | Stack | Role |
 |---|---|---:|---:|---:|---|
-| `loopTask` (Arduino default) | implicit, `main.cpp:loop()` | 1 | 1 | 8192 | All control: sensors, sequencer, safety, controllers, actuators, comms tick, logging |
+| `loopTask` (Arduino default) | implicit, `main.cpp:loop()` | 1 | 1 | 8192 | All control: sensors, sequencer, safety, controllers, actuators, comms tick, RAM logging |
 | `web` | `main.cpp:1598` `xTaskCreatePinnedToCore(webTask, "web", 12288, nullptr, 8, nullptr, 0)` | 0 | 8 | 12288 | WebServer::tick (HTTP + WS + DNS captive). 20 ms delay when engine active, 5 ms in STANDBY |
-| `async_tcp` | ESPAsyncWebServer library | (lib default) | 10 | (lib) | Owned by AsyncTCP; serves connections off `web` |
+| `async_tcp` | ESPAsyncWebServer library | 0 (build flag) | 10 | (lib) | Priority-10 network callbacks cannot pre-empt the Core-1 engine loop |
 
 > No per-subsystem tasks. The entire control chain runs serially on `loopTask`.
 > See `main.cpp:1618-1689` for loop body ordering.
@@ -84,8 +85,8 @@ platformio.ini       — esp32dev + esp32s3dev; -DCONFIG_ASYNC_TCP_USE_WDT=0 (wo
 | `RCInput::_isrIdle` | `src/hal/RCInput.h:96` | yes | `CHANGE` on idle RC pin | Captures pulse width into `_idle` volatile struct; sets `fresh` flag |
 
 No software ISR exists for RPM. `PCNTRpmSensor` (`hal/sensors/PCNTRpmSensor.h`) uses
-the ESP32 PCNT peripheral in polled mode (`pcnt_unit_get_count` every 100 ms), with a
-1 µs hardware glitch filter.
+the ESP32 PCNT peripheral in polled mode with speed-dependent sample averaging and a
+5 µs hardware glitch filter. Rate calculations advance only when a new sample is produced.
 
 Pin-change attach is via `attachInterrupt(digitalPinToInterrupt(pin), handler, CHANGE)`
 in `RCInput::begin()` (`hal/RCInput.h:39, 46`). No critical-section / `portENTER_CRITICAL`
@@ -96,7 +97,8 @@ wrapping on reads of the volatile shared struct.
 | Object | Where | Depth / type | Producer | Consumer |
 |---|---|---|---|---|
 | `CommandQueue::_queue` | `system/CommandQueue.cpp:64` | xQueueCreate depth=16, item=OTPacket | Core 0 (web, DI handler), main loop helpers | Core 1 main loop drain at start of tick |
-| `SessionLogger::_rowQueue` | `system/SessionLogger.cpp:76` | xQueueCreate depth=20, item=SessionRow | Core 1 loop `tick()` (sample sensor row) | Core 0 web task `drainQueue()` (write CSV) |
+| `SessionLogger::_rowQueue` | `system/SessionLogger.cpp` | xQueueCreate depth=64, item=SessionRow | Core 1 loop `tick()` (sample newest sensor row) | Core 0 `drainQueue()` in STANDBY/FAULT (write and close CSV) |
+| Flight-recorder append ring | `system/FlightRecorder.cpp` | 14 usable records on Classic, 15 on S3; 500-byte slots | Core 1 ECU loop and Core 0 config logging | Core 0 `runEviction()` in STANDBY/FAULT |
 | `FlightRecorder::_mutex` | `system/FlightRecorder.cpp:27` | binary mutex | n/a | wraps every append, eviction, web read |
 | `Watchdog` TWDT | `system/Watchdog.h:9-18` | `esp_task_wdt_init(5 s, panic=true)`, `esp_task_wdt_add(nullptr)` | n/a | Fed only from Core 1 `loop()` via `Watchdog::feed()`. Idle tasks not subscribed (see `-DCONFIG_ASYNC_TCP_USE_WDT=0` in `platformio.ini`) |
 
@@ -129,7 +131,7 @@ Writers/readers are cross-core. Fields grouped:
 64-bit fields: none in EngineData. Timers are `unsigned long` (32-bit on ESP32 / IDF
 LP64 model). Wraparound at ~49 days, relevant for `millis()` math throughout.
 
-### 3.2 `Config` (`system/Config.{h,cpp}`)
+### 3.2 `Config` (`system/Config.h`, `system/Config.cpp`, `system/ConfigSerialize.cpp`)
 
 LittleFS-backed (`/ecu_config.json`, with `/config.json` legacy fallback at
 `Config.cpp:225-330`). Static members organised by section:
@@ -147,14 +149,21 @@ LittleFS-backed (`/ecu_config.json`, with `/config.json` legacy fallback at
 - Rules array (`Config::rules[8]`, evaluated by RulesEngine).
 - Profile ID: `profileId`.
 
-Persistence (`Config.cpp`):
+Persistence:
+- `Config.cpp` owns storage, validation, locking, and runtime counters.
+- `ConfigSerialize.cpp` owns defaults plus JSON decode/encode. Repeated scalar
+  fields use typed descriptor tables, so each JSON key has one canonical mapping
+  used for both reading and writing.
+- `ConfigInternal.h` is the narrow shared interface for rule-handle resolution
+  and the runtime-statistics critical section.
 - `load()` calls `_applyDefaults()`, then tries `/ecu_config.json`, falls back to `/config.json`.
 - `save()` writes to `/ecu_config.json.tmp` then atomic-renames.
 - No CRC, no HMAC, no version-migration steps (only `configVersionMismatch` UI flag).
-- `requestSave()` sets `_savePending` flag; Core 0 (web task) calls `flushPendingSave()` to do the LittleFS I/O — keeps Core 1 free of blocking flash writes.
+- `requestSave()` sets `_savePending`; the Core-0 web task calls `flushPendingSave()` only in STANDBY/FAULT. Runtime-stat NVS writes, session CSV persistence, event-log persistence, and filesystem-stat refresh use the same safe-state gate because ESP32 flash writes can suspend both cores.
 - `isLocked()` returns true in STARTUP/RUNNING/SHUTDOWN unless `EngineData::devMode` is active. Dev Mode itself is only toggleable in STANDBY. Hardware/full-restore/OTA paths have separate STANDBY gates.
 
-### 3.3 `HardwareConfig` (`system/HardwareConfig.{h,cpp}`)
+### 3.3 `HardwareConfig` (`system/HardwareConfig.h`, `system/HardwareConfig.cpp`,
+`system/HardwareConfigSerialize.cpp`)
 
 LittleFS JSON (`/ecu_config.json` "hardware" section; legacy `/hardware.json`). All
 ~150 static members: pins, feature `has*` flags, actuator type selectors, sequence
@@ -207,7 +216,7 @@ checkToolTimers()                 — STANDBY-only tool expiries
 checkExtraCooldown()              — STANDBY cooldown timer
 checkRelight()                    — keeps igniter on while relight criteria hold
 checkABTrigger()                  — AB state machine evaluation
-checkStarterAssist()              — starter PWM hold in RUNNING (hysteresis)
+StarterSpin/PulsedStarterAssist   — startup-only proportional starter pulse state
 checkStandbyOilFeed()             — windmilling oil-feed in STANDBY
 checkGeneralDI()                  — debounced DI polling, role dispatch
 buzzerTick()                      — passive piezo FSM
@@ -235,11 +244,11 @@ apply. OpenTurbine is easier to reason about through these ownership areas:
 
 | Area | Code in scope |
 |---|---|
-| **sequencer-state** | `engine/sequencer/SequenceEngine.h`, `IBlock.h`, all 30+ blocks under `engine/sequencer/blocks/`, AB state machine in `main.cpp:651-843`, mode transitions `main.cpp:924-1097` |
+| **sequencer-state** | `engine/sequencer/SequenceEngine.h`, `IBlock.h`, all 30+ blocks under `engine/sequencer/blocks/`, dependency-free `engine/sequencer/PulsedStarterAssist.h`, AB state machine and mode transitions in `main.cpp` |
 | **sensor-input** | `hal/sensors/*` (PCNTRpmSensor, MAX6675/31855/31856, NTC, DS18B20, AnalogPoly, AnalogLinear, AnalogThreshold), `hal/RCInput.h`, sensor-read path in `Hardware::updateSensors` |
 | **actuator-output** | `hal/actuators/*`, all `g_act*` globals + selection pointers in `Hardware.h`, `Hardware::updateActuators`, `Hardware::allOff`, igniter dwell/coil-charge logic, AB pump scaling |
 | **controllers** | `engine/controllers/{ThrottleSlew,DynamicIdle,OilPressureLoop,PowerTurbineGovernor,IController}.h`, `Hardware::initControllers`, `Hardware::runControllers`, limp-mode cap |
-| **limits-protection** | `engine/SafetyMonitor.h`, `system/RulesEngine.h`, relight FSM in `main.cpp:476-505`, `checkStarterAssist`, `checkStandbyOilFeed`, `checkExtraCooldown`, `checkCooldownSkip`, DI fault role |
+| **limits-protection** | `engine/SafetyMonitor.h`, `system/RulesEngine.h`, relight FSM, standby-oil/cooldown monitors, and DI fault handling in `main.cpp` |
 | **calibration-storage** | `system/Config.{h,cpp}`, `system/HardwareConfig.{h,cpp}`, `_savePending` deferred-write path, `applyDefaults`, partition layout |
 | **comms-protocols** | `system/ClusterSerial.{h,cpp}`, `system/MAVLinkOutput.h`, `system/CommandQueue.{h,cpp}` |
 | **wireless-web** | `system/web/WebServer.{h,cpp}` (HTTP/WS/OTA/captive portal), AP setup in `PlatformInit.h` + WebServer, mDNS, `Update` flow, JSON request handling |
@@ -258,14 +267,17 @@ FuelPumpIdle, ABIgnite torch).
 From `platformio.ini`:
 - `-DCONFIG_ASYNC_TCP_USE_WDT=0` — AsyncTCP would otherwise subscribe itself to TWDT
   and block on `portMAX_DELAY`, causing periodic WDT panics.
+- `-DCONFIG_ASYNC_TCP_RUNNING_CORE=0` — pins priority-10 network callbacks away
+  from the Core-1 engine loop.
 - `-DCONFIG_ASYNC_TCP_QUEUE_SIZE=128` — default is 32, raised to absorb captive-portal
   HTTP+DNS bursts. Implication: more RAM pressure on async_tcp task.
 - `-DCORE_DEBUG_LEVEL=0` — no library-level logging in release.
 - `-mtext-section-literals` — keep ISR literal pools adjacent (Xtensa `l32r` reloc).
 - `OT_DEV_MODE` is an opt-in build flag that boots runtime Dev Mode already enabled. Normal beta builds leave it off and use the STANDBY-only web toggle when diagnostics or live Config tuning are intentionally needed.
 
-Partition: 4 MB flash, dual 1.5 MB OTA slots, 896 KB LittleFS region. `nvs` is reserved
-but most config lives in LittleFS JSON, not NVS.
+Classic partition: 4 MB flash, dual 1.5625 MiB OTA slots, a 64 KiB immutable
+PCB-profile partition, 704 KiB LittleFS, and a 64 KiB coredump partition. `nvs`
+is reserved, but most configuration lives in LittleFS JSON.
 
 ---
 
@@ -273,7 +285,7 @@ but most config lives in LittleFS JSON, not NVS.
 
 | Surface | Where parsed | Notes |
 |---|---|---|
-| HTTP/WS web requests | `system/web/WebServer.cpp` | Shared 8 KB RX buffer for POST/PATCH bodies; no auth on any endpoint |
+| HTTP/WS web requests | `system/web/WebServer.cpp` | One 16 KiB RX and one 16 KiB TX workspace reserved from internal heap before Wi-Fi; body ownership and bounded response copies prevent concurrent corruption; no endpoint authentication |
 | OTA upload | `WebServer.cpp:817-859` (`/update`) | STANDBY-only gate; `Update.write()` streamed; no size limit declared |
 | WiFi credentials | `WebServer.cpp` AP setup | AP password is optional; SSID = profile_id (broadcasts profile name) |
 | LittleFS config files | `Config::load`, `HardwareConfig::load` | JSON; no CRC; corrupt → parse error → defaults |

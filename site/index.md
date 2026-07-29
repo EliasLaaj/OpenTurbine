@@ -5,7 +5,7 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
 ---
 
 <section class="hero"><div class="shell hero-grid"><div>
-<p class="eyebrow">Open-source ESP32 turbine ECU</p>
+<p class="eyebrow">OpenTurbine 2.0 · open-source ESP32 turbine ECU</p>
 <h1>Build the turbine controller your system needs</h1>
 <p class="lede">Configure sensors, actuators, sequences, limits and control rules from a browser. No source-code build is required for the normal Windows setup.</p>
 {% include download-cta.html %}
@@ -26,12 +26,14 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
   <li>Editable startup and shutdown sequences</li>
   <li>Sensor calibration and actuator testing</li>
   <li>Speed, temperature, pressure and controller limits</li>
+  <li>Native, SPI, OneWire and discovered I²C sensor hardware</li>
+  <li>PCB-profile ports, torque/thrust load cells and oil-flow monitoring</li>
   <li>Threshold and input-to-output control rules</li>
   <li>Browser monitoring, backups, event logs and run logs</li>
 </ul>
 </div><figure><img class="screenshot" src="{{ '/assets/images/hardware-page.png' | relative_url }}?v=20260718b" width="1800" height="1050" loading="lazy" alt="OpenTurbine Hardware page showing a conflict-free example turbine channel inventory"><figcaption>Hardware contains only the sensors and actuators fitted to this example. Values shown throughout the documentation are examples, not settings to copy.</figcaption></figure></div></section>
 
-<section class="section alt"><div class="shell"><div class="compact-callout"><div><h2>Check compatibility before installing</h2><p>Normal setup supports Classic ESP32 boards with at least 4 MB flash and the ESP32-S3 DevKitC-1 N16R8 target. The guided installer currently requires Windows.</p></div><a class="button secondary" href="{{ '/hardware/' | relative_url }}">Read hardware requirements</a></div></div></section>
+<section class="section alt"><div class="shell"><div class="compact-callout"><div><h2>Check compatibility before installing</h2><p>Normal setup supports Classic ESP32 boards with at least 4 MB flash and ESP32-S3 DevKitC-1-compatible boards with at least 8 MB flash. The universal S3 image also runs on 16 MB modules and does not require PSRAM. The guided installer currently requires Windows.</p></div><a class="button secondary" href="{{ '/hardware/' | relative_url }}">Read hardware requirements</a></div></div></section>
 
 <section class="section"><div class="shell split"><div>
 <h2>Experimental software, independent safety</h2>

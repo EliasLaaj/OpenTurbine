@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-07-29T22:00:51",
+  "firmware": "2.0.0",
+  "rows": [
+    {
+      "name": "NO_FIELDS_CREATES_NO_SESSION_FILE",
+      "ok": true,
+      "before_path": "",
+      "after_path": ""
+    },
+    {
+      "name": "ENABLED_LOGGING_DEFERS_FLASH_AND_STAYS_RESPONSIVE",
+      "ok": true,
+      "active_path": "",
+      "completed_path": "/logs/session_1.csv",
+      "csv_lines": 65,
+      "web_samples": 35,
+      "max_active_loop_exec_ms": 3.419,
+      "logger_healthy": true,
+      "dropped_rows": 0
+    }
+  ],
+  "restored": true,
+  "error": null
+}

@@ -1,9 +1,8 @@
-# Keep the web-asset sources at LF on every platform so tools/gzip_data.py
-# produces byte-deterministic data/*.gz regardless of the checkout OS
-# (Windows autocrlf would otherwise bake CRLF into the shipped .gz).
-data_src/*.html text eol=lf
-data_src/*.js   text eol=lf
-data_src/*.css  text eol=lf
+# Keep source and documentation deterministic across Windows and Linux CI.
+* text=auto eol=lf
+
+# This wrapper is launched by Windows Command Prompt.
+*.cmd text eol=crlf
 
 # Generated / binary assets — never normalize line endings.
 data/*.gz binary

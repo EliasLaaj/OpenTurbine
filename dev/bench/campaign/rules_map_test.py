@@ -25,7 +25,7 @@ def configure_map_hardware(input_enabled=True):
         hw["actuators"]["throttle"].update(enabled=False, pin=-1)
         hw["actuators"]["starter"].update(
             enabled=True, pin=40, type=0, min_us=1000, max_us=2000,
-            inverted=False, active_h=True, low_rpm_support_enabled=False)
+            inverted=False, active_h=True)
         hw["actuators"]["starter_en"].update(enabled=False, pin=-1)
         hw["controllers"].update(dynamic_idle=False, governor=False)
         reg = hw.setdefault("channel_registry", {"version": 1, "inputs": [], "outputs": [], "bindings": []})

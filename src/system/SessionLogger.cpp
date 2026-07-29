@@ -18,6 +18,7 @@ struct SessionRow {
     uint32_t mask;
     float    n1, n2, tot, tit, oilTemp, oilPressure, p1, p2;
     float    throttleDemand, battVoltage, fuelPressure, fuelFlow;
+    float    torque, shaftPower, thrust, starterDemand;
     float    glowPlugDemand, fuelPump2Demand, propPitchDemand, oilPumpPct;
     float    wetGlowFuelDemand;
     float    glowCurrentAmps, igniterCurrentAmps, igniter2CurrentAmps, oilPumpCurrentAmps;
@@ -46,8 +47,13 @@ static uint32_t          _lastFreeCheckMs = 0;
 static bool              _lowSpaceDropActive = false;
 static constexpr uint32_t SESSION_FLUSH_MS = 5000;
 static uint32_t          _lastFlushMs = 0;
+static constexpr uint16_t SESSION_QUEUE_ROWS = 64;
 
-const char* SessionLogger::currentPath() { return _currentPath; }
+const char* SessionLogger::currentPath() {
+    // Do not advertise a file to the async HTTP task until the STANDBY
+    // persistence path has finished writing and closing it.
+    return (_acceptRows || _startPending || _endPending || _open) ? "" : _currentPath;
+}
 
 uint32_t SessionLogger::droppedRows() { return _droppedRows; }
 bool SessionLogger::healthy() { return _healthy; }
@@ -92,6 +98,8 @@ static uint8_t _csvColumnCount(uint32_t mask) {
     if (mask & Config::SLOG_PROP)       count += 1;
     if (mask & Config::SLOG_OIL_PCT)    count += 1;
     if (mask & Config::SLOG_LOOP)       count += 3;
+    if (mask & Config::SLOG_TORQUE)     count += 2;
+    if (mask & Config::SLOG_STARTER)    count += 1;
     return count;
 }
 
@@ -149,6 +157,12 @@ static void _writeRow(const SessionRow& row) {
                                                          (double)row.loopHz,
                                                          (double)row.loopExecAvgMs,
                                                          (double)row.loopExecMaxMs);
+    if (mask & Config::SLOG_TORQUE)     APPEND_ROW_FIELD(",%.2f,%.1f",
+                                                         (double)row.torque,
+                                                         (double)row.shaftPower);
+    if (mask & Config::SLOG_THRUST)     APPEND_ROW_FIELD(",%.2f",(double)row.thrust);
+    if (mask & Config::SLOG_STARTER)    APPEND_ROW_FIELD(",%.1f",
+                                                         (double)(row.starterDemand * 100.0f));
 
     #undef APPEND_ROW_FIELD
 
@@ -182,7 +196,7 @@ static void _writeRow(const SessionRow& row) {
 // ── One-time init ─────────────────────────────────────────────
 bool SessionLogger::begin() {
     if (!LittleFS.exists("/logs")) LittleFS.mkdir("/logs");
-    if (!_rowQueue) _rowQueue = xQueueCreate(20, sizeof(SessionRow));
+    if (!_rowQueue) _rowQueue = xQueueCreate(SESSION_QUEUE_ROWS, sizeof(SessionRow));
     _healthy = _rowQueue != nullptr;
     _errorCode = _healthy ? 0 : 1;
     return _healthy;
@@ -284,6 +298,9 @@ static void _openSession() {
     if (mask & Config::SLOG_PROP)       _file.print(",prop_pct");
     if (mask & Config::SLOG_OIL_PCT)    _file.print(",oil_pump_pct");
     if (mask & Config::SLOG_LOOP)       _file.print(",loop_hz,loop_exec_avg_ms,loop_exec_max_ms");
+    if (mask & Config::SLOG_TORQUE)     _file.print(",torque_nm,shaft_power_w");
+    if (mask & Config::SLOG_THRUST)     _file.print(",thrust_n");
+    if (mask & Config::SLOG_STARTER)    _file.print(",starter_pct");
     if (_file.println() == 0) {
         Serial.printf("[SessionLogger] Failed to write CSV header to %s\n", _currentPath);
         _file.close();
@@ -293,16 +310,12 @@ static void _openSession() {
         _errorCode = 3;
         return;
     }
-    _rowCount = 0;
-    _droppedRows = 0;
-    _healthy = true;
-    _errorCode = 0;
-    _lastMs   = 0;
+    _healthy = _droppedRows == 0;
+    _errorCode = _healthy ? 0 : 4;
     _lastFreeCheckMs = 0;
     _lowSpaceDropActive = false;
     _lastFlushMs = millis();
     _open     = true;
-    _acceptRows = true;
     Serial.printf("[SessionLogger] Session started - %u columns -> %s\n",
         (unsigned)_csvColumnCount(mask), _currentPath);
 }
@@ -337,17 +350,25 @@ void SessionLogger::startSession() {
         if (_open) _endPending = true;
         return;
     }
+    if (_rowQueue) xQueueReset(_rowQueue);
+    _currentPath[0] = '\0';
+    _rowCount = 0;
+    _droppedRows = 0;
+    _healthy = true;
+    _errorCode = 0;
+    _lastMs = 0;
     _startPending = true;
+    _endPending = false;
+    _acceptRows = true;
 }
 
 void SessionLogger::endSession() {
     _acceptRows = false;
     _endPending = true;
-    _startPending = false;
 }
 
 void SessionLogger::tick() {
-    if (!_open || !_acceptRows || !_rowQueue) return;
+    if (!_acceptRows || !_rowQueue) return;
 
     uint32_t now      = millis();
     uint32_t interval = Config::sessionLogIntervalMs > 0 ? Config::sessionLogIntervalMs : 500;
@@ -372,6 +393,10 @@ void SessionLogger::tick() {
     row.battVoltage     = ed.battVoltage;
     row.fuelPressure    = ed.fuelPressure;
     row.fuelFlow        = ed.fuelFlow;
+    row.torque          = ed.torque;
+    row.shaftPower      = ed.turboPower;
+    row.thrust          = ed.thrust;
+    row.starterDemand   = ed.starterDemand;
     row.glowPlugDemand  = ed.glowPlugDemand;
     row.wetGlowFuelDemand = ed.wetGlowFuelDemand;
     row.glowCurrentAmps = ed.glowCurrentAmps;
@@ -390,23 +415,31 @@ void SessionLogger::tick() {
     row.abFlameOn       = ed.abFlameOn;
     row.sysMode         = (uint8_t)ed.mode;
 
-    // Non-blocking — drops silently if Core 0 is behind by more than 20 rows
+    // Active-engine flash writes are forbidden, so retain a bounded tail in
+    // RAM. If a long/high-rate run fills the queue, discard the oldest row and
+    // keep the newest shutdown/fault context. Telemetry reports the loss.
     if (xQueueSendToBack(_rowQueue, &row, 0) != pdTRUE) {
+        SessionRow oldest;
+        (void)xQueueReceive(_rowQueue, &oldest, 0);
+        (void)xQueueSendToBack(_rowQueue, &row, 0);
         _droppedRows = _droppedRows + 1;
         _healthy = false;
         _errorCode = 4;
     }
 }
 
-// ── Core 0: write queued rows to flash (no file I/O on Core 1) ──
+// ── Core 0: persist queued rows once engine outputs are safe ───
 void SessionLogger::drainQueue() {
-    if (_endPending) {
-        _endPending = false;
-        _closeSession();
-    }
+    // Both flags are normally observed together after a run because this
+    // function is deliberately not called while engine control is active.
     if (_startPending) {
         _startPending = false;
         _openSession();
+    }
+    if (_endPending) {
+        _endPending = false;
+        _closeSession();
+        return;
     }
     if (!_open || !_rowQueue) return;
     SessionRow row;
@@ -417,10 +450,8 @@ void SessionLogger::drainQueue() {
         _writeRow(row);
         drained++;
     }
-    // Periodic sync bounds mid-run data loss to ~5 s on a power cut —
-    // LittleFS only commits file data/metadata on flush or close, so an
-    // unflushed session would otherwise be lost entirely (exactly the run
-    // where the log matters most). Runs on Core 0, off the ECU loop.
+    // This path also supports a session opened while already safe (for tests
+    // and recovery). Active-engine calls are blocked by WebServer::tick().
     if (_open && millis() - _lastFlushMs >= SESSION_FLUSH_MS) {
         _lastFlushMs = millis();
         _file.flush();

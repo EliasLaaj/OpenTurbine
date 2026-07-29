@@ -8,12 +8,17 @@
 
 class ChannelRegistry {
 public:
-    // Both supported boards expose the same inventory and configuration
-    // schema. Classic ESP32 stores its instance on the heap (see
-    // HardwareConfig) instead of reducing functionality to save static DRAM.
-    // Handles occupy 64..79 (outputs) and 80..95 (inputs), leaving the fixed
-    // rule/sequence handle ranges untouched.
+    // Handles occupy 64..79 (outputs) and start at 80 for inputs, leaving the
+    // fixed rule/sequence handle ranges untouched.
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    // The official ECU exposes twenty assignable input connectors plus its
+    // fixed supply monitor. Keep spare capacity for future profile revisions.
+    static constexpr uint8_t MAX_INPUT_CHANNELS = 24;
+#else
+    // Preserve the classic ESP32's established capacity and static-DRAM margin.
+    // PCB profiles are target-specific, so this does not constrain the S3 ECU.
     static constexpr uint8_t MAX_INPUT_CHANNELS = 16;
+#endif
     static constexpr uint8_t MAX_OUTPUT_CHANNELS = 16;
     static constexpr uint8_t MAX_BINDINGS = 8;
     static constexpr uint8_t INPUT_SENSOR_BASE = 80;
@@ -81,6 +86,7 @@ public:
                            !strcmp(purpose, "fuel_pressure") || !strcmp(purpose, "p1_pressure") ||
                            !strcmp(purpose, "p2_pressure") || !strcmp(purpose, "fuel_flow") ||
                            !strcmp(purpose, "flame") || !strcmp(purpose, "torque") ||
+                           !strcmp(purpose, "thrust") ||
                            !strcmp(purpose, "battery_voltage") || !strcmp(purpose, "throttle") ||
                            !strcmp(purpose, "idle"));
     }
@@ -125,6 +131,7 @@ public:
                    !strcmp(role, "flame") ||
                    !strcmp(role, "flow") ||
                    !strcmp(role, "torque") ||
+                   !strcmp(role, "thrust") ||
                    !strcmp(role, "voltage") ||
                    !strcmp(role, "operator") ||
                    !strcmp(role, "digital_switch") ||
@@ -156,7 +163,10 @@ public:
                !strcmp(role, "indicator");
     }
     // Driver numbers are persisted. Keep 0..6 stable and append new drivers.
-    enum Driver : uint8_t { Digital, Analog, Pulse, RcPwm, Relay, Pwm, Servo, PwmDuty };
+    enum Driver : uint8_t {
+        Digital, Analog, Pulse, RcPwm, Relay, Pwm, Servo, PwmDuty,
+        I2cDigital, I2cAnalog, I2cLoadCell, I2cRelay
+    };
     struct Channel {
         bool installed = false;
         Direction direction = Input;
@@ -165,12 +175,28 @@ public:
         char name[16] = {};
         char role[18] = {"generic"};
         char purpose[20] = {"generic"};
+        // Empty in generic dev-board mode. In PCB-profile mode these stable
+        // IDs are the persisted topology; raw pin/bus/driver fields below are
+        // derived from the immutable flashed profile on every load.
+        char physicalPortId[24] = {};
+        char physicalModeId[24] = {};
         int8_t pin = -1;
+        uint8_t i2cAddress = 0;
+        uint8_t deviceChannel = 0;
+        float i2cReferenceMv = 3300.0f;
+        uint8_t loadCellGain = 128;
+        uint16_t loadCellRate = 80;
+        int32_t loadCellZero = 0;
+        float loadCellNPerCount = 1.0f;
+        float leverArmM = 1.0f;
+        float filterAlpha = 1.0f;
         float minValue = 0.0f, maxValue = 1.0f;
         float pulsesPerUnit = 1.0f; // pulse inputs: speed=pulses/rev, flow=pulses/litre
         float analogZeroMv = 0.0f;      // analog physical roles: mV at zero output
         float analogMvPerUnit = 1000.0f; // speed=RPM, pressure=bar, temp=C, flow=L/min, torque=Nm
         float analogDivider = 1.0f;     // voltage role: Vbatt = ADC volts * divider
+        uint16_t digitalThresholdRaw = 2048; // ADC-backed switch centre, 0..4095
+        uint16_t digitalHysteresisRaw = 64;  // total switch deadband, 0..2047
         // Torque cards can use a normal analog transmitter (0) or an HX711
         // bridge ADC (1).  For HX711, pin is DOUT and hx711Clk is SCK.
         uint8_t torqueInterface = 0;
@@ -184,7 +210,7 @@ public:
         uint8_t temperatureInterface = 0;
         int8_t spiClk = -1, spiCs = -1, spiMiso = -1, spiMosi = -1;
         char tcType[2] = "K";
-        uint8_t temperatureResolution = 12;
+        uint8_t temperatureResolution = 10;
         float thermistorBeta = 3950.0f, thermistorR0 = 10000.0f, thermistorRFixed = 10000.0f;
         bool thermistorPullup = true;
         float safeDemand = 0.0f;
@@ -202,6 +228,8 @@ public:
         float currentMvPerA = 100.0f;
         float currentZeroV = 1.65f;
         float currentMaxAmps = 0.0f;
+        bool hasFlowMonitor = false;
+        float minimumFlow = 0.0f;  // L/min; applies to oil/scavenge pump outputs
     };
     static bool isCoreManagedInput(const Channel& c) {
         return isCoreManagedInputId(c.id) || isCoreManagedInputPurpose(c.purpose);
@@ -229,10 +257,14 @@ public:
         return nullptr;
     }
     bool add(const Channel& c) {
+        const bool profileBacked = c.physicalPortId[0] && c.physicalModeId[0];
         const bool thermocouple = c.direction == Input && !strcmp(c.role, "temperature") &&
                                   c.temperatureInterface >= 1 && c.temperatureInterface <= 3;
+        const bool remote = c.driver == I2cDigital || c.driver == I2cAnalog ||
+                            c.driver == I2cLoadCell || c.driver == I2cRelay;
         if (!validId(c.id) || findMutable(c.id, Input) || findMutable(c.id, Output) ||
-            (!thermocouple && c.pin < 0) || (thermocouple && !temperatureInterfaceValid(c))) return false;
+            (!profileBacked && !thermocouple && !remote && c.pin < 0) ||
+            (!profileBacked && thermocouple && !temperatureInterfaceValid(c))) return false;
         Channel* list = c.direction == Input ? inputs : outputs;
         uint8_t& count = c.direction == Input ? inputCount : outputCount;
         uint8_t max = c.direction == Input ? MAX_INPUT_CHANNELS : MAX_OUTPUT_CHANNELS;
@@ -253,19 +285,57 @@ public:
         return true;
     }
     bool validate() const {
-        for (uint8_t i=0; i<inputCount; ++i) if (!validId(inputs[i].id) || !driverMatches(Input, inputs[i].driver) || !roleValid(Input, inputs[i].role) || !purposeValid(Input, inputs[i].purpose) || !semanticDriverValid(inputs[i]) || !temperatureInterfaceValid(inputs[i]) || !torqueInterfaceValid(inputs[i]) || !demandsValid(inputs[i])) return false;
-        for (uint8_t i=0; i<outputCount; ++i) if (!validId(outputs[i].id) || !driverMatches(Output, outputs[i].driver) || !roleValid(Output, outputs[i].role) || !purposeValid(Output, outputs[i].purpose) || !semanticDriverValid(outputs[i]) || !demandsValid(outputs[i])) return false;
-        uint8_t auxiliaryPcnt = 0, registryOneWire = 0;
+        for (uint8_t i=0; i<inputCount; ++i) if (!validId(inputs[i].id) || !driverMatches(Input, inputs[i].driver) || !roleValid(Input, inputs[i].role) || !purposeValid(Input, inputs[i].purpose) || !semanticDriverValid(inputs[i]) || (!(inputs[i].physicalPortId[0] && inputs[i].physicalModeId[0]) && !temperatureInterfaceValid(inputs[i])) || !torqueInterfaceValid(inputs[i]) || !demandsValid(inputs[i])) return false;
+        for (uint8_t i=0; i<outputCount; ++i) {
+            if (!validId(outputs[i].id) || !driverMatches(Output, outputs[i].driver) ||
+                !roleValid(Output, outputs[i].role) || !purposeValid(Output, outputs[i].purpose) ||
+                !semanticDriverValid(outputs[i]) || !demandsValid(outputs[i])) return false;
+            if (outputs[i].hasFlowMonitor) {
+                const char* expected = !strcmp(outputs[i].purpose, "oil_pump") ? "oil_flow" : "scavenge_flow";
+                bool found = false;
+                for (uint8_t j=0; j<inputCount; ++j)
+                    if (inputs[j].installed && !strcmp(inputs[j].purpose, expected)) { found = true; break; }
+                if (!found) return false;
+            }
+        }
+        uint8_t auxiliaryPcnt = 0, registryOneWire = 0, nauLoadCells = 0;
+        uint8_t nauGain = 0;
+        uint16_t nauRate = 0;
         for (uint8_t i=0; i<inputCount; ++i) {
             if (inputs[i].driver == Pulse && !strcmp(inputs[i].purpose, "shaft_speed")) auxiliaryPcnt++;
             if (inputs[i].temperatureInterface == 5 && strcmp(inputs[i].purpose, "oil_temperature")) registryOneWire++;
+            if (inputs[i].driver == I2cLoadCell) {
+                nauLoadCells++;
+                if (!nauGain) { nauGain = inputs[i].loadCellGain; nauRate = inputs[i].loadCellRate; }
+                else if (inputs[i].loadCellGain != nauGain || inputs[i].loadCellRate != nauRate) return false;
+            }
         }
-        if (auxiliaryPcnt > 2 || registryOneWire > 4) return false;
+        if (auxiliaryPcnt > 2 || registryOneWire > 4 || nauLoadCells > 2) return false;
         for (uint8_t i=0; i<inputCount; ++i) for (uint8_t j=0; j<outputCount; ++j) if (inputs[i].pin >= 0 && inputs[i].pin == outputs[j].pin) return false;
+        for (uint8_t i=0; i<inputCount; ++i) {
+            if (inputs[i].driver < I2cDigital) continue;
+            for (uint8_t j=i+1; j<inputCount; ++j)
+                if (inputs[j].driver >= I2cDigital &&
+                    inputs[i].i2cAddress == inputs[j].i2cAddress &&
+                    inputs[i].deviceChannel == inputs[j].deviceChannel) return false;
+            for (uint8_t j=0; j<outputCount; ++j)
+                if (outputCount && outputCount > j && outputs[j].driver == I2cRelay &&
+                    inputs[i].i2cAddress == outputs[j].i2cAddress &&
+                    inputs[i].deviceChannel == outputs[j].deviceChannel) return false;
+        }
+        for (uint8_t i=0; i<outputCount; ++i) {
+            if (outputs[i].driver != I2cRelay) continue;
+            for (uint8_t j=i+1; j<outputCount; ++j)
+                if (outputs[j].driver == I2cRelay &&
+                    outputs[i].i2cAddress == outputs[j].i2cAddress &&
+                    outputs[i].deviceChannel == outputs[j].deviceChannel) return false;
+        }
         for (uint8_t i=0; i<bindingCount; ++i) if (!bindingValid(bindings[i])) return false;
         return true;
     }
     void toJson(JsonObject root) const {
+        root["input_capacity"] = MAX_INPUT_CHANNELS;
+        root["output_capacity"] = MAX_OUTPUT_CHANNELS;
         JsonArray in = root["inputs"].to<JsonArray>(), out = root["outputs"].to<JsonArray>(), bind = root["bindings"].to<JsonArray>();
         write(in, inputs, inputCount); write(out, outputs, outputCount);
         for (uint8_t i=0;i<bindingCount;i++) { JsonObject b=bind.add<JsonObject>(); b["key"]=bindings[i].key; b["channel"]=bindings[i].channelId; }
@@ -306,9 +376,13 @@ public:
                    !strcmp(purpose, "p2_pressure") || !strcmp(purpose, "coolant_pressure") ||
                    !strcmp(purpose, "oil_temperature") || !strcmp(purpose, "coolant_temp") ||
                    !strcmp(purpose, "intake_temperature") || !strcmp(purpose, "fuel_flow") ||
+                   !strcmp(purpose, "oil_flow") || !strcmp(purpose, "scavenge_flow") ||
                    !strcmp(purpose, "flame") || !strcmp(purpose, "torque") ||
+                   !strcmp(purpose, "thrust") ||
                    !strcmp(purpose, "battery_voltage") || !strcmp(purpose, "throttle") ||
-                   !strcmp(purpose, "idle") || !strcmp(purpose, "digital_switch") ||
+                   !strcmp(purpose, "idle") || !strcmp(purpose, "ab_command") ||
+                   !strcmp(purpose, "digital_switch") ||
+                   !strcmp(purpose, "start_switch") || !strcmp(purpose, "stop_switch") ||
                    !strcmp(purpose, "fault") || !strcmp(purpose, "estop") ||
                    !strcmp(purpose, "inhibit_start") || !strcmp(purpose, "sequence_gate") ||
                    !strcmp(purpose, "low_oil_switch") || !strcmp(purpose, "oil_zero_switch") ||
@@ -325,33 +399,37 @@ public:
                !strcmp(purpose, "ab_valve") ||
                !strcmp(purpose, "prop_pitch") ||
                !strcmp(purpose, "air_starter") || !strcmp(purpose, "pilot_fuel") ||
-               !strcmp(purpose, "purge_valve") || !strcmp(purpose, "nozzle_actuator") ||
+               !strcmp(purpose, "purge_valve") || !strcmp(purpose, "drain_valve") ||
+               !strcmp(purpose, "nozzle_actuator") ||
                !strcmp(purpose, "warning_indicator");
     }
 private:
     static bool driverMatches(Direction d, Driver v) {
         return d == Input
-            ? (v == Digital || v == Analog || v == Pulse || v == RcPwm || v == PwmDuty)
-            : (v == Relay || v == Pwm || v == Servo);
+            ? (v == Digital || v == Analog || v == Pulse || v == RcPwm ||
+               v == PwmDuty || v == I2cDigital || v == I2cAnalog || v == I2cLoadCell)
+            : (v == Relay || v == Pwm || v == Servo || v == I2cRelay);
     }
     static bool semanticDriverValid(const Channel& c) {
         if (c.direction != Input) return true;
         if (!strcmp(c.role, "speed") || !strcmp(c.role, "flow"))
-            return c.driver == Pulse || c.driver == Analog;
+            return c.driver == Pulse || c.driver == Analog || c.driver == I2cAnalog;
         if (!strcmp(c.role, "pressure") || !strcmp(c.role, "temperature") ||
-            !strcmp(c.role, "torque") ||
+            !strcmp(c.role, "torque") || !strcmp(c.role, "thrust") ||
             !strcmp(c.role, "voltage"))
-            return c.driver == Analog;
-        if (!strcmp(c.role, "flame")) return c.driver == Digital || c.driver == Analog;
+            return c.driver == Analog || c.driver == I2cAnalog || c.driver == I2cLoadCell;
+        if (!strcmp(c.role, "flame")) return c.driver == Digital || c.driver == Analog ||
+                                               c.driver == I2cDigital || c.driver == I2cAnalog;
         if (!strcmp(c.role, "operator")) return c.driver == Digital || c.driver == Analog ||
                                                  c.driver == Pulse || c.driver == RcPwm ||
-                                                 c.driver == PwmDuty;
+                                                 c.driver == PwmDuty || c.driver == I2cDigital ||
+                                                 c.driver == I2cAnalog;
         if (!strcmp(c.role, "digital_switch") || !strcmp(c.role, "fault") ||
             !strcmp(c.role, "estop") || !strcmp(c.role, "inhibit_start") ||
             !strcmp(c.role, "low_oil_switch") || !strcmp(c.role, "oil_zero_switch") ||
             !strcmp(c.role, "sequence_gate") || !strcmp(c.role, "ab_arm") ||
             !strcmp(c.role, "ab_fire") || !strcmp(c.role, "limp_mode"))
-            return c.driver == Digital;
+            return c.driver == Digital || c.driver == I2cDigital;
         return true;
     }
     static bool temperatureInterfaceValid(const Channel& c) {
@@ -387,6 +465,27 @@ private:
                c.hx711Scale >= 0.000001f && c.hx711Scale <= 1000000.0f;
     }
     static bool rangeValid(const Channel& c) {
+        if (c.driver == I2cDigital || c.driver == I2cRelay)
+            return c.i2cAddress >= 0x08 && c.i2cAddress <= 0x77 && c.deviceChannel < 8;
+        if (c.driver == I2cAnalog)
+            return c.i2cAddress >= 0x08 && c.i2cAddress <= 0x77 && c.deviceChannel < 8 &&
+                   c.i2cReferenceMv >= 1000.0f && c.i2cReferenceMv <= 5500.0f &&
+                   c.analogMvPerUnit > 0.0f &&
+                   c.digitalThresholdRaw <= 4095 &&
+                   c.digitalHysteresisRaw <= 2047 &&
+                   c.filterAlpha > 0.0f && c.filterAlpha <= 1.0f;
+        if (c.driver == I2cLoadCell)
+            return c.i2cAddress == 0x2A && c.deviceChannel < 2 &&
+                   (c.loadCellGain == 1 || c.loadCellGain == 2 || c.loadCellGain == 4 ||
+                    c.loadCellGain == 8 || c.loadCellGain == 16 || c.loadCellGain == 32 ||
+                    c.loadCellGain == 64 || c.loadCellGain == 128) &&
+                   (c.loadCellRate == 10 || c.loadCellRate == 20 || c.loadCellRate == 40 ||
+                    c.loadCellRate == 80 || c.loadCellRate == 320) &&
+                   isfinite(c.loadCellNPerCount) && c.loadCellNPerCount != 0.0f &&
+                   isfinite(c.leverArmM) && c.leverArmM <= 100.0f &&
+                   (!strcmp(c.role, "torque") ? c.leverArmM > 0.0f
+                                                : c.leverArmM >= 0.0f) &&
+                   c.filterAlpha > 0.0f && c.filterAlpha <= 1.0f;
         if (c.torqueInterface == 1) return torqueInterfaceValid(c);
         // Dedicated temperature interfaces do not consume the generic analog
         // validity range or mV scale. Their own wiring/calibration validates
@@ -417,6 +516,10 @@ private:
                (!c.hasCurrent || (c.currentPin >= 0 && c.currentMvPerA > 0.0f &&
                                   c.currentZeroV >= 0.0f && c.currentZeroV <= 3.3f &&
                                   c.currentMaxAmps >= 0.0f)) &&
+               (!c.hasFlowMonitor ||
+                (c.direction == Output &&
+                 (!strcmp(c.purpose, "oil_pump") || !strcmp(c.purpose, "scavenge_pump")) &&
+                 isfinite(c.minimumFlow) && c.minimumFlow > 0.0f)) &&
                rangeValid(c);
     }
     bool bindingValid(const Binding& b) const {
@@ -462,8 +565,11 @@ private:
             if (!strcmp(id, "intake_temperature")) return "intake_temperature";
             if (!strcmp(id, "coolant_pressure")) return "coolant_pressure";
             if (!strcmp(id, "fuel_flow") || !strcmp(id, "fuel_flow_main")) return "fuel_flow";
+            if (!strcmp(id, "oil_flow") || !strcmp(id, "oil_flow_main")) return "oil_flow";
+            if (!strcmp(id, "scavenge_flow") || !strcmp(id, "scavenge_flow_main")) return "scavenge_flow";
             if (!strcmp(id, "flame_main")) return "flame";
             if (!strcmp(id, "torque_main")) return "torque";
+            if (!strcmp(id, "thrust_main")) return "thrust";
             if (!strcmp(id, "battery_voltage") || !strcmp(id, "batt_voltage_main")) return "battery_voltage";
             if (!strcmp(id, "operator_throttle")) return "throttle";
             if (!strcmp(id, "operator_idle")) return "idle";
@@ -494,6 +600,7 @@ private:
         if (!strcmp(id, "air_starter")) return "air_starter";
         if (!strcmp(id, "pilot_fuel")) return "pilot_fuel";
         if (!strcmp(id, "purge_valve")) return "purge_valve";
+        if (!strcmp(id, "drain_valve")) return "drain_valve";
         if (!strcmp(id, "nozzle_actuator")) return "nozzle_actuator";
         if (!strcmp(role, "coolant_pump")) return "coolant_pump";
         if (!strcmp(role, "starter_en")) return "starter_enable";
@@ -503,8 +610,21 @@ private:
         for (uint8_t i = 0; i < n; i++) {
             const Channel& c = list[i]; JsonObject o = a.add<JsonObject>();
             o["id"] = c.id; o["name"] = c.name; o["role"] = c.role; o["purpose"] = c.purpose; o["driver"] = (uint8_t)c.driver; o["pin"] = c.pin;
+            if (c.physicalPortId[0]) {
+                o["physical_port"] = c.physicalPortId;
+                o["physical_mode"] = c.physicalModeId;
+            }
+            if (c.driver >= I2cDigital) {
+                o["i2c_address"] = c.i2cAddress; o["device_channel"] = c.deviceChannel;
+                o["i2c_reference_mv"] = c.i2cReferenceMv;
+                o["loadcell_gain"] = c.loadCellGain; o["loadcell_rate_sps"] = c.loadCellRate;
+                o["loadcell_zero"] = c.loadCellZero; o["loadcell_n_per_count"] = c.loadCellNPerCount;
+                o["lever_arm_m"] = c.leverArmM; o["filter_alpha"] = c.filterAlpha;
+            }
             o["min"] = c.minValue; o["max"] = c.maxValue; o["pulses_per_unit"] = c.pulsesPerUnit;
             o["analog_zero_mv"] = c.analogZeroMv; o["analog_mv_per_unit"] = c.analogMvPerUnit; o["analog_divider"] = c.analogDivider;
+            o["digital_threshold_raw"] = c.digitalThresholdRaw;
+            o["digital_hysteresis_raw"] = c.digitalHysteresisRaw;
             o["torque_interface"] = c.torqueInterface; o["hx711_clk"] = c.hx711Clk; o["hx711_scale"] = c.hx711Scale; o["hx711_zero"] = c.hx711Zero;
             o["temp_interface"] = c.temperatureInterface; o["spi_clk"] = c.spiClk; o["spi_cs"] = c.spiCs; o["spi_miso"] = c.spiMiso; o["spi_mosi"] = c.spiMosi; o["tc_type"] = c.tcType;
             o["temp_resolution"] = c.temperatureResolution; o["ntc_beta"] = c.thermistorBeta; o["ntc_r0"] = c.thermistorR0; o["ntc_r_fixed"] = c.thermistorRFixed; o["ntc_pullup"] = c.thermistorPullup;
@@ -514,6 +634,7 @@ private:
             if (c.pwmTimingConfigured) { o["pwm_freq_hz"] = c.pwmFrequency; o["pwm_res_bits"] = c.pwmResolution; }
             o["invert"] = c.inverted; o["active_high"] = c.activeHigh; o["pullup"] = c.pullup; o["pulldown"] = c.pulldown;
             o["has_current"] = c.hasCurrent; o["current_pin"] = c.currentPin; o["current_mv_a"] = c.currentMvPerA; o["current_zero_v"] = c.currentZeroV; o["current_max_a"] = c.currentMaxAmps;
+            o["has_flow_monitor"] = c.hasFlowMonitor; o["minimum_flow_l_min"] = c.minimumFlow;
         }
     }
     bool read(JsonVariantConst v, Direction d) {
@@ -521,15 +642,38 @@ private:
             Channel c; c.direction = d; c.installed = true;
             strlcpy(c.id, o["id"] | "", sizeof(c.id)); strlcpy(c.name, o["name"] | c.id, sizeof(c.name)); strlcpy(c.role, o["role"] | "generic", sizeof(c.role));
             strlcpy(c.purpose, o["purpose"] | derivePurpose(d, c.id, c.role), sizeof(c.purpose));
+            strlcpy(c.physicalPortId, o["physical_port"] | "", sizeof(c.physicalPortId));
+            strlcpy(c.physicalModeId, o["physical_mode"] | "", sizeof(c.physicalModeId));
             c.driver = (Driver)(o["driver"] | 0); c.pin = o["pin"] | -1; c.minValue = o["min"] | 0.0f; c.maxValue = o["max"] | 1.0f;
+            c.i2cAddress = o["i2c_address"] | 0; c.deviceChannel = o["device_channel"] | 0;
+            c.i2cReferenceMv = o["i2c_reference_mv"] | 3300.0f;
+            c.loadCellGain = o["loadcell_gain"] | 128; c.loadCellRate = o["loadcell_rate_sps"] | 80;
+            c.loadCellZero = o["loadcell_zero"] | 0; c.loadCellNPerCount = o["loadcell_n_per_count"] | 1.0f;
+            c.leverArmM = o["lever_arm_m"] | 1.0f;
+            c.filterAlpha = o["filter_alpha"] |
+                (c.driver == I2cLoadCell ? 0.25f : 1.0f);
             c.pulsesPerUnit = o["pulses_per_unit"] | 1.0f; c.analogZeroMv = o["analog_zero_mv"] | 0.0f; c.analogMvPerUnit = o["analog_mv_per_unit"] | 1000.0f; c.analogDivider = o["analog_divider"] | 1.0f;
+            c.digitalThresholdRaw = constrain(o["digital_threshold_raw"] | 2048, 0, 4095);
+            c.digitalHysteresisRaw = constrain(o["digital_hysteresis_raw"] | 64, 0, 2047);
             c.torqueInterface = o["torque_interface"] | 0; c.hx711Clk = o["hx711_clk"] | -1; c.hx711Scale = o["hx711_scale"] | 1.0f; c.hx711Zero = o["hx711_zero"] | 0;
             c.temperatureInterface = o["temp_interface"] | 0; c.spiClk = o["spi_clk"] | -1; c.spiCs = o["spi_cs"] | -1; c.spiMiso = o["spi_miso"] | -1; c.spiMosi = o["spi_mosi"] | -1; strlcpy(c.tcType, o["tc_type"] | "K", sizeof(c.tcType));
-            c.temperatureResolution = o["temp_resolution"] | 12; c.thermistorBeta = o["ntc_beta"] | 3950.0f; c.thermistorR0 = o["ntc_r0"] | 10000.0f; c.thermistorRFixed = o["ntc_r_fixed"] | 10000.0f; c.thermistorPullup = o["ntc_pullup"] | true;
+            c.temperatureResolution = o["temp_resolution"] | 10; c.thermistorBeta = o["ntc_beta"] | 3950.0f; c.thermistorR0 = o["ntc_r0"] | 10000.0f; c.thermistorRFixed = o["ntc_r_fixed"] | 10000.0f; c.thermistorPullup = o["ntc_pullup"] | true;
             c.safeDemand = o["safe_demand"] | 0.0f; c.forceSafeOnFault = o["force_safe_on_fault"] | false; c.minimumRunDemand = o["min_run_demand"] | 0.0f; c.pwmTimingConfigured = !o["pwm_freq_hz"].isNull() || !o["pwm_res_bits"].isNull(); c.pwmFrequency = o["pwm_freq_hz"] | 5000; c.pwmResolution = o["pwm_res_bits"] | 10;
             c.inverted = o["invert"] | false; c.activeHigh = o["active_high"] | true; c.pullup = o["pullup"] | false; c.pulldown = o["pulldown"] | false; c.hasCurrent = o["has_current"] | false; c.currentPin = o["current_pin"] | -1; c.currentMvPerA = o["current_mv_a"] | 100.0f; c.currentZeroV = o["current_zero_v"] | 1.65f; c.currentMaxAmps = o["current_max_a"] | 0.0f;
+            c.hasFlowMonitor = o["has_flow_monitor"] | false; c.minimumFlow = o["minimum_flow_l_min"] | 0.0f;
             if (c.pullup) c.pulldown = false;
-            if (!add(c)) return false;
+            if (!add(c)) {
+                Serial.printf(
+                    "[ChannelRegistry] rejected %s channel id=%s driver=%u pin=%d "
+                    "role=%s purpose=%s id_ok=%d driver_ok=%d role_ok=%d purpose_ok=%d "
+                    "semantic_ok=%d demands_ok=%d\n",
+                    d == Input ? "input" : "output", c.id, (unsigned)c.driver,
+                    (int)c.pin, c.role, c.purpose, validId(c.id),
+                    driverMatches(d, c.driver), roleValid(d, c.role),
+                    purposeValid(d, c.purpose), semanticDriverValid(c),
+                    demandsValid(c));
+                return false;
+            }
         }
         return true;
     }

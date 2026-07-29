@@ -1,6 +1,6 @@
 ---
 layout: document
-title: OpenTurbine complete beginner user guide
+title: OpenTurbine 2.0 complete beginner user guide
 description: A source-matched, step-by-step guide to building, wiring, configuring, calibrating, dry-testing and operating an OpenTurbine ESP32 turbine ECU.
 lede: Start with no electronics experience; finish with a wired, configured and thoroughly dry-tested ECU.
 ---
@@ -55,7 +55,7 @@ You only need these basic ideas to begin:
 
 ### Required for the normal supported path
 
-- A Classic ESP32 board with at least 4 MB flash, or an ESP32-S3 DevKitC-1 N16R8.
+- A Classic ESP32 board with at least 4 MB flash, or an ESP32-S3 DevKitC-1-compatible board with at least 8 MB flash. The universal S3 image works on 8 MB and 16 MB modules without requiring PSRAM.
 - A Windows computer and a USB **data** cable. A charge-only cable will power the board but cannot install firmware.
 - A clean regulated ECU power supply within the board maker's limits, with a fuse.
 - A multimeter and the datasheets for the board, every sensor, every converter and every output driver.
@@ -123,7 +123,7 @@ Before connecting a signal to the ESP32, answer all five questions from its data
 
 1. What powers the sensor?
 2. What is the lowest and highest possible output, including a fault?
-3. Is it digital, analog voltage, pulse/frequency, RC PWM, SPI, 1-Wire or an HX711 bridge?
+3. Is it digital, analog voltage, pulse/frequency, RC PWM, SPI, 1-Wire, I²C or a load-cell bridge?
 4. Does it need a divider, pull-up, filter, comparator, isolator or converter?
 5. Which ground/reference must be shared?
 
@@ -143,16 +143,19 @@ Click or tap this diagram to enlarge it. These four drawings show the exact mean
 <tbody>
 <tr><td>Digital switch</td><td>For the usual active-LOW arrangement: selected GPIO → switch → sensor ground; enable a pull-up. The input reads active when the switch closes.</td><td>GPIO, active polarity, input bias. Use an external resistor and protection for long/noisy wires.</td></tr>
 <tr><td>Analog voltage / ADC</td><td>Sensor output → protection/filter and, if needed, voltage divider → ADC-capable GPIO. Sensor ground returns to the sensor reference point.</td><td>GPIO, minimum/maximum raw ADC counts, mapped engineering range. Calibrate with a trusted reference.</td></tr>
-<tr><td>Pulse/frequency</td><td>Open-collector sensor: pull up to 3.3 V. Magnetic/variable-reluctance pickup: use a proper conditioner/comparator. Conditioner output → GPIO.</td><td>GPIO, pulses per revolution/litre/unit, frequency or engineering endpoints.</td></tr>
+<tr><td>Pulse/frequency</td><td>Open-collector sensor: pull up to 3.3 V. Magnetic/variable-reluctance pickup: use a proper conditioner/comparator. Conditioner output → GPIO.</td><td>GPIO, pulses per revolution/litre/unit, frequency or engineering endpoints. Shaft-speed PCNT inputs default to a 5 µs glitch filter and derive their plausibility ceiling from twice the applicable hard shutdown speed.</td></tr>
 <tr><td>RC PWM</td><td>Receiver signal must be 3.3 V compatible; receiver and ECU need a valid reference unless isolated. Do not power a receiver from an unsuitable pin.</td><td>GPIO, minimum/maximum pulse width, signal-loss timeout, calibrated command endpoints.</td></tr>
 <tr><td>PWM duty input</td><td>Condition the external PWM to 3.3 V logic, then connect to the selected input GPIO.</td><td>GPIO and mapped endpoints. This reads duty/frequency; it is not a servo pulse unless RC PWM is selected.</td></tr>
-<tr><td>MAX31855 / MAX31856 / MAX6675</td><td>Thermocouple → matching converter terminals; converter VCC/GND → permitted supply/reference; CLK and MISO may be shared; each module needs its own CS GPIO. MAX31856 may also use MOSI.</td><td>Interface type, CS, CLK, MISO and MOSI where required; thermocouple type and polarity.</td></tr>
-<tr><td>DS18B20</td><td>VDD and GND as specified; DQ → selected GPIO with the required pull-up to the correct logic supply.</td><td>GPIO and discovered sensor/address behavior. Keep the bus away from ignition noise.</td></tr>
+<tr><td>MAX31855 / MAX31856 / MAX6675</td><td>Thermocouple → matching converter terminals; converter VCC/GND → permitted supply/reference. Enable the shared SPI bus and choose SCK/MISO once; MAX31856 also needs shared MOSI. Each module needs its own CS GPIO.</td><td>Shared bus pins at the top of Hardware; interface type, unique CS, thermocouple type and polarity on the device card.</td></tr>
+<tr><td>DS18B20</td><td>VDD and GND as specified; DQ → selected GPIO with the required pull-up to the correct logic supply.</td><td>GPIO, discovered sensor/address behavior and resolution. The 10-bit default updates substantially faster than 12-bit. Keep the bus away from ignition noise.</td></tr>
 <tr><td>NTC thermistor</td><td>Thermistor plus a known resistor form a voltage divider; divider midpoint → ADC GPIO.</td><td>GPIO, nominal resistance, beta/coefficient and calibration. Divider values must keep the pin safe.</td></tr>
 <tr><td>HX711</td><td>Load cell/bridge → HX711 inputs; HX711 data and clock → their selected GPIOs; power and grounding follow the module/load-cell specifications.</td><td>Data/clock pins, zero and scale calibration.</td></tr>
+<tr><td>TCA9554 / TLA2528 / NAU7802 I²C</td><td>Connect every device to the configured shared SDA/SCL bus with suitable pull-ups and 3.3 V-compatible levels. The Hardware page discovers responding chips automatically.</td><td>Only connected devices can receive new assignments. TCA9554 provides binary I/O, TLA2528 analog inputs, and NAU7802 thrust/torque load-cell channels.</td></tr>
 </tbody></table></div>
 
 Classic ESP32 note: use ADC1 GPIO 32–39 while Wi-Fi is active. GPIO 34–39 are input-only. ADC2 readings are unreliable while Wi-Fi is operating. On ESP32-S3, use only choices offered for that selected target; native USB and flash/PSRAM pins are not spare pins.
+
+If an I²C chip is unplugged, its channels become unhealthy and its saved assignments are shown as **Disconnected**. Use **Remove device and assignments** to clear all channels and dependencies belonging to a permanently removed chip. Native ESP32 GPIO remains strongly recommended for turbine fuel, ignition, starter, and shutdown outputs because a disconnected TCA9554 can physically retain its last output latch.
 
 ### 5.3 Every available input purpose
 
@@ -171,8 +174,10 @@ The **Purpose** field tells the firmware how an installed channel may be used. T
 <tr><td>P1 / P2 / coolant pressure</td><td>Compressor inlet, compressor discharge and cooling-system measurements used for display, logging, rules and calculated behavior where supported.</td></tr>
 <tr><td>Oil, coolant or intake temperature</td><td>Auxiliary temperature channels. Oil temperature can enable its dedicated shutdown; others are available to logging and automation.</td></tr>
 <tr><td>Fuel flow</td><td>Pulse or analog flow measurement for consumption logs and rules. Enter the manufacturer's pulses/litre or calibrated mapping.</td></tr>
+<tr><td>Main / scavenge oil flow</td><td>Separate flow feedback for the corresponding pump. Calibrate in L/min, enable monitoring on that pump's Hardware card, and test its minimum-flow threshold. Confirmed underflow warns by default; shutdown is a separate Config choice.</td></tr>
 <tr><td>Main flame / afterburner flame</td><td>Dedicated combustion detectors. Main flame can confirm startup/flameout; AB flame can confirm afterburner light-off.</td></tr>
-<tr><td>Torque</td><td>Analog or HX711 measurement. With N2 it supports shaft-power calculation; it is also available to rules.</td></tr>
+<tr><td>Torque</td><td>Analog, HX711, or NAU7802 measurement. NAU7802 calibration captures unloaded zero plus known force and lever arm. With N2 it supports shaft-power calculation; it is also available to rules.</td></tr>
+<tr><td>Thrust</td><td>NAU7802 load-cell measurement calibrated from unloaded zero plus a known force or mass. Canonical display, telemetry, rules and logs use newtons.</td></tr>
 <tr><td>Battery / bus voltage</td><td>Scaled ADC measurement for display, logs and undervoltage protection. A battery must never connect directly to an ADC pin.</td></tr>
 <tr><td>Throttle input</td><td>Operator demand from analog, RC PWM, pulse-duty or another supported input. Calibrate low/high endpoints and signal-loss behavior.</td></tr>
 <tr><td>Idle input</td><td>Separate idle/startup demand, usable as digital, analog, RC PWM, pulse or duty depending on the installation.</td></tr>
@@ -219,6 +224,7 @@ An ESP32 GPIO can provide only a logic command. Use an interface rated for the r
 <tr><td>Air starter</td><td>Air-start valve through an on/off driver.</td></tr>
 <tr><td>Pilot gas / start-fuel solenoid</td><td>Dedicated light-off fuel valve for an applicable combustion system.</td></tr>
 <tr><td>Air / fuel purge valve</td><td>Valve that can be placed in a custom safe sequence.</td></tr>
+<tr><td>Electric drain valve</td><td>Open/close output available to startup/shutdown sequences, Control Rules and standby Tools tests. Configure its physical polarity or endpoints in Hardware.</td></tr>
 <tr><td>Variable nozzle / propeller pitch</td><td>Proportional servo/ESC output; propeller pitch can be the N2 governor's controlled output.</td></tr>
 <tr><td>Generic automation output</td><td>Relay, PWM or servo output controlled by custom rules or sequence steps, with no built-in engine role.</td></tr>
 </tbody></table></div>
@@ -226,6 +232,12 @@ An ESP32 GPIO can provide only a logic command. Use an interface rated for the r
 For every output, set a **Power-on state / Boot safe demand** and a **Fault safe demand** that are electrically safe. Verify actual polarity at the driver input and load terminals; a label in software cannot correct a wrongly wired active-low module.
 
 ## Part 7: Install OpenTurbine and connect
+
+If this ECU previously ran a pre-2.0 build, keep its engine file only as a
+reference and follow the
+[v2 migration guide](https://github.com/elia179/OpenTurbine/blob/main/docs/V2_MIGRATION.md).
+Version 2.0 intentionally changed the hardware model and several startup/safety
+settings; recommission it instead of assuming an old file is safe.
 
 1. Download the [guided Windows Setup Tool]({{ '/get-started/' | relative_url }}).
 2. Disconnect all load power. Connect exactly one intended ESP32 by USB.
@@ -290,7 +302,7 @@ A controller continuously changes an output based on a measurement. Enable it on
 <tbody>
 <tr><td>Oil pressure loop</td><td>Compares measured oil pressure with the active target and changes oil-pump demand. Gain controls reaction strength; deadband prevents constant tiny corrections; fallback handles a failed sensor.</td><td>After the oil-pressure input is calibrated and the proportional oil-pump output, plumbing and safe fallback demand are proven.</td></tr>
 <tr><td>Smooth fuel/throttle movement</td><td>Limits how quickly the main fuel output opens or closes. It also supports gradual limit protection behavior.</td><td>Normally enabled for a proportional main-fuel output. Set opening/closing times from controlled tests, not examples.</td></tr>
-<tr><td>Automatic idle speed control</td><td>Measures N1 or N2 and adjusts fuel within configured bounds to hold idle speed. Deadband prevents hunting; optional integral/predictive fields correct persistent error and fast deceleration.</td><td>Only after manual/fixed idle behavior is stable, the RPM signal is clean, and fuel limits are safe.</td></tr>
+<tr><td>Automatic idle control</td><td>Measures one selected N1, N2, P1, or P2 source and adjusts fuel within configured bounds to hold idle. N1/N2 is the normal proven method; pressure control is experimental and has separate target, deadband, and disengagement settings.</td><td>Only after manual/fixed idle behavior is stable, the selected feedback is calibrated, and fuel limits are safe.</td></tr>
 <tr><td>Automatic N2 speed control</td><td>Compares N2 with its target and changes main fuel or proportional propeller pitch. Pitch control increases load to restrain speed.</td><td>Only on an appropriate two-shaft system with verified N2, output direction, travel limits and conservative gains.</td></tr>
 </tbody></table></div>
 
@@ -303,11 +315,11 @@ Enabling a checkbox does not prove the protection. You must force a safe simulat
 <tbody>
 <tr><td>N1 overspeed</td><td>Hard shutdown above Maximum N1 Speed; requires primary N1.</td></tr>
 <tr><td>N2 overspeed</td><td>Independent hard shutdown above Maximum N2 Speed; requires N2.</td></tr>
-<tr><td>Turbine gas overtemperature</td><td>Watches the selected TOT/TIT hard limit; requires at least one turbine-temperature input.</td></tr>
+<tr><td>Turbine gas overtemperature</td><td>Watches the startup-specific selected TOT/TIT limit during STARTUP and the normal hard limit during RUNNING. A zero startup limit inherits the normal limit.</td></tr>
 <tr><td>Low oil pressure</td><td>Shutdown after configured low-pressure behavior; requires oil pressure or a low-oil switch.</td></tr>
 <tr><td>Zero oil pressure</td><td>Detects effectively absent oil pressure; requires oil pressure or a zero-oil switch.</td></tr>
-<tr><td>Flameout</td><td>Declares combustion loss using the selected flame, N1 or EGT evidence after its confirmation time.</td></tr>
-<tr><td>Hot start</td><td>Blocks/aborts startup when selected turbine temperature is already above the configured threshold.</td></tr>
+<tr><td>Flameout</td><td>Declares combustion loss using the selected flame, N1, or EGT evidence after its confirmation time. EGT evidence means temperature is below its threshold and falling, or is falling faster than the configured rate.</td></tr>
+<tr><td>Hot start</td><td>Blocks START when selected turbine temperature is already above the pre-start limit. The normal/startup overtemperature guard then protects the active start.</td></tr>
 <tr><td>Oil temperature high</td><td>Shutdown above the oil-temperature limit; requires that input.</td></tr>
 <tr><td>Fuel pressure low</td><td>Shutdown below the running fuel-pressure threshold; requires fuel-pressure input.</td></tr>
 <tr><td>Battery undervoltage</td><td>Fault behavior below the configured bus-voltage threshold; requires a scaled, calibrated voltage input.</td></tr>
@@ -323,7 +335,7 @@ The Hardware page disables protections whose required input is not fitted. After
 1. Open **Config** only after Hardware saves without errors.
 2. Select **Essentials** first. Enter limits from the exact engine, sensor and actuator documentation.
 3. Use **Changed** to review every edit. Yellow fields are not saved yet.
-4. Use **Unavailable** to see settings whose required hardware/controller is absent. Do not enable Developer Mode to bypass a missing physical prerequisite.
+4. Use **Explore all features** to inspect or preconfigure features whose required hardware/controller is absent. Amber-bordered tuning values save normally but remain inactive until Hardware satisfies the displayed prerequisite. Enable switches and choices for missing hardware remain locked, so Explore cannot arm a feature unexpectedly. Search also reveals unavailable settings; neither Explore nor Developer Mode bypasses a missing physical prerequisite.
 5. Save one related group at a time and read the save recap.
 6. Reopen the page and confirm values survived the reboot/save.
 

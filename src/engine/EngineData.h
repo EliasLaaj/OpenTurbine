@@ -56,12 +56,14 @@ struct EngineData {
     volatile float    fuelFlow        = 0;      // (optional, unit per cal)
     volatile float    battVoltage     = 0;      // V    battery / bus voltage (optional)
     volatile float    torque          = 0;      // Nm   output shaft torque (turboshaft, optional)
+    volatile float    thrust          = 0;      // N    measured engine thrust (optional)
     volatile float    turboPower      = 0;      // W    shaft power = torque × n2AngularVel (turboshaft)
     volatile int      oilPressureRaw  = 0;      // raw ADC counts
     volatile int      flameSensorRaw  = 0;      // raw ADC counts
     volatile float    lastRunFlameAvg = 0;      // sparse 1 Hz average from latest run
     volatile uint32_t lastRunFlameSamples = 0;
     volatile int      torqueRaw       = 0;      // raw ADC counts (ADC torque sensor only)
+    volatile int      thrustRaw       = 0;      // raw NAU7802 bridge-ADC counts
     volatile int      throttleInputRaw = 0;     // ADC counts (ADC mode) or pulse width us (servo mode)
     volatile int      idleInputRaw     = 0;     // ADC counts (ADC mode) or pulse width us (servo mode)
     volatile bool     throttleInputValid = false;
@@ -73,6 +75,7 @@ struct EngineData {
     volatile uint32_t p1SampleSeq      = 0;
     volatile uint32_t p2SampleSeq      = 0;
     volatile uint32_t torqueSampleSeq  = 0;
+    volatile uint32_t thrustSampleSeq  = 0;
     volatile uint32_t n1SampleMs       = 0;
     volatile uint32_t n2SampleMs       = 0;
     volatile uint32_t totSampleMs      = 0;
@@ -80,6 +83,7 @@ struct EngineData {
     volatile uint32_t p1SampleMs       = 0;
     volatile uint32_t p2SampleMs       = 0;
     volatile uint32_t torqueSampleMs   = 0;
+    volatile uint32_t thrustSampleMs   = 0;
 
     // ── Sensor health ─────────────────────────────────────────
     volatile bool     n1Healthy       = false;
@@ -91,14 +95,16 @@ struct EngineData {
     volatile bool     fuelPressHealthy= true;    // unfitted → not a fault
     volatile bool     battHealthy     = true;    // unfitted → not a fault
     volatile bool     torqueHealthy   = true;    // unfitted → not a fault
+    volatile bool     thrustHealthy   = true;    // unfitted → not a fault
     volatile bool     p1Healthy       = true;    // unfitted → not a fault
     volatile bool     p2Healthy       = true;    // unfitted → not a fault
     volatile bool     fuelFlowHealthy = true;    // unfitted → not a fault
-    // Rail-check on the flame threshold sensor's ADC. Display/rules hint
-    // only — flameout safety logic keeps using flameDetected directly (a
-    // strong flame can legitimately saturate the sensor while RUNNING).
-    volatile bool     flameHealthy    = true;
+    // Configured flame-channel availability. Threshold detectors may
+    // legitimately use either ADC rail as ON/OFF; presence is separate.
+    volatile bool     flameHealthy    = true;   // configured channel is available
     volatile bool     flameDetected   = false;
+    volatile uint32_t flameSampleSeq  = 0;
+    volatile uint32_t flameSampleMs   = 0;
     volatile float    registryInputValue[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
     volatile bool     registryInputHealthy[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
 
@@ -117,6 +123,7 @@ struct EngineData {
     volatile float    registryOutputDemand[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     volatile float    registryOutputCurrentAmps[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     volatile bool     registryOutputCurrentHealthy[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
+    volatile bool     oilFlowWarningActive = false;
     volatile bool     fuelSolOpen     = false;
     volatile bool     igniterOn       = false;
     volatile bool     igniter2On      = false;
@@ -146,7 +153,7 @@ struct EngineData {
     volatile bool     abTriggerActive = false;  // trigger input (throttle/switch/input) is asserted
     volatile bool     abArmSwitchOn   = false;  // arm switch currently asserted
     volatile bool     abFlameOn       = false;  // AB flame sensor detected
-    volatile bool     abFlameHealthy  = false;
+    volatile bool     abFlameHealthy  = false;  // configured channel is available
     volatile bool     abSolOpen       = false;  // AB fuel solenoid (g_actAbSol)
     volatile int      abInputRaw      = 0;      // raw ADC/RC counts for analog/RC AB trigger
     volatile float    abInputNorm     = 0.0f;   // normalized 0.0-1.0 AB command input
@@ -178,7 +185,6 @@ struct EngineData {
     volatile bool     limpMode           = false;
     volatile bool     stopSwitchActive   = false;
     volatile bool     startSwitchActive  = false;  // hardware start button currently pressed
-    volatile bool     starterLowRpmSupportActive = false; // optional starter support armed for this run
     volatile bool     manualRelightActive = false; // operator holding START while running
 
     // ── Last mode-change reason (best-effort display, no mutex) ──
@@ -285,12 +291,13 @@ struct EngineData {
     volatile float    loopPeriodMs       = 0.0f; // measured loop start-to-start period
     volatile float    loopExecAvgMs      = 0.0f; // EWMA loop body execution time
     volatile float    loopExecMaxMs      = 0.0f; // worst loop body time in the last sample window
-    volatile float    loopSensorsMs      = 0.0f; // last sensor update section time
-    volatile float    loopSequencerMs    = 0.0f; // last sequencer + command section time
-    volatile float    loopControllersMs  = 0.0f; // last controller/rules section time
-    volatile float    loopActuatorsMs    = 0.0f; // last actuator write section time
-    volatile float    loopLoggingMs      = 0.0f; // last recorder/logger section time
-    volatile float    loopLedMs          = 0.0f; // last status LED section time
+    // Section breakdown from the same worst loop represented by loopExecMaxMs.
+    volatile float    loopSensorsMs      = 0.0f;
+    volatile float    loopSequencerMs    = 0.0f;
+    volatile float    loopControllersMs  = 0.0f;
+    volatile float    loopActuatorsMs    = 0.0f;
+    volatile float    loopLoggingMs      = 0.0f;
+    volatile float    loopLedMs          = 0.0f;
     volatile uint8_t  resetReason        = 0;   // esp_reset_reason_t cast to uint8
 
 private:

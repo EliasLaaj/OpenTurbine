@@ -19,6 +19,7 @@ public:
     void onEnter() override {
         _entryMs   = millis();
         _lastCheck = millis();
+        _lastSampleSeq = 0;
         _count     = 0;
         clearWaitReason();
     }
@@ -42,8 +43,10 @@ public:
         }
 
         unsigned long now = millis();
-        if (now - _lastCheck >= checkIntervalMs) {
+        if (ed.flameSampleSeq != 0 && ed.flameSampleSeq != _lastSampleSeq &&
+            now - _lastCheck >= checkIntervalMs) {
             _lastCheck = now;
+            _lastSampleSeq = ed.flameSampleSeq;
             if (ed.flameDetected) {
                 if (++_count >= requiredCount) {
                     clearWaitReason();
@@ -72,4 +75,5 @@ private:
     unsigned long _entryMs   = 0;
     unsigned long _lastCheck = 0;
     int           _count     = 0;
+    uint32_t      _lastSampleSeq = 0;
 };

@@ -829,6 +829,7 @@ body[data-page="tools"] main { max-width: 1180px; }
   margin-bottom: 0.85rem;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
 }
+.hw-section[id] { scroll-margin-top: 60px; }
 .hw-title {
   font-size: 0.68rem;
   color: var(--dim);
@@ -1022,20 +1023,20 @@ main.hw-installed-view #hardware-requirements-panel {
 main.hw-installed-view .registry-bindings-panel {
   display: none !important;
 }
-main .hw-section:not(#hardware-profile-section):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-requirements-panel) {
+main .hw-section:not(#hardware-profile-section):not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-requirements-panel) {
   display: none !important;
 }
-main.hw-installed-view .hw-section:not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card {
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card {
   padding: .58rem .75rem;
 }
-main.hw-installed-view .hw-section:not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-grid,
-main.hw-installed-view .hw-section:not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > [id^="grp-"] {
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-grid,
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > [id^="grp-"] {
   display: none !important;
 }
-main.hw-installed-view .hw-section:not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-toggle {
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-toggle {
   margin-bottom: 0 !important;
 }
-main.hw-installed-view .hw-section:not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-desc {
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-desc {
   margin-top: .25rem;
 }
 .registry-card-summary {
@@ -1187,6 +1188,83 @@ main.hw-installed-view .hw-section:not(#hardware-inputs-panel):not(#hardware-out
   color: var(--text-2);
   font-size: .75rem;
 }
+.control-setup-guide {
+  margin: .2rem 0 .8rem;
+  border: 1px solid color-mix(in srgb, var(--blue) 42%, var(--border));
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--blue) 5%, var(--bg));
+}
+.control-setup-title {
+  width: fit-content;
+  margin: .55rem;
+  padding: .34rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  font-size: .7rem;
+  font-weight: 750;
+}
+.control-setup-title:hover {
+  border-color: color-mix(in srgb, var(--blue) 60%, var(--border));
+  color: var(--blue);
+}
+.control-setup-guide[open] .control-setup-title {
+  margin-bottom: .65rem;
+}
+.control-setup-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: .55rem;
+  padding: 0 .7rem .7rem;
+}
+.control-setup-card {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: .35rem;
+  padding: .6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.control-setup-card strong { color: var(--text); font-size: .78rem; }
+.control-setup-card span { color: var(--dim); font-size: .7rem; line-height: 1.45; }
+.control-setup-card a {
+  margin-top: auto;
+  color: var(--blue);
+  font-size: .7rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+.control-setup-card a:hover { text-decoration: underline; }
+.context-links {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: .4rem .75rem;
+  align-items: center;
+  padding: .5rem .6rem;
+  border-top: 1px solid var(--border);
+  color: var(--dim);
+  font-size: .7rem;
+}
+.context-links strong { color: var(--text-2); font-size: .7rem; }
+.context-links a {
+  color: var(--blue);
+  font-weight: 650;
+  text-decoration: none;
+}
+.context-links a:hover { text-decoration: underline; }
+.deep-link-target {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--blue) 14%, transparent);
+}
+@media (max-width: 860px) {
+  .control-setup-grid { grid-template-columns: minmax(0, 1fr); }
+}
 
 /* A flat, ordered settings grid: the outer card provides the visual grouping. */
 .hw-grid.profile-grid {
@@ -1236,7 +1314,15 @@ main.hw-installed-view .hw-section:not(#hardware-inputs-panel):not(#hardware-out
   background: var(--bg);
   font-size: .78rem;
 }
-.requirement-row span:first-child { color: var(--text); }
+.requirement-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: .22rem;
+  color: var(--text);
+}
+.requirement-copy strong { display:block;font-weight:650;line-height:1.35; }
+.requirement-copy small { display:block;color:var(--dim);font-size:.69rem;line-height:1.4; }
 .requirement-ok { border-color: color-mix(in srgb, var(--green) 35%, var(--border)); }
 .requirement-warn { border-color: color-mix(in srgb, var(--yellow) 45%, var(--border)); }
 .requirement-error { border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
@@ -1314,6 +1400,12 @@ main.hw-installed-view .hw-section:not(#hardware-inputs-panel):not(#hardware-out
 .hw-item-card.disabled-safety {
   border-color: color-mix(in srgb, var(--red) 50%, var(--border));
   opacity: 0.62;
+}
+.workflow-prerequisite {
+  margin-top:.3rem;
+  color:var(--yellow);
+  font-size:.7rem;
+  line-height:1.4;
 }
 
 .rebooting-overlay {
@@ -1627,10 +1719,10 @@ select option.pin-inonly { color: #5ba3e0; }
   background: var(--surface-2); overflow: hidden;
 }
 .fs-header { padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.68rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: 0.07em; font-family: var(--font-ui); }
-.fs-grid  { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0.2rem; padding: 0.45rem 0.75rem; }
-.fs-row   { display: flex; align-items: baseline; gap: 0.35rem; font-size: 0.75rem; }
-.fs-label { color: var(--dim); min-width: 8rem; flex-shrink: 0; font-family: var(--font-ui); }
-.fs-val   { color: var(--text); font-weight: 500; font-family: var(--font-mono); }
+.fs-grid  { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 0.45rem 1rem; padding: 0.6rem 0.75rem; }
+.fs-row   { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, 1.15fr); align-items: start; gap: 0.5rem; font-size: 0.75rem; min-width: 0; }
+.fs-label { color: var(--dim); min-width: 0; font-family: var(--font-ui); overflow-wrap: anywhere; }
+.fs-val   { color: var(--text); min-width: 0; font-weight: 500; font-family: var(--font-mono); overflow-wrap: anywhere; }
 
 .ab-section-hdr {
   font-size: 0.82rem; font-weight: 700; color: var(--text);
@@ -1651,12 +1743,17 @@ select option.pin-inonly { color: #5ba3e0; }
   color: var(--text); flex: 1 1 180px; width: auto; min-width: 0;
 }
 .add-row select:focus { outline: none; border-color: var(--accent); }
+.add-row .add-btn { flex: 0 1 auto; max-width: 100%; white-space: normal; }
 .add-btn {
   background: var(--accent); color: color-mix(in srgb, var(--accent) 22%, #000); border: none; border-radius: var(--r-sm);
   padding: 0.32rem 0.85rem; font-size: 0.82rem; font-weight: 600; cursor: pointer;
   font-family: var(--font-ui);
 }
 .add-btn:hover { opacity: 0.85; }
+@media (max-width: 620px) {
+  .add-row select, .add-row .add-btn { flex: 1 1 100%; width: 100%; }
+  .fs-row { grid-template-columns: minmax(0, 1fr); gap: 0.15rem; }
+}
 
 /* Sequence save bar — full-bleed sticky bottom bar */
 .seq-save-bar {

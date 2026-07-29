@@ -1,5 +1,9 @@
 # OpenTurbine Setup Tool
 
+This document describes the OpenTurbine 2.0 package and setup workflow. A v2
+release package must contain firmware and web assets built from the same commit
+and must report version `2.0.0` during post-install verification.
+
 The Windows setup tool provides two deliberately distinct paths: **Clean install
 / reinstall** erases a blank or previously used board over USB, while **Update
 and keep my setup** updates an existing OpenTurbine board over Wi-Fi without a
@@ -46,9 +50,20 @@ contains both ESP32 and ESP32-S3 firmware.
 
 ## Build The Recommended Package
 
-Build both firmware targets and their LittleFS images:
+Run the complete release gate first. It assembles split web sources, compresses
+the web assets, runs browser/firmware/package tests, builds both targets and
+LittleFS images, and checks memory/partition margins:
 
 ```bash
+python tools/run_release_checks.py
+```
+
+The equivalent manual build steps begin with web-source assembly and then build
+both firmware targets and their LittleFS images:
+
+```bash
+python tools/build_web_sources.py
+python tools/gzip_data.py
 pio run -e esp32dev
 pio run -e esp32dev -t buildfs
 pio run -e esp32s3dev
@@ -81,6 +96,10 @@ dist/setup_tool/OpenTurbine_Recommended.zip.sha256
 ```
 
 ## Release Checklist
+
+Before packaging v2.0, also follow [`V2_MIGRATION.md`](V2_MIGRATION.md) and
+verify a clean Development-board install, bundled official PCB profile install,
+custom chip-matched profile install, and Wi-Fi update of an existing v2 ECU.
 
 Attach these assets to the GitHub release:
 
@@ -175,9 +194,22 @@ esp32s3dev/littlefs.bin
 esp32s3dev/web_assets/*.gz
 ```
 
-The generated `manifest.json` must include `package_schema: 2` and
-`setup_tool_version`, which prevents an EXE/ZIP layout mismatch. Do not publish
-a package built with `--allow-missing-drivers`.
+The generated `manifest.json` must include `package_schema: 3`,
+`setup_tool_version`, and `minimum_setup_tool_version`. The package schema
+protects the flashing/layout contract. The minimum version makes Setup Tool
+0.6.0 a stable client: later firmware and dashboard packages remain compatible
+without requiring a new EXE unless they adopt a newer package format or feature
+that the installed tool cannot handle. `setup_tool_version` records which tool
+source built the package; it is informational for modern packages rather than
+an exact-match requirement.
+
+On each normal launch, the tool downloads and verifies the current
+`releases/latest` package. If GitHub is temporarily unavailable, it can use a
+previously verified cached package. A ZIP deliberately placed beside the EXE is
+a local/offline override and therefore stays pinned until it is replaced or
+removed.
+
+Do not publish a package built with `--allow-missing-drivers`.
 
 Recommended driver sources:
 

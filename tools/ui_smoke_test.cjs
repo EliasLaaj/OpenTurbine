@@ -51,6 +51,10 @@ function installedBrowser() {
   const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
   const page = await browser.newPage();
   page.on('pageerror', error => console.error(`Browser page error: ${error.message}`));
+  page.on('dialog', async dialog => {
+    console.error(`Browser dialog: ${dialog.message()}`);
+    await dialog.dismiss();
+  });
   const results = [];
 
   try {
@@ -269,11 +273,11 @@ function installedBrowser() {
     await page.request.post(`${base}/__sim/data`, { data: { throttle_input_us: 1120, throttle_input_norm: 0.12 } });
     await page.waitForFunction(() => document.querySelector('#cal-th-raw').textContent.includes('1120'));
     await page.locator('#throttle-cal-row button', { hasText: 'Capture Min' }).click();
-    await page.waitForTimeout(1100); // endpoint capture averages one second
+    await page.waitForFunction(() => document.querySelector('#th-status')?.textContent.includes('Min: 1120'));
     await page.request.post(`${base}/__sim/data`, { data: { throttle_input_us: 1880, throttle_input_norm: 0.88 } });
     await page.waitForFunction(() => document.querySelector('#cal-th-raw').textContent.includes('1880'));
     await page.locator('#throttle-cal-row button', { hasText: 'Capture Max' }).click();
-    await page.waitForTimeout(1100);
+    await page.waitForFunction(() => document.querySelector('#th-status')?.textContent.includes('Max: 1880'));
     await page.locator('#btn-th-save').click();
     await page.waitForTimeout(100);
     saved = await state(page);
@@ -435,11 +439,19 @@ function installedBrowser() {
     await page.locator('#btn-OIL_PRIME').click();
     await page.waitForSelector('#ot-app-dialog.show');
     assert.match(await page.locator('#ot-dialog-message').textContent(), /energize.*5 s[\s\S]*safe test state[\s\S]*moving hardware is clear/i);
+    await page.locator('#ot-dialog-check').check();
     await page.locator('#ot-dialog-confirm').click();
     await page.waitForTimeout(100);
     saved = await state(page);
     assert.equal(saved.commands.at(-1).cmd, 'OIL_PRIME');
-    results.push('tools gates bench and dynamic idle by prerequisites while keeping standby actuator tests');
+    assert.equal(await page.evaluate(() => localStorage.getItem('ot_tool_confirmations_skip_all')), '1');
+    await page.locator('#btn-test-settings').click();
+    assert.equal(await page.locator('#tool-always-confirm').isChecked(), false);
+    await page.locator('#tool-always-confirm').check();
+    await page.getByRole('button', { name: 'Save settings' }).click();
+    await page.waitForTimeout(650);
+    assert.equal(await page.evaluate(() => localStorage.getItem('ot_tool_confirmations_skip_all')), null);
+    results.push('tools gates prerequisites and uses one restorable confirmation preference for the full page');
 
     await page.request.patch(`${base}/api/hardware`, { data: {
       controllers: { dynamic_idle: true },
@@ -488,7 +500,6 @@ function installedBrowser() {
       cfg.actuators.oil_pump.has_current = true;
       cfg.controllers.oil_loop = true;
       cfg.actuators.throttle.enabled = false;
-      cfg.controllers.throttle_slew = true;
       cfg.channel_registry.outputs.forEach(channel => {
         if (channel.purpose === 'oil_pump' || channel.purpose === 'main_fuel') channel.installed = false;
       });
@@ -498,10 +509,9 @@ function installedBrowser() {
       currentDisabled: !registryHasPurpose('output', 'oil_pump'),
       oilDisabled: !controllerAvailability('oil_loop').ok,
       oilChecked: !!cfg.controllers.oil_loop,
-      slewDisabled: !controllerAvailability('throttle_slew').ok,
-      slewChecked: !!cfg.controllers.throttle_slew
-    })), { currentDisabled:true, oilDisabled:true, oilChecked:false, slewDisabled:true, slewChecked:false });
-    results.push('hardware editor ghosts current sensing and controllers when required hardware is absent');
+      fuelResponseAutomatic: registryHasPurpose('output', 'main_fuel')
+    })), { currentDisabled:true, oilDisabled:true, oilChecked:false, fuelResponseAutomatic:false });
+    results.push('hardware editor ghosts current sensing/controllers and derives fuel protection from Main Fuel');
     await page.evaluate(() => {
       cfg.has_two_shaft = false;
       cfg.sensors.n2_rpm.enabled = true;
@@ -554,6 +564,7 @@ function installedBrowser() {
       channel_registry: hardwareBeforeAbRemoval.channel_registry
     } });
     await page.reload();
+    await page.waitForFunction(() => document.querySelector('#save-status')?.textContent === 'No unsaved changes');
     assert.equal(await page.locator('#add-afterburner-sel option[value="ABPumpOn"]').count(), 1);
     assert.equal(await page.locator('#add-afterburner-sel option[value="ABSolOpen"]').count(), 1);
     await page.locator('.seq-tab', { hasText: 'Control Rules' }).click();
@@ -633,6 +644,19 @@ function installedBrowser() {
     await page.waitForFunction(() => document.body.textContent.includes('Run #'));
     assert.match(await page.locator('body').textContent(), /TIT 1544/);
     results.push('event log renders firmware event keys, TIT peaks, and follows the unit preference');
+
+    await page.locator('#tab-session').click();
+    await page.locator('#session-save-btn:not([disabled])').waitFor();
+    assert.equal(await page.locator('[data-bit="p1"]').count(), 1);
+    assert.equal(await page.locator('[data-bit="p2"]').count(), 1);
+    await page.locator('#session-log-interval').fill('750');
+    await page.locator('#event-snapshot-interval').fill('12500');
+    await page.locator('#session-save-btn').click();
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('#session-save-msg')).display !== 'none');
+    saved = await state(page);
+    assert.equal(saved.settings.session_log.interval_ms, 750);
+    assert.equal(saved.settings.telemetry.snapshot_interval_ms, 12500);
+    results.push('Log > Session Data owns channel selection and logging intervals');
 
     await page.evaluate(() => renderSummary([], 8));
     assert.match(await page.locator('#runs-container').textContent(), /No engine runs in the currently loaded log\. 8 diagnostic events are still available under All Events\./);

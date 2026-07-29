@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright');
 
@@ -15,7 +16,8 @@ function installedBrowser() {
 (async () => {
   const base = process.argv[2] || 'http://192.168.4.1';
   const cycles = Number(process.argv[3] || 10);
-  const screenshotDir = process.argv[4] || process.cwd();
+  const screenshotDir = process.argv[4] || path.join(os.tmpdir(), 'openturbine-live-audit');
+  fs.mkdirSync(screenshotDir, { recursive: true });
   const dwellMs = Number(process.argv[5] || 1000);
   const pages = ['/', '/hardware.html', '/config.html', '/calibration.html', '/sequence.html', '/log.html', '/tools.html'];
   const failures = [];
@@ -93,11 +95,12 @@ function installedBrowser() {
   for (const key of ['pb_p1s', 'pb_p1h', 'pb_p2s', 'pb_p2h']) {
     assert.match(await page.locator(`#cf-${key}`).evaluate(el => el.closest('.cfg-field').querySelector('.cfg-label').textContent), /bar|PSI|kPa/);
   }
-  for (const key of ['sl_p1', 'sl_p2']) {
-    const field = page.locator(`#cf-${key}`);
-    assert.equal(await field.evaluate(el => !el.closest('.cfg-field').classList.contains('filter-hidden')), true, `${key} is hidden from Essentials`);
-  }
   await page.screenshot({ path: path.join(screenshotDir, 'classic-config-mobile.png'), fullPage: true });
+
+  await navigate(`${base}/log.html`, { waitUntil: 'domcontentloaded' });
+  await page.locator('#tab-session').click();
+  for (const bit of ['p1', 'p2', 'torque', 'starter'])
+    assert.equal(await page.locator(`[data-bit="${bit}"]`).count(), 1, `${bit.toUpperCase()} logging is missing from Log > Session Data`);
 
   await navigate(`${base}/tools.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#btn-factory-reset:not([disabled])', { timeout: 10000 });

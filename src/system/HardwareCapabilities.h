@@ -26,16 +26,18 @@ public:
                    HardwareConfig::hasTot || HardwareConfig::hasTit;
         if (!strcmp(feature, "dynamic_idle"))
             return ((hasInputBindingOrPurpose("primary_n1", "n1_speed") ||
-                    hasInputBindingOrPurpose("primary_n2", "n2_speed")) &&
+                    hasInputBindingOrPurpose("primary_n2", "n2_speed") ||
+                    hasInputPurpose("p1_pressure") || hasInputPurpose("p2_pressure")) &&
                     hasOutputPurpose("main_fuel")) ||
-                   ((HardwareConfig::hasN1Rpm || HardwareConfig::hasN2Rpm) && HardwareConfig::hasThrottle);
+                   ((HardwareConfig::hasN1Rpm || HardwareConfig::hasN2Rpm || HardwareConfig::hasP1 || HardwareConfig::hasP2) &&
+                    HardwareConfig::hasThrottle);
         return false;
     }
     static const char* enabledFeatureRejectReason() {
         if (HardwareConfig::hasOilLoop && !available("oil_loop"))
             return "Oil control loop requires an oil pressure input and oil pump output";
         if (HardwareConfig::hasDynamicIdle && !available("dynamic_idle"))
-            return "Automatic idle speed control requires an RPM input and fuel/throttle output";
+            return "Automatic idle control requires N1, N2, P1, or P2 feedback and a main fuel output";
         if (HardwareConfig::hasGovernor && !available("n2_governor"))
             return "Governor requires N2 RPM feedback and a throttle or prop-pitch output";
         if ((HardwareConfig::safetyOverspeed || HardwareConfig::safetySurge) && !available("n1_safety"))
@@ -77,7 +79,9 @@ public:
         }
         else if (!strcmp(feature, "egt_safety")) addMissing(missing, "primary_egt", "Bind or add a temperature input");
         else if (!strcmp(feature, "dynamic_idle")) {
-            if (!hasInputRole("speed") && !HardwareConfig::hasN1Rpm && !HardwareConfig::hasN2Rpm) addMissing(missing, "rpm_input", "Add an RPM input");
+            if (!hasInputRole("speed") && !hasInputPurpose("p1_pressure") && !hasInputPurpose("p2_pressure") &&
+                !HardwareConfig::hasN1Rpm && !HardwareConfig::hasN2Rpm && !HardwareConfig::hasP1 && !HardwareConfig::hasP2)
+                addMissing(missing, "idle_feedback", "Add an N1, N2, P1, or P2 feedback input");
             if (!hasOutputPurpose("main_fuel") && !HardwareConfig::hasThrottle) addMissing(missing, "throttle_output", "Add a main fuel output");
         }
     }

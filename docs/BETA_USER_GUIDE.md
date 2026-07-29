@@ -1,6 +1,8 @@
 # Beta tester appendix
 
-The repository root [`README.md`](../README.md) is the authoritative and current guide for installation, minimum equipment, hardware setup, configuration, calibration, dry testing, first runs, backup, updates, and recovery.
+The current v2 procedure is [`USER_GUIDE.md`](USER_GUIDE.md), with a concise
+project gateway in the repository root [`README.md`](../README.md). A pre-2.0
+installation must also follow [`V2_MIGRATION.md`](V2_MIGRATION.md).
 
 This appendix contains only beta-specific reporting guidance.
 
@@ -9,7 +11,7 @@ This appendix contains only beta-specific reporting guidance.
 - Use a sacrificial or safely recoverable ECU board.
 - Record the firmware version, target (`esp32dev` or `esp32s3dev`), and installation method.
 - Back up the full engine file.
-- Follow the README pre-start review and repeat the relevant dry tests.
+- Follow the v2 User Guide pre-start review and repeat the relevant dry tests.
 - Keep a known-good installer/package available for recovery.
 
 ## What to report

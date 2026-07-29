@@ -120,7 +120,7 @@ function organizeDashboardCards() {
     'speed-cards': ['oil-card', 'oil-temp-card', 'oilpump-current-card'],
     'combustion-cards': ['flame-card', 'fuel-press-card', 'fuel-flow-card'],
     'pressure-cards': ['p1-card', 'p2-card'],
-    'electrical-cards': ['batt-card', 'torque-card', 'glow-current-card',
+    'electrical-cards': ['batt-card', 'torque-card', 'thrust-card', 'glow-current-card',
       'igniter-current-card', 'igniter2-current-card']
   };
   Object.entries(groups).forEach(([targetId, cardIds]) => {
@@ -1012,6 +1012,8 @@ function applyData(d) {
     const oilPct = Number(d.oil_pct);
     setGaugeBar('oil-output-gauge-bar', Math.max(0, Math.min(100, oilPct)));
   }
+  const oilFlowWarning = document.getElementById('oil-flow-warning-note');
+  if (oilFlowWarning) oilFlowWarning.style.display = d.oil_flow_warning ? '' : 'none';
   renderRegistryOutputCards(d);
   const registryInputCount = renderRegistryInputCards(d);
   persistSparklineHistory();
@@ -1141,6 +1143,14 @@ function applyData(d) {
       } else {
         setText('turbo-power', 'N2 required');
       }
+    }
+  }
+  const thrustCard = document.getElementById('thrust-card');
+  if (thrustCard) {
+    thrustCard.style.display = d.has_thrust ? '' : 'none';
+    if (d.has_thrust) {
+      setText('thrust', d.thrust !== undefined ? Number(d.thrust).toFixed(1) : '—');
+      setDot('thrust-health', d.thrust_healthy, 'Thrust sensor');
     }
   }
 
@@ -1846,6 +1856,7 @@ function registryInputDisplay(ch) {
   if (role === 'voltage') return {value:value.toFixed(2), unit:'V', numeric:value};
   if (role === 'flow') return {value:value.toFixed(2), unit:'L/min', numeric:value};
   if (role === 'torque') return {value:value.toFixed(1), unit:'Nm', numeric:value};
+  if (role === 'thrust') return {value:value.toFixed(1), unit:'N', numeric:value};
   if (role === 'operator') return {value:(value * 100).toFixed(1), unit:'%', numeric:value};
   if (purpose === 'generic' || role === 'generic') return {value:value.toFixed(3), unit:'0-1', numeric:value};
   return {value:value.toFixed(2), unit:'', numeric:value};
@@ -1853,7 +1864,7 @@ function registryInputDisplay(ch) {
 function registryInputRangeText(ch) {
   const role = String(ch?.role || '');
   const purpose = String(ch?.purpose || '');
-  if (registryInputIsBinary(ch)) return 'digital 0/1 input';
+  if (registryInputIsBinary(ch)) return 'digital On/Off input';
   if (role === 'temperature') return purpose === 'coolant_temp' ? 'coolant temperature' : 'temperature input';
   if (role === 'pressure') return 'pressure input';
   if (role === 'speed') return 'speed input';

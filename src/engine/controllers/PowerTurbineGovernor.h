@@ -51,24 +51,30 @@ class PowerTurbineGovernor : public IController {
 public:
     float targetRpm    = 0.0f;      // 0 = disabled
     float bandRpm      = 500.0f;
-    float kp           = 0.001f;    // throttle fraction per RPM·s
-    float pitchKp      = 0.0005f;   // pitch fraction per RPM·s
+    float kp           = 0.00025f;  // 25 fuel percentage-points/s at 1000 RPM error
+    float pitchKp      = 0.00020f;  // 20 pitch percentage-points/s at 1000 RPM error
     float pitchRampSec = 10.0f;     // hard slew limit for pitch (0=off)
     bool  usePropPitch = false;     // true = turboprop pitch-primary mode
 
     void begin() override {
         auto& ed = EngineData::instance();
-        // If the governor was previously active and holding a non-zero pitch,
-        // re-sync internal state to the live demand and let tick()'s
-        // slew-capped path walk pitch from there.  The old instant
+        // Always take ownership from the live actuator demand. Startup
+        // sequencing may already have positioned the propeller before the
+        // governor's first RUNNING tick; beginning from the default zero would
+        // otherwise create an unintended jump toward fine pitch.
+        //
+        // Re-sync internal state and let tick()'s slew-capped path walk pitch
+        // from there. The old instant
         // propPitchDemand = 0 step bypassed pitchRampSec: a full-stroke
         // release on RUNNING re-entry / relight is exactly the gearbox torque
         // transient the slew cap exists to prevent.  With targetRpm > 0 the
         // governor drives pitch itself from the first tick; when disabled,
         // tick()'s release path slews pitch to fine.
-        if (usePropPitch && _wasActive) {
-            _pitchCurrent = ed.propPitchDemand;
-            if (targetRpm <= 0.0f) _releasing = true;
+        if (usePropPitch) {
+            _pitchCurrent = constrain(ed.propPitchDemand, 0.0f, 1.0f);
+            _releasing = targetRpm <= 0.0f && _pitchCurrent > 0.0f;
+        } else {
+            _releasing = false;
         }
         _wasActive = false;
         _lastMs    = millis();
@@ -100,7 +106,6 @@ public:
             return;
         }
         if (!ed.n2Healthy) {
-            ed.limpMode = true;
             _wasActive = false;
             if (usePropPitch) {
                 // Lost free-turbine feedback: add propeller load. Fine pitch

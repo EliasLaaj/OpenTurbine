@@ -307,8 +307,11 @@ function enumNames(source, marker) {
     // (igniter / igniter2 / glow — no longer hardcoded to igniter 1).
     assert.match(safetyMonitor, /relightIgnitionOk && n1Ok/);
     assert.match(safetyMonitor, /case 1: relightIgnitionOk = HardwareConfig::hasIgniter2/);
-    const configSource = fs.readFileSync(path.join('src', 'system', 'Config.cpp'), 'utf8');
-    assert.match(configSource, /eng\["n2_rpm_limit"\]\s*=\s*n2RpmLimit/);
+    const configSource = fs.readFileSync(path.join('src', 'system', 'Config.cpp'), 'utf8') +
+      fs.readFileSync(path.join('src', 'system', 'ConfigSerialize.cpp'), 'utf8');
+    assert.match(configSource, /CONFIG_FIELD\(n2RpmLimit,\s*"n2_rpm_limit"\)/);
+    assert.match(configSource, /readConfigFields\(eng,\s*ENGINE_FLOAT_FIELDS\)/);
+    assert.match(configSource, /writeConfigFields\(eng,\s*ENGINE_FLOAT_FIELDS\)/);
     // Relight sanitization is target-aware: disabled when N1 is missing or
     // the SELECTED ignition output (igniter/igniter2/glow) is not fitted.
     assert.match(configSource, /case 1: relightTargetAvailable = HardwareConfig::hasIgniter2/);
@@ -332,9 +335,11 @@ function enumNames(source, marker) {
     assert.match(mainSource, /case OTCommand::APPLY_CONFIG:[\s\S]*Hardware::applyConfig\(\);[\s\S]*validateSequences\(\);/);
     assert.match(mainSource, /Selected EGT hard limit is 0 - overtemperature shutdown is disabled", false/);
     assert.match(mainSource, /Running oil minimum is 0 - low-oil shutdown is disabled", false/);
-    assert.match(mainSource, /EGT flameout drop is 0 - EGT-source flameout detection is disabled", false/);
+    assert.match(mainSource, /Both EGT flameout conditions are disabled", false/);
     assert.match(mainSource, /EGT relight recovery rise is 0 - EGT-source relight cannot confirm success", false/);
-    assert.match(mainSource, /Minimum N1 for relight is 0 - windmill viability check is effectively disabled", false/);
+    assert.match(mainSource, /Minimum N1 to fire relight is below Minimum Running N1; the ECU will use the higher Minimum Running N1 value", false/);
+    const configSourceCpp = fs.readFileSync(path.join('src', 'system', 'Config.cpp'), 'utf8');
+    assert.match(configSourceCpp, /return fmaxf\(relightMinRpm, minRpm\)/);
     assert.match(mainSource, /Relight timeout is 0 - igniter can stay active indefinitely during a failed relight attempt", false/);
     assert.match(mainSource, /START blocked: actuator tool active/);
     assert.match(mainSource, /Cannot start: an actuator test or prime tool is still active/);
@@ -407,7 +412,7 @@ function enumNames(source, marker) {
     assert.doesNotMatch(indexHtml, /20260612b|20260617b|20260619a|20260625a|20260705a|Primary thermal limit/);
     assert.doesNotMatch(indexHtml, />Not saved<|No calibration saved|No successful test recorded/);
     assert.match(indexHtml, /Run a safe actuator or dry-sequence test/);
-    assert.match(indexHtml, /20260722a/);
+    assert.match(indexHtml, /20260723a/);
     assert.match(indexHtml, /<body data-page="dashboard">/);
     assert.match(indexHtml, /id="profile-mismatch-banner" style="display:none"/);
     const appSource = fs.readFileSync(path.join('data_src', 'app.js'), 'utf8');
@@ -418,8 +423,11 @@ function enumNames(source, marker) {
 
     await page.goto(`${base}/generate_204`);
     await page.waitForSelector('#n1-card', { state: 'attached' });
+    await page.evaluate(() => startTelemetryBoot());
+    await page.waitForFunction(() => _pullPeriodMs === 333, null, {
+      timeout: 3000
+    });
     const portalBoot = await page.evaluate(() => {
-      startTelemetryBoot();
       return {
         path: location.pathname,
         isLive: isLiveTelemetryPage(),

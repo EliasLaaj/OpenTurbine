@@ -7,27 +7,28 @@
 //
 //  Core 1 (ECU loop) calls tick() which snapshots EngineData
 //  into a FreeRTOS queue — no file I/O on Core 1.
-//  Core 0 (web task) calls drainQueue() to write queued rows
-//  to flash, keeping all LittleFS access off the ECU core.
+//  Core 0 (web task) calls drainQueue() only in STANDBY/FAULT.
+//  ESP32 flash operations suspend both cores, so active-engine samples stay
+//  in a bounded RAM queue and are persisted only after outputs are safe.
 //
 //  Lifecycle:
 //    begin()        — called once in setup(); creates /logs/ dir
-//    startSession() — called when mode enters STARTUP; requests new CSV
-//    endSession()   — called when mode returns to STANDBY; requests close
+//    startSession() — called when mode enters STARTUP; starts RAM capture
+//    endSession()   — called when mode returns to STANDBY; requests persistence
 //    tick()         — Core 1: queue push only, no file I/O
-//    drainQueue()   — Core 0: writes queued rows to flash
+//    drainQueue()   — Core 0: persists queued rows while storage is safe
 // ============================================================
 
 class SessionLogger {
 public:
-    // currentPath() returns the active session file path (valid after startSession()).
+    // currentPath() becomes valid after the completed run is persisted.
     static const char* currentPath();
 
     static bool begin();         // init (mkdir /logs, create queue); call once in setup()
-    static void startSession();  // open new CSV, write header; call at STARTUP
-    static void endSession();    // drain remaining rows, flush + close; call at STANDBY
+    static void startSession();  // begin bounded RAM capture; call at STARTUP
+    static void endSession();    // request persist + close; call at STANDBY
     static void tick();          // Core 1: snapshot → queue push (no file I/O)
-    static void drainQueue();    // Core 0: write queued rows to flash
+    static void drainQueue();    // Core 0: persist only in STANDBY/FAULT
     static uint32_t droppedRows();
     static bool healthy();
     static uint8_t errorCode();  // 0=ok, 1=queue, 2=open, 3=header, 4=backlog, 5=space, 6=write

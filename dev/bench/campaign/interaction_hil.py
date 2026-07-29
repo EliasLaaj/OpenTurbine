@@ -52,7 +52,7 @@ class InteractionQualification:
         # physically observable without taking the main-fuel servo capture pin.
         hw["actuators"]["prop_pitch"].update(enabled=True, pin=39, type=2, active_h=True)
         hw["controllers"].update(
-            governor=True, dynamic_idle=True, throttle_slew=True, oil_loop=True
+            governor=True, dynamic_idle=True, oil_loop=True
         )
         for key in hw["safety"]:
             hw["safety"][key] = key in (
@@ -121,10 +121,11 @@ class InteractionQualification:
                 "oil_poly": {"a": 0, "b": 0, "c": OIL_C, "d": 0,
                              "x_min": 0, "x_max": 4095},
             },
-            "sequence": {"startup": {"hot_start_tot_threshold": 200}},
+            "sequence": {"startup": {"pre_start_egt_limit_c": 200, "startup_egt_limit_c": 0}},
             "safety": {
                 "check_interval_ms": 20, "flameout_shutdown_ms": 700,
-                "flameout_source": 1, "tot_rise_rate_limit_deg_s": 0,
+                "flameout_source": 1, "flameout_egt_below_c": 300,
+                "flameout_egt_fall_rate_c_s": 50,
                 "low_oil_confirm_ms": 1500, "oil_zero_confirm_ms": 1500,
             },
             "oil_advanced": {"zero_bar": 0.2},
@@ -164,7 +165,7 @@ class InteractionQualification:
         if not required.issubset(purposes):
             raise RuntimeError(f"interaction inputs absent: {sorted(required - purposes)}")
         if not all(hw["controllers"].get(k) for k in
-                   ("governor", "dynamic_idle", "throttle_slew", "oil_loop")):
+                   ("governor", "dynamic_idle", "oil_loop")):
             raise RuntimeError("not every interaction controller remained enabled")
         if data.get("seq_has_errors"):
             raise RuntimeError(f"interaction profile readiness issues: {data.get('seq_issues')}")
@@ -486,7 +487,7 @@ class InteractionQualification:
         self.save_rules(fuel_rule, {"hil_relight_fuel"})
         ok, resp = self.runner.dc.patch_cfg({
             "relight": {
-                "enabled": True, "min_rpm": 30000, "confirm_rpm": 0,
+                "enabled": True, "min_rpm": 30000, "confirm_rpm": 35000,
                 "relight_timeout_ms": 4000,
             }
         })

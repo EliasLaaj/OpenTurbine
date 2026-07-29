@@ -120,6 +120,7 @@
 
   let activeResolve = null;
   let previousFocus = null;
+  let activeOptions = null;
 
   function ensureDialog() {
     let overlay = document.getElementById('ot-app-dialog');
@@ -133,6 +134,8 @@
       .ot-dialog-header{padding:1rem 1.1rem .7rem;font-size:.9rem;font-weight:800;letter-spacing:.04em}
       .ot-dialog-message{padding:.25rem 1.1rem 1rem;color:var(--text-2,#cecdd4);font-size:.82rem;line-height:1.55;white-space:pre-wrap;overflow:auto}
       .ot-dialog-input{box-sizing:border-box;margin:0 1.1rem 1rem;width:calc(100% - 2.2rem);max-width:calc(100% - 2.2rem);min-width:0;min-height:44px;padding:.55rem .7rem;background:var(--bg,#101012);color:var(--text,#f5f5f7);border:1px solid var(--border-light,#42424a);border-radius:6px;font:inherit}
+      .ot-dialog-check{display:none;align-items:center;gap:.5rem;margin:0 1.1rem 1rem;color:var(--text-2,#cecdd4);font-size:.76rem;line-height:1.4}
+      .ot-dialog-check input{flex:0 0 auto}
       .ot-dialog-actions{display:flex;justify-content:flex-end;gap:.6rem;padding:.85rem 1.1rem;border-top:1px solid var(--border,#313135)}
       .ot-dialog-actions button{min-height:44px}
       .ot-dialog-actions .danger{background:var(--red,#ff4d5f);border-color:var(--red,#ff4d5f);color:#fff}
@@ -150,6 +153,7 @@
         <div class="ot-dialog-header" id="ot-dialog-title"></div>
         <div class="ot-dialog-message" id="ot-dialog-message"></div>
         <input class="ot-dialog-input" id="ot-dialog-input" type="text" style="display:none">
+        <label class="ot-dialog-check" id="ot-dialog-check-wrap"><input id="ot-dialog-check" type="checkbox"><span id="ot-dialog-check-label"></span></label>
         <div class="ot-dialog-actions">
           <button type="button" id="ot-dialog-cancel" style="display:none">Cancel</button>
           <button type="button" id="ot-dialog-confirm">OK</button>
@@ -169,16 +173,21 @@
     if (!overlay) return;
     const input = document.getElementById('ot-dialog-input');
     const value = accepted ? (input.style.display === 'none' ? true : input.value) : false;
+    if (accepted && activeOptions?.rememberKey && document.getElementById('ot-dialog-check')?.checked) {
+      try { localStorage.setItem(activeOptions.rememberKey, '1'); } catch (_) {}
+    }
     overlay.classList.remove('show');
     if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
     const resolve = activeResolve;
     activeResolve = null;
+    activeOptions = null;
     if (resolve) resolve(value);
   }
 
   function open(message, options) {
     const overlay = ensureDialog();
     if (activeResolve) activeResolve(false);
+    activeOptions = options;
     previousFocus = document.activeElement;
     document.getElementById('ot-dialog-title').textContent = options.title || 'OpenTurbine';
     document.getElementById('ot-dialog-message').textContent = String(message || '');
@@ -186,6 +195,11 @@
     input.style.display = options.prompt ? '' : 'none';
     input.value = options.value || '';
     input.placeholder = options.placeholder || '';
+    const checkWrap = document.getElementById('ot-dialog-check-wrap');
+    const check = document.getElementById('ot-dialog-check');
+    checkWrap.style.display = options.checkboxLabel ? 'flex' : 'none';
+    check.checked = false;
+    document.getElementById('ot-dialog-check-label').textContent = options.checkboxLabel || '';
     const cancel = document.getElementById('ot-dialog-cancel');
     cancel.style.display = options.cancel ? '' : 'none';
     cancel.textContent = options.cancelLabel || 'Cancel';

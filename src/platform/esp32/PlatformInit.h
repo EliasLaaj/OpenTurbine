@@ -24,21 +24,26 @@ namespace ResetRecovery {
 
 class PlatformInit {
 public:
-    static void begin() {
-        // Drive compiled relay outputs inactive before filesystem/config work.
-        // External pull-offs are still required to guarantee the reset interval.
+    static void begin(bool genericDevBoardMode = true) {
+        // Only an erased PCB-profile partition selects the generic development-board
+        // pinout. A valid profile has already parked all of its native outputs;
+        // a profile fault deliberately leaves pins high-impedance and locks
+        // START instead of briefly driving unrelated generic GPIOs.
+        if (genericDevBoardMode) {
+            // External pull-offs are still required to guarantee the reset interval.
 #ifdef OT_HAS_FUEL_SOL
-        pinMode(OT_FUEL_SOL_PIN, OUTPUT);
-        digitalWrite(OT_FUEL_SOL_PIN, OT_FUEL_SOL_ACTIVE_H ? LOW : HIGH);
+            digitalWrite(OT_FUEL_SOL_PIN, OT_FUEL_SOL_ACTIVE_H ? LOW : HIGH);
+            pinMode(OT_FUEL_SOL_PIN, OUTPUT);
 #endif
 #ifdef OT_HAS_IGNITER
-        pinMode(OT_IGNITER_PIN, OUTPUT);
-        digitalWrite(OT_IGNITER_PIN, OT_IGNITER_ACTIVE_H ? LOW : HIGH);
+            digitalWrite(OT_IGNITER_PIN, OT_IGNITER_ACTIVE_H ? LOW : HIGH);
+            pinMode(OT_IGNITER_PIN, OUTPUT);
 #endif
 #ifdef OT_HAS_STARTER_EN
-        pinMode(OT_STARTER_EN_PIN, OUTPUT);
-        digitalWrite(OT_STARTER_EN_PIN, OT_STARTER_EN_ACTIVE_H ? LOW : HIGH);
+            digitalWrite(OT_STARTER_EN_PIN, OT_STARTER_EN_ACTIVE_H ? LOW : HIGH);
+            pinMode(OT_STARTER_EN_PIN, OUTPUT);
 #endif
+        }
 
         Serial.begin(115200);
         delay(100);
@@ -47,7 +52,12 @@ public:
         // LittleFS
         // Never format automatically on a control-system boot: a transient
         // mount failure must not erase configuration and logs.
-        bool fsOk = LittleFS.begin(false, "/littlefs", 10, "littlefs");
+        // Configuration saves briefly need old/new/backup files while the web
+        // server and Windows/phone captive-portal probes may still own asset
+        // handles. Ten descriptors was reproducibly exhausted during a normal
+        // Hardware-page save, leaving valid settings unsynchronised. Keep
+        // enough headroom for those concurrent, bounded operations.
+        bool fsOk = LittleFS.begin(false, "/littlefs", 16, "littlefs");
         if (!fsOk) {
             Serial.println("[OT] ERROR: LittleFS mount failed - storage unavailable");
             auto& ed = EngineData::instance();
@@ -110,11 +120,14 @@ public:
         }
         ResetRecovery::markSafe();
 
-        // Stop pin pull-up
-        pinMode(OT_STOP_PIN, INPUT_PULLUP);
+        // Generic dev-board switch defaults. Profile-backed Start/Stop ports
+        // are initialized from the resolved runtime hardware configuration.
+        if (genericDevBoardMode) {
+            pinMode(OT_STOP_PIN, INPUT_PULLUP);
 #ifdef OT_START_PIN
-        pinMode(OT_START_PIN, INPUT_PULLUP);
+            pinMode(OT_START_PIN, INPUT_PULLUP);
 #endif
+        }
 
 #ifdef OT_DEV_MODE
         EngineData::instance().devMode = true;

@@ -22,7 +22,8 @@ public:
                               FUEL_FLOW=12, P1=13, P2=14, TORQUE=15, FLAME=16,
                               THROTTLE_INPUT=17, IDLE_INPUT=18, AB_FLAME=19,
                               GLOW_CURRENT=20, IGNITER_CURRENT=21, IGNITER2_CURRENT=22,
-                              OIL_PUMP_CURRENT=23, AB_INPUT=24, START_SWITCH=25, STOP_SWITCH=26 };
+                              OIL_PUMP_CURRENT=23, AB_INPUT=24, START_SWITCH=25, STOP_SWITCH=26,
+                              THRUST=27 };
     // Comparison operators
     enum Op       : uint8_t { GT=0, LT=1, GTE=2, LTE=3, EQ=4 };
     // Controllable actuators
@@ -151,10 +152,13 @@ private:
     static bool _sensorUsable(uint8_t s, const EngineData& ed) {
         if (ChannelRegistry::isInputSensor(s)) {
             uint8_t idx = ChannelRegistry::inputIndexFromSensor(s);
-            return idx < HardwareConfig::channelRegistry.inputCount &&
-                   HardwareConfig::channelRegistry.inputs[idx].installed &&
-                   HardwareConfig::channelRegistry.inputs[idx].pin >= 0 &&
-                   ed.registryInputHealthy[idx];
+            if (idx >= HardwareConfig::channelRegistry.inputCount) return false;
+            const auto& channel = HardwareConfig::channelRegistry.inputs[idx];
+            const bool addressable = channel.pin >= 0 ||
+                channel.driver == ChannelRegistry::I2cDigital ||
+                channel.driver == ChannelRegistry::I2cAnalog ||
+                channel.driver == ChannelRegistry::I2cLoadCell;
+            return channel.installed && addressable && ed.registryInputHealthy[idx];
         }
         switch (s) {
             case OIL_TEMP:        return HardwareConfig::hasOilTemp && ed.oilTempHealthy;
@@ -185,6 +189,7 @@ private:
                                          HardwareConfig::abInputPin >= 0 && ed.abInputValid;
             case START_SWITCH:    return HardwareConfig::startPin >= 0;
             case STOP_SWITCH:     return HardwareConfig::stopPin >= 0;
+            case THRUST:          return HardwareConfig::hasThrust && ed.thrustHealthy;
             default:              return false;
         }
     }
@@ -234,6 +239,7 @@ private:
             case AB_INPUT:   return ed.abInputValid ? constrain(ed.abInputNorm, 0.0f, 1.0f) : 0.0f;
             case START_SWITCH:return ed.startSwitchActive ? 1.0f : 0.0f;
             case STOP_SWITCH: return ed.stopSwitchActive ? 1.0f : 0.0f;
+            case THRUST:      return ed.thrust;
             default:        return 0.0f;
         }
     }
@@ -244,7 +250,7 @@ private:
             if (idx >= HardwareConfig::channelRegistry.outputCount) return false;
             const auto& out = HardwareConfig::channelRegistry.outputs[idx];
             return out.installed &&
-                   out.pin >= 0 &&
+                   (out.pin >= 0 || out.driver == ChannelRegistry::I2cRelay) &&
                    !HardwareConfig::channelRegistry.ownsCoreOutput(out) &&
                    !HardwareConfig::channelRegistry.boundToCoreOutput(out);
         }

@@ -105,6 +105,7 @@ async function optionDisabled(page, selector, value) {
       has_oil_temp: false, has_batt_voltage: false, has_torque: false, has_glow_current: false,
       has_igniter_current: false, has_igniter2_current: false, has_oil_pump_current: false,
       has_fuel_flow: false, has_fuel_press: false, has_governor: false,
+      has_thrust: false, registry_inputs: [], registry_outputs: [],
       has_glow_plug: false, has_bleed_valve: false, has_prop_pitch: false, has_fuel_pump2: false,
       has_cool_fan: false, has_airstarter: false, has_oil_scavenge: false, has_afterburner: false,
       has_ab_sol: false, has_ab_pump: false, has_ab_flame: false,
@@ -141,7 +142,7 @@ async function optionDisabled(page, selector, value) {
       cfg.channel_registry.inputs = [];
       cfg.channel_registry.outputs = [];
       updateSafetyPrerequisites(true);
-      cfg.controllers.oil_loop = cfg.controllers.throttle_slew = cfg.controllers.dynamic_idle = cfg.controllers.governor = true;
+      cfg.controllers.oil_loop = cfg.controllers.dynamic_idle = cfg.controllers.governor = true;
       cfg.actuators.oil_pump.enabled = false;
       cfg.actuators.throttle.enabled = false;
       cfg.has_two_shaft = false;
@@ -156,7 +157,8 @@ async function optionDisabled(page, selector, value) {
           flameout: sst('flameout'), oilTemp: sst('oil_temp_high'),
           fuelPress: sst('fuel_press_low'), batt: sst('batt_low')
         },
-        controllers: { oil: cst('oil_loop'), slew: cst('throttle_slew'), idle: cst('dynamic_idle'), gov: cst('governor') },
+        controllers: { oil: cst('oil_loop'), idle: cst('dynamic_idle'), gov: cst('governor') },
+        fuelResponseAutomatic: registryHasPurpose('output', 'main_fuel'),
         currentGroups: {
           oil: { disabled: !registryHasPurpose('output', 'oil_pump'), checked: false },
           glow: { disabled: !registryHasPurpose('output', 'glow_plug'), checked: false }
@@ -167,6 +169,7 @@ async function optionDisabled(page, selector, value) {
     assert.equal(await page.locator('#f-saf-titovertemp').count(), 0);
     for (const state of Object.values(hwPrereq.safety)) assert.deepEqual(state, { disabled: true, checked: false });
     for (const state of Object.values(hwPrereq.controllers)) assert.deepEqual(state, { disabled: true, checked: false });
+    assert.equal(hwPrereq.fuelResponseAutomatic, false);
     assert.deepEqual(hwPrereq.currentGroups.oil, { disabled: true, checked: false });
     assert.deepEqual(hwPrereq.currentGroups.glow, { disabled: true, checked: false });
     assert.equal(hwPrereq.n2Visible, false);
@@ -185,10 +188,11 @@ async function optionDisabled(page, selector, value) {
       throttle: registryAllowedDrivers('input', 'operator', 'throttle')
     }));
     assert.deepEqual(typeMatrix, {
-      mainFuel:[5,6], starter:[4,5,6], oilPump:[4,5,6], igniter:[4,5],
-      abPump:[4,5,6], propPitch:[5,6], tot:[1], torque:[1], abFlame:[0,1], throttle:[1,3,2,7]
+      mainFuel:[5,6], starter:[4,5,6,11], oilPump:[4,5,6,11], igniter:[4,5,11],
+      abPump:[4,5,6,11], propPitch:[5,6], tot:[1,9], torque:[1,10],
+      abFlame:[0,1,8,9], throttle:[1,3,2,7,9]
     });
-    results.push('hardware editor type selectors show exactly the servo/PWM/relay/SPI/analog subfields that apply');
+    results.push('hardware editor type selectors include only compatible native and shared-I2C signal types');
 
     const sensorInterfaceUx = await page.evaluate(() => {
       const base = {role:'temperature', driver:1, pin:4, min:0, max:4095};
@@ -223,18 +227,18 @@ async function optionDisabled(page, selector, value) {
     assert.match(sensorInterfaceUx.totEditor, /MAX6675/);
     assert.match(sensorInterfaceUx.totEditor, /MAX31856/);
     assert.doesNotMatch(sensorInterfaceUx.totEditor, /DS18B20/);
-    assert.equal(sensorInterfaceUx.totSignalEditor, '');
+    assert.match(sensorInterfaceUx.totSignalEditor, /TLA2528 (?:analog|ADC)/);
     assert.match(sensorInterfaceUx.totEditor, /Sensor interface/);
     assert.match(sensorInterfaceUx.torqueEditor, /HX711 SCK GPIO/);
     assert.match(sensorInterfaceUx.torqueEditor, /Sensor interface/);
-    assert.equal(sensorInterfaceUx.torqueSignalEditor, '');
+    assert.match(sensorInterfaceUx.torqueSignalEditor, /NAU7802 load cell/);
     assert.match(sensorInterfaceUx.torquePins, /DOUT GPIO5 \/ SCK GPIO6/);
     assert.equal(sensorInterfaceUx.digitalRangeProblem, '');
     assert.match(sensorInterfaceUx.unsafeTotInterface, /only for oil, coolant, intake or ambient/i);
     assert.equal(sensorInterfaceUx.mv.min, 'Minimum valid signal (mV)');
     assert.equal(sensorInterfaceUx.mv.max, 'Maximum valid signal (mV)');
     assert.ok(Math.abs(sensorInterfaceUx.mv.scale - 3300/4095) < 0.000001);
-    results.push('temperature and torque cards expose their real interfaces, wiring and measurable mV validity ranges');
+    results.push('temperature and torque cards expose native, SPI, and shared-I2C interfaces with their wiring and ranges');
 
     await patchHardware(page, { platform: 'esp32s3', cluster_serial: { enabled: true, tx_pin: 1, rx_pin: -1 } });
     await goto(page, 'hardware.html', '#f-cl-rx');
@@ -272,16 +276,15 @@ async function optionDisabled(page, selector, value) {
       ab_flame: { enabled: false },
       ab_trigger: { input_pin: -1 }
     });
-    await goto(page, 'config.html', '#cf-oil_sp');
+    await goto(page, 'config.html', '#cf-oil_rm');
     const configGhosts = {
-      oilSp: await shown(page, '#cf-oil_sp'),
+      oilSp: await shown(page, '#cf-oil_rm'),
       oilMm: await shown(page, '#cf-oil_mm'),
-      oilSpDisabled: await disabled(page, '#cf-oil_sp'),
+      oilSpDisabled: await disabled(page, '#cf-oil_rm'),
       oilMmDisabled: await disabled(page, '#cf-oil_mm'),
       standby: await page.evaluate(() => Array.from(document.querySelectorAll('.cfg-section')).find(sec => sec.querySelector('.cfg-title')?.textContent.trim() === 'Windmilling Oil Protection')?.style.display !== 'none'),
       flameSection: await shown(page, '#flame-detect-section'),
       dynamicIdleDisabled: await disabled(page, '#cf-di_tr'),
-      clusterEnabledDisabled: await disabled(page, '#cf-cl_en'),
       relightDisabled: await disabled(page, '#cf-rl_en'),
       abIgnDisabled: await disabled(page, '#cf-ab_ui'),
       abTorchDisabled: await disabled(page, '#cf-ab_ut'),
@@ -292,13 +295,45 @@ async function optionDisabled(page, selector, value) {
       abInputOpt: await optionDisabled(page, '#cf-ab_pcm', '2')
     };
     assert.deepEqual(configGhosts, {
-      oilSp: true, oilMm: true, oilSpDisabled: true, oilMmDisabled: true,
+      oilSp: false, oilMm: false, oilSpDisabled: true, oilMmDisabled: true,
       standby: true, flameSection: false, dynamicIdleDisabled: true,
-      clusterEnabledDisabled: true, relightDisabled: true, abIgnDisabled: true,
+      relightDisabled: true, abIgnDisabled: true,
       abTorchDisabled: true, abTotDisabled: true, abPumpModeDisabled: true,
       abFlameOpt: true, abTotOpt: true, abInputOpt: true
     });
-    results.push('config editor hides or ghosts oil, flame, relight, cluster, and afterburner settings when hardware is absent');
+    await page.locator('#btn-view-explore').click();
+    const futureFields = await page.evaluate(() => ({
+      oilSpShown: !!document.querySelector('#cf-oil_rm')?.offsetParent,
+      oilSpEditable: !document.querySelector('#cf-oil_rm')?.disabled,
+      oilSpInactive: document.querySelector('#cf-oil_rm')?.closest('.cfg-field')?.classList.contains('cfg-field-inactive'),
+      relightActivationLocked: document.querySelector('#cf-rl_en')?.disabled,
+      abPumpEditable: !document.querySelector('#cf-ab_pcm')?.disabled,
+      abFlameOptionLocked: document.querySelector('#cf-ab_fm option[value="0"]')?.disabled,
+      amberNote: document.querySelector('#cf-oil_rm')?.closest('.cfg-field')?.querySelector('.cfg-inactive-note')?.textContent || ''
+    }));
+    assert.deepEqual(futureFields, {
+      oilSpShown: true, oilSpEditable: true, oilSpInactive: true,
+      relightActivationLocked: true, abPumpEditable: true, abFlameOptionLocked: true,
+      amberNote: 'Saved for future use; inactive now. Oil pressure sensor is not configured in Hardware. Enable an oil pressure sensor to unlock closed-loop oil pressure settings.'
+    });
+    const futureChange = await page.evaluate(() => {
+      const el = document.querySelector('#cf-oil_rm');
+      el.value = '2.7';
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return _buildChanges().find(change => change.label.includes('Running Low-Pressure Shutdown'));
+    });
+    assert.equal(futureChange?.inactive, true, 'save recap must identify future-hardware edits as inactive');
+    assert.match(futureChange?.inactiveReason || '', /oil pressure sensor is not configured/i);
+    assert.equal(await disabled(page, '#cf-oil_tm'), true,
+      'Explore must not allow an unavailable controller enable to be armed');
+    assert.equal(await disabled(page, '#cf-oil_mx'), false,
+      'Explore should still allow harmless future controller setpoints to be prepared');
+    await page.locator('#btn-view-expert').click();
+    assert.equal(await disabled(page, '#cf-oil_rm'), true, 'Configured system must protect inactive future values');
+    await page.locator('#btn-filter-changed').click();
+    assert.equal(await shown(page, '#cf-oil_rm'), true, 'Changed view must show the inactive edited value');
+    assert.equal(await disabled(page, '#cf-oil_rm'), false, 'Changed view must allow the inactive edited value to be corrected');
+    results.push('config hides inactive settings normally and keeps clearly marked future edits changeable in Explore and Changed');
 
     await reset(page);
     await patchHardware(page, {
@@ -306,14 +341,19 @@ async function optionDisabled(page, selector, value) {
       sensors: { oil_press: { enabled: false }, tot: { enabled: false }, tit: { enabled: false }, n1_rpm: { enabled: true } },
       cluster_serial: { enabled: true }
     });
-    await goto(page, 'config.html', '#cf-cl_en');
+    await goto(page, 'config.html', '#cf-cl_n1');
     await page.locator('#btn-view-expert').click();
-    await page.locator('#cf-cl_en').check();
-    assert.equal(await shown(page, '#cf-cl_tw'), true, 'cluster EGT warning should stay visible when cluster is fitted');
+    assert.equal(await page.locator('#cf-cl_en').count(), 0, 'cluster has no redundant Config enable');
+    assert.equal(await shown(page, '#cf-cl_tw'), false, 'Configured system should hide cluster EGT warning without an EGT source');
     assert.equal(await disabled(page, '#cf-cl_tw'), true, 'cluster EGT warning must ghost without TOT/TIT');
-    assert.equal(await shown(page, '#cf-cl_ow'), true, 'cluster oil warning should stay visible when cluster is fitted');
+    assert.equal(await shown(page, '#cf-cl_ow'), false, 'Configured system should hide cluster oil warning without pressure feedback');
     assert.equal(await disabled(page, '#cf-cl_ow'), true, 'cluster oil warning must ghost without oil pressure sensor');
-    results.push('config cluster warning thresholds are visible but locked when their sensor sources are not fitted');
+    await page.locator('#btn-view-explore').click();
+    assert.equal(await shown(page, '#cf-cl_tw'), true);
+    assert.equal(await disabled(page, '#cf-cl_tw'), false);
+    assert.equal(await shown(page, '#cf-cl_ow'), true);
+    assert.equal(await disabled(page, '#cf-cl_ow'), false);
+    results.push('config cluster warnings stay relevant normally and allow clearly inactive future tuning in Explore');
 
     await reset(page);
     await patchHardware(page, {
@@ -358,10 +398,12 @@ async function optionDisabled(page, selector, value) {
     assert.equal(await shown(page, '#cf-cl_n2'), false, 'N2 cluster warning field must stay hidden in Advanced view on single-shaft hardware');
     await page.locator('#cf-sf_fs').selectOption('2');
     assert.equal(await shown(page, '#cf-sf_fn'), true, 'N1 flameout threshold should show for N1 flameout source');
-    assert.equal(await shown(page, '#cf-sf_ft'), false, 'EGT drop field should hide for N1 flameout source');
+    assert.equal(await shown(page, '#cf-sf_eb'), false, 'EGT low threshold should hide for N1 flameout source');
+    assert.equal(await shown(page, '#cf-sf_ef'), false, 'EGT fall-rate field should hide for N1 flameout source');
     await page.locator('#cf-sf_fs').selectOption('3');
     assert.equal(await shown(page, '#cf-sf_fn'), false, 'N1 flameout threshold should hide for EGT flameout source');
-    assert.equal(await shown(page, '#cf-sf_ft'), true, 'EGT drop field should show for EGT flameout source');
+    assert.equal(await shown(page, '#cf-sf_eb'), true, 'EGT low threshold should show for EGT flameout source');
+    assert.equal(await shown(page, '#cf-sf_ef'), true, 'EGT fall-rate field should show for EGT flameout source');
     await page.locator('#cf-ab_ut').uncheck();
     await page.locator('#cf-ab_fm').selectOption('2');
     for (const selector of ['#cf-ab_tpct', '#cf-ab_tms', '#cf-ab_ttl', '#cf-ab_tr', '#cf-ab_tw']) {
@@ -480,19 +522,19 @@ async function optionDisabled(page, selector, value) {
     await reset(page);
     await goto(page, 'config.html', '#cf-tot_limit');
     const firstTotLimit = await value(page, '#cf-tot_limit');
-    const firstRiseRate = await value(page, '#cf-sf_rr');
+    const firstFallRate = await value(page, '#cf-sf_ef');
     assert.ok(['720', '1328'].includes(firstTotLimit), `unexpected displayed TOT limit ${firstTotLimit}`);
-    assert.equal(firstRiseRate, '80');
+    assert.equal(firstFallRate, '50');
     await page.locator('#unit-temp-btn').click();
     const secondTotLimit = await value(page, '#cf-tot_limit');
-    const secondRiseRate = await value(page, '#cf-sf_rr');
+    const secondFallRate = await value(page, '#cf-sf_ef');
     assert.ok(['720', '1328'].includes(secondTotLimit), `unexpected toggled TOT limit ${secondTotLimit}`);
     assert.notEqual(secondTotLimit, firstTotLimit);
-    assert.equal(secondRiseRate, '144');
+    assert.equal(secondFallRate, '90');
     assert.equal(await page.locator('#cf-tot_limit').getAttribute('min'), '0');
     await page.locator('#unit-temp-btn').click();
     assert.equal(await value(page, '#cf-tot_limit'), firstTotLimit);
-    assert.equal(await value(page, '#cf-sf_rr'), firstRiseRate);
+    assert.equal(await value(page, '#cf-sf_ef'), firstFallRate);
     await page.locator('#unit-press-btn').click();
     const firstOilMin = await value(page, '#cf-oil_rm');
     assert.ok(['1.2', '17.405'].includes(firstOilMin), `unexpected displayed oil min ${firstOilMin}`);
@@ -621,7 +663,7 @@ async function optionDisabled(page, selector, value) {
     });
     await page.reload();
     await page.waitForSelector('#oil-press-cal-row', { state: 'attached' });
-    await page.waitForFunction(() => /us|µs|Âµs/.test(document.querySelector('#cal-th-raw')?.textContent || ''), null, { timeout: 5000 });
+    await page.waitForFunction(() => /us|µs/.test(document.querySelector('#cal-th-raw')?.textContent || ''), null, { timeout: 5000 });
     assert.equal(await shown(page, '#fuelflow-cal-row'), true);
     assert.equal(await shown(page, '#glow-current-cal-row'), true);
     assert.equal(await shown(page, '#igniter-current-cal-row'), true);
@@ -832,7 +874,9 @@ async function optionDisabled(page, selector, value) {
     });
     await goto(page, 'log.html', '#tab-session');
     await page.locator('#tab-session').click();
-    await page.waitForFunction(() => document.querySelector('input[data-bit="n2"]')?.disabled === true);
+    await page.waitForFunction(() =>
+      document.querySelector('input[data-bit="n2"]')?.disabled === true &&
+      document.querySelector('input[data-bit="ab"]')?.disabled === false);
     for (const bit of ['n2', 'tit', 'batt', 'fuel_press', 'fuel_flow', 'glow', 'fp2', 'prop']) {
       assert.equal(await disabled(page, `input[data-bit="${bit}"]`), true, `${bit} session log should be disabled`);
       assert.equal(await checked(page, `input[data-bit="${bit}"]`), false, `${bit} session log should be unchecked`);

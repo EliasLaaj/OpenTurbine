@@ -15,7 +15,11 @@ flash_fw_output.txt
 flash_fs_output.txt
 flash_fw.log
 *.log
+.codex-*.err
 dist/
+
+# Local PCB-import inspection scratch (source design stays outside the repo)
+.pcb-design-review/
 
 # ESP32-S3 dynconfig module copied into project root for pioarduino toolchain lookup
 xtensa_esp32s3.so
@@ -27,3 +31,7 @@ node_modules/
 # Python bytecode (tools/ and the dev/bench harness)
 __pycache__/
 *.pyc
+
+# Bench campaign engine-file snapshots are local recovery artifacts. Curated
+# qualification result JSON may still be committed from this directory.
+dev/bench/results/*_backup_*.json

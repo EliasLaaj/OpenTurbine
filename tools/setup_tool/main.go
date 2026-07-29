@@ -8,10 +8,12 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -29,13 +31,14 @@ import (
 )
 
 const (
-	appVersion              = "0.5.26"
-	requiredPackageSchema   = 2
-	appTitle                = "OpenTurbine Setup Tool"
-	ecuBaseURL              = "http://192.168.4.1"
-	defaultPackageURL       = "https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbine_Recommended.zip"
-	cleanSafetyButtonLabel  = "I understand — continue to erase"
-	updateSafetyButtonLabel = "My engine is safe — continue update"
+	appVersion                  = "0.6.0"
+	packageCompatibilityVersion = "0.6.0"
+	requiredPackageSchema       = 3
+	appTitle                    = "OpenTurbine Setup Tool"
+	ecuBaseURL                  = "http://192.168.4.1"
+	defaultPackageURL           = "https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbine_Recommended.zip"
+	cleanSafetyButtonLabel      = "I understand — continue to erase"
+	updateSafetyButtonLabel     = "My engine is safe — continue update"
 )
 
 var (
@@ -76,27 +79,126 @@ type AppConfig struct {
 }
 
 type Manifest struct {
-	Project          string                    `json:"project"`
-	Version          string                    `json:"version"`
-	Recommended      bool                      `json:"recommended"`
-	PackageSchema    int                       `json:"package_schema"`
-	SetupToolVersion string                    `json:"setup_tool_version"`
-	Targets          map[string]ManifestTarget `json:"targets"`
-	FirmwareOTA      string                    `json:"firmware_ota"`
-	WebAssets        string                    `json:"web_assets"`
+	Project                 string                    `json:"project"`
+	Version                 string                    `json:"version"`
+	Recommended             bool                      `json:"recommended"`
+	PackageSchema           int                       `json:"package_schema"`
+	SetupToolVersion        string                    `json:"setup_tool_version"`
+	MinimumSetupToolVersion string                    `json:"minimum_setup_tool_version"`
+	Targets                 map[string]ManifestTarget `json:"targets"`
+	FirmwareOTA             string                    `json:"firmware_ota"`
+	WebAssets               string                    `json:"web_assets"`
 }
 
 type ManifestTarget struct {
-	Chip        string       `json:"chip"`
-	USBFlash    []FlashEntry `json:"usb_flash"`
-	FirmwareOTA string       `json:"firmware_ota"`
-	WebAssets   string       `json:"web_assets"`
+	Chip        string              `json:"chip"`
+	USBFlash    []FlashEntry        `json:"usb_flash"`
+	FirmwareOTA string              `json:"firmware_ota"`
+	WebAssets   string              `json:"web_assets"`
+	PCBProfile  PCBProfilePartition `json:"pcb_profile"`
+}
+
+type PCBProfilePartition struct {
+	Address          string               `json:"address"`
+	Size             int                  `json:"size"`
+	OfficialProfiles []ManifestPCBProfile `json:"official_profiles"`
+}
+
+type ManifestPCBProfile struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Revision string `json:"revision"`
+	File     string `json:"file"`
+	SHA256   string `json:"sha256"`
 }
 
 type FlashEntry struct {
 	Address string `json:"address"`
 	File    string `json:"file"`
 	SHA256  string `json:"sha256,omitempty"`
+}
+
+type sourcePCBProfile struct {
+	Format        string `json:"format"`
+	FormatVersion struct {
+		Major int `json:"major"`
+		Minor int `json:"minor"`
+	} `json:"format_version"`
+	Board struct {
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+		Revision string `json:"revision"`
+	} `json:"board"`
+	Target struct {
+		Chip string `json:"chip"`
+	} `json:"target"`
+	Buses []struct {
+		ID   string         `json:"id"`
+		Kind string         `json:"kind"`
+		Pins map[string]int `json:"pins"`
+	} `json:"buses"`
+	Devices []struct {
+		ID      string `json:"id"`
+		Driver  string `json:"driver"`
+		Bus     string `json:"bus"`
+		Address *int   `json:"address"`
+		Select  struct {
+			GPIO *int `json:"gpio"`
+		} `json:"select"`
+	} `json:"devices"`
+	FixedFunctions struct {
+		StatusLED *struct {
+			GPIO       int      `json:"gpio"`
+			ActiveHigh *bool    `json:"active_high"`
+			Type       string   `json:"type"`
+			SafeDemand *float64 `json:"safe_demand"`
+		} `json:"status_led"`
+		Buzzer *struct {
+			GPIO       int      `json:"gpio"`
+			ActiveHigh *bool    `json:"active_high"`
+			SafeDemand *float64 `json:"safe_demand"`
+		} `json:"buzzer"`
+		ServoOutputEnable *struct {
+			GPIO       int      `json:"gpio"`
+			ActiveHigh *bool    `json:"active_high"`
+			SafeDemand *float64 `json:"safe_demand"`
+		} `json:"servo_output_enable"`
+		SupplyVoltage *struct {
+			GPIO        int     `json:"gpio"`
+			Divider     float64 `json:"divider"`
+			ReferenceMV float64 `json:"reference_mv"`
+		} `json:"supply_voltage"`
+		ClusterSerial *struct {
+			Bus string `json:"bus"`
+		} `json:"cluster_serial"`
+		MAVLink *struct {
+			Bus string `json:"bus"`
+		} `json:"mavlink"`
+	} `json:"fixed_functions"`
+	Ports []struct {
+		ID    string `json:"id"`
+		Label string `json:"label"`
+		Modes []struct {
+			ID          string   `json:"id"`
+			Adapter     string   `json:"adapter"`
+			Device      string   `json:"device"`
+			Channel     int      `json:"channel"`
+			ActiveHigh  *bool    `json:"active_high"`
+			Pull        string   `json:"pull"`
+			SafeDemand  *float64 `json:"safe_demand"`
+			ReferenceMV float64  `json:"reference_mv"`
+			Endpoint    struct {
+				GPIO *int `json:"gpio"`
+			} `json:"endpoint"`
+		} `json:"modes"`
+	} `json:"ports"`
+}
+
+type pcbTargetCatalog struct {
+	Chip          string `json:"chip"`
+	GPIO          []int  `json:"gpio"`
+	InputOnlyGPIO []int  `json:"input_only_gpio"`
+	StrappingGPIO []int  `json:"strapping_gpio"`
 }
 
 type Package struct {
@@ -131,6 +233,13 @@ type driverInstallResult struct {
 type driverChoice struct {
 	Kind  driverKind
 	Label string
+}
+
+type pcbProfileChoice struct {
+	Label   string
+	Detail  string
+	Action  string
+	Enabled bool
 }
 
 type detectedBoard struct {
@@ -190,6 +299,7 @@ var (
 	user32   = syscall.NewLazyDLL("user32.dll")
 	gdi32    = syscall.NewLazyDLL("gdi32.dll")
 	shell32  = syscall.NewLazyDLL("shell32.dll")
+	comdlg32 = syscall.NewLazyDLL("comdlg32.dll")
 	dwmapi   = syscall.NewLazyDLL("dwmapi.dll")
 
 	procGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
@@ -244,6 +354,7 @@ var (
 	procIntersectClipRect      = gdi32.NewProc("IntersectClipRect")
 
 	procShellExecuteW         = shell32.NewProc("ShellExecuteW")
+	procGetOpenFileNameW      = comdlg32.NewProc("GetOpenFileNameW")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 )
 
@@ -324,6 +435,29 @@ type wndClassEx struct {
 	hIconSm       uintptr
 }
 
+type openFileName struct {
+	structSize       uint32
+	owner            uintptr
+	instance         uintptr
+	filter           *uint16
+	customFilter     *uint16
+	maxCustomFilter  uint32
+	filterIndex      uint32
+	file             *uint16
+	maxFile          uint32
+	fileTitle        *uint16
+	maxFileTitle     uint32
+	initialDir       *uint16
+	title            *uint16
+	flags            uint32
+	fileOffset       uint16
+	fileExtension    uint16
+	defaultExtension *uint16
+	customData       uintptr
+	hook             uintptr
+	templateName     *uint16
+}
+
 type screenKind int
 
 const (
@@ -335,6 +469,7 @@ const (
 	screenError
 	screenDriverHelp
 	screenBoardChoice
+	screenPCBProfileChoice
 )
 
 type clickZone struct {
@@ -372,6 +507,7 @@ type NativeUI struct {
 	activeJob     *Job
 	zones         []clickZone
 	boards        []detectedBoard
+	pcbChoices    []pcbProfileChoice
 	driverChoices []driverChoice
 
 	pending *uiUpdate
@@ -393,6 +529,7 @@ type uiUpdate struct {
 	mode          string
 	appendLog     []string
 	boards        []detectedBoard
+	pcbChoices    []pcbProfileChoice
 	driverChoices []driverChoice
 }
 
@@ -652,7 +789,8 @@ func (ui *NativeUI) click(x, y int) {
 	ui.mu.Unlock()
 	for _, z := range zones {
 		if pointInRect(x, y, z.r) {
-			if strings.HasPrefix(z.action, "selectBoard:") && job != nil {
+			if (strings.HasPrefix(z.action, "selectBoard:") ||
+				strings.HasPrefix(z.action, "pcbProfile:")) && job != nil {
 				select {
 				case job.actionCh <- z.action:
 				default:
@@ -709,6 +847,15 @@ func (ui *NativeUI) click(x, y int) {
 					default:
 					}
 				}
+			case "pcbProfileCustom":
+				if job != nil {
+					if path := ui.choosePCBProfileFile(); path != "" {
+						select {
+						case job.actionCh <- "pcbProfileCustom:" + path:
+						default:
+						}
+					}
+				}
 			case "details":
 				ui.mu.Lock()
 				ui.showDetails = !ui.showDetails
@@ -754,6 +901,29 @@ func (ui *NativeUI) click(x, y int) {
 		}
 	}
 	_ = screen
+}
+
+func (ui *NativeUI) choosePCBProfileFile() string {
+	buffer := make([]uint16, 32768)
+	filter := syscall.StringToUTF16("OpenTurbine PCB profile (*.otpcb.json)\x00*.otpcb.json\x00JSON files (*.json)\x00*.json\x00All files (*.*)\x00*.*\x00\x00")
+	title := syscall.StringToUTF16("Choose the PCB profile supplied with the board design")
+	defExt := syscall.StringToUTF16("json")
+	ofn := openFileName{
+		structSize:       uint32(unsafe.Sizeof(openFileName{})),
+		owner:            ui.hwnd,
+		filter:           &filter[0],
+		filterIndex:      1,
+		file:             &buffer[0],
+		maxFile:          uint32(len(buffer)),
+		title:            &title[0],
+		flags:            0x00080000 | 0x00000800 | 0x00001000, // explorer, path exists, file exists
+		defaultExtension: &defExt[0],
+	}
+	ok, _, _ := procGetOpenFileNameW.Call(uintptr(unsafe.Pointer(&ofn)))
+	if ok == 0 {
+		return ""
+	}
+	return syscall.UTF16ToString(buffer)
 }
 
 func (ui *NativeUI) openBackupFolder() {
@@ -845,6 +1015,9 @@ func (ui *NativeUI) applyPending() {
 		if p.boards != nil {
 			ui.boards = append([]detectedBoard(nil), p.boards...)
 		}
+		if p.pcbChoices != nil {
+			ui.pcbChoices = append([]pcbProfileChoice(nil), p.pcbChoices...)
+		}
 		if p.screen == screenDriverHelp || p.driverChoices != nil {
 			ui.driverChoices = append([]driverChoice(nil), p.driverChoices...)
 		}
@@ -865,6 +1038,7 @@ func (ui *NativeUI) applyPending() {
 			ui.showDetails = false
 			ui.activeJob = nil
 			ui.driverChoices = nil
+			ui.pcbChoices = nil
 		}
 		if p.screen != screenDriverHelp {
 			ui.scrollOffset = 0
@@ -925,6 +1099,7 @@ func (ui *NativeUI) paint() {
 	showDetails := ui.showDetails
 	scrollOffset := ui.scrollOffset
 	boards := append([]detectedBoard(nil), ui.boards...)
+	pcbChoices := append([]pcbProfileChoice(nil), ui.pcbChoices...)
 	driverChoices := append([]driverChoice(nil), ui.driverChoices...)
 	ui.zones = nil
 	ui.mu.Unlock()
@@ -957,6 +1132,8 @@ func (ui *NativeUI) paint() {
 		ui.paintDriverHelp(hdc, w, h, body, detail, logs, showDetails, scrollOffset, driverChoices)
 	case screenBoardChoice:
 		ui.paintBoardChoice(hdc, w, h, boards)
+	case screenPCBProfileChoice:
+		ui.paintPCBProfileChoice(hdc, w, h, pcbChoices)
 	case screenError:
 		errorSecondary := secondaryState
 		if errorSecondary == "" {
@@ -1455,7 +1632,7 @@ func subtitleForMode(mode string) string {
 }
 
 func (j *Job) runNewBoard() {
-	total := 6
+	total := 7
 	j.set(1, total, 5, "Preparing setup files", "Stay connected to your normal internet Wi‑Fi. The tool is preparing the recommended OpenTurbine setup files.", "For a clean USB install or reinstall, the selected board will be erased and OpenTurbine will be installed from the recommended package.", false)
 	pkg, err := j.app.ensurePackage()
 	if err != nil {
@@ -1530,15 +1707,94 @@ func (j *Job) runNewBoard() {
 		}
 	}
 	j.addLog("Detected board on " + port + ": " + friendlyTarget(target))
-	j.set(4, total, 48, "Confirm complete erase", "Found "+friendlyTarget(target)+" on "+port+".\n\nContinuing will ERASE THE ENTIRE BOARD, including any existing settings, calibration, logs, and Wi-Fi details, then install a fresh OpenTurbine copy. No backup is made by this clean-install path.", "This is the last confirmation before the selected board is erased. Cancel if you intended to update, keep its setup, or make a backup first.", true)
+	targetPackage := pkg.Manifest.Targets[target]
+	choices := []pcbProfileChoice{{
+		Label:  "1. ESP32 development board",
+		Detail: "No PCB profile. Hardware is configured manually with GPIO, bus, chip, and signal fields as before.",
+		Action: "pcbProfile:dev", Enabled: true,
+	}}
+	if len(targetPackage.PCBProfile.OfficialProfiles) == 0 {
+		choices = append(choices, pcbProfileChoice{
+			Label:   "2. Official OpenTurbine PCB",
+			Detail:  "No official profile for this ESP chip is included in this setup package.",
+			Enabled: false,
+		})
+	} else {
+		for i, profile := range targetPackage.PCBProfile.OfficialProfiles {
+			choices = append(choices, pcbProfileChoice{
+				Label:  fmt.Sprintf("2. %s — revision %s", profile.Name, profile.Revision),
+				Detail: "Official immutable pinout supplied with the OpenTurbine PCB design.",
+				Action: fmt.Sprintf("pcbProfile:official:%d", i), Enabled: true,
+			})
+		}
+	}
+	choices = append(choices, pcbProfileChoice{
+		Label:  "3. Custom PCB profile…",
+		Detail: "Choose the .otpcb.json file supplied with a third-party or self-designed PCB. The file must match the detected ESP chip.",
+		Action: "pcbProfileCustom", Enabled: true,
+	})
+	j.ui().update(uiUpdate{screen: screenPCBProfileChoice, title: "Choose board hardware", subtitle: subtitleForMode(j.mode), mode: j.mode, pcbChoices: choices})
+	var pcbProfilePath, pcbProfileLabel string
+	for pcbProfilePath == "" && pcbProfileLabel == "" {
+		action := <-j.actionCh
+		if action == "cancel" {
+			j.cancelToHome("Clean USB install was cancelled before a PCB layout was selected.")
+			return
+		}
+		if action == "pcbProfile:dev" {
+			pcbProfileLabel = "ESP32 development board (no PCB profile)"
+			break
+		}
+		if strings.HasPrefix(action, "pcbProfile:official:") {
+			var selected int
+			if _, err := fmt.Sscanf(action, "pcbProfile:official:%d", &selected); err != nil ||
+				selected < 0 || selected >= len(targetPackage.PCBProfile.OfficialProfiles) {
+				continue
+			}
+			profile := targetPackage.PCBProfile.OfficialProfiles[selected]
+			path, err := packageFile(pkg, target, profile.File)
+			if err != nil || verifySHA256(path, profile.SHA256) != nil {
+				j.fail(errors.New("the selected official PCB profile is missing or corrupt; no board was erased"))
+				return
+			}
+			pcbProfilePath = path
+			pcbProfileLabel = profile.Name + " revision " + profile.Revision
+			break
+		}
+		if strings.HasPrefix(action, "pcbProfileCustom:") {
+			sourcePath := strings.TrimPrefix(action, "pcbProfileCustom:")
+			path, warnings, err := buildCustomPCBProfile(pkg, target, sourcePath)
+			if err != nil {
+				retryChoices := append([]pcbProfileChoice{{
+					Label:   "Profile not accepted",
+					Detail:  err.Error(),
+					Enabled: false,
+				}}, choices...)
+				j.ui().update(uiUpdate{screen: screenPCBProfileChoice, title: "Custom PCB profile rejected", subtitle: subtitleForMode(j.mode), mode: j.mode, pcbChoices: retryChoices, appendLog: []string{"Custom PCB profile rejected: " + err.Error()}})
+				continue
+			}
+			pcbProfilePath = path
+			pcbProfileLabel = filepath.Base(sourcePath)
+			defer os.Remove(path)
+			if len(warnings) > 0 {
+				j.set(4, total, 43, "Review custom PCB warnings",
+					"The profile is structurally valid for this chip, but its designer should review:\n\n• "+strings.Join(warnings, "\n• ")+"\n\nContinue only if these choices match the PCB schematic.",
+					"Custom profiles are intentionally permissive after hard chip, GPIO, reference, size, and output-safe-state checks.", true)
+				j.waitContinue()
+			}
+			break
+		}
+	}
+	j.addLog("Selected hardware: " + pcbProfileLabel)
+	j.set(5, total, 52, "Confirm complete erase", "Found "+friendlyTarget(target)+" on "+port+".\nSelected hardware: "+pcbProfileLabel+".\n\nContinuing will ERASE THE ENTIRE BOARD, including any existing settings, calibration, logs, Wi-Fi details, and any previous PCB profile, then install a fresh OpenTurbine copy. No backup is made by this clean-install path.", "This is the last confirmation before the selected board is erased. Cancel if you intended to update, keep its setup, or make a backup first.", true)
 	j.waitContinue()
 
 	version := packageVersion(pkg)
 	j.addLog("Using package " + version + " for " + friendlyTarget(target))
-	j.set(5, total, 60, "Installing OpenTurbine "+version, "Detected "+friendlyTarget(target)+" on "+port+".\n\nDo not unplug USB or power. The board will be erased and OpenTurbine "+version+" will be installed.", "Package target: "+target+". This is the clean-install path for blank boards and intentional fresh reinstalls.", false)
-	if err := flashUSB(esptool, port, target, pkg, j.addLog, func(percent int) {
+	j.set(6, total, 64, "Installing OpenTurbine "+version, "Detected "+friendlyTarget(target)+" on "+port+".\nHardware: "+pcbProfileLabel+".\n\nDo not unplug USB or power. The board will be erased and OpenTurbine "+version+" will be installed.", "Package target: "+target+". This is the clean-install path for blank boards and intentional fresh reinstalls.", false)
+	if err := flashUSB(esptool, port, target, pkg, pcbProfilePath, j.addLog, func(percent int) {
 		progress := 64 + percent*30/100
-		j.ui().update(uiUpdate{screen: screenRunning, title: "Flashing board — " + fmt.Sprintf("%d%%", percent), subtitle: subtitleForMode(j.mode), body: "Writing OpenTurbine to " + friendlyTarget(target) + " on " + port + ".\n\nDo not unplug USB or power.", detail: "Flash write progress reported by esptool.", step: 5, totalSteps: total, progress: progress, mode: j.mode})
+		j.ui().update(uiUpdate{screen: screenRunning, title: "Flashing board — " + fmt.Sprintf("%d%%", percent), subtitle: subtitleForMode(j.mode), body: "Writing OpenTurbine to " + friendlyTarget(target) + " on " + port + ".\n\nDo not unplug USB or power.", detail: "Flash write progress reported by esptool.", step: 6, totalSteps: total, progress: progress, mode: j.mode})
 	}); err != nil {
 		j.fail(err)
 		return
@@ -2052,13 +2308,82 @@ func loadPackageFromDir(root string) (*Package, error) {
 	if strings.TrimSpace(m.Project) != "" && !strings.EqualFold(strings.TrimSpace(m.Project), "OpenTurbine") {
 		return nil, fmt.Errorf("this setup package is not for OpenTurbine")
 	}
-	if m.PackageSchema != requiredPackageSchema {
-		return nil, fmt.Errorf("This setup package is not compatible with this Setup Tool.\nDownload the EXE and OpenTurbine_Recommended.zip from the same release.")
+	if err := validateManifestCompatibility(m); err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(m.SetupToolVersion) != appVersion {
-		return nil, fmt.Errorf("This setup package is for Setup Tool %q, but this copy is %q. Download the EXE and OpenTurbine_Recommended.zip from the same release.", m.SetupToolVersion, appVersion)
+	for name, target := range m.Targets {
+		if !regexp.MustCompile(`^0x[0-9a-fA-F]+$`).MatchString(target.PCBProfile.Address) ||
+			target.PCBProfile.Size < 32 {
+			return nil, fmt.Errorf("setup package target %s has invalid PCB-profile partition metadata", name)
+		}
 	}
 	return &Package{Root: root, Manifest: m}, nil
+}
+
+func validateManifestCompatibility(m Manifest) error {
+	if m.PackageSchema != requiredPackageSchema {
+		return fmt.Errorf("This setup package uses format %d, but this Setup Tool supports format %d.\nDownload the latest OpenTurbine Setup Tool.", m.PackageSchema, requiredPackageSchema)
+	}
+	minimum := strings.TrimSpace(m.MinimumSetupToolVersion)
+	if minimum == "" {
+		return fmt.Errorf("This setup package does not declare a minimum compatible Setup Tool version.\nDownload the latest OpenTurbine Setup Tool.")
+	}
+	ok, err := versionAtLeast(appVersion, minimum)
+	if err != nil {
+		return fmt.Errorf("setup package has an invalid minimum_setup_tool_version %q", minimum)
+	}
+	if !ok {
+		return fmt.Errorf("OpenTurbine %s needs Setup Tool %s or newer; this copy is %s.\nDownload the latest OpenTurbine Setup Tool.", strings.TrimSpace(m.Version), minimum, appVersion)
+	}
+	return nil
+}
+
+func versionAtLeast(current, minimum string) (bool, error) {
+	parse := func(value string) ([]int, error) {
+		value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+		parts := strings.Split(value, ".")
+		if len(parts) < 2 || len(parts) > 4 {
+			return nil, fmt.Errorf("invalid version")
+		}
+		out := make([]int, len(parts))
+		for i, part := range parts {
+			if part == "" {
+				return nil, fmt.Errorf("invalid version")
+			}
+			for _, ch := range part {
+				if ch < '0' || ch > '9' {
+					return nil, fmt.Errorf("invalid version")
+				}
+				out[i] = out[i]*10 + int(ch-'0')
+			}
+		}
+		return out, nil
+	}
+	have, err := parse(current)
+	if err != nil {
+		return false, err
+	}
+	need, err := parse(minimum)
+	if err != nil {
+		return false, err
+	}
+	width := len(have)
+	if len(need) > width {
+		width = len(need)
+	}
+	for i := 0; i < width; i++ {
+		havePart, needPart := 0, 0
+		if i < len(have) {
+			havePart = have[i]
+		}
+		if i < len(need) {
+			needPart = need[i]
+		}
+		if havePart != needPart {
+			return havePart > needPart, nil
+		}
+	}
+	return true, nil
 }
 
 func unzip(src, dst string) error {
@@ -2542,7 +2867,370 @@ func (w *esptoolProgressWriter) String() string {
 	return w.output.String()
 }
 
-func flashUSB(esptool, port, target string, pkg *Package, logf func(string), progress func(int)) error {
+func validStableID(value string, max int) bool {
+	if len(value) < 1 || len(value) > max {
+		return false
+	}
+	for i, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') ||
+			(i > 0 && (r == '_' || r == '-')) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func (ui *NativeUI) paintPCBProfileChoice(hdc uintptr, w, h int, choices []pcbProfileChoice) {
+	card := rect{34, 112, int32(w - 34), int32(h - 78)}
+	drawPanel(hdc, card, colPanel, colBorderSoft, 24)
+	text(hdc, "Choose the physical board layout. This choice is written at flash time and cannot be changed from the ECU web page.", rect{card.left + 28, card.top + 22, card.right - 28, card.top + 66}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
+	y := card.top + 78
+	for _, choice := range choices {
+		if y+72 > card.bottom-72 {
+			break
+		}
+		r := rect{card.left + 28, y, card.right - 28, y + 64}
+		drawPanel(hdc, r, colPanelSoft, colBorder, 14)
+		color := colText
+		if !choice.Enabled {
+			color = colTextSoft
+		}
+		text(hdc, choice.Label, rect{r.left + 16, r.top + 9, r.right - 16, r.top + 31}, ui.fontButton, color, dtLeft|dtSingleLine|dtNoPrefix)
+		text(hdc, choice.Detail, rect{r.left + 16, r.top + 34, r.right - 16, r.bottom - 7}, ui.fontSmall, colTextMuted, dtLeft|dtWordBreak|dtNoPrefix)
+		if choice.Enabled && choice.Action != "" {
+			ui.addZone(r, choice.Action)
+		}
+		y += 72
+	}
+	cancel := rect{card.left + 28, card.bottom - 56, card.left + 150, card.bottom - 14}
+	drawButton(hdc, cancel, "Cancel", ui.fontButton, false)
+	ui.addZone(cancel, "cancelUSB")
+}
+
+func buildCustomPCBProfile(pkg *Package, target, sourcePath string) (string, []string, error) {
+	targetInfo, ok := pkg.Manifest.Targets[target]
+	if !ok {
+		return "", nil, errors.New("setup package has no matching board target")
+	}
+	source, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return "", nil, fmt.Errorf("cannot read custom PCB profile: %w", err)
+	}
+	var profile sourcePCBProfile
+	if err := json.Unmarshal(source, &profile); err != nil {
+		return "", nil, fmt.Errorf("custom PCB profile is not valid UTF-8 JSON: %w", err)
+	}
+	if profile.Format != "openturbine-pcb-profile" || profile.FormatVersion.Major != 1 ||
+		profile.FormatVersion.Minor < 0 || profile.FormatVersion.Minor > 255 {
+		return "", nil, errors.New("custom PCB profile uses an unsupported format or major version")
+	}
+	expectedChip := "esp32"
+	targetID := byte(1)
+	if target == "esp32s3dev" {
+		expectedChip, targetID = "esp32-s3", 2
+	}
+	if profile.Target.Chip != expectedChip {
+		return "", nil, fmt.Errorf("custom PCB profile is for %s, but the detected board is %s",
+			profile.Target.Chip, expectedChip)
+	}
+	if !validStableID(profile.Board.ID, 40) || profile.Board.Name == "" ||
+		len(profile.Board.Name) > 47 || profile.Board.Revision == "" ||
+		len(profile.Board.Revision) > 15 {
+		return "", nil, errors.New("custom PCB profile has invalid board identity fields")
+	}
+	if len(profile.Buses) > 8 || len(profile.Devices) > 24 ||
+		len(profile.Ports) < 1 || len(profile.Ports) > 48 {
+		return "", nil, errors.New("custom PCB profile exceeds firmware bus, device, or port limits")
+	}
+	catalogPath, err := packageFile(pkg, "", "pcb_profiles/targets/"+expectedChip+".json")
+	if err != nil {
+		return "", nil, fmt.Errorf("setup package lacks the %s pin catalog", expectedChip)
+	}
+	var catalog pcbTargetCatalog
+	catalogBytes, readErr := os.ReadFile(catalogPath)
+	if readErr != nil || json.Unmarshal(catalogBytes, &catalog) != nil || catalog.Chip != expectedChip {
+		return "", nil, fmt.Errorf("setup package has an invalid %s pin catalog", expectedChip)
+	}
+	validPins, inputOnly, straps := map[int]bool{}, map[int]bool{}, map[int]bool{}
+	for _, pin := range catalog.GPIO {
+		validPins[pin] = true
+	}
+	for _, pin := range catalog.InputOnlyGPIO {
+		inputOnly[pin] = true
+	}
+	for _, pin := range catalog.StrappingGPIO {
+		straps[pin] = true
+	}
+	warnings := []string{}
+	gpioOwners := map[int]string{}
+	checkPin := func(pin int, output bool, owner string) error {
+		if pin == -1 {
+			return nil
+		}
+		if !validPins[pin] {
+			return fmt.Errorf("%s uses GPIO %d, which does not exist on %s", owner, pin, expectedChip)
+		}
+		if output && inputOnly[pin] {
+			return fmt.Errorf("%s uses input-only GPIO %d as an output", owner, pin)
+		}
+		if straps[pin] {
+			warnings = append(warnings, fmt.Sprintf("%s uses boot-strapping GPIO %d", owner, pin))
+		}
+		return nil
+	}
+	claimPin := func(pin int, owner string, sameOwnerOK bool) error {
+		if pin == -1 {
+			return nil
+		}
+		if prior, exists := gpioOwners[pin]; exists && !(sameOwnerOK && prior == owner) {
+			return fmt.Errorf("GPIO %d is claimed by both %s and %s", pin, prior, owner)
+		}
+		gpioOwners[pin] = owner
+		return nil
+	}
+	allIDs, busIDs, deviceIDs := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	busKinds := map[string]string{}
+	claimID := func(id, owner string) error {
+		if !validStableID(id, 24) {
+			return fmt.Errorf("%s has an invalid stable ID", owner)
+		}
+		if allIDs[id] {
+			return fmt.Errorf("stable ID %q is used more than once", id)
+		}
+		allIDs[id] = true
+		return nil
+	}
+	for _, bus := range profile.Buses {
+		if err := claimID(bus.ID, "bus"); err != nil {
+			return "", nil, err
+		}
+		if bus.Kind != "i2c" && bus.Kind != "spi" && bus.Kind != "uart" && bus.Kind != "onewire" {
+			return "", nil, fmt.Errorf("bus %s has unsupported kind %q", bus.ID, bus.Kind)
+		}
+		if len(bus.Pins) == 0 {
+			return "", nil, fmt.Errorf("bus %s has no pins", bus.ID)
+		}
+		requiredPins := map[string][]string{
+			"i2c": {"sda", "scl"}, "spi": {"sck", "miso"},
+			"uart": {"tx"}, "onewire": {"data"},
+		}[bus.Kind]
+		requiredValues := map[int]bool{}
+		for _, name := range requiredPins {
+			pin, exists := bus.Pins[name]
+			if !exists || pin < 0 || requiredValues[pin] {
+				return "", nil, fmt.Errorf("bus %s has missing or duplicated required %s pins", bus.ID, bus.Kind)
+			}
+			requiredValues[pin] = true
+		}
+		for name, pin := range bus.Pins {
+			output := name == "sck" || name == "mosi" || name == "sda" || name == "scl" || name == "tx"
+			if err := checkPin(pin, output, "bus "+bus.ID+"."+name); err != nil {
+				return "", nil, err
+			}
+			if err := claimPin(pin, "bus "+bus.ID+"."+name, false); err != nil {
+				return "", nil, err
+			}
+		}
+		busIDs[bus.ID] = true
+		busKinds[bus.ID] = bus.Kind
+	}
+	for _, device := range profile.Devices {
+		if err := claimID(device.ID, "device"); err != nil {
+			return "", nil, err
+		}
+		if !validStableID(device.Driver, 24) {
+			return "", nil, fmt.Errorf("device %s has invalid driver", device.ID)
+		}
+		if device.Bus != "" && !busIDs[device.Bus] {
+			return "", nil, fmt.Errorf("device %s refers to missing bus", device.ID)
+		}
+		if device.Address != nil && (*device.Address < 0 || *device.Address > 127) {
+			return "", nil, fmt.Errorf("device %s has invalid I2C address", device.ID)
+		}
+		if device.Select.GPIO != nil {
+			if err := checkPin(*device.Select.GPIO, true, "device "+device.ID+" select"); err != nil {
+				return "", nil, err
+			}
+			if err := claimPin(*device.Select.GPIO, "device "+device.ID+" select", false); err != nil {
+				return "", nil, err
+			}
+		}
+		deviceIDs[device.ID] = true
+	}
+	checkFixedOutput := func(name string, gpio int, safeDemand *float64, kind string) error {
+		if safeDemand == nil || *safeDemand != 0 {
+			return fmt.Errorf("fixed function %s requires safe_demand 0", name)
+		}
+		if name == "status_led" && kind != "" && kind != "gpio" && kind != "neopixel" {
+			return errors.New("fixed status LED type must be gpio or neopixel")
+		}
+		if err := checkPin(gpio, true, "fixed function "+name); err != nil {
+			return err
+		}
+		if err := claimPin(gpio, "fixed function "+name, false); err != nil {
+			return err
+		}
+		return nil
+	}
+	if fixed := profile.FixedFunctions.StatusLED; fixed != nil {
+		if err := checkFixedOutput("status_led", fixed.GPIO, fixed.SafeDemand, fixed.Type); err != nil {
+			return "", nil, err
+		}
+	}
+	if fixed := profile.FixedFunctions.Buzzer; fixed != nil {
+		if err := checkFixedOutput("buzzer", fixed.GPIO, fixed.SafeDemand, ""); err != nil {
+			return "", nil, err
+		}
+	}
+	if fixed := profile.FixedFunctions.ServoOutputEnable; fixed != nil {
+		if fixed.ActiveHigh == nil {
+			return "", nil, errors.New("fixed function servo_output_enable requires active_high")
+		}
+		if err := checkFixedOutput("servo_output_enable", fixed.GPIO, fixed.SafeDemand, ""); err != nil {
+			return "", nil, err
+		}
+	}
+	if fixed := profile.FixedFunctions.SupplyVoltage; fixed != nil {
+		if fixed.Divider < 1 || fixed.Divider > 100 {
+			return "", nil, errors.New("fixed function supply_voltage divider must be 1..100")
+		}
+		if fixed.ReferenceMV != 0 && (fixed.ReferenceMV < 1000 || fixed.ReferenceMV > 5500) {
+			return "", nil, errors.New("fixed function supply_voltage reference_mv must be 1000..5500")
+		}
+		if err := checkPin(fixed.GPIO, false, "fixed function supply_voltage"); err != nil {
+			return "", nil, err
+		}
+		if err := claimPin(fixed.GPIO, "fixed function supply_voltage", false); err != nil {
+			return "", nil, err
+		}
+	}
+	for name, serial := range map[string]*struct {
+		Bus string `json:"bus"`
+	}{
+		"cluster_serial": profile.FixedFunctions.ClusterSerial,
+		"mavlink":        profile.FixedFunctions.MAVLink,
+	} {
+		if serial != nil && busKinds[serial.Bus] != "uart" {
+			return "", nil, fmt.Errorf("fixed function %s must refer to a UART bus", name)
+		}
+	}
+	knownAdapters := map[string]bool{
+		"digital_input": true, "analog_input": true, "pcnt_input": true, "rc_pwm_input": true,
+		"pwm_duty_input": true, "spi_thermocouple": true, "onewire_temperature": true,
+		"i2c_digital_input": true, "i2c_adc_input": true, "i2c_adc_digital_input": true,
+		"i2c_load_cell":  true,
+		"digital_output": true, "relay_output": true, "pwm_output": true, "servo_output": true,
+		"i2c_digital_output": true,
+	}
+	deviceChannelOwners := map[string]string{}
+	for _, port := range profile.Ports {
+		if err := claimID(port.ID, "port"); err != nil {
+			return "", nil, err
+		}
+		if port.Label == "" || len(port.Label) > 31 || len(port.Modes) < 1 || len(port.Modes) > 4 {
+			return "", nil, fmt.Errorf("port %s has invalid label or mode count", port.ID)
+		}
+		modeIDs := map[string]bool{}
+		nativeOutputLevels := map[int]bool{}
+		for _, mode := range port.Modes {
+			if !validStableID(mode.ID, 24) || modeIDs[mode.ID] {
+				return "", nil, fmt.Errorf("port %s has invalid or duplicate mode ID", port.ID)
+			}
+			modeIDs[mode.ID] = true
+			if !knownAdapters[mode.Adapter] {
+				warnings = append(warnings, fmt.Sprintf("port %s mode %s requires a newer firmware adapter %q", port.ID, mode.ID, mode.Adapter))
+			}
+			if mode.Device != "" && !deviceIDs[mode.Device] {
+				return "", nil, fmt.Errorf("port %s refers to missing device", port.ID)
+			}
+			if mode.Pull != "" && mode.Pull != "none" && mode.Pull != "up" && mode.Pull != "down" {
+				return "", nil, fmt.Errorf("port %s mode %s has invalid pull setting", port.ID, mode.ID)
+			}
+			if mode.ReferenceMV != 0 && (mode.ReferenceMV < 1000 || mode.ReferenceMV > 5500) {
+				return "", nil, fmt.Errorf("port %s mode %s reference_mv must be 1000..5500", port.ID, mode.ID)
+			}
+			isOutput := strings.HasSuffix(mode.Adapter, "_output") || mode.Adapter == "relay_output" ||
+				mode.Adapter == "pwm_output" || mode.Adapter == "servo_output"
+			if mode.Endpoint.GPIO != nil {
+				if err := checkPin(*mode.Endpoint.GPIO, isOutput, "port "+port.ID+"/"+mode.ID); err != nil {
+					return "", nil, err
+				}
+				if err := claimPin(*mode.Endpoint.GPIO, "port "+port.ID, true); err != nil {
+					return "", nil, err
+				}
+			}
+			if mode.Device != "" {
+				resource := fmt.Sprintf("%s:%d", mode.Device, mode.Channel)
+				if prior, exists := deviceChannelOwners[resource]; exists && prior != port.ID {
+					return "", nil, fmt.Errorf("device channel %s is claimed by ports %s and %s", resource, prior, port.ID)
+				}
+				deviceChannelOwners[resource] = port.ID
+			}
+			if isOutput && (mode.SafeDemand == nil || *mode.SafeDemand < 0 || *mode.SafeDemand > 1) {
+				return "", nil, fmt.Errorf("output port %s/%s has no valid power-on safe demand", port.ID, mode.ID)
+			}
+			if isOutput && mode.Endpoint.GPIO != nil && !strings.HasPrefix(mode.Adapter, "i2c_") {
+				activeHigh := true
+				if mode.ActiveHigh != nil {
+					activeHigh = *mode.ActiveHigh
+				}
+				proportional := mode.Adapter == "pwm_output" || mode.Adapter == "servo_output"
+				physicalLevel := !activeHigh
+				if !proportional {
+					physicalLevel = (*mode.SafeDemand >= 0.5) == activeHigh
+				}
+				pin := *mode.Endpoint.GPIO
+				if prior, exists := nativeOutputLevels[pin]; exists && prior != physicalLevel {
+					return "", nil, fmt.Errorf("multipurpose port %s output modes disagree on GPIO %d boot-safe level", port.ID, pin)
+				}
+				nativeOutputLevels[pin] = physicalLevel
+			}
+		}
+	}
+	// Re-marshal to a bounded canonical payload; encoding/json sorts map keys in
+	// the source object, matching the source-tool container semantics.
+	var canonical any
+	if err := json.Unmarshal(source, &canonical); err != nil {
+		return "", nil, err
+	}
+	payload, err := json.Marshal(canonical)
+	if err != nil {
+		return "", nil, err
+	}
+	payload = append(payload, '\n')
+	if len(payload) > 24*1024 || len(payload)+32 > targetInfo.PCBProfile.Size {
+		return "", nil, errors.New("custom PCB profile is larger than the firmware or partition limit")
+	}
+	header := make([]byte, 32)
+	copy(header[0:4], []byte("OTPB"))
+	header[4] = 1
+	header[5] = 1
+	header[6] = byte(profile.FormatVersion.Major)
+	header[7] = byte(profile.FormatVersion.Minor)
+	header[8] = targetID
+	header[9] = 1
+	binary.LittleEndian.PutUint16(header[10:12], 32)
+	binary.LittleEndian.PutUint32(header[12:16], uint32(len(payload)))
+	binary.LittleEndian.PutUint32(header[16:20], crc32.ChecksumIEEE(payload))
+	out, err := os.CreateTemp(pkg.Root, "custom-pcb-profile-*.bin")
+	if err != nil {
+		return "", nil, err
+	}
+	outPath := out.Name()
+	if _, err = out.Write(append(header, payload...)); err != nil {
+		out.Close()
+		os.Remove(outPath)
+		return "", nil, err
+	}
+	if err = out.Close(); err != nil {
+		os.Remove(outPath)
+		return "", nil, err
+	}
+	return outPath, warnings, nil
+}
+
+func flashUSB(esptool, port, target string, pkg *Package, pcbProfilePath string, logf func(string), progress func(int)) error {
 	t, ok := pkg.Manifest.Targets[target]
 	if !ok {
 		return fmt.Errorf("setup package does not contain files for this board")
@@ -2552,9 +3240,13 @@ func flashUSB(esptool, port, target string, pkg *Package, logf func(string), pro
 	}
 
 	args := []string{"--port", port, "--baud", "921600", "write-flash", "-z"}
-	segmentSizes := make([]int64, 0, len(t.USBFlash))
+	entries := append([]FlashEntry(nil), t.USBFlash...)
+	if pcbProfilePath != "" {
+		entries = append(entries, FlashEntry{Address: t.PCBProfile.Address, File: pcbProfilePath})
+	}
+	segmentSizes := make([]int64, 0, len(entries))
 	seenAddresses := map[string]bool{}
-	for _, e := range t.USBFlash {
+	for _, e := range entries {
 		address := strings.ToLower(strings.TrimSpace(e.Address))
 		if !regexp.MustCompile(`^0x[0-9a-f]+$`).MatchString(address) {
 			return fmt.Errorf("setup package contains invalid flash address %q; board was not erased", e.Address)
@@ -2563,9 +3255,13 @@ func flashUSB(esptool, port, target string, pkg *Package, logf func(string), pro
 			return fmt.Errorf("setup package contains duplicate flash address %s; board was not erased", address)
 		}
 		seenAddresses[address] = true
-		p, err := packageFile(pkg, target, e.File)
-		if err != nil {
-			return fmt.Errorf("%w; board was not erased", err)
+		p := e.File
+		if !filepath.IsAbs(p) {
+			var err error
+			p, err = packageFile(pkg, target, e.File)
+			if err != nil {
+				return fmt.Errorf("%w; board was not erased", err)
+			}
 		}
 		if e.SHA256 != "" {
 			if err := verifySHA256(p, e.SHA256); err != nil {

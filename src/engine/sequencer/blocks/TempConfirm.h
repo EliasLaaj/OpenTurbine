@@ -21,6 +21,7 @@ public:
     void onEnter() override {
         _entryMs   = millis();
         _lastCheck = millis();
+        _lastSampleSeq = 0;
         _count     = 0;
         clearWaitReason();
     }
@@ -37,12 +38,16 @@ public:
             clearWaitReason();
             return BlockResult::Abort;
         }
-        // Space checks by checkIntervalMs (like FlameConfirm): EGT sensors
-        // update on ~100 ms intervals, so back-to-back loop ticks would count
-        // the same (possibly glitched) reading requiredCount times.
+        // Count only newly arrived EGT samples. The interval remains a
+        // configurable minimum spacing, but can never manufacture multiple
+        // confirmations from one held sensor value.
         unsigned long now = millis();
-        if (now - _lastCheck >= checkIntervalMs) {
+        const uint32_t sampleSeq = Config::effectiveEgtSource() == 2
+            ? ed.titSampleSeq : ed.totSampleSeq;
+        if (sampleSeq != 0 && sampleSeq != _lastSampleSeq &&
+            now - _lastCheck >= checkIntervalMs) {
             _lastCheck = now;
+            _lastSampleSeq = sampleSeq;
             if (Config::primaryEgtHealthy(ed) && Config::primaryEgtC(ed) >= tempTarget) {
                 if (++_count >= requiredCount) {
                     clearWaitReason();
@@ -61,4 +66,5 @@ private:
     unsigned long _entryMs   = 0;
     unsigned long _lastCheck = 0;
     int           _count     = 0;
+    uint32_t      _lastSampleSeq = 0;
 };

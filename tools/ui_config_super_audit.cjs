@@ -152,11 +152,10 @@ async function sectionVisible(page, title) {
     await gotoConfig(page);
     for (const selector of [
       '#cf-eg_src', '#cf-tot_limit', '#cf-tot_safe_margin', '#cf-tot_cooldown_target',
-      '#cf-sf_hs', '#cf-sf_rr', '#cf-sf_fo', '#cf-sf_fs',
+      '#cf-sf_hs', '#cf-sf_st', '#cf-sf_fo', '#cf-sf_fs',
       '#cf-rh_jt', '#cf-rh_zs',
       '#cf-th_ru', '#cf-th_rd', '#cf-th_mx', '#cf-th_ex',
-      '#cf-lm_mt', '#cf-ms_is',
-      '#cf-sl_n1', '#cf-sl_tt', '#cf-sl_ti', '#cf-sl_ol', '#cf-sl_th'
+      '#cf-lm_mt', '#cf-ms_is'
     ]) {
       assert.equal(await disabled(page, selector), true, `${selector} should be locked without its hardware`);
     }
@@ -164,7 +163,7 @@ async function sectionVisible(page, title) {
     assert.equal(await shown(page, '#ab-cfg-section'), false);
     assert.equal(await shown(page, '[data-group="power"]'), false,
       'Power System must not remain as an empty expandable group without governor or afterburner hardware');
-    results.push('minimal hardware locks unavailable temperature, flameout, throttle, logging, cluster, and AB config');
+    results.push('minimal hardware locks unavailable temperature, flameout, throttle, cluster, and AB config');
 
     await reset(page);
     console.log('super-audit: tool durations');
@@ -242,11 +241,23 @@ async function sectionVisible(page, title) {
     assert.equal(await shown(page, '#starter-support-section'), false, 'starter support section should hide without starter hardware');
     assert.equal(await shown(page, '#glow-cfg-section'), false, 'glow section should hide without glow plug hardware');
     assert.equal(await shown(page, '#rc-pwm-section'), false, 'RC PWM section should hide without servo PWM inputs');
+    await page.locator('#btn-view-explore').click();
+    assert.equal(await shown(page, '#starter-support-section'), true, 'Explore all should reveal unavailable starter assist');
+    assert.equal(await disabled(page, '#cf-sa_en'), true, 'Explore all must not arm starter assist without its hardware prerequisites');
+    assert.equal(await page.locator('#cf-sa_en').evaluate(el => el.closest('.cfg-field').classList.contains('cfg-field-inactive')), true,
+      'future starter-assist values should be visibly marked inactive');
+    assert.match(await page.locator('#starter-support-section').textContent(), /requires.*starter.*N1/i);
+    await page.locator('#btn-view-expert').click();
+    assert.equal(await shown(page, '#starter-support-section'), false, 'Configured system should hide unavailable starter assist');
+    await page.locator('#btn-view-explore').click();
+    await page.locator('#cfg-search').fill('Bendix starter');
+    assert.equal(await shown(page, '#cf-sa_en'), true, 'search should reveal unavailable starter assist fields');
+    await page.locator('#cfg-search').fill('');
 
     await patchHardware(page, {
       has_starter: true,
       actuators: {
-        starter: { low_rpm_support_enabled: true },
+        starter: { enabled: true, type: 0 },
         glow_plug: { enabled: true }
       },
       sensors: {
@@ -265,7 +276,7 @@ async function sectionVisible(page, title) {
     await gotoConfig(page);
     await page.locator('#btn-view-expert').click();
     assert.equal(await shown(page, '#starter-support-section'), false, 'starter support settings should hide without N1 feedback');
-    results.push('optional low-RPM starter support, glow, and RC PWM sections follow fitted hardware and feedback prerequisites');
+    results.push('optional Pulsed Starter Assist, glow, and RC PWM sections follow fitted hardware and feedback prerequisites');
 
     await reset(page);
     console.log('super-audit: cluster toggle');
@@ -282,15 +293,22 @@ async function sectionVisible(page, title) {
     });
     await gotoConfig(page);
     await page.locator('#btn-view-expert').click();
-    await page.locator('#cf-cl_en').check();
+    assert.equal(await page.locator('#cf-cl_en').count(), 0, 'cluster has no redundant Config enable');
     assert.equal(await shown(page, '#cf-cl_n1'), true);
     assert.equal(await disabled(page, '#cf-cl_n1'), false);
-    assert.equal(await shown(page, '#cf-cl_n2'), false, 'cluster N2 threshold must stay hidden on single-shaft hardware after toggling Enable');
-    assert.equal(await shown(page, '#cf-cl_tw'), true);
+    assert.equal(await shown(page, '#cf-cl_n2'), false, 'Configured system should hide an N2 threshold without N2 hardware');
+    assert.equal(await shown(page, '#cf-cl_tw'), false);
     assert.equal(await disabled(page, '#cf-cl_tw'), true);
-    assert.equal(await shown(page, '#cf-cl_ow'), true);
+    assert.equal(await shown(page, '#cf-cl_ow'), false);
     assert.equal(await disabled(page, '#cf-cl_ow'), true);
-    results.push('cluster enable toggle cannot expose N2/EGT/oil settings without their sources');
+    await page.locator('#btn-view-explore').click();
+    assert.equal(await shown(page, '#cf-cl_n2'), true, 'Explore should expose a future N2 cluster threshold');
+    assert.equal(await disabled(page, '#cf-cl_n2'), false);
+    assert.equal(await shown(page, '#cf-cl_tw'), true);
+    assert.equal(await disabled(page, '#cf-cl_tw'), false);
+    assert.equal(await shown(page, '#cf-cl_ow'), true);
+    assert.equal(await disabled(page, '#cf-cl_ow'), false);
+    results.push('cluster thresholds stay hardware-focused normally and become editable, marked future values in Explore');
 
     await reset(page);
     console.log('super-audit: TIT-only');
@@ -336,11 +354,16 @@ async function sectionVisible(page, title) {
     });
     await gotoConfig(page);
     await page.locator('#btn-view-expert').click();
-    assert.equal(await shown(page, '#cf-sf_fn'), true);
+    assert.equal(await shown(page, '#cf-sf_fn'), false);
     assert.equal(await disabled(page, '#cf-sf_fn'), true);
-    assert.equal(await shown(page, '#cf-rl_tr'), true);
+    assert.equal(await shown(page, '#cf-rl_tr'), false);
     assert.equal(await disabled(page, '#cf-rl_tr'), true);
-    results.push('stale flameout/relight source selections cannot unlock missing N1 or EGT detail fields');
+    await page.locator('#btn-view-explore').click();
+    assert.equal(await shown(page, '#cf-sf_fn'), true);
+    assert.equal(await disabled(page, '#cf-sf_fn'), false);
+    assert.equal(await shown(page, '#cf-rl_tr'), true);
+    assert.equal(await disabled(page, '#cf-rl_tr'), false);
+    results.push('stale flameout/relight source selections stay hidden normally but can be prepared safely in Explore');
 
     await reset(page);
     console.log('super-audit: dual EGT');
@@ -374,6 +397,39 @@ async function sectionVisible(page, title) {
     await page.locator('#cf-oil_tm').check();
     assert.equal(await disabled(page, '#cf-oil_mx'), false);
     results.push('dynamic idle and oil throttle map respond to actuator and checkbox prerequisites');
+
+    await reset(page);
+    console.log('super-audit: pressure-only dynamic idle');
+    await patchConfig(page, {
+      dynamic_idle: { source: 2, target_pressure_bar: 1.8, pressure_deadband_bar: 0.05, pressure_limit_bar: 3.0 }
+    });
+    await patchHardware(page, {
+      sensors: { n1_rpm: { enabled: false }, n2_rpm: { enabled: false }, p1: { enabled: true }, p2: { enabled: false } },
+      actuators: { throttle: { enabled: true } },
+      controllers: { dynamic_idle: true },
+      has_two_shaft: false
+    });
+    await gotoConfig(page);
+    await page.locator('#btn-view-expert').click();
+    assert.equal(await disabled(page, '#cf-di_src'), false, 'P1-only profile should make Automatic Idle available');
+    assert.equal(await page.locator('#cf-di_src').inputValue(), '2');
+    assert.equal(await shown(page, '#cf-di_tp'), true);
+    assert.equal(await shown(page, '#cf-di_pd'), true);
+    assert.equal(await shown(page, '#cf-di_pl'), true);
+    assert.equal(await shown(page, '#cf-di_tr'), false);
+    assert.equal(await shown(page, '#cf-di_db'), false);
+    assert.equal(await shown(page, '#cf-di_rl'), false);
+    assert.equal(await optionDisabled(page, '#cf-di_src', '3'), true, 'unfitted P2 source should be unavailable');
+    await patchConfig(page, { dynamic_idle: { source: 3 } });
+    await patchHardware(page, { sensors: { p1: { enabled: false }, p2: { enabled: true } } });
+    await gotoConfig(page);
+    await page.locator('#btn-view-expert').click();
+    assert.equal(await disabled(page, '#cf-di_src'), false, 'P2-only profile should make Automatic Idle available');
+    assert.equal(await page.locator('#cf-di_src').inputValue(), '3');
+    assert.equal(await shown(page, '#cf-di_tp'), true);
+    assert.equal(await shown(page, '#cf-di_tr'), false);
+    assert.equal(await optionDisabled(page, '#cf-di_src', '2'), true, 'unfitted P1 source should be unavailable');
+    results.push('P1-only and P2-only Automatic Idle expose pressure settings and hide shaft-speed settings');
 
     await reset(page);
     await patchHardware(page, {

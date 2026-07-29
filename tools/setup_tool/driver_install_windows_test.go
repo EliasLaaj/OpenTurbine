@@ -215,16 +215,16 @@ func TestInstallINFDriverPackagePreservesRebootRequired(t *testing.T) {
 func TestLoadPackageRejectsSchemaMismatch(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "manifest.json"), `{"project":"OpenTurbine","version":"1.0","package_schema":1}`)
-	if _, err := loadPackageFromDir(root); err == nil || !strings.Contains(err.Error(), "not compatible") {
+	if _, err := loadPackageFromDir(root); err == nil || !strings.Contains(err.Error(), "uses format") {
 		t.Fatalf("expected schema mismatch, got %v", err)
 	}
 }
 
-func TestLoadPackageRejectsSetupToolVersionMismatch(t *testing.T) {
+func TestLoadPackageRejectsMissingMinimumToolVersion(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "manifest.json"), `{"project":"OpenTurbine","version":"1.0","package_schema":2,"setup_tool_version":"0.5.23"}`)
-	if _, err := loadPackageFromDir(root); err == nil || !strings.Contains(err.Error(), "same release") {
-		t.Fatalf("expected setup-tool version mismatch, got %v", err)
+	writeTestFile(t, filepath.Join(root, "manifest.json"), `{"project":"OpenTurbine","version":"2.0.0","package_schema":3,"setup_tool_version":"0.6.0"}`)
+	if _, err := loadPackageFromDir(root); err == nil || !strings.Contains(err.Error(), "minimum compatible") {
+		t.Fatalf("expected missing minimum-tool-version error, got %v", err)
 	}
 }
 

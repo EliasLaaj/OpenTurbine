@@ -30,6 +30,7 @@
 #include "hal/sensors/NTCSensor.h"
 #include "hal/sensors/DS18B20TempSensor.h"
 #include "hal/sensors/HX711Sensor.h"
+#include "hal/i2c/I2CDeviceManager.h"
 
 // ── All actuator headers — always included ────────────────────
 #include "hal/actuators/ServoActuator.h"
@@ -237,6 +238,7 @@
     ABIgnOn      g_blkABIgnOn;      ABIgnOff     g_blkABIgnOff;                 \
     ABSolOpen    g_blkABSolOpen;    ABSolClose   g_blkABSolClose;               \
     OilScavengeOn  g_blkOilScavengeOn;  OilScavengeOff g_blkOilScavengeOff;          \
+    DrainValveOpen g_blkDrainValveOpen; DrainValveClose g_blkDrainValveClose;          \
     /* ── MoreBlocks ─────────────────────────────────────────────────────────── */ \
     FuelPulse    g_blkFuelPulse;                                                  \
     WaitTOTCool  g_blkWaitTOTCool;                                                \
@@ -385,6 +387,8 @@ extern ABIgnOn       g_blkABIgnOn;      extern ABIgnOff      g_blkABIgnOff;
 extern ABSolOpen     g_blkABSolOpen;    extern ABSolClose    g_blkABSolClose;
 extern OilScavengeOn  g_blkOilScavengeOn;
 extern OilScavengeOff g_blkOilScavengeOff;
+extern DrainValveOpen g_blkDrainValveOpen;
+extern DrainValveClose g_blkDrainValveClose;
 extern FuelPulse     g_blkFuelPulse;
 extern WaitTOTCool   g_blkWaitTOTCool;
 extern WaitForInput  g_blkWaitForInput;
@@ -442,6 +446,9 @@ namespace Hardware {
     static constexpr uint8_t REG_PWM_FRESH = 0x01;
     static constexpr uint8_t REG_PWM_VALID = 0x02;
     inline float             g_registryOilLoopPct[HardwareConfig::MAX_OIL_LOOPS] = {};
+    inline uint32_t          g_registryOilLoopFailSinceMs[HardwareConfig::MAX_OIL_LOOPS] = {};
+    inline bool              g_registryOilLoopFailArmed[HardwareConfig::MAX_OIL_LOOPS] = {};
+    inline uint32_t          g_registryOilLoopLastMs = 0;
 
     inline float registryMappedInput(float raw, const ChannelRegistry::Channel& c) {
         float span = c.maxValue - c.minValue;
@@ -508,7 +515,9 @@ namespace Hardware {
         auto& reg = HardwareConfig::channelRegistry;
         for (uint8_t i = 0; i < reg.inputCount; ++i) {
             const auto& c = reg.inputs[i];
-            if (!c.installed || c.pin < 0 || c.driver != ChannelRegistry::Analog || c.temperatureInterface != 0) continue;
+            const bool localAnalog = c.driver == ChannelRegistry::Analog && c.pin >= 0;
+            const bool remoteAnalog = c.driver == ChannelRegistry::I2cAnalog;
+            if (!c.installed || (!localAnalog && !remoteAnalog) || c.temperatureInterface != 0) continue;
             if ((id && !strcmp(c.id, id)) || (binding && registryInputBoundTo(c, binding)) ||
                 (purpose && !strcmp(c.purpose, purpose)))
                 return (int8_t)i;
@@ -533,8 +542,23 @@ namespace Hardware {
         auto& reg = HardwareConfig::channelRegistry;
         for (uint8_t i = 0; i < reg.inputCount; ++i) {
             const auto& c = reg.inputs[i];
-            if (!c.installed || c.pin < 0) continue;
+            const bool remote = c.driver == ChannelRegistry::I2cDigital ||
+                                c.driver == ChannelRegistry::I2cAnalog ||
+                                c.driver == ChannelRegistry::I2cLoadCell;
+            if (!c.installed || (!remote && c.pin < 0)) continue;
             if ((purpose && !strcmp(c.purpose, purpose)) || (binding && registryInputBoundTo(c, binding)))
+                return (int8_t)i;
+        }
+        return -1;
+    }
+
+    inline int8_t registryPurposeOutputIndex(const char* purpose) {
+        auto& reg = HardwareConfig::channelRegistry;
+        for (uint8_t i = 0; i < reg.outputCount; ++i) {
+            const auto& c = reg.outputs[i];
+            const bool remote = c.driver == ChannelRegistry::I2cRelay;
+            if (c.installed && (remote || c.pin >= 0) &&
+                purpose && !strcmp(c.purpose, purpose))
                 return (int8_t)i;
         }
         return -1;
@@ -611,8 +635,14 @@ namespace Hardware {
             ed.registryInputValue[i] = 0.0f;
             g_registryDs18Slot[i] = -1;
             g_registryPcntSlot[i] = -1;
-            const bool legacyOilTemperature = !strcmp(c.id, "oil_temperature") || !strcmp(c.purpose, "oil_temperature");
-            if (!strcmp(c.role, "temperature") && c.temperatureInterface == 5 && !legacyOilTemperature) {
+            if (c.driver == ChannelRegistry::I2cDigital ||
+                c.driver == ChannelRegistry::I2cAnalog ||
+                c.driver == ChannelRegistry::I2cLoadCell) {
+                ed.registryInputHealthy[i] = false;
+                continue;
+            }
+            const bool singletonOilTemperature = !strcmp(c.id, "oil_temperature") || !strcmp(c.purpose, "oil_temperature");
+            if (!strcmp(c.role, "temperature") && c.temperatureInterface == 5 && !singletonOilTemperature) {
                 if (c.installed && c.pin >= 0 && ds18Count < MAX_REGISTRY_ONEWIRE) {
                     g_registryDs18Slot[i] = (int8_t)ds18Count;
                     g_registryDs18[ds18Count++].begin(c.pin, c.temperatureResolution);
@@ -621,7 +651,7 @@ namespace Hardware {
                 continue;
             }
             if (!strcmp(c.role, "temperature") && c.temperatureInterface != 0 &&
-                (c.temperatureInterface != 4 || legacyOilTemperature)) {
+                (c.temperatureInterface != 4 || singletonOilTemperature)) {
                 // Thermocouple, NTC and OneWire inputs are sampled by their
                 // dedicated drivers in updateSensors(), not analogRead().
                 ed.registryInputHealthy[i] = false;
@@ -635,7 +665,15 @@ namespace Hardware {
                 !strcmp(c.role, "speed")) {
                 if (g_pcntResourcePlanValid && pcntCount < MAX_REGISTRY_PCNT) {
                     g_registryPcntSlot[i] = (int8_t)pcntCount;
-                    g_registryPcnt[pcntCount].rpmLimit = c.maxValue > 0.0f ? c.maxValue : 60000.0f;
+                    // The hardware page no longer asks hobbyists for a second,
+                    // unrelated "sensor maximum".  PCNT plausibility follows
+                    // the applicable hard shutdown and leaves 2x headroom so
+                    // it catches impossible signals without restricting use.
+                    float hardLimit = Config::rpmLimit;
+                    if (!strcmp(c.purpose, "n2_speed") || !strcmp(c.id, "n2_main"))
+                        hardLimit = Config::n2RpmLimit > 0.0f ? Config::n2RpmLimit : Config::rpmLimit;
+                    if (!isfinite(hardLimit) || hardLimit <= 0.0f) hardLimit = 60000.0f;
+                    g_registryPcnt[pcntCount].rpmLimit = hardLimit * 2.0f;
                     g_registryPcnt[pcntCount++].begin(c.pin, c.pulsesPerUnit);
                 }
                 ed.registryInputHealthy[i] = false;
@@ -764,6 +802,17 @@ namespace Hardware {
         const uint8_t inputCount = min(reg.inputCount, ChannelRegistry::MAX_INPUT_CHANNELS);
         for (uint8_t i = 0; i < inputCount; ++i) {
             const auto& c = reg.inputs[i];
+            if (c.driver == ChannelRegistry::I2cDigital ||
+                c.driver == ChannelRegistry::I2cAnalog ||
+                c.driver == ChannelRegistry::I2cLoadCell) {
+                float value = 0.0f; int32_t raw = 0; uint32_t seq = 0, sampleMs = 0;
+                ed.registryInputHealthy[i] = I2CDeviceManager::input(i, value, raw, seq, sampleMs);
+                if (ed.registryInputHealthy[i]) {
+                    ed.registryInputValue[i] = value;
+                    g_registryAnalogLastMs[i] = sampleMs;
+                }
+                continue;
+            }
             uint8_t coreKind = registryCoreInputKind(c);
             if (coreKind) {
                 mirrorCoreRegistryInput(i, coreKind, ed);
@@ -787,9 +836,9 @@ namespace Hardware {
                 ed.registryInputHealthy[i] = sensor.isHealthy();
                 continue;
             }
-            const bool legacyOilTemperature = !strcmp(c.id, "oil_temperature") || !strcmp(c.purpose, "oil_temperature");
+            const bool singletonOilTemperature = !strcmp(c.id, "oil_temperature") || !strcmp(c.purpose, "oil_temperature");
             if (!strcmp(c.role, "temperature") && c.temperatureInterface != 0 &&
-                (c.temperatureInterface != 4 || legacyOilTemperature)) {
+                (c.temperatureInterface != 4 || singletonOilTemperature)) {
                 ed.registryInputHealthy[i] = false;
                 continue;
             }
@@ -823,6 +872,29 @@ namespace Hardware {
         return HardwareConfig::channelRegistry.ownsCoreOutput(c);
     }
 
+    inline bool i2cOutputAffectsEngine(const ChannelRegistry::Channel& c) {
+        if (!c.installed || c.driver != ChannelRegistry::I2cRelay) return false;
+        const char* p = c.purpose;
+        return !strcmp(p, "main_fuel") || !strcmp(p, "fuel_shutoff") ||
+               !strcmp(p, "starter") || !strcmp(p, "starter_enable") ||
+               !strcmp(p, "igniter") || !strcmp(p, "ab_igniter") ||
+               !strcmp(p, "ab_valve") || !strcmp(p, "air_starter") ||
+               !strcmp(p, "oil_pump") || !strcmp(p, "scavenge_pump") ||
+               !strcmp(p, "fuel_pump") || !strcmp(p, "ab_pump") ||
+               !strcmp(p, "glow_plug") || !strcmp(p, "pilot_fuel") ||
+               !strcmp(p, "wet_glow_fuel");
+    }
+
+    inline const ChannelRegistry::Channel* unavailableEngineI2cOutput() {
+        const auto& reg = HardwareConfig::channelRegistry;
+        for (uint8_t i = 0; i < reg.outputCount; ++i) {
+            const auto& c = reg.outputs[i];
+            if (i2cOutputAffectsEngine(c) && !I2CDeviceManager::channelAvailable(c))
+                return &c;
+        }
+        return nullptr;
+    }
+
     inline const ChannelRegistry::Channel* registryStarterEnableOutput() {
         const auto& reg = HardwareConfig::channelRegistry;
         for (uint8_t i = 0; i < reg.outputCount; ++i)
@@ -840,6 +912,7 @@ namespace Hardware {
     }
 
     inline bool registryOutputManaged(const ChannelRegistry::Channel& c) {
+        if (c.installed && c.driver == ChannelRegistry::I2cRelay) return true;
         const bool proportionalStarterEnable = !strcmp(c.purpose, "starter_enable") && c.driver != ChannelRegistry::Relay;
         const bool proportionalAirStarter = !strcmp(c.purpose, "air_starter") && c.driver != ChannelRegistry::Relay;
         return c.installed && c.pin >= 0 &&
@@ -865,7 +938,9 @@ namespace Hardware {
         demand = constrain(demand, 0.0f, 1.0f);
         if (demand > 0.0f) demand = fmaxf(demand, constrain(c.minimumRunDemand, 0.0f, 1.0f));
         float driveDemand = c.inverted ? 1.0f - demand : demand;
-        if (c.driver == ChannelRegistry::Relay) {
+        if (c.driver == ChannelRegistry::I2cRelay) {
+            I2CDeviceManager::writeOutput(c, demand);
+        } else if (c.driver == ChannelRegistry::Relay) {
             digitalWrite(c.pin, driveDemand >= 0.5f ? HIGH : LOW);
         } else if (c.driver == ChannelRegistry::Pwm) {
             float minDuty = constrain(c.minValue, 0.0f, 1.0f);
@@ -893,7 +968,10 @@ namespace Hardware {
             const auto& c = reg.outputs[i];
             if (!registryOutputManaged(c)) continue;
             ed.registryOutputDemand[i] = constrain(c.safeDemand, 0.0f, 1.0f);
-            if (c.driver == ChannelRegistry::Relay) {
+            if (c.driver == ChannelRegistry::I2cRelay) {
+                // The manager wrote the configured safe latch before changing
+                // the TCA9554 direction register.
+            } else if (c.driver == ChannelRegistry::Relay) {
                 pinMode(c.pin, OUTPUT);
             } else if (c.driver == ChannelRegistry::Pwm) {
                 const uint32_t freq = c.pwmTimingConfigured ? constrain(c.pwmFrequency, 1U, 100000U) : 5000U;
@@ -914,9 +992,31 @@ namespace Hardware {
 
     inline void updateRegistryOutputs() {
         auto& reg = HardwareConfig::channelRegistry;
+        auto& hw = HardwareConfig::instance();
         auto& ed = EngineData::instance();
         for (uint8_t i = 0; i < reg.outputCount; ++i) {
             const auto& c = reg.outputs[i];
+            const bool wetGlowOwned =
+                !strcmp(c.purpose, "wet_glow_fuel") ||
+                (!strcmp(c.purpose, "pilot_fuel") &&
+                 hw.hasGlowPlug && hw.glowPlugType == 2);
+            if (wetGlowOwned)
+                ed.registryOutputDemand[i] = constrain(ed.wetGlowFuelDemand, 0.0f, 1.0f);
+            if (c.driver == ChannelRegistry::I2cRelay) {
+                if (!strcmp(c.purpose, "fuel_shutoff")) ed.registryOutputDemand[i] = ed.fuelSolOpen ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "starter")) ed.registryOutputDemand[i] = ed.starterDemand > 0.001f ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "starter_enable")) ed.registryOutputDemand[i] = ed.starterEnabled ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "oil_pump")) ed.registryOutputDemand[i] = ed.oilPumpPct > 0.1f ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "igniter")) ed.registryOutputDemand[i] = ed.igniterOn ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "ab_igniter")) ed.registryOutputDemand[i] = ed.igniter2On ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "ab_valve")) ed.registryOutputDemand[i] = ed.abSolOpen ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "air_starter")) ed.registryOutputDemand[i] = ed.airstarterOpen ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "cooling_fan")) ed.registryOutputDemand[i] = ed.coolFanOn ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "scavenge_pump")) ed.registryOutputDemand[i] = ed.oilScavengeOn ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "fuel_pump")) ed.registryOutputDemand[i] = ed.fuelPump2Demand > 0.001f ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "ab_pump")) ed.registryOutputDemand[i] = ed.abPumpDemand > 0.001f ? 1.0f : 0.0f;
+                else if (!strcmp(c.purpose, "glow_plug")) ed.registryOutputDemand[i] = ed.glowPlugDemand >= 0.5f ? 1.0f : 0.0f;
+            }
             if (!strcmp(c.purpose, "starter_enable") && c.driver != ChannelRegistry::Relay)
                 ed.registryOutputDemand[i] = ed.starterEnabled ? 1.0f : 0.0f;
             if (!strcmp(c.purpose, "air_starter") && c.driver != ChannelRegistry::Relay)
@@ -1069,6 +1169,14 @@ namespace Hardware {
         g_blkStarterSpin.timeoutMs        = (unsigned long)Config::starterTimeoutMs;
         g_blkStarterSpin.oilStartupMinBar = Config::oilStartupMinBar;
         g_blkStarterSpin.rampPctPerSec    = Config::starterStartupRampPctPerSec;
+        g_blkStarterSpin.assistEnabled    = Config::starterAssistEnabled &&
+                                             HardwareConfig::hasStarter &&
+                                             HardwareConfig::starterType != 2 &&
+                                             HardwareConfig::hasN1Rpm;
+        g_blkStarterSpin.assistDemand     = Config::starterAssistPwmPct / 100.0f;
+        g_blkStarterSpin.assistUntilRpm   = Config::starterAssistUntilRpm;
+        g_blkStarterSpin.assistOnMs       = Config::starterAssistOnMs;
+        g_blkStarterSpin.assistOffMs      = Config::starterAssistOffMs;
         g_blkPreIgnSpark.sparkMs          = Config::preIgnSparkMs;
         g_blkTempConfirm.tempTarget       = Config::tempConfirmTarget;
         g_blkTempConfirm.timeoutMs        = (unsigned long)Config::tempConfirmTimeoutMs;
@@ -1167,7 +1275,7 @@ namespace Hardware {
                 break;
             }
         }
-        if (hw.hasThrottleSlew) {
+        if (hw.hasThrottle) {
             g_ctrlThrottleSlew.rampUpMs     = Config::throttleRampUpMs;
             g_ctrlThrottleSlew.rampDownMs   = Config::throttleRampDownMs;
             g_ctrlThrottleSlew.n1PullbackEnabled = Config::pullbackN1Enabled;
@@ -1256,10 +1364,11 @@ namespace Hardware {
         }
         if (hw.hasN1Rpm) { g_sensorN1Rpm.jumpThreshold  = Config::rpmJumpThreshold;
                            g_sensorN1Rpm.zeroStuckLimit = Config::rpmZeroStuckTicks;
-                           g_sensorN1Rpm.rpmLimit       = Config::rpmLimit; }
+                           g_sensorN1Rpm.rpmLimit       = Config::rpmLimit > 0.0f ? Config::rpmLimit * 2.0f : 120000.0f; }
         if (hw.hasN2Rpm) { g_sensorN2Rpm.jumpThreshold  = Config::rpmJumpThreshold;
                            g_sensorN2Rpm.zeroStuckLimit = Config::rpmZeroStuckTicks;
-                           g_sensorN2Rpm.rpmLimit       = Config::n2RpmLimit > 0.0f ? Config::n2RpmLimit : Config::rpmLimit; }
+                           g_sensorN2Rpm.rpmLimit       = (Config::n2RpmLimit > 0.0f ? Config::n2RpmLimit :
+                                                          (Config::rpmLimit > 0.0f ? Config::rpmLimit : 60000.0f)) * 2.0f; }
         g_safety.rpmLimit              = Config::rpmLimit;
         g_safety.n2RpmLimit            = Config::n2RpmLimit;
         g_safety.minRpm               = Config::minRpm;
@@ -1276,9 +1385,9 @@ namespace Hardware {
         g_safety.flameoutShutdownMs   = Config::flameoutShutdownMs;
         g_safety.flameoutSource       = Config::flameoutSource;
         g_safety.flameoutN1MinRpm     = Config::flameoutN1MinRpm;
-        g_safety.flameoutTotDropC     = Config::flameoutTotDropC;
+        g_safety.flameoutEgtBelowC    = Config::flameoutEgtBelowC;
+        g_safety.flameoutEgtFallRateCPerSec = Config::flameoutEgtFallRateCPerSec;
         g_safety.checkIntervalMs      = Config::safetyCheckIntervalMs;
-        g_safety.totRiseRateLimit     = Config::totRiseRateLimitDegPerSec;
 
         if (hw.hasGovernor) {
             g_ctrlGovernor.targetRpm    = Config::governorTargetRpm;
@@ -1525,9 +1634,19 @@ namespace Hardware {
     inline void updateSensors() {
         auto& hw = HardwareConfig::instance();
         auto& ed = EngineData::instance();
+        // Full address discovery is maintenance work. Assigned devices remain
+        // serviced while active, but scanning unknown addresses is restricted
+        // to standby/fault so a damaged bus cannot add jitter to fuel control.
+        const bool allowI2cDiscovery =
+            ed.mode == SysMode::STANDBY || ed.mode == SysMode::FAULT;
+        I2CDeviceManager::tick(allowI2cDiscovery);
         updateRegistryInputs();
         const int8_t idleRegistry = registryPurposeInputIndex("idle");
         const int8_t throttleRegistry = registryPurposeInputIndex("throttle", "operator_throttle");
+        const int8_t torqueRegistry = registryPurposeInputIndex("torque");
+        const int8_t thrustRegistry = registryPurposeInputIndex("thrust");
+        const int8_t flameRegistry = registryPurposeInputIndex("flame");
+        const int8_t abCommandRegistry = registryPurposeInputIndex("ab_command");
         // Preserve the existing idle/throttle consumers and telemetry without
         // making them apply a second calibration layer. Registry endpoints
         // already produce 0..1, so synthesize the legacy raw value that maps
@@ -1561,6 +1680,7 @@ namespace Hardware {
         const int8_t p2Analog = registryAnalogInputIndex("p2_main", nullptr, "p2_pressure");
         const int8_t flameAnalog = registryAnalogInputIndex("flame_main", nullptr, "flame");
         const int8_t fuelFlowAnalog = registryAnalogInputIndex("fuel_flow", nullptr, "fuel_flow");
+        const int8_t battAnalog = registryAnalogInputIndex("battery_voltage", nullptr, "battery_voltage");
         const int8_t totSpecial = registrySpecialTemperatureIndex("tot_main", "tot");
         const int8_t titSpecial = registrySpecialTemperatureIndex("tit_main", "tit");
         const int8_t oilTempSpecial = registrySpecialTemperatureIndex("oil_temperature", "oil_temperature");
@@ -1684,15 +1804,38 @@ namespace Hardware {
         }
         if (flameAnalog >= 0) {
             const auto& c = HardwareConfig::channelRegistry.inputs[flameAnalog];
-            ed.flameSensorRaw = analogRead(c.pin);
-            ed.flameDetected = ed.flameSensorRaw > Config::flameThreshold;
-            ed.flameHealthy = ed.registryInputHealthy[flameAnalog];
+            if (c.driver == ChannelRegistry::I2cAnalog) {
+                float value = 0.0f; int32_t raw = 0; uint32_t seq = 0, sampleMs = 0;
+                ed.flameHealthy = I2CDeviceManager::input(flameAnalog, value, raw, seq, sampleMs);
+                ed.flameSensorRaw = raw;
+                ed.flameDetected = ed.flameHealthy && value >= 0.5f;
+                ed.flameSampleSeq = seq; ed.flameSampleMs = sampleMs;
+            } else {
+                ed.flameSensorRaw = analogRead(c.pin);
+                ed.flameDetected = ed.flameSensorRaw > Config::flameThreshold;
+                ed.flameHealthy = ed.registryInputHealthy[flameAnalog];
+                const uint32_t sampleMs = g_registryAnalogLastMs[flameAnalog];
+                if (sampleMs != ed.flameSampleMs) {
+                    ed.flameSampleMs = sampleMs;
+                    ed.flameSampleSeq = ed.flameSampleSeq + 1U;
+                }
+            }
+        } else if (flameRegistry >= 0 &&
+                   HardwareConfig::channelRegistry.inputs[flameRegistry].driver ==
+                       ChannelRegistry::I2cDigital) {
+            ed.flameHealthy = ed.registryInputHealthy[flameRegistry];
+            ed.flameDetected = ed.flameHealthy && ed.registryInputValue[flameRegistry] >= 0.5f;
+            ed.flameSensorRaw = ed.flameDetected ? 1 : 0;
         } else if (hw.hasFlame) {
             g_sensorFlame.update();
             ed.flameSensorRaw = g_sensorFlame.rawCounts();
             ed.flameDetected  = g_sensorFlame.getValue() > 0.5f;
-            // Wiring hint only — never gates flameDetected (see EngineData.h)
-            ed.flameHealthy   = g_sensorFlame.railHealthy();
+            // Threshold flame detectors may legitimately use either ADC rail
+            // as their binary ON/OFF state; fitted-channel availability is the
+            // only generic health information this interface can provide.
+            ed.flameHealthy   = true;
+            ed.flameSampleSeq = g_sensorFlame.sampleSequence();
+            ed.flameSampleMs  = g_sensorFlame.sampleTimestampMs();
         }
         if (hw.hasIdleInput && !hw.idleInputRcPwm && idleRegistry < 0) {
             g_sensorIdleInput.update();
@@ -1707,11 +1850,18 @@ namespace Hardware {
             ed.throttleInputValid = g_sensorThrottleInput.railHealthy();
             if (!ed.throttleInputValid) ed.throttleInputRaw = Config::throttleMinRaw;
         }
+        if (abCommandRegistry >= 0) {
+            ed.abInputValid = ed.registryInputHealthy[abCommandRegistry];
+            ed.abInputNorm = ed.abInputValid
+                ? constrain(ed.registryInputValue[abCommandRegistry], 0.0f, 1.0f)
+                : 0.0f;
+            ed.abInputRaw = (int32_t)(ed.abInputNorm * 4095.0f + 0.5f);
+        }
         // AB flame sensor (dedicated, optional)
         if (hw.hasAbFlame && hw.abFlamePin >= 0) {
             g_sensorAbFlame.update();
             ed.abFlameOn = (g_sensorAbFlame.getValue() > 0.5f);
-            ed.abFlameHealthy = g_sensorAbFlame.railHealthy();
+            ed.abFlameHealthy = true;  // binary rail states are valid ON/OFF states
         }
         // AB analog/RC trigger input
         if (hw.hasAfterburner && hw.abInputPin >= 0 && !hw.abInputRcPwm &&
@@ -1731,7 +1881,14 @@ namespace Hardware {
         // ── New sensors ──────────────────────────────────────────
         if (oilTempAnalog >= 0) {
             ed.oilTemp = ed.registryInputValue[oilTempAnalog];
-            ed.oilTempRaw = analogRead(HardwareConfig::channelRegistry.inputs[oilTempAnalog].pin);
+            const auto& channel = HardwareConfig::channelRegistry.inputs[oilTempAnalog];
+            if (channel.driver == ChannelRegistry::I2cAnalog) {
+                float value = 0.0f; int32_t raw = 0; uint32_t seq = 0, sampleMs = 0;
+                I2CDeviceManager::input(oilTempAnalog, value, raw, seq, sampleMs);
+                ed.oilTempRaw = raw;
+            } else {
+                ed.oilTempRaw = analogRead(channel.pin);
+            }
             ed.oilTempHealthy = ed.registryInputHealthy[oilTempAnalog];
             if (ed.oilTempHealthy && ed.oilTemp > ed.maxOilTemp) ed.maxOilTemp = ed.oilTemp;
         } else if (hw.hasOilTemp && g_pSensorOilTemp) {
@@ -1745,14 +1902,27 @@ namespace Hardware {
             ed.registryInputValue[oilTempSpecial] = ed.oilTemp;
             ed.registryInputHealthy[oilTempSpecial] = ed.oilTempHealthy;
         }
-        if (hw.hasBattVoltage) {
+        if (battAnalog >= 0) {
+            ed.battVoltage = ed.registryInputValue[battAnalog];
+            ed.battHealthy = ed.registryInputHealthy[battAnalog];
+            if (ed.battHealthy && ed.battVoltage > ed.maxBattVoltage) ed.maxBattVoltage = ed.battVoltage;
+        } else if (hw.hasBattVoltage) {
             g_sensorBattVolt.update();
             ed.battVoltage  = g_sensorBattVolt.getValue();
             ed.battHealthy  = g_sensorBattVolt.isHealthy();
             if (ed.battHealthy && ed.battVoltage > ed.maxBattVoltage) ed.maxBattVoltage = ed.battVoltage;
         }
         if (hw.hasTorque) {
-            if (hw.torqueHx711) {
+            if (torqueRegistry >= 0 &&
+                HardwareConfig::channelRegistry.inputs[torqueRegistry].driver ==
+                    ChannelRegistry::I2cLoadCell) {
+                float rawValue = 0.0f; int32_t raw = 0; uint32_t seq = 0, sampleMs = 0;
+                ed.torqueHealthy = I2CDeviceManager::input(torqueRegistry, rawValue, raw, seq, sampleMs);
+                if (ed.torqueHealthy) {
+                    ed.torque = rawValue; ed.torqueRaw = raw;
+                    ed.torqueSampleSeq = seq; ed.torqueSampleMs = sampleMs;
+                }
+            } else if (hw.torqueHx711) {
                 g_sensorTorqueHx711.update();
                 ed.torque        = g_sensorTorqueHx711.getValue();
                 ed.torqueRaw     = (int)g_sensorTorqueHx711.rawCounts();
@@ -1781,6 +1951,14 @@ namespace Hardware {
                 ed.turboPower = ed.torque * omega;
             } else {
                 ed.turboPower = 0.0f;
+            }
+        }
+        if (hw.hasThrust && thrustRegistry >= 0) {
+            float value = 0.0f; int32_t raw = 0; uint32_t seq = 0, sampleMs = 0;
+            ed.thrustHealthy = I2CDeviceManager::input(thrustRegistry, value, raw, seq, sampleMs);
+            if (ed.thrustHealthy) {
+                ed.thrust = value; ed.thrustRaw = raw;
+                ed.thrustSampleSeq = seq; ed.thrustSampleMs = sampleMs;
             }
         }
         if (fuelFlowAnalog >= 0) {
@@ -1920,11 +2098,18 @@ namespace Hardware {
         for (uint8_t i = 0; i < HardwareConfig::channelRegistry.outputCount; ++i) {
             const auto& c = HardwareConfig::channelRegistry.outputs[i];
             if (!registryOutputManaged(c)) continue;
+            if (c.driver == ChannelRegistry::I2cRelay) continue; // parked by manager
             const float safe = constrain(c.safeDemand, 0.0f, 1.0f);
             const bool high = (c.inverted ? 1.0f - safe : safe) >= 0.5f;
             digitalWrite(c.pin, high ? HIGH : LOW);
             pinMode(c.pin, OUTPUT);
         }
+        // A separately powered TCA9554 retains its output latch while the ESP
+        // resets. Bring the shared bus up before Wi-Fi and park every assigned
+        // remote output after all native outputs have reached their safe state.
+        I2CDeviceManager::begin(hw.i2cEnabled, hw.i2cSdaPin, hw.i2cSclPin,
+                                hw.i2cInterruptPin,
+                                hw.i2cFrequencyHz, hw.channelRegistry);
     }
 
     // ── Actuator init ─────────────────────────────────────────
@@ -2151,7 +2336,11 @@ namespace Hardware {
         requireReady(hw.hasGlowPlug,
                      hw.glowPlugOutputType == 1 ? (IActuator*)&g_actGlowPlugRelay : (IActuator*)&g_actGlowPlug,
                      "Glow plug");
-        requireReady(hw.hasGlowPlug && hw.glowPlugType == 2, g_actWetGlowFuel, "Wet-glow fuel");
+        const bool registryWetGlowFuel =
+            registryPurposeOutputIndex("pilot_fuel") >= 0 ||
+            registryPurposeOutputIndex("wet_glow_fuel") >= 0;
+        requireReady(hw.hasGlowPlug && hw.glowPlugType == 2 && !registryWetGlowFuel,
+                     g_actWetGlowFuel, "Wet-glow fuel");
         if (!ed.hardwareReady) Serial.printf("[HW] START readiness fault: %s\n", ed.hardwareFault);
     }
 
@@ -2316,7 +2505,10 @@ namespace Hardware {
                 g_actGlowPlugRelay.setOn(glowDemand > 0.001f);
             else
                 g_actGlowPlug.set(glowDemand);
-            if (hw.glowPlugType == 2 && g_actWetGlowFuel) {
+            const bool registryWetGlowFuel =
+                registryPurposeOutputIndex("pilot_fuel") >= 0 ||
+                registryPurposeOutputIndex("wet_glow_fuel") >= 0;
+            if (hw.glowPlugType == 2 && (g_actWetGlowFuel || registryWetGlowFuel)) {
                 static bool s_wetGlowActive = false;
                 static unsigned long s_wetGlowOnMs = 0;
                 bool commandOn = glowDemand > 0.001f;
@@ -2324,18 +2516,18 @@ namespace Hardware {
                     s_wetGlowActive = true;
                     s_wetGlowOnMs = millis();
                     ed.wetGlowFuelDemand = 0.0f;
-                    g_actWetGlowFuel->off();
+                    if (g_actWetGlowFuel) g_actWetGlowFuel->off();
                 } else if (!commandOn) {
                     s_wetGlowActive = false;
                     s_wetGlowOnMs = 0;
                     ed.wetGlowFuelDemand = 0.0f;
-                    g_actWetGlowFuel->off();
+                    if (g_actWetGlowFuel) g_actWetGlowFuel->off();
                 }
                 if (commandOn && s_wetGlowActive &&
                     (millis() - s_wetGlowOnMs) >= (unsigned long)hw.wetGlowFuelDelayMs) {
                     float fuelDemand = hw.wetGlowFuelType == 0 ? 1.0f : (hw.wetGlowFuelDemandPct / 100.0f);
                     ed.wetGlowFuelDemand = constrain(fuelDemand, 0.0f, 1.0f);
-                    g_actWetGlowFuel->set(ed.wetGlowFuelDemand);
+                    if (g_actWetGlowFuel) g_actWetGlowFuel->set(ed.wetGlowFuelDemand);
                 }
             } else {
                 ed.wetGlowFuelDemand = 0.0f;
@@ -2410,12 +2602,15 @@ namespace Hardware {
     inline void initControllers() {
         auto& hw = HardwareConfig::instance();
         if (hw.hasOilLoop)      g_ctrlOilLoop.begin();
-        if (hw.hasThrottleSlew) g_ctrlThrottleSlew.begin();
+        if (hw.hasThrottle) g_ctrlThrottleSlew.begin();
         if (hw.hasDynamicIdle)  g_ctrlDynamicIdle.begin();
         if (hw.hasGovernor)     g_ctrlGovernor.begin();
         for (uint8_t i = 0; i < HardwareConfig::MAX_OIL_LOOPS; ++i) {
             g_registryOilLoopPct[i] = 0.0f;
+            g_registryOilLoopFailSinceMs[i] = 0;
+            g_registryOilLoopFailArmed[i] = false;
         }
+        g_registryOilLoopLastMs = millis();
     }
 
     inline void runAdditionalOilLoops() {
@@ -2423,10 +2618,10 @@ namespace Hardware {
         auto& ed = EngineData::instance();
         if (!hw.hasOilLoop || ed.benchMode) return;
 
-        static unsigned long lastMs = 0;
         unsigned long now = millis();
-        float dt = lastMs ? (now - lastMs) / 1000.0f : 1.0f / 400.0f;
-        lastMs = now;
+        float dt = g_registryOilLoopLastMs
+            ? (now - g_registryOilLoopLastMs) / 1000.0f : 1.0f / 400.0f;
+        g_registryOilLoopLastMs = now;
         dt = constrain(dt, 0.0005f, 0.05f);
 
         bool legacyLoopSkipped = false;
@@ -2449,10 +2644,19 @@ namespace Hardware {
             if (g_registryOilLoopPct[i] < minPct) g_registryOilLoopPct[i] = minPct;
 
             if (!ed.registryInputHealthy[loop.pressureInputIndex]) {
-                g_registryOilLoopPct[i] = constrain(Config::oilFailsafePct, minPct, maxPct);
+                if (!g_registryOilLoopFailArmed[i]) {
+                    g_registryOilLoopFailArmed[i] = true;
+                    g_registryOilLoopFailSinceMs[i] = now;
+                } else if (now - g_registryOilLoopFailSinceMs[i] >=
+                           (unsigned long)Config::oilFailsafeDelayMs) {
+                    g_registryOilLoopPct[i] =
+                        constrain(Config::oilFailsafePct, minPct, maxPct);
+                }
                 ed.registryOutputDemand[loop.pumpOutputIndex] = g_registryOilLoopPct[i] / 100.0f;
                 continue;
             }
+            g_registryOilLoopFailArmed[i] = false;
+            g_registryOilLoopFailSinceMs[i] = 0;
 
             const float pressureBar = constrain(ed.registryInputValue[loop.pressureInputIndex], 0.0f, 20.0f);
             const float targetBar = loop.targetCentiBar / 100.0f;
@@ -2552,7 +2756,7 @@ namespace Hardware {
             float cap = constrain(Config::limpMaxThrottlePct / 100.0f, 0.0f, 1.0f);
             if (ed.throttleDemand > cap) ed.throttleDemand = cap;
         }
-        if (hw.hasThrottleSlew) g_ctrlThrottleSlew.tick();
+        if (hw.hasThrottle) g_ctrlThrottleSlew.tick();
         // The calibrated fuel-pump minimum is applied as an output deadband in
         // updateActuators(), not as a clamp here. Low commands below min-spin
         // become zero instead of being silently lifted to the threshold.

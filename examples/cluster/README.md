@@ -48,7 +48,8 @@ Never connect two push-pull TX pins together. Confirm voltage levels before wiri
 2. Enable **Cluster Serial**.
 3. Choose ECU TX, optional ECU RX, and baud rate.
 4. Save Hardware and reboot.
-5. Open **Config → Cluster** and keep **Enable** on for live streaming.
+5. Open **Config → Cluster** only to review the fitted display's warning
+   thresholds and field choices. Hardware is the single transmission enable.
 
 The default link is UART 8N1 at 115200 baud with a nominal 50 ms telemetry interval.
 

@@ -32,10 +32,10 @@ def hard_post(mutate, check):
         if check(dut.hardware()): return True
     return False
 
-# enable throttle slew + oil loop (one reboot); pullback flags already true in cfg
-print("enable throttle_slew + oil_loop:",
-      hard_post(lambda hw: hw["controllers"].update(throttle_slew=True, oil_loop=True),
-                lambda hw: hw["controllers"]["throttle_slew"] and hw["controllers"]["oil_loop"]))
+# Main-fuel slew and pullback are automatic when a main-fuel output exists.
+print("enable oil_loop:",
+      hard_post(lambda hw: hw["controllers"].update(oil_loop=True),
+                lambda hw: hw["controllers"]["oil_loop"]))
 print("cfg (fast slew, linear oil cal, pullback bands):", dc.patch_cfg({
     "throttle": {"ramp_up_ms": 1500, "ramp_down_ms": 1500, "expo": 0, "idle_min_pct": 0,
                  "pullback_min_pct": 8, "pullback_strength": 1},

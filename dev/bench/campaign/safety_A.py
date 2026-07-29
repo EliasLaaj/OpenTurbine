@@ -52,10 +52,10 @@ print("  sensors+cooldown:", dc.multi(
     check=lambda hw: all(hw["sensors"][s]["enabled"] for s in ("n1_rpm","tot","oil_press","flame")))[0])
 print("  arm:", dc.only_safety("overspeed", "overtemp")[0])
 print("  cfg:", dc.patch_cfg({"engine": {"rpm_limit": 50000, "tot_limit": 700},
-                              "sequence": {"startup": {"hot_start_tot_threshold": 200}}})[0])
+                              "sequence": {"startup": {"pre_start_egt_limit_c": 200, "startup_egt_limit_c": 0}}})[0])
 c = rig.dut.config(); hw = rig.dut.hardware()
 print("  VERIFIED armed=%s rpm_limit=%s tot_limit=%s hot_thr=%s\n"
-      % ({k for k,v in hw["safety"].items() if v}, c["engine"]["rpm_limit"], c["engine"]["tot_limit"], c["sequence"]["startup"]["hot_start_tot_threshold"]))
+      % ({k for k,v in hw["safety"].items() if v}, c["engine"]["rpm_limit"], c["engine"]["tot_limit"], c["sequence"]["startup"]["pre_start_egt_limit_c"]))
 
 # OVERSPEED
 rig.baseline(); rig.start_active()

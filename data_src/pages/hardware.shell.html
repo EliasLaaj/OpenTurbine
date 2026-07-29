@@ -1,0 +1,376 @@
+<!-- Source template. Run tools/build_web_sources.py after editing this file or page modules. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101012">
+<title>OpenTurbine — Hardware</title>
+<link rel="stylesheet" href="/style.css?v=20260723a">
+<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+<script src="/ui_dialog.js?v=20260723a"></script>
+</head>
+<body>
+<nav>
+  <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
+  <a href="/hardware.html" class="active" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
+  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
+  <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
+  <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
+  <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
+  <a href="/tools.html" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
+  <span id="conn" class="conn-dot disconnected"></span><span id="conn-label" class="conn-label">Disconnected</span>
+</nav>
+
+<div class="rebooting-overlay" id="reboot-overlay">
+  <div class="spinner"></div>
+  <div>Device rebooting — reconnecting…</div>
+  <div id="reboot-wifi-note" style="font-size:.82rem;color:var(--text);max-width:32rem;text-align:center;line-height:1.45"></div>
+  <div id="reboot-timer" style="font-size:.85rem;color:var(--dim)"></div>
+</div>
+
+<div id="registry-add-modal" class="registry-add-backdrop" style="display:none" onclick="if(event.target===this)closeRegistryAddDialog()">
+  <div class="registry-add-panel">
+    <div style="display:flex;justify-content:space-between;gap:1rem;align-items:start">
+      <div>
+        <h2 id="registry-add-title" style="margin:.1rem 0 .25rem;font-size:1rem">Add channel</h2>
+        <div class="hw-desc" id="registry-add-description">Choose an installed device type.</div>
+      </div>
+      <button type="button" onclick="closeRegistryAddDialog()">Close</button>
+    </div>
+    <input id="registry-add-search" class="registry-add-search" type="search" placeholder="Search sensors, actuators, switches, generic IO..." oninput="renderRegistryAddCatalog()">
+    <div id="registry-add-catalog" class="registry-add-catalog"></div>
+    <div id="registry-add-error" class="hw-desc" style="color:var(--red);margin-top:.5rem;display:none"></div>
+  </div>
+</div>
+
+<div id="registry-remove-modal" class="registry-add-backdrop" style="display:none" onclick="if(event.target===this)closeRegistryRemoveDialog()">
+  <div class="registry-add-panel registry-remove-panel">
+    <h2 id="registry-remove-title" style="margin:.1rem 0 .25rem;font-size:1rem">Remove channel</h2>
+    <div id="registry-remove-body" class="hw-desc" style="margin:.5rem 0 .8rem"></div>
+    <div style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:.75rem">
+      <button type="button" onclick="closeRegistryRemoveDialog()">Cancel</button>
+      <button type="button" class="primary danger" onclick="confirmRegistryRemoveChannel()">Remove and disable dependents</button>
+    </div>
+  </div>
+</div>
+
+<main>
+  <div class="page-heading">
+    <div class="page-heading-main">
+      <h1 class="page-title">Hardware Configuration</h1>
+      <p class="page-subtitle">Define fitted sensors, actuators and pins. Then set limits in <a href="/config.html" style="color:var(--accent)">Config</a>, calibrate inputs in <a href="/calibration.html" style="color:var(--accent)">Calibration</a>, and review startup logic in <a href="/sequence.html" style="color:var(--accent)">Sequence</a>.</p>
+    </div>
+    <div class="page-heading-actions">
+      <span id="hw-profile-badge" style="font-size:.72rem;padding:.15rem .6rem;border-radius:4px;background:var(--surface);border:1px solid var(--border);color:var(--dim)">—</span>
+      <div style="display:flex;align-items:center;gap:.35rem;font-size:.7rem;color:var(--dim)">
+      Units:
+      <button id="unit-temp-btn" type="button" onclick="setHardwareTempUnit(tempUnit()==='C'?'F':'C')"
+        style="font-size:.7rem;padding:.15rem .55rem;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--dim);cursor:pointer;font-family:inherit;min-height:34px">&deg;C</button>
+      <button id="unit-press-btn" type="button" onclick="setHardwarePressUnit(pressUnit()==='bar'?'psi':'bar')"
+        style="font-size:.7rem;padding:.15rem .55rem;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--dim);cursor:pointer;font-family:inherit;min-height:34px">bar</button>
+      </div>
+    </div>
+  </div>
+  <div id="standby-warn" class="error-banner" style="display:none">⚠ Engine is not in STANDBY — hardware changes are locked.</div>
+
+  <div class="warning-banner" style="margin-bottom:.8rem">
+    <strong>Who should edit this page?</strong> The person wiring or commissioning the ECU. The selected physical connection, signal type, and active state must match the actual electrical installation. If you are operating or mechanically setting up an already-wired turbine, import the engine file supplied by the builder and use Config and Calibration; you normally do not need to edit hardware details.
+  </div>
+
+  <div class="hw-section" id="hardware-profile-section">
+    <div class="hw-title">System Profile</div>
+    <div id="pcb-profile-identity" class="warning-banner" style="display:none;margin-bottom:.65rem"></div>
+    <div class="hw-item-card">
+      <div class="hw-grid profile-grid">
+        <div class="hw-field">
+          <span class="hw-label">Engine name / WiFi network name</span>
+          <span class="hw-desc">Identifies this engine and its saved setup. It is also used as the ECU Wi-Fi network name. Default: OpenTurbine.</span>
+          <input type="text" id="f-profile-id" maxlength="63" placeholder="OpenTurbine" oninput="setProfileId(this.value)">
+          <span id="profile-id-warn" style="display:none;font-size:.68rem;color:var(--yellow)">⚠ Longer than 32 bytes — WiFi limits SSIDs to 32 bytes, so the broadcast AP name will be truncated (the full ID is still used everywhere else).</span>
+        </div>
+        <div class="hw-field">
+          <span class="hw-label">WiFi AP Password</span>
+          <span class="hw-desc">Optional password for the Wi-Fi access point. A saved password is retained unless you enter a replacement; blank selects an open network. ⚠ On an open network, anyone who joins the AP can send engine commands — set a password for anything beyond bench use.</span>
+          <div style="display:flex;gap:.35rem;align-items:center">
+            <input type="password" id="f-wifi-password" maxlength="63" placeholder="(open network)"
+              oninput="set('wifi_password',this.value)" style="flex:1">
+            <button type="button" id="btn-wifi-pw-toggle" onclick="toggleWifiPassword()"
+              title="Show/hide password"
+              style="font-size:1rem;padding:.28rem .5rem;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--surface-2);color:var(--dim);cursor:pointer;line-height:1;min-width:2rem;text-transform:none;letter-spacing:0;font-weight:400;display:flex;align-items:center;justify-content:center">
+              <svg id="btn-wifi-pw-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="hw-field">
+          <span class="hw-label">Engine description</span>
+          <span class="hw-desc">Optional installation note saved with this engine setup, e.g. "Test bench JT-1".</span>
+          <input type="text" id="f-profile-desc" maxlength="63" oninput="set('profile_desc',this.value)">
+        </div>
+        <div class="hw-field">
+          <span class="hw-label">WiFi TX Power</span>
+          <span class="hw-desc">Access-point transmit power in dBm. Lower values reduce radio heat/current draw; raise only if you need more range. Default: 8 dBm.</span>
+          <div style="display:flex;align-items:center;gap:.6rem">
+            <input type="range" id="f-wifi-tx-power" min="2" max="20" step="1"
+              oninput="setWifiTxPower(this.value)" style="flex:1;min-width:130px">
+            <span id="f-wifi-tx-power-val" style="font-size:.74rem;color:var(--dim);min-width:3.5rem;text-align:right">8 dBm</span>
+          </div>
+        </div>
+        <details class="hw-advanced" style="grid-column:1/-1">
+          <summary>Advanced board / GPIO info</summary>
+          <span class="hw-desc">Runtime target and remaining pin capacity. Useful when debugging pin conflicts or choosing another GPIO.</span>
+          <div id="hardware-board-summary" class="board-summary" style="margin-top:.45rem">Loading board summary...</div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Features ─────────────────────────────────────── -->
+  <div class="hw-section" id="hardware-requirements-panel">
+    <div class="hw-title">Requirements and validation</div>
+    <div id="hardware-requirements-summary" class="requirements-summary">
+      <div class="hw-desc">Loading hardware requirements…</div>
+    </div>
+  </div>
+
+  <div class="hw-section" id="hardware-inputs-panel">
+    <div class="hw-title">Inputs</div>
+    <div class="hw-desc" style="margin-bottom:.6rem">Sensors, switches and operator inputs physically wired to this ECU.</div>
+    <div class="warning-banner" id="required-controls-note" style="margin-bottom:.65rem">
+      <strong>Required controls:</strong> assign physical Start and Stop GPIO inputs before saving. Browser controls do not replace these required hardware inputs.
+    </div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.65rem"><button type="button" onclick="addRegistryChannel('input')">+ Add input</button></div>
+    <div id="builtin-inputs"></div>
+    <div id="registry-inputs"></div>
+  </div>
+
+  <div class="hw-section" id="hardware-outputs-panel">
+    <div class="hw-title">Outputs</div>
+    <div class="hw-desc" style="margin-bottom:.6rem">Actuators and writable outputs. PWM and servo drivers keep proportional 0-100% demand.</div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.65rem"><button type="button" onclick="addRegistryChannel('output')">+ Add output</button></div>
+    <div id="registry-outputs"></div>
+    <div id="registry-bindings" class="registry-bindings-panel"></div>
+  </div>
+
+  <div class="hw-section" id="hardware-comms-panel">
+    <div class="hw-title">Communications and indicators</div>
+    <div class="hw-desc" style="margin-bottom:.6rem">Installed external communication links and local indication devices.</div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.65rem"><button id="btn-edit-comms" type="button" onclick="toggleWorkflowEditor('comms')">Edit devices</button></div>
+    <div id="hardware-comms-summary"></div>
+  </div>
+
+  <div class="hw-section" id="hardware-buses-panel">
+    <div class="hw-title">Shared sensor buses</div>
+    <div class="hw-desc" style="margin-bottom:.6rem">I2C and SPI wiring shared by sensor and expansion cards. Open Edit buses only when fitting or changing bus devices.</div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.65rem"><button id="btn-edit-buses" type="button" onclick="toggleWorkflowEditor('buses')">Edit buses</button></div>
+    <div id="hardware-buses-summary"></div>
+    <div id="hardware-buses-editor" style="display:none">
+    <details class="control-setup-guide" id="supported-bus-devices" style="margin-bottom:.65rem">
+      <summary class="control-setup-title">Supported bus devices</summary>
+      <div class="hw-desc" style="padding:.65rem .8rem;line-height:1.6">
+        <b>I2C:</b> TCA9554 digital inputs and low-current relay outputs; TLA2528 analog inputs and threshold switches; NAU7802 load-cell inputs for torque or thrust.
+        <br><b>SPI:</b> MAX6675, MAX31855, and MAX31856 thermocouple amplifiers for TOT, TIT, and other temperature inputs.
+        <br>DS18B20 temperature sensors use their own OneWire GPIO selected on the sensor card; they do not use these shared I2C or SPI pins.
+      </div>
+    </details>
+    <div class="hw-item-card" id="hardware-i2c-card">
+      <label class="hw-toggle"><input id="en-i2c" type="checkbox" onchange="setI2cField('enabled',this.checked)"><span></span> Enable shared I2C bus</label>
+      <div class="hw-grid" id="grp-i2c" style="margin-top:.65rem">
+        <div class="hw-field"><span class="hw-label">SDA GPIO</span><select id="f-i2c-sda" onchange="setI2cField('sda_pin',+this.value)"></select></div>
+        <div class="hw-field"><span class="hw-label">SCL GPIO</span><select id="f-i2c-scl" onchange="setI2cField('scl_pin',+this.value)"></select></div>
+        <div class="hw-field"><span class="hw-label">Bus speed</span><select id="f-i2c-frequency" onchange="setI2cField('frequency_hz',+this.value)"><option value="100000">100 kHz</option><option value="400000">400 kHz</option></select></div>
+      </div>
+      <div id="i2c-discovery"></div>
+      <div class="hw-desc" style="margin-top:.5rem;color:var(--warning)">For fuel, ignition, shutdown, or starter control, native ESP32 GPIO is recommended. An I2C output expander can retain its last latched state if the expander or bus is disconnected.</div>
+    </div>
+    <div class="hw-item-card" id="hardware-spi-card" style="margin-top:.6rem">
+      <label class="hw-toggle"><input id="en-spi" type="checkbox" onchange="setSpiField('enabled',this.checked)"><span></span> Enable shared SPI bus</label>
+      <div class="hw-grid" id="grp-spi" style="margin-top:.65rem">
+        <div class="hw-field"><span class="hw-label">SCK / clock GPIO</span><select id="f-spi-sck" onchange="setSpiField('sck_pin',+this.value)"></select></div>
+        <div class="hw-field"><span class="hw-label">MISO / data from device GPIO</span><select id="f-spi-miso" onchange="setSpiField('miso_pin',+this.value)"></select></div>
+        <div class="hw-field"><span class="hw-label">MOSI / data to device GPIO (optional)</span><span class="hw-desc">MAX31856 needs MOSI for configuration. MAX6675 and MAX31855 do not.</span><select id="f-spi-mosi" onchange="setSpiField('mosi_pin',+this.value)"></select></div>
+      </div>
+      <div class="hw-desc" style="margin-top:.5rem">Thermocouple cards use these shared pins and ask only for their own CS GPIO. Enable this bus before adding an SPI temperature device.</div>
+    </div>
+    </div>
+  </div>
+
+  <div class="hw-section" id="hardware-controllers-panel">
+    <div class="hw-title">Controllers</div>
+    <div class="hw-desc" style="margin-bottom:.6rem">Closed-loop and helper controllers enabled for this engine. Choose Edit controllers to change them or inspect unavailable choices and their required hardware.</div>
+    <details class="control-setup-guide" id="shaft-control-setup-guide">
+      <summary class="control-setup-title">Common shaft-control setups</summary>
+      <div class="control-setup-grid">
+        <div class="control-setup-card">
+          <strong>N2-controlled idle</strong>
+          <span>Fit Main Fuel and N2 Speed, then enable <b>Automatic idle control</b>. In Config choose N2 as the idle feedback source and set its idle target.</span>
+          <a href="/config.html#idle-control-cfg-section">Open N2 idle settings →</a>
+        </div>
+        <div class="control-setup-card">
+          <strong>Turboprop with automatic pitch</strong>
+          <span>Fit Main Fuel, N2 Speed, and a proportional Prop Pitch output, then enable <b>Automatic N2 speed control</b>. A nonzero pitch response makes pitch primary; fuel is the fallback at pitch limits.</span>
+          <a href="/config.html#governor-cfg-section">Open turboprop governor settings →</a>
+        </div>
+        <div class="control-setup-card">
+          <strong>Generator or turboshaft</strong>
+          <span>Fit Main Fuel and N2 Speed, then enable <b>Automatic N2 speed control</b>. Without active prop-pitch response, the governor commands main fuel to hold N2.</span>
+          <a href="/config.html#governor-cfg-section">Open fuel-governor settings →</a>
+        </div>
+      </div>
+    </details>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.65rem"><button id="btn-edit-controllers" type="button" onclick="toggleWorkflowEditor('controllers')">Edit controllers</button></div>
+    <div id="hardware-controllers-summary"></div>
+  </div>
+
+  <div class="hw-section" id="hardware-safety-panel">
+    <div class="hw-title">Safety</div>
+    <div class="hw-desc" style="margin-bottom:.6rem">Enabled safety interlocks for this engine. Choose Edit safeties to change them or inspect unavailable protections and their required sensors.</div>
+    <details class="control-setup-guide" id="protection-setup-guide">
+      <summary class="control-setup-title">Where protection settings are configured</summary>
+      <div class="control-setup-grid">
+        <div class="control-setup-card">
+          <strong>Engine limits</strong>
+          <span>N1, N2, TOT/TIT, P1, P2, and torque each combine gradual fuel reduction with a separate hard shutdown limit.</span>
+          <a href="/config.html#engine-limits">Open Engine Limits &amp; Protection &rarr;</a>
+        </div>
+        <div class="control-setup-card">
+          <strong>Oil protection</strong>
+          <span>Pressure, pump current, and pump-owned flow monitoring have their confirmation and shutdown behavior in Oil System.</span>
+          <a href="/config.html#oil-config-section">Open Oil System settings &rarr;</a>
+        </div>
+        <div class="control-setup-card">
+          <strong>Combustion and startup</strong>
+          <span>Flameout detection, hot-engine start blocking, startup temperature, and relight behavior depend on the fitted flame, N1, temperature, and ignition hardware.</span>
+          <a href="/config.html#cf-sf_fs">Choose combustion-loss detection &rarr;</a>
+        </div>
+        <div class="control-setup-card">
+          <strong>Auxiliary protection</strong>
+          <span>Oil temperature, fuel pressure, battery voltage, and surge detection have their own thresholds and confirmation times.</span>
+          <a href="/config.html#cf-sf_ot">Open the first auxiliary limit &rarr;</a>
+        </div>
+        <div class="control-setup-card">
+          <strong>Sensor calibration</strong>
+          <span>Calibrate fitted pressure, temperature, current, flow, torque, and operator inputs before relying on their limits.</span>
+          <a href="/calibration.html">Open Calibration &rarr;</a>
+        </div>
+      </div>
+    </details>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.65rem"><button id="btn-edit-safety" type="button" onclick="toggleWorkflowEditor('safety')">Edit safeties</button></div>
+    <div id="hardware-safety-summary"></div>
+  </div>
+
+  <!-- ── Cluster Serial ─────────────────────────────────── -->
+  <div class="hw-section" id="hardware-cluster-source-panel">
+    <div class="hw-title">Cluster / Instrument Serial</div>
+    <div class="hw-item-card">
+      <div class="hw-toggle" style="margin-bottom:.5rem">
+        <input type="checkbox" id="en-cluster" onchange="setNested('cluster_serial','enabled',this.checked);updateGroupEnabled('grp-cluster',this.checked)">
+        <b>OT Cluster Protocol</b>
+      </div>
+      <span class="hw-desc" style="display:block;margin-bottom:.6rem">
+        TX only streams telemetry to a display. Add RX for two-way handshake, subscriptions and cluster commands.
+      </span>
+      <div class="hw-grid" id="grp-cluster">
+        <div class="hw-field">
+          <span class="hw-label">TX pin (GPIO)</span>
+          <select id="f-cl-tx" onchange="setNested('cluster_serial','tx_pin',+this.value)"></select>
+        </div>
+        <div class="hw-field">
+          <span class="hw-label">RX pin (GPIO, optional)</span>
+          <span class="hw-desc">Leave unassigned for one-way streaming. Set RX when the cluster should request fields or send commands.</span>
+          <select id="f-cl-rx" onchange="setNested('cluster_serial','rx_pin',+this.value)"></select>
+        </div>
+        <div class="hw-field">
+          <span class="hw-label">Baud rate</span>
+          <span class="hw-desc">Must match the receiving display / ground-station serial setting, or there is no communication.</span>
+          <select id="f-cl-baud" onchange="setNested('cluster_serial','baud',+this.value)">
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+            <option value="230400">230400</option>
+            <option value="460800">460800</option>
+            <option value="921600">921600</option>
+          </select>
+        </div>
+        <div class="hw-field">
+          <span class="hw-label">Interval (ms)</span>
+          <span class="hw-desc">How often to push status to cluster display.</span>
+          <input type="number" id="f-cl-interval" min="10" max="5000" oninput="setNested('cluster_serial','interval_ms',+this.value)">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MAVLink Output ───────────────────────────────── -->
+  <div class="hw-section" id="hardware-mavlink-source-panel">
+    <div class="hw-title">MAVLink Telemetry Output</div>
+    <div class="hw-item-card">
+      <div class="hw-toggle" style="margin-bottom:.5rem">
+        <input type="checkbox" id="en-mavlink" onchange="setNested('mavlink','enabled',this.checked);updateGroupEnabled('grp-mavlink',this.checked)">
+        <b>MAVLink v1 Serial Output</b>
+      </div>
+      <span class="hw-desc" style="display:block;margin-bottom:.5rem">
+        Streams engine data as MAVLink HEARTBEAT + NAMED_VALUE_FLOAT packets. Compatible with Mission Planner, QGroundControl, and similar GCSs. Uses UART2 (TX only). Does not interfere with the cluster serial port.
+      </span>
+      <div class="hw-grid" id="grp-mavlink">
+        <div class="hw-field">
+          <span class="hw-label">TX pin (GPIO)</span>
+          <span class="hw-desc">TX output only — no RX needed. Avoid GPIO 1 (UART0 TX).</span>
+          <select id="f-mav-tx" onchange="setNested('mavlink','tx_pin',+this.value)"></select>
+        </div>
+        <div class="hw-field">
+          <span class="hw-label">Baud rate</span>
+          <span class="hw-desc">Must match the receiving display / ground-station serial setting, or there is no communication.</span>
+          <select id="f-mav-baud" onchange="setNested('mavlink','baud',+this.value)">
+            <option value="57600">57600</option>
+            <option value="115200">115200</option>
+            <option value="230400">230400</option>
+          </select>
+        </div>
+        <div class="hw-field">
+          <span class="hw-label">Interval (ms)</span>
+          <span class="hw-desc">How often to send a telemetry packet. 100–500 ms typical.</span>
+          <input type="number" id="f-mav-interval" min="50" max="5000" step="50"
+            oninput="setNested('mavlink','interval_ms',+this.value)">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Pin conflict banner ──────────────────────────── -->
+  <div id="pin-conflict-banner" class="error-banner" style="display:none;margin-top:.75rem"></div>
+
+  <!-- ── Save-recap modal ─────────────────────────────── -->
+  <div class="save-recap-backdrop" id="save-recap-modal" style="display:none" onclick="if(event.target===this)_cancelSaveRecap()">
+    <div class="save-recap-card">
+      <div class="save-recap-header">
+        <span>Review Changes</span>
+        <button onclick="_cancelSaveRecap()" title="Close">✕</button>
+      </div>
+      <div class="save-recap-subtitle" id="save-recap-subtitle"></div>
+      <div class="save-recap-body" id="save-recap-body"></div>
+      <div class="save-recap-footer">
+        <button onclick="_cancelSaveRecap()">Cancel</button>
+        <button class="primary" id="save-recap-confirm-btn" onclick="_doSave()">Save &amp; Reboot</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Backup / Restore ─────────────────────────────── -->
+  <div style="display:flex;gap:.6rem;flex-wrap:wrap;padding:.6rem 1rem;background:var(--surface);border-top:1px solid var(--border);align-items:center">
+    <span style="font-size:.72rem;color:var(--dim);flex:1;min-width:10rem">Full ECU configuration backup and restore is managed in one place.</span>
+    <a href="/tools.html" style="font-size:.78rem;color:var(--accent)">Open Tools Backup / Restore</a>
+  </div>
+
+  <!-- ── Save bar ──────────────────────────────────────── -->
+  <div class="save-bar">
+    <button id="btn-discard" onclick="resetDefaults()" disabled>Discard</button>
+    <span class="save-msg" id="save-msg">Loading hardware config…</span>
+    <button id="btn-save" class="primary" onclick="saveHardware()" disabled>Save &amp; Reboot</button>
+  </div>
+</main>
+
+<!-- OT_PAGE_SCRIPTS -->
+</body>
+</html>

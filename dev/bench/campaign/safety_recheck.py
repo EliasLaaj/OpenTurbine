@@ -1,8 +1,6 @@
 """Targeted re-validation of the three safety checks that the batch run flagged.
 
 Each batch failure looked like a *harness* artifact, not a firmware defect:
-  TOT_RISE  - baseline() holds N1=0, so the always-on under-speed/stall trip fired
-              during the negative window before the EGT-rate test could run.
   OIL_ZERO  - the naive full-range linear oil cal puts the ESP32 ADC low-end floor
               (~raw 84) at ~0.2 bar, which never drops below the 0.1 bar zero
               threshold -> the reading the firmware needs to see is unreachable.
@@ -25,21 +23,6 @@ print("settled:", dut.mode())
 # Keep N1 spinning in every baseline so the always-on under-speed protection
 # never contaminates a RUNNING-mode negative window.
 rig.baseline = lambda: (t.set("N1", N1_HOLD), t.set_tot(120), t.set("OILP", 2.5), t.set("FLAME", 1))
-
-# ── 1. TOT_RISE with N1 held above min-rpm ──────────────────────────
-print("\n-- TOT_RISE (N1 held) --")
-print("  minimal short seq:", dc.set_sequence(
-    startup=["OilPumpOn", "TimedDelay", "IgniterOn", "FuelPumpIdle", "TimedDelay", "IgniterOff", "TimedDelay"],
-    startup_delays=[0, 400, 0, 0, 400, 0, 400])[0])
-print("  arm none (rate is separate):", dc.only_safety()[0])
-print("  rate limit 200 deg/s:", dc.patch_cfg({"safety": {"tot_rise_rate_limit_deg_s": 200}})[0])
-rig.baseline(); t.set_tot(100); time.sleep(2)
-rig.start()
-neg = rig.stays_active(lambda: (t.set("N1", N1_HOLD), t.set_tot(100)), 3)   # stable EGT, N1 held
-pos = rig.detect_trip(lambda: t.set_tot(600), "rate")                       # fast jump -> rate
-print("  N1 during test = %s rpm" % dut.data().get("n1"))
-rig.rec("TOT_RISE", neg, pos); rig.recover()
-dc.patch_cfg({"safety": {"tot_rise_rate_limit_deg_s": 0}})
 
 # ── 2. OIL_ZERO with a reachable zero threshold ─────────────────────
 print("\n-- OIL_ZERO (reachable threshold) --")
@@ -85,5 +68,5 @@ else:
 dc.multi(lambda hw: (hw["sensors"]["batt_voltage"].update(enabled=False),
                      hw["sensors"]["throttle_input"].update(enabled=True, pin=4)))
 
-rig.summary("Safety recheck (TOT_RISE, OIL_ZERO, BATT_LOW)")
+rig.summary("Safety recheck (OIL_ZERO, BATT_LOW)")
 rig.close()

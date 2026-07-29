@@ -5,6 +5,7 @@ Uses only the Python standard library. Telemetry is read by polling
 actuator demands, sequence progress, health flags, bench/dev mode, ...).
 """
 
+import http.client
 import json
 import os
 import socket
@@ -60,17 +61,20 @@ class DUT:
         req = urllib.request.Request(self.base + path, method="GET")
         last = None
         for _ in range(3):
-            with self._open_retry(req) as r:
-                body = r.read().decode("utf-8")
             try:
+                with self._open_retry(req) as r:
+                    body = r.read().decode("utf-8")
                 return json.loads(body)
-            except json.JSONDecodeError as e:
+            except (http.client.IncompleteRead, json.JSONDecodeError) as e:
                 last = e
                 time.sleep(0.3)
         raise last
 
     def _body(self, path, obj, method):
-        data = json.dumps(obj).encode("utf-8") if obj is not None else b""
+        # The ECU intentionally uses a fixed receive buffer. Whitespace in the
+        # default JSON encoding can push a valid, fully fitted hardware map
+        # over that limit even though its compact representation fits.
+        data = json.dumps(obj, separators=(",", ":")).encode("utf-8") if obj is not None else b""
         headers = {"Content-Type": "application/json"} if obj is not None else {}
         req = urllib.request.Request(self.base + path, data=data, method=method, headers=headers)
         try:
@@ -167,13 +171,18 @@ class DUT:
 
     def _ensure_toggle(self, key, cmd, want, settle=0.4):
         """Toggle a boolean EngineData flag (dev_mode / bench_mode) to `want`.
-        These toggles are STANDBY-only in the firmware."""
-        d = self.data()
-        if bool(d.get(key)) != bool(want):
-            self.command(cmd)
-            time.sleep(settle)
+        These toggles are STANDBY-only in the firmware. A hardware reboot may
+        make HTTP reachable just before its configuration gate has settled, so
+        retry a transiently rejected toggle instead of reporting a false HIL
+        failure."""
+        deadline = time.time() + 6.0
+        while time.time() < deadline:
             d = self.data()
-        return bool(d.get(key))
+            if bool(d.get(key)) == bool(want):
+                return True
+            code, _ = self.command(cmd)
+            time.sleep(settle if code == 200 else 0.6)
+        return bool(self.data().get(key)) == bool(want)
 
     def ensure_dev_mode(self, want=True):
         return self._ensure_toggle("dev_mode", "TOGGLE_DEV_MODE", want)

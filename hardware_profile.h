@@ -249,7 +249,6 @@
 // ── Controllers ──────────────────────────────────────────────
 // All require matching hardware above to be defined.
 // #define OT_HAS_OIL_LOOP        // P-controller: OIL_PRESS → OIL_PUMP (needs oil-pressure sensor)
-#define OT_HAS_THROTTLE_SLEW      // Rate-limiter on throttle output (no sensor needed)
 // #define OT_HAS_DYNAMIC_IDLE    // Closed-loop idle RPM hold; requires N1 or N2 RPM feedback
 
 // Use N2 as idle control source instead of N1 (requires OT_HAS_N2_RPM):
@@ -312,7 +311,7 @@
 // ── External cluster / device serial link ───────────────────
 // OpenTurbine Cluster (OTC) binary telemetry on a dedicated UART TX pin.
 // Optional RX is configured at runtime in the Hardware page.
-// Runtime transmission is also controlled by Config > Cluster > Enable.
+// Fitting Cluster Data here enables runtime transmission.
 // Configure TX pin to a free GPIO (avoid GPIO1/3 = USB serial).
 // Baud: 115200 default. Interval: telemetry packet rate.
 // #define OT_HAS_CLUSTER_SERIAL

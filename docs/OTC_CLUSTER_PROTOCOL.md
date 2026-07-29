@@ -19,9 +19,10 @@ schema, and exposes live values as ordinary variables.
 - Default telemetry interval: 50 ms
 - ECU TX is required
 - ECU RX is optional; leave `cluster_serial.rx_pin = -1` for telemetry-only
-- Enable Cluster Serial on the Hardware page to fit the physical port
-- Keep Config > Cluster > Enable on to transmit live frames; turn it off only
-  when you want the wiring saved but the UART quiet
+- Hardware > Cluster Serial is the single link enable. When enabled with a
+  valid TX connection, the ECU transmits live frames.
+- Config contains the fitted cluster's warning/display thresholds and field
+  choices; it does not contain a second transmission enable.
 
 ## Handshake Modes
 

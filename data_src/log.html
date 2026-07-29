@@ -4,16 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
-<script src="/ui_dialog.js?v=20260722g"></script>
+<script src="/ui_dialog.js?v=20260723a"></script>
 <title>OpenTurbine — Log</title>
-<link rel="stylesheet" href="/style.css?v=20260722a">
+<link rel="stylesheet" href="/style.css?v=20260723a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 </head>
 <body>
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune limits, controllers, logging, telemetry, and hardware-dependent settings.">Config</a>
+  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" class="active" title="View fault/event history and per-run CSV session logs.">Log</a>
@@ -28,8 +28,8 @@
     </div>
     <div class="page-heading-actions">
       <button onclick="loadLog()">Refresh</button>
-      <button onclick="downloadLog('raw')" title="Download newline-delimited JSON: one detailed event object per line for diagnostics and scripts.">Detailed JSON</button>
-      <button onclick="downloadLog('csv')" title="Download the recent event window as a small spreadsheet-friendly CSV. Use NDJSON for the complete black-box event log.">CSV</button>
+      <button onclick="downloadLog('raw')" title="Download newline-delimited JSON: one detailed event object per line for diagnostics and scripts.">Event NDJSON</button>
+      <button onclick="downloadLog('csv')" title="Download the recent event window as a small spreadsheet-friendly CSV. Use NDJSON for the complete black-box event log.">Event CSV</button>
       <button onclick="askClear('flightlog')" class="danger">Clear</button>
     </div>
   </div>
@@ -86,7 +86,20 @@
 
     <div style="display:flex;gap:.75rem;align-items:flex-start;flex-wrap:wrap;margin-bottom:.9rem">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.8rem 1.1rem;flex:1;min-width:240px">
-        <div style="font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.6rem">Logged Sensors</div>
+        <div style="font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.6rem">Recording Settings</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.6rem;margin-bottom:.8rem">
+          <label style="display:grid;gap:.25rem;font-size:.7rem;color:var(--dim)">
+            Session CSV row interval
+            <span style="display:flex;align-items:center;gap:.35rem"><input id="session-log-interval" type="number" min="100" max="60000" step="100" style="width:100%"> ms</span>
+            <small>Default 1000 ms. The newest 64 rows stay in RAM during a run and are written after STANDBY; faster logging fills that buffer sooner and drops its oldest rows.</small>
+          </label>
+          <label style="display:grid;gap:.25rem;font-size:.7rem;color:var(--dim)">
+            Event snapshot interval
+            <span style="display:flex;align-items:center;gap:.35rem"><input id="event-snapshot-interval" type="number" min="500" max="3600000" step="500" style="width:100%"> ms</span>
+            <small>Periodic compact RUNNING snapshots in the Event Log. Default 10000 ms.</small>
+          </label>
+        </div>
+        <div style="font-size:.72rem;color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin-bottom:.6rem">Session CSV Channels</div>
         <div style="display:flex;flex-wrap:wrap;gap:.5rem .9rem">
           <label class="slog-chk"><input type="checkbox" data-bit="n1">N1 RPM</label>
           <label class="slog-chk"><input type="checkbox" data-bit="n2">N2 RPM</label>
@@ -96,12 +109,15 @@
           <label class="slog-chk"><input type="checkbox" data-bit="oil">Oil bar</label>
           <label class="slog-chk"><input type="checkbox" data-bit="p1">P1 bar</label>
           <label class="slog-chk"><input type="checkbox" data-bit="p2">P2 bar</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="torque">Torque Nm + shaft power W</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="thrust">Thrust N</label>
           <label class="slog-chk"><input type="checkbox" data-bit="throttle">Throttle %</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="starter">Starter output %</label>
           <label class="slog-chk"><input type="checkbox" data-bit="oil_pct">Oil pump %</label>
           <label class="slog-chk"><input type="checkbox" data-bit="batt">Batt V</label>
-          <label class="slog-chk"><input type="checkbox" data-bit="fuel_press">Fuel press</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="fuel_press">Fuel pressure</label>
           <label class="slog-chk"><input type="checkbox" data-bit="fuel_flow">Fuel flow</label>
-          <label class="slog-chk"><input type="checkbox" data-bit="glow">Glow output</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="glow">Glow output (%)</label>
           <label class="slog-chk"><input type="checkbox" data-bit="wet_glow">Wet glow fuel output</label>
           <label class="slog-chk"><input type="checkbox" data-bit="glow_current">Glow current A</label>
           <label class="slog-chk"><input type="checkbox" data-bit="ign_current">Igniter 1 current A</label>
@@ -110,14 +126,14 @@
           <label class="slog-chk"><input type="checkbox" data-bit="fp2">Pilot / aux fuel pump %</label>
           <label class="slog-chk"><input type="checkbox" data-bit="ab">Afterburner state/fuel</label>
           <label class="slog-chk"><input type="checkbox" data-bit="prop">Prop pitch %</label>
-          <label class="slog-chk"><input type="checkbox" data-bit="mode">Mode</label>
-          <label class="slog-chk"><input type="checkbox" data-bit="loop">ECU loop timing</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="mode">Engine state</label>
+          <label class="slog-chk" title="Records loop frequency (Hz), average execution time (ms), and maximum execution time (ms)."><input type="checkbox" data-bit="loop">ECU loop timing (Hz / ms)</label>
         </div>
         <div style="margin-top:.65rem;font-size:.7rem;color:var(--dim)">Changes take effect on the next engine start.</div>
         <label class="slog-chk" style="display:block;margin-top:.6rem" title="When off, Event Log does not add periodic sensor snapshots while the ECU is in standby.">
           <input type="checkbox" id="log-standby"> Log periodic snapshots while in standby
         </label>
-        <button id="session-save-btn" onclick="saveSessionCfg()" style="margin-top:.55rem" title="Save which sensor channels are recorded in each run's session CSV (applied to the next run).">Save Selection</button>
+        <button id="session-save-btn" onclick="saveSessionCfg()" style="margin-top:.55rem" title="Save logging intervals and which channels are recorded in each run's session CSV.">Save Logging Settings</button>
         <span id="session-save-msg" style="font-size:.72rem;color:var(--green);margin-left:.5rem;display:none">Saved</span>
         <span id="session-lock-msg" style="font-size:.72rem;color:var(--yellow);margin-left:.5rem;display:none">Settings locked until STANDBY</span>
       </div>
@@ -127,9 +143,7 @@
         <div id="session-rows" style="font-size:.72rem;color:var(--dim);margin-top:.2rem"></div>
       </div>
     </div>
-    <div style="font-size:.72rem;color:var(--dim);padding:.5rem 0">
-      Session log rate is configurable on the <a href="/config.html#cf-tm_sl" style="color:var(--dim);text-decoration:underline">Config page</a> (default 1 Hz). File is kept until manually cleared.
-    </div>
+    <div style="font-size:.72rem;color:var(--dim);padding:.5rem 0">Session files are kept until manually cleared.</div>
 
     <!-- In-browser CSV preview -->
     <div style="margin-top:.75rem">
@@ -151,8 +165,8 @@
           <label id="chart-lbl-tit"  style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-tit"         onchange="redrawChart()"> <span style="color:#e8875a">TIT <span class="chart-tunit">°C</span></span></label>
           <label id="chart-lbl-oilt" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-oilt"        onchange="redrawChart()"> <span style="color:#9bd66f">Oil temp <span class="chart-tunit">°C</span></span></label>
           <label id="chart-lbl-batt" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-batt"        onchange="redrawChart()"> <span style="color:#5ecdd9">Batt V</span></label>
-          <label id="chart-lbl-fp"   style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-fp"          onchange="redrawChart()"> <span style="color:#b87fdb">Fuel press</span></label>
-          <label id="chart-lbl-glow" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-glow"        onchange="redrawChart()"> <span style="color:#f06060">Glow output</span></label>
+          <label id="chart-lbl-fp"   style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-fp"          onchange="redrawChart()"> <span style="color:#b87fdb">Fuel pressure</span></label>
+          <label id="chart-lbl-glow" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-glow"        onchange="redrawChart()"> <span style="color:#f06060">Glow output (%)</span></label>
           <label id="chart-lbl-wetg" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-wetg"        onchange="redrawChart()"> <span style="color:#e05f8a">Wet glow fuel output</span></label>
           <label id="chart-lbl-gcur" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-gcur"        onchange="redrawChart()"> <span style="color:#ff8b8b">Glow current</span></label>
           <label id="chart-lbl-icur" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-icur"        onchange="redrawChart()"> <span style="color:#ffb15c">Igniter 1 current</span></label>
@@ -372,7 +386,7 @@ function renderSummary(runs, eventCount = 0) {
         <div class="run-outcome ${outClass}">${escapeHtmlText(outLabel)}</div>
         <div class="run-stats">
           <div class="run-stat">
-            <div class="run-stat-label">Started</div>
+            <div class="run-stat-label">Started after boot</div>
             <div class="run-stat-val">${tStr}</div>
           </div>
           <div class="run-stat">
@@ -570,29 +584,50 @@ function confirmClear() {
 }
 
 // ── Session Data tab ──────────────────────────────────────────
-const SLOG_BITS = ['n1','n2','tot','tit','oil_temp','oil','p1','p2','throttle','oil_pct','batt','fuel_press','fuel_flow','glow','wet_glow','glow_current','ign_current','ign2_current','oil_current','fp2','ab','prop','mode','loop'];
+const SLOG_BITS = ['n1','n2','tot','tit','oil_temp','oil','p1','p2','torque','thrust','throttle','starter','oil_pct','batt','fuel_press','fuel_flow','glow','wet_glow','glow_current','ign_current','ign2_current','oil_current','fp2','ab','prop','mode','loop'];
 let _sessionSettingsLocked = false;
+let _sessionSettingsLoaded = false;
 
 function loadSessionCfg() {
+  _sessionSettingsLoaded = false;
+  SLOG_BITS.forEach(bit => {
+    const el = document.querySelector('[data-bit="' + bit + '"]');
+    if (el) el.disabled = true;
+  });
+  _applySessionSettingsLock();
   loadSessionCfgJson().then(({cfg, hw, status}) => {
     _sessionSettingsLocked = !!status?.locked;
     const sl = cfg.session_log || {};
     const sb = document.getElementById('log-standby');
     if (sb) sb.checked = !!cfg.telemetry?.log_standby;
+    const sessionInterval = document.getElementById('session-log-interval');
+    const snapshotInterval = document.getElementById('event-snapshot-interval');
+    if (sessionInterval) sessionInterval.value = Number(sl.interval_ms || 1000);
+    if (snapshotInterval) snapshotInterval.value = Number(cfg.telemetry?.snapshot_interval_ms || 10000);
     SLOG_BITS.forEach(bit => {
       const el = document.querySelector('[data-bit="' + bit + '"]');
       if (el) el.checked = !!sl[bit];
     });
+    _sessionSettingsLoaded = true;
     _applyLogHwVisibility(hw);
     _applySessionSettingsLock();
   }).catch(() => {
     // Fallback: at least load the config without hardware filtering
     fetch('/api/config').then(r => r.json()).then(cfg => {
       const sl = cfg.session_log || {};
+      const sessionInterval = document.getElementById('session-log-interval');
+      const snapshotInterval = document.getElementById('event-snapshot-interval');
+      if (sessionInterval) sessionInterval.value = Number(sl.interval_ms || 1000);
+      if (snapshotInterval) snapshotInterval.value = Number(cfg.telemetry?.snapshot_interval_ms || 10000);
       SLOG_BITS.forEach(bit => {
         const el = document.querySelector('[data-bit="' + bit + '"]');
-        if (el) el.checked = !!sl[bit];
+        if (el) {
+          el.checked = !!sl[bit];
+          el.disabled = _sessionSettingsLocked;
+        }
       });
+      _sessionSettingsLoaded = true;
+      _applySessionSettingsLock();
     }).catch(() => {});
   });
   // Row count hint (independent of above)
@@ -616,6 +651,8 @@ function _applyLogHwVisibility(hw) {
   const s = (hw && hw.sensors)   || {};
   const a = (hw && hw.actuators) || {};
   const hwOn = key => !!(hw && hw[key]);
+  const hasRegistry = (direction, purpose) =>
+    !!(hw?.channel_registry?.[direction] || []).some(c => c?.installed !== false && c?.purpose === purpose);
 
   // Returns true when the source/feature is active in the hardware section.
   const enabled = bit => {
@@ -628,6 +665,9 @@ function _applyLogHwVisibility(hw) {
       case 'oil':        return s.oil_press    ? !!s.oil_press.enabled    : hwOn('has_oil_press');
       case 'p1':         return s.p1           ? !!s.p1.enabled           : hwOn('has_p1');
       case 'p2':         return s.p2           ? !!s.p2.enabled           : hwOn('has_p2');
+      case 'torque':     return s.torque       ? !!s.torque.enabled       : hwOn('has_torque') || hasRegistry('inputs','torque');
+      case 'thrust':     return hwOn('has_thrust') || hasRegistry('inputs','thrust');
+      case 'starter':    return a.starter      ? !!a.starter.enabled      : hwOn('has_starter') || hasRegistry('outputs','starter');
       case 'oil_pct':    return a.oil_pump     ? !!a.oil_pump.enabled     : hwOn('has_oil_pump');
       case 'batt':       return s.batt_voltage ? !!s.batt_voltage.enabled : hwOn('has_batt_voltage');
       case 'fuel_press': return s.fuel_press   ? !!s.fuel_press.enabled   : hwOn('has_fuel_press');
@@ -654,6 +694,7 @@ function _applyLogHwVisibility(hw) {
     tot: 'TOT sensor', tit: 'TIT sensor',
     oil_temp: 'Oil Temperature sensor',
     oil: 'Oil Pressure sensor', p1: 'P1 sensor', p2: 'P2 sensor',
+    torque: 'Shaft Torque sensor', starter: 'Starter output',
     oil_pct: 'Oil pump output',
     batt: 'Battery Voltage sensor', fuel_press: 'Fuel Pressure sensor',
     fuel_flow: 'Fuel Flow sensor', glow: 'Glow Plug',
@@ -689,20 +730,28 @@ function _applyLogHwVisibility(hw) {
 }
 
 function _applySessionSettingsLock() {
+  const controlsLocked = _sessionSettingsLocked || !_sessionSettingsLoaded;
   const sb = document.getElementById('log-standby');
-  if (sb) sb.disabled = _sessionSettingsLocked;
+  if (sb) sb.disabled = controlsLocked;
+  ['session-log-interval','event-snapshot-interval'].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.disabled = controlsLocked;
+  });
   const sbLabel = sb ? sb.closest('label.slog-chk') : null;
   if (sbLabel) {
-    sbLabel.style.opacity = _sessionSettingsLocked ? '0.55' : '';
-    sbLabel.style.cursor = _sessionSettingsLocked ? 'not-allowed' : '';
-    sbLabel.title = _sessionSettingsLocked
-      ? 'Standby snapshot logging is locked while the engine is not in STANDBY.'
+    sbLabel.style.opacity = controlsLocked ? '0.55' : '';
+    sbLabel.style.cursor = controlsLocked ? 'not-allowed' : '';
+    sbLabel.title = controlsLocked
+      ? (!_sessionSettingsLoaded ? 'Loading logging settings.' : 'Standby snapshot logging is locked while the engine is not in STANDBY.')
       : 'When off, Event Log does not add periodic sensor snapshots while the ECU is in standby.';
   }
   const saveBtn = document.getElementById('session-save-btn');
-  if (saveBtn) saveBtn.disabled = _sessionSettingsLocked;
+  if (saveBtn) saveBtn.disabled = controlsLocked;
   const lockMsg = document.getElementById('session-lock-msg');
-  if (lockMsg) lockMsg.style.display = _sessionSettingsLocked ? '' : 'none';
+  if (lockMsg) {
+    lockMsg.textContent = !_sessionSettingsLoaded ? 'Loading settings…' : 'Settings locked until STANDBY';
+    lockMsg.style.display = controlsLocked ? '' : 'none';
+  }
 }
 
 async function fetchJsonWithTimeout(url, ms = 8000) {
@@ -739,6 +788,10 @@ async function loadSessionCfgJson() {
 }
 
 function saveSessionCfg() {
+  if (!_sessionSettingsLoaded) {
+    alert('Logging settings are still loading. Try again in a moment.');
+    return;
+  }
   if (_sessionSettingsLocked) {
     alert('Logging settings are locked until the engine is back in STANDBY.');
     return;
@@ -748,6 +801,14 @@ function saveSessionCfg() {
     if (!cfg.telemetry) cfg.telemetry = {};
     const sb = document.getElementById('log-standby');
     cfg.telemetry.log_standby = sb ? sb.checked : false;
+    const sessionInterval = Number(document.getElementById('session-log-interval')?.value);
+    const snapshotInterval = Number(document.getElementById('event-snapshot-interval')?.value);
+    if (!Number.isFinite(sessionInterval) || sessionInterval < 100 || sessionInterval > 60000)
+      throw new Error('Session CSV row interval must be between 100 and 60000 ms.');
+    if (!Number.isFinite(snapshotInterval) || snapshotInterval < 500 || snapshotInterval > 3600000)
+      throw new Error('Event snapshot interval must be between 500 and 3600000 ms.');
+    cfg.session_log.interval_ms = Math.round(sessionInterval);
+    cfg.telemetry.snapshot_interval_ms = Math.round(snapshotInterval);
     SLOG_BITS.forEach(bit => {
       const el = document.querySelector('[data-bit="' + bit + '"]');
       cfg.session_log[bit] = el ? el.checked : false;

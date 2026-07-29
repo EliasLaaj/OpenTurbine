@@ -1,6 +1,7 @@
 #pragma once
 #include "../IBlock.h"
 #include "../../EngineData.h"
+#include "../../../system/HardwareConfig.h"
 
 // ============================================================
 //  Simple one-shot actuator control blocks.
@@ -106,6 +107,31 @@ class OilScavengeOff : public IBlock {
 public:
     const char* name() override { return "OilScavengeOff"; }
     void onEnter() override { auto& ed = EngineData::instance(); ed.oilScavengeDemand = 0.0f; ed.oilScavengeOn = false; }
+    BlockResult tick() override { return BlockResult::Complete; }
+    void onExit() override {}
+};
+
+inline void setDrainValveDemand(float demand) {
+    auto& ed = EngineData::instance();
+    const auto& reg = HardwareConfig::channelRegistry;
+    for (uint8_t i = 0; i < reg.outputCount; ++i) {
+        if (reg.outputs[i].installed && !strcmp(reg.outputs[i].purpose, "drain_valve"))
+            ed.registryOutputDemand[i] = constrain(demand, 0.0f, 1.0f);
+    }
+}
+
+class DrainValveOpen : public IBlock {
+public:
+    const char* name() override { return "DrainValveOpen"; }
+    void onEnter() override { setDrainValveDemand(1.0f); }
+    BlockResult tick() override { return BlockResult::Complete; }
+    void onExit() override {}
+};
+
+class DrainValveClose : public IBlock {
+public:
+    const char* name() override { return "DrainValveClose"; }
+    void onEnter() override { setDrainValveDemand(0.0f); }
     BlockResult tick() override { return BlockResult::Complete; }
     void onExit() override {}
 };

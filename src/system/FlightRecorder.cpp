@@ -25,12 +25,13 @@ static int s_lineCount = -1;
 
 // ── Producer → Core 0 append ring ────────────────────────────
 // _append() only queues formatted lines here; Core 0 (runEviction, called
-// from the web task tick every 5-20 ms) writes them to flash so LittleFS
-// never runs on the ECU core. Multi-producer: Core 1 (ECU loop) plus Core-0
+// from the web task only while the ECU is in STANDBY/FAULT) writes them to
+// flash so LittleFS never stalls active engine control. Multi-producer:
+// Core 1 (ECU loop) plus Core-0
 // callers (logConfigChange from the web task, Config::load warnings), so
 // slot write + head advance + drop counting are serialized with s_ringMux.
-// Single consumer: only Core 0's drain writes s_ringTail, and it reads
-// slots only behind a committed s_ringHead.
+// Core 0 drains normally. While draining is paused, a full active-run queue
+// may advance s_ringTail to preserve newest evidence.
 static constexpr size_t RING_SLOT_LEN = 500;   // fits the largest (FAULT) record
 #if defined(OT_PLATFORM_ESP32)
 // Keep scarce classic DRAM contiguous for the mandatory FreeRTOS timer-task
@@ -46,10 +47,11 @@ static char s_ring[RING_SLOTS][RING_SLOT_LEN];
 #endif
 static volatile uint8_t s_ringHead = 0;
 static volatile uint8_t s_ringTail = 0;
+static volatile bool    s_drainActive = false;
 static portMUX_TYPE     s_ringMux  = portMUX_INITIALIZER_UNLOCKED;
-// Drops already reported with an EVENTS_DROPPED marker (written by Core 0 only;
-// s_droppedEvents is only incremented under s_ringMux and snapshotted by the
-// drain, so neither counter is racy).
+// Overwrites already reported with an EVENTS_DROPPED marker (written by Core 0
+// only; s_droppedEvents is only incremented under s_ringMux and snapshotted by
+// the drain, so neither counter is racy).
 static uint32_t         s_droppedMarked = 0;
 
 static void jsonSafeCopy(char* dst, size_t len, const char* src) {
@@ -420,7 +422,13 @@ static int _copyTailLocked(int dropFirst) {
         return -1;
     }
     if (!LittleFS.rename("/logs/events.tmp", FlightRecorder::PATH)) {
-        if (hadOriginal) LittleFS.rename("/logs/events.bak", FlightRecorder::PATH);
+        const bool restored = !hadOriginal ||
+            LittleFS.rename("/logs/events.bak", FlightRecorder::PATH);
+        LittleFS.remove("/logs/events.tmp");
+        if (!restored) {
+            // begin() will retry this recovery on the next boot.
+            Serial.println("[FlightRecorder] rollback failed; preserving events.bak");
+        }
         return -1;
     }
     if (hadOriginal) LittleFS.remove("/logs/events.bak");
@@ -531,6 +539,10 @@ void FlightRecorder::runEviction() {
         return;
     }
 
+    portENTER_CRITICAL(&s_ringMux);
+    s_drainActive = true;
+    portEXIT_CRITICAL(&s_ringMux);
+
     if (s_clearPending) {
         LittleFS.remove(PATH);
         s_lineCount = 0;
@@ -538,6 +550,9 @@ void FlightRecorder::runEviction() {
     }
 
     _drainRingLocked();
+    portENTER_CRITICAL(&s_ringMux);
+    s_drainActive = false;
+    portEXIT_CRITICAL(&s_ringMux);
     if (_mutex) xSemaphoreGive(_mutex);
 }
 
@@ -545,8 +560,8 @@ void FlightRecorder::runEviction() {
 
 void FlightRecorder::_append(const char* eventJson) {
     // Queue only — no LittleFS access here. Flash writes happen on Core 0 in
-    // runEviction(); a flash program/erase suspends cache and can stall 100+
-    // ms, which would delay safety checks on the ECU loop.
+    // runEviction(), and only after the ECU reaches STANDBY/FAULT. A flash
+    // program/erase suspends both cores and can otherwise delay safety checks.
     // Multiple producers reach this (Core 1 ECU loop, Core-0 config-change /
     // load-warning logging), so slot claim + copy + head advance must be
     // atomic. The bounded <500-byte copy keeps the critical section a few µs.
@@ -554,11 +569,15 @@ void FlightRecorder::_append(const char* eventJson) {
     uint8_t head = s_ringHead;
     uint8_t next = (uint8_t)((head + 1) % RING_SLOTS);
     if (next == s_ringTail) {
-        // Ring full (Core 0 stalled or paused for a raw download). Count the
-        // drop; the drain records an EVENTS_DROPPED marker when space frees.
+        // Preserve newest evidence while persistence is paused. If Core 0 has
+        // already started draining, leave the consumer-owned tail untouched
+        // and drop this new record instead.
         s_droppedEvents = s_droppedEvents + 1;
-        portEXIT_CRITICAL(&s_ringMux);
-        return;
+        if (s_drainActive) {
+            portEXIT_CRITICAL(&s_ringMux);
+            return;
+        }
+        s_ringTail = (uint8_t)((s_ringTail + 1) % RING_SLOTS);
     }
     strncpy(s_ring[head], eventJson, RING_SLOT_LEN - 1);
     s_ring[head][RING_SLOT_LEN - 1] = '\0';

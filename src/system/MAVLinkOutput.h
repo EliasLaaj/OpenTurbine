@@ -173,7 +173,7 @@ private:
     void _sendEngineData() {
         const auto& ed = EngineData::instance();
         struct Item { const char* name; float value; };
-        Item items[11];
+        Item items[12];
         uint8_t n = 0;
         if (HardwareConfig::hasN1Rpm && ed.n1Healthy)       items[n++] = { "N1_RPM",   ed.n1Rpm };
         if (HardwareConfig::hasTot && ed.totHealthy)        items[n++] = { "TOT_C",    ed.tot };
@@ -183,6 +183,7 @@ private:
         if (HardwareConfig::hasBattVoltage && ed.battHealthy) items[n++] = { "BATT_V",   ed.battVoltage };
         if (HardwareConfig::hasFuelPress && ed.fuelPressHealthy) items[n++] = { "FUEL_BAR", ed.fuelPressure };
         if (HardwareConfig::hasTorque && ed.torqueHealthy)  items[n++] = { "TORQ_NM",  ed.torque };
+        if (HardwareConfig::hasThrust && ed.thrustHealthy)  items[n++] = { "THRUST_N", ed.thrust };
         if (HardwareConfig::hasTit && ed.titHealthy)        items[n++] = { "TIT_C",    ed.tit };
         if (HardwareConfig::hasFuelFlow) items[n++] = { "FUEL_FLOW", ed.fuelFlow };
         if (HardwareConfig::hasThrottle) items[n++] = { "THR_PCT",  ed.throttleDemand * 100.0f };

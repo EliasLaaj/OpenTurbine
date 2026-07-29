@@ -1,0 +1,144 @@
+{
+  "firmware": "2.0.0",
+  "dut": "classic ESP32",
+  "tester": "ESP32-S3 OK OTBench 0.9",
+  "results": [
+    {
+      "name": "MAX6675 decodes temperature",
+      "ok": true,
+      "detail": {
+        "expected": 642.25,
+        "observed": 642.25,
+        "healthy": true
+      }
+    },
+    {
+      "name": "MAX6675 open-circuit becomes unhealthy",
+      "ok": true,
+      "detail": {
+        "observed": {
+          "id": "max6675",
+          "name": "MAX6675",
+          "role": "temperature",
+          "purpose": "tot",
+          "driver": 1,
+          "pin": -1,
+          "min": 0,
+          "max": 4095,
+          "active_high": true,
+          "pullup": false,
+          "pulldown": false,
+          "invert": false,
+          "value": 642.25,
+          "healthy": false
+        }
+      }
+    },
+    {
+      "name": "MAX31855 decodes temperature",
+      "ok": true,
+      "detail": {
+        "expected": 731.75,
+        "observed": 731.75,
+        "healthy": true
+      }
+    },
+    {
+      "name": "MAX31855 open-circuit becomes unhealthy",
+      "ok": true,
+      "detail": {
+        "observed": {
+          "id": "max31855",
+          "name": "MAX31855",
+          "role": "temperature",
+          "purpose": "tot",
+          "driver": 1,
+          "pin": -1,
+          "min": 0,
+          "max": 4095,
+          "active_high": true,
+          "pullup": false,
+          "pulldown": false,
+          "invert": false,
+          "value": 731.75,
+          "healthy": false
+        }
+      }
+    },
+    {
+      "name": "MAX31856 decodes temperature",
+      "ok": true,
+      "detail": {
+        "expected": 815.5,
+        "observed": 815.5,
+        "healthy": true
+      }
+    },
+    {
+      "name": "MAX31856 open-circuit becomes unhealthy",
+      "ok": true,
+      "detail": {
+        "observed": {
+          "id": "max31856",
+          "name": "MAX31856",
+          "role": "temperature",
+          "purpose": "tot",
+          "driver": 1,
+          "pin": -1,
+          "min": 0,
+          "max": 4095,
+          "active_high": true,
+          "pullup": false,
+          "pulldown": false,
+          "invert": false,
+          "value": 815.5,
+          "healthy": false
+        }
+      }
+    },
+    {
+      "name": "HX711 positive counts and calibration",
+      "ok": true,
+      "detail": {
+        "counts": 123456,
+        "zero": 100000,
+        "scale": 0.01,
+        "expected": 234.56,
+        "observed": 234.56
+      }
+    },
+    {
+      "name": "HX711 below-zero signed torque",
+      "ok": true,
+      "detail": {
+        "counts": 87654,
+        "expected": -123.46000000000001,
+        "observed": -123.46
+      }
+    },
+    {
+      "name": "HX711 missing-data timeout",
+      "ok": true,
+      "detail": {
+        "observed": {
+          "id": "torque_hx711",
+          "name": "Shaft Torque",
+          "role": "torque",
+          "purpose": "torque",
+          "driver": 1,
+          "pin": 4,
+          "min": 0,
+          "max": 4095,
+          "active_high": true,
+          "pullup": false,
+          "pulldown": false,
+          "invert": false,
+          "value": -123.46,
+          "healthy": false
+        }
+      }
+    }
+  ],
+  "passed": 9,
+  "total": 9
+}

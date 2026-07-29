@@ -1,6 +1,6 @@
 """Role-reversed physical HIL for digital temperature and torque interfaces.
 
-Classic ESP32 = OpenTurbine DUT, S3 = OTBench 0.6 protocol emulator on COM4.
+Classic ESP32 = OpenTurbine DUT, S3 = OTBench 0.9 protocol emulator on COM4.
 The existing protected harness links are repurposed temporarily; no rewiring is
 required.  This validates actual GPIO transactions, decoding, health/fault
 transitions, registry plumbing and calibration.  It does not simulate the
@@ -29,12 +29,20 @@ class ReversedDigitalSensorHil:
     def __init__(self):
         self.dut = DUT()
         self.tester = Tester(os.environ.get("OTBENCH_PORT", "COM4")).open()
+        self.firmware = self.dut.data().get("fw_version", "unknown")
+        self.tester_version = self.tester.ping()
         self.original_hw = self.dut.hardware()
         self.rows: list[dict] = []
         self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.result_path = os.path.join(
             ROOT, "dev", "bench", "results", f"reversed_digital_sensor_hil_{self.run_id}.json"
         )
+        self.backup_path = os.path.join(
+            ROOT, "dev", "bench", "results", f"reversed_digital_sensor_backup_{self.run_id}.json"
+        )
+        os.makedirs(os.path.dirname(self.backup_path), exist_ok=True)
+        with open(self.backup_path, "w", encoding="utf-8") as f:
+            json.dump(self.original_hw, f, indent=2)
 
     def record(self, name, ok, **detail):
         row = {"name": name, "ok": bool(ok), "detail": detail}
@@ -64,8 +72,6 @@ class ReversedDigitalSensorHil:
                 item["has_current"] = False
             if "assist_enabled" in item:
                 item["assist_enabled"] = False
-            if "low_rpm_support_enabled" in item:
-                item["low_rpm_support_enabled"] = False
         # A physical STOP input is mandatory even in a sensor-only bench
         # profile. GPIO27 is unused by the protected role-reversal harness.
         hw["controls"].update(start_pin=-1, stop_pin=27)
@@ -77,6 +83,10 @@ class ReversedDigitalSensorHil:
         for key in hw.get("controllers", {}):
             hw["controllers"][key] = False
         hw["oil_loops"] = []
+        if "i2c" in hw:
+            hw["i2c"]["enabled"] = False
+        if "spi" in hw:
+            hw["spi"]["enabled"] = False
         hw["channel_registry"] = {"version": 1, "inputs": [], "outputs": [], "bindings": []}
         hw["custom_blocks"] = {}
         if "ab_trigger" in hw:
@@ -104,11 +114,13 @@ class ReversedDigitalSensorHil:
             time.sleep(0.5)
         raise RuntimeError(f"DUT did not return from hardware save: {last}")
 
-    def install_channel(self, channel, legacy=None):
+    def install_channel(self, channel, legacy=None, spi=None):
         self.dut.ensure_mode_standby()
         hw = copy.deepcopy(self.dut.hardware())
         self.quiet_profile(hw)
         hw["channel_registry"]["inputs"] = [channel]
+        if spi is not None:
+            hw["spi"].update(spi)
         if legacy:
             hw["sensors"][legacy[0]].update(legacy[1])
         old_boot = self.dut.data().get("boot_count")
@@ -156,10 +168,14 @@ class ReversedDigitalSensorHil:
             temp_interface=interface, spi_clk=13, spi_cs=14,
             spi_miso=4, spi_mosi=mosi, tc_type="K",
         )
+        # Generic dev-board mode requires the shared bus to be explicitly
+        # enabled, exactly as the Hardware UI does before adding an SPI card.
+        hw_spi = {"enabled": True, "sck_pin": 13, "miso_pin": 4,
+                  "mosi_pin": mosi}
         self.install_channel(channel, ("tot", {
             "enabled": True, "chip": command.lower(), "tc_type": "K",
             "clk": 13, "cs": 14, "miso": 4, "mosi": mosi,
-        }))
+        }), spi=hw_spi)
         sample = self.registry_value(channel_id, timeout=5)
         value = sample.get("value")
         self.record(
@@ -235,19 +251,20 @@ class ReversedDigitalSensorHil:
 
     def run(self):
         try:
-            print(self.tester.ping())
+            print(self.tester_version)
             self.dut.ensure_mode_standby()
-            self.thermocouple("MAX6675", 1, 642.25, 0.3)
-            self.thermocouple("MAX31855", 2, 731.75, 0.3)
-            self.thermocouple("MAX31856", 3, 815.5, 0.03, mosi=25)
+            if os.environ.get("OTBENCH_HX_ONLY") != "1":
+                self.thermocouple("MAX6675", 1, 642.25, 0.3)
+                self.thermocouple("MAX31855", 2, 731.75, 0.3)
+                self.thermocouple("MAX31856", 3, 815.5, 0.03, mosi=25)
             self.hx711()
         finally:
             self.restore()
             self.tester.close()
             payload = {
-                "firmware": "1.9.9",
+                "firmware": self.firmware,
                 "dut": "classic ESP32",
-                "tester": "ESP32-S3 OTBench 0.6",
+                "tester": f"ESP32-S3 {self.tester_version}",
                 "results": self.rows,
                 "passed": sum(1 for row in self.rows if row["ok"]),
                 "total": len(self.rows),

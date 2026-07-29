@@ -6,18 +6,8 @@ OILC = round(10.0 / 4095.0, 7)
 rig = BenchRig(); dc = rig.dcfg
 print("DUT settled:", rig.dut.mode())
 
-# ── TOT_RISE (EGT rate-of-rise) ─────────────────────────────────
-print("\n-- TOT_RISE --")
-print("  disarm all:", dc.only_safety()[0])
-print("  set rate limit 200:", dc.patch_cfg({"safety": {"tot_rise_rate_limit_deg_s": 200}})[0])
-print("  limit now =", rig.dut.config()["safety"]["tot_rise_rate_limit_deg_s"])
-rig.baseline(); rig.t.set_tot(100); time.sleep(2)
-rig.start()
-neg = rig.stays_active(lambda: rig.t.set_tot(100), 3)          # stable EGT -> rate ~0
-pos = rig.detect_trip(lambda: rig.t.set_tot(600), "rate")      # fast jump -> high rate
-rig.rec("TOT_RISE", neg, pos); rig.recover()
-dc.patch_cfg({"safety": {"tot_rise_rate_limit_deg_s": 0}})     # disarm rate for later tests
-
+# The former standalone EGT-rise trip was removed in v2.0; startup now uses
+# an explicit hard EGT limit and EGT flameout uses cooling behavior.
 # ── LOW_OIL (needs OilPrime in the startup seq to arm oilMinBar) ──
 print("\n-- LOW_OIL --")
 print("  seq=OilPrime,TimedDelay:", dc.set_sequence(startup=["OilPrime", "TimedDelay"], startup_delays=[3000, 25000])[0])
@@ -39,5 +29,5 @@ rig.rec("LOW_OIL", neg, pos); rig.recover()
 dc.set_sequence(startup=["OilPumpOn", "TimedDelay", "IgniterOn", "FuelPumpIdle", "TimedDelay", "IgniterOff", "TimedDelay"],
                 startup_delays=[0, 15000, 0, 0, 10000, 0, 5000])
 
-rig.summary("Run B (TOT_RISE, LOW_OIL)")
+rig.summary("Run B (LOW_OIL)")
 rig.close()

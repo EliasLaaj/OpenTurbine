@@ -13,13 +13,21 @@ New to electronics or microcontrollers? Use the [complete beginner user guide]({
 
 ## Supported ESP32 targets
 
-Use a Classic ESP32 with at least 4 MB flash, or the supported ESP32-S3 DevKitC-1 N16R8 target. ESP32-C3 and other unlisted families are not supported by the normal Windows setup path. Select the exact target in Hardware before assigning pins, and never copy a classic-ESP32 pin assignment to an S3 without rechecking it.
+Use a Classic ESP32 with at least 4 MB flash, or an ESP32-S3 DevKitC-1-compatible board with at least 8 MB flash. The universal S3 image runs on 8 MB and 16 MB modules and does not require PSRAM. ESP32-C3 and other unlisted families are not supported by the normal Windows setup path. Select the exact target in Hardware before assigning pins, and never copy a classic-ESP32 pin assignment to an S3 without rechecking it.
 
 ## Installed Channel Inventory
 
 The Hardware page is the source of truth for what is physically connected. Add each fitted input and output once, give it a short unique stable ID, select its electrical driver, assign a valid GPIO, and set the real engineering range. Display names can change later; stable IDs should not change after sequences, rules, controllers, or telemetry refer to them.
 
 Inputs can represent digital switches, analog measurements, pulse/frequency sensors, or RC PWM commands. Outputs can represent relays, proportional PWM loads, or servo/ESC commands. Set boot-safe and fault-safe output demand deliberately. Resolve every missing requirement, invalid-channel message, and GPIO conflict before saving; the firmware blocks unsafe or ambiguous hardware configurations rather than guessing.
+
+On development boards, configure shared I²C and SPI wiring once under **Shared
+sensor buses**. Its normal collapsed view reports Enabled/Disabled; **Edit
+buses** opens the pins and supported-device help. Current I²C devices are
+TCA9554, TLA2528, and NAU7802. Current shared-SPI thermocouple interfaces are
+MAX6675, MAX31855, and MAX31856. DS18B20 uses a separate OneWire GPIO. A flashed
+PCB profile owns these physical connections and shows board-labelled ports
+instead of editable raw topology.
 
 ## Power supply
 

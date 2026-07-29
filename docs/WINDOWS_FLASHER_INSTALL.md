@@ -1,6 +1,9 @@
 # Windows installer troubleshooting
 
-Normal download and installation instructions now live in the repository root [`README.md`](../README.md). This page is retained as a focused troubleshooting reference and should not be treated as a second installation guide.
+Normal download and installation instructions live in
+[`USER_GUIDE.md`](USER_GUIDE.md). This page is retained as a focused
+troubleshooting reference and should not be treated as a second installation
+guide.
 
 ## Official download
 
@@ -10,7 +13,9 @@ Only bypass browser or SmartScreen warnings for a file downloaded from the offic
 
 ## Browser warning
 
-Open the browser’s Downloads panel, inspect the source URL, and choose to keep the file. If the stable link returns Not Found, no public installer release exists yet.
+Open the browser’s Downloads panel, inspect the source URL, and choose to keep
+the file. If the stable link returns **Not Found**, the requested official
+release asset has not been published; do not substitute an unrelated download.
 
 ## Windows SmartScreen
 

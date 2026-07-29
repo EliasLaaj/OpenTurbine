@@ -35,14 +35,13 @@ def main() -> int:
         hw["actuators"]["ab_pump"].update(enabled=True, pin=17, type=2, active_h=True)
         hw["ab_trigger"].update(source=0, requires_arm=False)
         hw["ab_flame"].update(enabled=False, pin=-1)
-        # Deterministic sensorless bench ignition sequence. ABStabilize owns the
-        # transition to Running; production users may add their chosen flame or
-        # EGT confirmation blocks.
-        hw["ab_seq"] = ["ABSolOpen", "ABPumpOn", "ABStabilize"]
-        hw["ab_delay_ms"] = [0, 0, 300]
-        hw["ab_ignition_target"] = [0, 0, 0]
-        hw["ab_enter_actions"] = [[], [], []]
-        hw["ab_exit_actions"] = [[], [], []]
+        # Bench mode makes ABFlameConfirm deterministic, while retaining the
+        # same explicit confirmation contract required from production sequences.
+        hw["ab_seq"] = ["ABSolOpen", "ABPumpOn", "ABFlameConfirm", "ABStabilize"]
+        hw["ab_delay_ms"] = [0, 0, 0, 300]
+        hw["ab_ignition_target"] = [0, 0, 0, 0]
+        hw["ab_enter_actions"] = [[], [], [], []]
+        hw["ab_exit_actions"] = [[], [], [], []]
 
     try:
         runner.apply_profile({
@@ -109,7 +108,9 @@ def main() -> int:
         # 1000..2000 us calibration: a true 30% total main-fuel cap is <=1300 us.
         record(
             "REDUCED_POWER_CAP_INCLUDES_AFTERBURNER_MAIN_FUEL_OFFSET",
-            code == 200 and capped_ok and int(capped_pulse.get("us") or 0) <= 1305,
+            code == 200 and capped_ok and
+            float(capped.get("throttle_effective") or 1) <= 0.305 and
+            int(capped_pulse.get("us") or 0) <= 1305,
             command=resp, throttle_effective=capped.get("throttle_effective"),
             ab_offset=capped.get("ab_fuel_offset"), capped_pulse=capped_pulse,
         )

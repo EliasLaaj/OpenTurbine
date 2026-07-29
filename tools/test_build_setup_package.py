@@ -63,10 +63,17 @@ class BuildSetupPackageTests(unittest.TestCase):
                 mock.patch.object(build_setup_package, "find_boot_app0", return_value=boot_app0), \
                 mock.patch.object(build_setup_package, "read_version", return_value="9.9.9"):
                 manifest = build_setup_package.stage_package(stage, esptool, str(cp210x), str(wch))
-            self.assertEqual(manifest["package_schema"], 2)
-            self.assertEqual(manifest["setup_tool_version"], "0.5.26")
+            self.assertEqual(manifest["package_schema"], 3)
+            self.assertEqual(manifest["setup_tool_version"], "0.6.0")
+            self.assertEqual(manifest["minimum_setup_tool_version"], "0.6.0")
             self.assertTrue((stage / "drivers" / "cp210x" / "driver.inf").exists())
             self.assertTrue((stage / "drivers" / "wch" / "driver.inf").exists())
+            self.assertTrue(any((stage / "pcb_profiles" / "targets").glob("*.json")))
+            for target in manifest["targets"].values():
+                profile = target["pcb_profile"]
+                self.assertGreater(int(profile["address"], 0), 0)
+                self.assertGreater(profile["size"], 0)
+                self.assertIsInstance(profile["official_profiles"], list)
 
     def complete_driver(self, root: Path) -> Path:
         root.mkdir(parents=True)

@@ -1,0 +1,77 @@
+{
+  "timestamp": "2026-07-29T15:27:42",
+  "firmware": "2.0.0",
+  "firmware_after": "2.0.0",
+  "firmware_match": true,
+  "rows": [
+    {
+      "name": "DEV_MODE_APPLIES_CONFIG_WHILE_RUNNING",
+      "ok": true,
+      "detail": {
+        "http": 200,
+        "response": {
+          "ok": true,
+          "saved": true,
+          "runtime_safe_values_live": true,
+          "block_hardware_apply": "deferred_until_standby"
+        },
+        "mode": "RUNNING",
+        "telemetry_rpm_limit": 91000
+      }
+    },
+    {
+      "name": "NO_N1_FINALSTOP_USES_CONFIGURED_DELAY",
+      "ok": true,
+      "detail": {
+        "elapsed_s": 2.187,
+        "last_event": "Seq: FinalStop"
+      }
+    },
+    {
+      "name": "OIL_STAYS_ON_THROUGH_DELAY_THEN_STANDBY_FORCES_OFF",
+      "ok": true,
+      "detail": {
+        "before": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 1.0,
+          "level": 1
+        },
+        "during": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 1.0,
+          "level": 1
+        },
+        "after": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 0.0,
+          "level": 0
+        },
+        "shutdown_mode": "SHUTDOWN"
+      }
+    },
+    {
+      "name": "RUNNING_BLOCK_CHANGE_APPLIES_ON_NEXT_STANDBY",
+      "ok": true,
+      "detail": {
+        "elapsed_s": 1.0,
+        "configured_timeout_ms": 800,
+        "last_event": "Seq: FinalStop"
+      }
+    },
+    {
+      "name": "NORMAL_RUNNING_MODE_STILL_LOCKS_CONFIG",
+      "ok": true,
+      "detail": {
+        "http": 423,
+        "response": {
+          "error": "config is locked while the engine is active; enable Developer Mode before starting to allow live settings updates"
+        }
+      }
+    }
+  ],
+  "restored": true,
+  "error": null
+}

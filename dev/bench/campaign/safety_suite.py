@@ -76,11 +76,11 @@ rig.dcfg.multi(arm)
 rig.dcfg.patch_cfg({"engine": {"rpm_limit": 50000, "tot_limit": 700},
                     "oil": {"startup_min_bar": 1.5},
                     "calibration": {"oil_poly": {"a": 0, "b": 0, "c": OILC, "d": 0, "x_min": 0, "x_max": 4095}},
-                    "sequence": {"startup": {"hot_start_tot_threshold": 200}}})
+                    "sequence": {"startup": {"pre_start_egt_limit_c": 200, "startup_egt_limit_c": 0}}})
 c = rig.dut.config()
 print("  rpm_limit=%s tot_limit=%s oil_min=%s oil_poly.c=%s hot_start_thr=%s"
       % (c["engine"]["rpm_limit"], c["engine"]["tot_limit"], c["oil"]["startup_min_bar"],
-         c["calibration"]["oil_poly"]["c"], c["sequence"]["startup"]["hot_start_tot_threshold"]))
+         c["calibration"]["oil_poly"]["c"], c["sequence"]["startup"]["pre_start_egt_limit_c"]))
 print()
 
 # ── HOT_START (fault present at start) ──────────────────────────
@@ -104,7 +104,7 @@ rig.rec("HOT_START", True, hs)
 rig.recover()
 # Isolate the remaining protections: their safe-side temperature points are
 # intentionally above the hot-start threshold used by the first test.
-rig.dcfg.patch_cfg({"sequence": {"startup": {"hot_start_tot_threshold": 1000}}})
+rig.dcfg.patch_cfg({"sequence": {"startup": {"pre_start_egt_limit_c": 1000}}})
 
 # ── OVERSPEED ───────────────────────────────────────────────────
 rig.baseline(); rig.start_active()

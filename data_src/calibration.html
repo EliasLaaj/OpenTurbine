@@ -5,15 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Calibration</title>
-<link rel="stylesheet" href="/style.css?v=20260722a">
+<link rel="stylesheet" href="/style.css?v=20260723a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/ui_dialog.js?v=20260722g"></script>
+<script src="/ui_dialog.js?v=20260723a"></script>
 </head>
 <body>
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune limits, controllers, logging, telemetry, and hardware-dependent settings.">Config</a>
+  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
   <a href="/calibration.html" class="active" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
@@ -26,6 +26,15 @@
       <h1 class="page-title">Calibration</h1>
       <p class="page-subtitle">View live sensor readings and calibrate fitted inputs and actuators.</p>
     </div>
+  </div>
+
+  <div class="sensor-row" id="thrust-cal-row" style="display:none">
+    <div class="sensor-name">Thrust</div>
+    <div class="sensor-vals">
+      <div class="sv-item"><div class="sv-label">Thrust</div><div class="sv-val" id="cal-thrust">—</div></div>
+      <div class="sv-item"><div class="sv-label">Raw bridge ADC</div><div class="sv-val" id="cal-thrust-raw">—</div></div>
+    </div>
+    <div id="thrust-loadcell-wizard"></div>
   </div>
 
   <!-- Minimum reliable fuel-pump output calibration -->
@@ -469,6 +478,7 @@
       </div>
       <div id="torque-hx711-status" style="font-size:.75rem;color:var(--dim)"></div>
     </div>
+    <div id="torque-loadcell-wizard"></div>
   </div>
 
   <!-- Throttle Input -->
@@ -663,6 +673,11 @@ const REGISTRY_ACTUATOR_PURPOSES = {
 };
 function registryChannelInstalled(channel) {
   if (!channel || channel.installed === false) return false;
+  const driver = Number(channel.driver);
+  if (driver >= 8 && driver <= 11) {
+    return Number(channel.i2c_address) >= 0x08 && Number(channel.i2c_address) <= 0x77 &&
+      Number(channel.device_channel) >= 0;
+  }
   const tempInterface = Number(channel.temp_interface || 0);
   if (tempInterface >= 1 && tempInterface <= 3) {
     return Number(channel.spi_clk) >= 0 && Number(channel.spi_cs) >= 0 &&
@@ -694,6 +709,15 @@ function hwAbFlameEnabled(hw) {
 function setRowVisible(id, visible) {
   const el = document.getElementById(id);
   if (el) el.style.display = visible ? '' : 'none';
+}
+function revealCalibrationDeepLink() {
+  const id = decodeURIComponent(String(location.hash || '').replace(/^#/, ''));
+  if (!id) return;
+  const target = document.getElementById(id);
+  if (!target || target.style.display === 'none') return;
+  document.querySelectorAll('.deep-link-target').forEach(el => el.classList.remove('deep-link-target'));
+  target.classList.add('deep-link-target');
+  requestAnimationFrame(() => target.scrollIntoView({behavior:'smooth', block:'center'}));
 }
 
 async function fetchJsonWithTimeout(url, ms = 8000) {
@@ -757,6 +781,7 @@ function refreshOilTempCalMode(sensor) {
   setRowVisible('oiltemp-cal-row', hwSensorEnabled(hw, 'oil_temp', 'has_oil_temp'));
   setRowVisible('battvolt-cal-row', hwSensorEnabled(hw, 'batt_voltage', 'has_batt_voltage'));
   setRowVisible('torque-cal-row', hwSensorEnabled(hw, 'torque', 'has_torque'));
+  setRowVisible('thrust-cal-row', !!registryChannelByPurpose(hw, 'inputs', 'thrust'));
   setRowVisible('throttle-cal-row', hwSensorEnabled(hw, 'throttle_input', 'has_throttle_input'));
   setRowVisible('idle-cal-row', hwSensorEnabled(hw, 'idle_input', 'has_idle_input'));
   setRowVisible('fuelflow-cal-row', hwFuelFlowAnalog(hw));
@@ -839,10 +864,15 @@ function refreshOilTempCalMode(sensor) {
   // ── Torque sensor type — switch ADC vs HX711 wizard ──────────────────────────
   const torqueRegistry = registryChannelByPurpose(c.hardware, 'inputs', 'torque');
   const isHX711 = Number(torqueRegistry?.torque_interface || 0) === 1;
+  const isNauTorque = Number(torqueRegistry?.driver) === 10;
   const adcWiz  = document.getElementById('torque-adc-wizard');
   const hxWiz   = document.getElementById('torque-hx711-wizard');
-  if (adcWiz) adcWiz.style.display  = isHX711 ? 'none' : '';
+  if (adcWiz) adcWiz.style.display  = (isHX711 || isNauTorque) ? 'none' : '';
   if (hxWiz)  hxWiz.style.display   = isHX711 ? '' : 'none';
+  renderLoadCellWizard('torque', torqueRegistry);
+  renderLoadCellWizard('thrust', registryChannelByPurpose(c.hardware, 'inputs', 'thrust'));
+  revealCalibrationDeepLink();
+  window.addEventListener('hashchange', revealCalibrationDeepLink);
 
   // Prime live calibration values once hardware/config context is ready.
   // The WebSocket also updates this page, but its first frame can arrive
@@ -943,6 +973,7 @@ window.applyData = function(d) {
   const hasOilTemp = fittedFromTelemetryOrHardware(d, 'oil_temp', 'has_oil_temp');
   const hasBattVolt = fittedFromTelemetryOrHardware(d, 'batt_voltage', 'has_batt_voltage');
   const hasTorque = fittedFromTelemetryOrHardware(d, 'torque', 'has_torque');
+  const hasThrust = fittedFromTelemetryOrHardware(d, 'thrust', 'has_thrust');
   const hasOilPress = fittedFromTelemetryOrHardware(d, 'oil_press', 'has_oil_press');
   const hasFlame = fittedFromTelemetryOrHardware(d, 'flame', 'has_flame');
   const hasFuelFlowAnalog = fuelFlowAnalogFromTelemetryOrHardware(d);
@@ -1046,6 +1077,8 @@ window.applyData = function(d) {
   if (oiltRow) oiltRow.style.display = hasOilTemp ? '' : 'none';
   if (bvRow) bvRow.style.display = hasBattVolt ? '' : 'none';
   if (torqRow) torqRow.style.display = hasTorque ? '' : 'none';
+  const thrustRow = document.getElementById('thrust-cal-row');
+  if (thrustRow) thrustRow.style.display = hasThrust ? '' : 'none';
 
   // ── Oil pressure / flame rows — gated on has_* flags ─────────
   const opRow = document.getElementById('oil-press-cal-row');
@@ -1127,6 +1160,10 @@ window.applyData = function(d) {
     setText('cal-torque',     Number(d.torque).toFixed(1) + ' Nm');
     setText('cal-torque-raw', d.torque_raw ?? '—');
     bar('bar-torque', d.torque, 0, parseFloat(document.getElementById('torque-fullscale')?.value || '100'), true);
+  }
+  if (hasThrust && d.thrust !== undefined) {
+    setText('cal-thrust', Number(d.thrust).toFixed(1) + ' N');
+    setText('cal-thrust-raw', d.thrust_raw ?? '—');
   }
 
   // ── Throttle input ────────────────────────────────────────────
@@ -2008,6 +2045,68 @@ function saveBattVoltDivider() {
 }
 
 // ── Torque sensor calibration ─────────────────────────────────
+const _loadCellCal = {torque:{zero:null,id:null}, thrust:{zero:null,id:null}};
+function renderLoadCellWizard(kind, channel) {
+  const box = document.getElementById(kind + '-loadcell-wizard');
+  if (!box) return;
+  if (!channel || Number(channel.driver) !== 10) {
+    _loadCellCal[kind].id = null;
+    box.innerHTML = '';
+    return;
+  }
+  _loadCellCal[kind].id = channel.id;
+  const torque = kind === 'torque';
+  box.innerHTML = `<div class="wizard">
+    <div class="wizard-title">${torque?'Torque':'Thrust'} Load Cell (NAU7802)</div>
+    <div class="wizard-steps">1. Remove all load and capture zero.<br>2. Apply a trusted known load, enter it below, and save. OpenTurbine stores force internally in newtons.${torque?' Enter the perpendicular lever arm; torque is force × lever arm.':''}</div>
+    <div style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin:.6rem 0">
+      <label>Known load <input id="${kind}-lc-known" type="number" min="0.000001" step="0.001" style="width:8rem"></label>
+      <label>Unit <select id="${kind}-lc-unit"><option value="N">N</option><option value="kg">kg mass</option><option value="g">grams</option><option value="kgf">kgf</option><option value="lbf">lbf</option></select></label>
+      ${torque?`<label>Lever arm (m) <input id="${kind}-lc-arm" type="number" min="0.000001" max="100" step="0.001" value="${Number(channel.lever_arm_m??1)}" style="width:7rem"></label>`:''}
+    </div>
+    <div class="wiz-buttons"><button onclick="captureLoadCellZero('${kind}')">Capture zero</button><button onclick="saveLoadCellKnown('${kind}')">Capture known load &amp; save</button></div>
+    <div id="${kind}-lc-status" style="font-size:.75rem;color:var(--dim);margin-top:.4rem"></div>
+  </div>`;
+}
+function loadCellRaw(kind) { return Number(live[kind + '_raw']); }
+function captureLoadCellZero(kind) {
+  const raw = loadCellRaw(kind);
+  if (!Number.isFinite(raw)) { alert('No live NAU7802 sample is available. Check the device connection.'); return; }
+  _loadCellCal[kind].zero = raw;
+  document.getElementById(kind+'-lc-status').textContent = `Zero captured at raw count ${raw}. Apply the known load next.`;
+}
+function loadToNewtons(value, unit) {
+  if (unit === 'kg' || unit === 'kgf') return value * 9.80665;
+  if (unit === 'g') return value * 0.00980665;
+  if (unit === 'lbf') return value * 4.4482216153;
+  return value;
+}
+function saveLoadCellKnown(kind) {
+  const zero = _loadCellCal[kind].zero;
+  const raw = loadCellRaw(kind);
+  const entered = Number(document.getElementById(kind+'-lc-known')?.value);
+  if (!Number.isFinite(zero)) { alert('Capture zero with all load removed first.'); return; }
+  if (!Number.isFinite(raw) || raw === zero) { alert('No changed live load-cell reading. Apply the known load and try again.'); return; }
+  if (!(entered > 0)) { alert('Enter a positive known load.'); return; }
+  const forceN = loadToNewtons(entered, document.getElementById(kind+'-lc-unit').value);
+  const nPerCount = forceN / (raw - zero);
+  const fields = {loadcell_zero:Math.round(zero), loadcell_n_per_count:nPerCount};
+  if (kind === 'torque') {
+    const arm = Number(document.getElementById(kind+'-lc-arm')?.value);
+    if (!(arm > 0 && arm <= 100)) { alert('Enter a valid perpendicular lever arm in metres.'); return; }
+    fields.lever_arm_m = arm;
+  }
+  const id = _loadCellCal[kind].id;
+  if (!id) { alert('The configured load-cell channel is no longer available. Reload this page and try again.'); return; }
+  patchHardware({channel_registry_calibration:{id,...fields}}, () => {
+    const ch = registryInputById(id);
+    if (ch) Object.assign(ch, fields);
+    document.getElementById(kind+'-lc-status').textContent =
+      `Saved: zero ${Math.round(zero)}, ${Math.abs(nPerCount).toExponential(6)} N/count${kind==='torque' ? ', lever arm '+fields.lever_arm_m+' m' : ''}.`;
+    _loadCellCal[kind].zero = null;
+  });
+}
+
 let _torqueZeroRaw = null;
 function captureTorqueZero() {
   const raw = live.torque_raw;

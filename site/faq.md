@@ -11,7 +11,7 @@ No. Download `OpenTurbineSetupTool.exe` from the official release. Do not use Gi
 
 ## Which boards are supported?
 
-Use a Classic ESP32 with at least 4 MB flash, or the ESP32-S3 DevKitC-1 N16R8 target. ESP32-C3 and other unlisted ESP32 families are not supported by the current normal setup path.
+Use a Classic ESP32 with at least 4 MB flash, or an ESP32-S3 DevKitC-1-compatible board with at least 8 MB flash. The same universal S3 image runs on 8 MB and 16 MB modules and does not require PSRAM. ESP32-C3 and other unlisted ESP32 families are not supported by the current normal setup path.
 
 ## Does driver installation require a restart?
 
@@ -20,6 +20,15 @@ Usually not. The Setup Tool rescans after installing a driver and shows when Win
 ## What does Clean install erase? How does Update keep my setup?
 
 Clean install/reinstall erases the selected board. **Update and keep my setup** is the normal Wi-Fi update path for a working controller; it backs up the engine file first. Keep backups private because they can contain Wi-Fi credentials.
+
+## Can I reuse a pre-2.0 engine file?
+
+OpenTurbine 2.0 intentionally replaces older hardware and startup-safety
+behavior. Keep the old file as a reference, but use a clean installation and
+rebuild/review Hardware, Config, Calibration, Sequence, Rules, and every dry
+shutdown test. Read the
+[v2 migration guide](https://github.com/elia179/OpenTurbine/blob/main/docs/V2_MIGRATION.md)
+before moving an engine installation.
 
 ## Can I explore without a turbine? Can GPIO power a pump or igniter?
 

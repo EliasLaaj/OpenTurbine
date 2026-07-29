@@ -118,6 +118,7 @@ enum FieldId : uint8_t {
     F_DI2,
     F_DI3,
     F_DI4,
+    F_THRUST_N,
 };
 
 enum UnitId : uint8_t {
@@ -135,6 +136,7 @@ enum UnitId : uint8_t {
     U_MS,
     U_COUNT,
     U_AMP,
+    U_NEWTON,
 };
 
 struct MsgDef {
@@ -188,6 +190,7 @@ bool hasP1() { return HardwareConfig::hasP1; }
 bool hasP2() { return HardwareConfig::hasP2; }
 bool hasBatt() { return HardwareConfig::hasBattVoltage; }
 bool hasTorque() { return HardwareConfig::hasTorque; }
+bool hasThrust() { return HardwareConfig::hasThrust; }
 bool hasShaftPower() { return HardwareConfig::hasTorque && HardwareConfig::hasN2Rpm; }
 bool hasThrottle() { return HardwareConfig::hasThrottle; }
 bool hasStarter() { return HardwareConfig::hasStarter; }
@@ -236,6 +239,7 @@ float rP1() { return EngineData::instance().p1; }
 float rP2() { return EngineData::instance().p2; }
 float rBatt() { return EngineData::instance().battVoltage; }
 float rTorque() { return EngineData::instance().torque; }
+float rThrust() { return EngineData::instance().thrust; }
 float rPower() { return EngineData::instance().turboPower; }
 float rThrottle() { return EngineData::instance().throttleDemand * 100.0f; }
 float rStarter() { return EngineData::instance().starterDemand * 100.0f; }
@@ -306,6 +310,7 @@ static const FieldDef FIELDS[] = {
     { F_P2_BAR,         U_BAR,     2, "P2_BAR",         "P2 bar",         hasP2,          rP2,               true },
     { F_BATT_V,         U_VOLT,    2, "BATT_V",         "Battery V",      hasBatt,        rBatt,             true },
     { F_TORQUE_NM,      U_NM,      1, "TORQUE_NM",      "Torque Nm",      hasTorque,      rTorque,           true },
+    { F_THRUST_N,        U_NEWTON,  1, "THRUST_N",       "Thrust N",       hasThrust,      rThrust,           true },
     { F_POWER_W,        U_WATT,    0, "POWER_W",        "Power W",        hasShaftPower,  rPower,            true },
     { F_THROTTLE_PCT,   U_PERCENT, 1, "THROTTLE_PCT",   "Main fuel pct",  hasThrottle,    rThrottle,         true },
     { F_STARTER_PCT,    U_PERCENT, 1, "STARTER_PCT",    "Starter pct",    hasStarter,     rStarter,          true },
@@ -523,7 +528,7 @@ void sendAck(uint8_t seq, uint8_t ok, const char* text) {
 }
 
 void ClusterSerial::begin() {
-    if (!HardwareConfig::hasClusterSerial || !Config::clusterEnabled || HardwareConfig::clusterTxPin < 0) return;
+    if (!HardwareConfig::hasClusterSerial || HardwareConfig::clusterTxPin < 0) return;
 
     uint32_t baud = (uint32_t)HardwareConfig::clusterBaud;
     if (baud == 0) baud = OT_CLUSTER_BAUD;
@@ -627,7 +632,7 @@ void ClusterSerial::_sendSchema() {
 }
 
 void ClusterSerial::sendStatus(uint8_t code) {
-    if (!HardwareConfig::hasClusterSerial || !Config::clusterEnabled) return;
+    if (!HardwareConfig::hasClusterSerial) return;
     _lastStatusCode = code;
     const MsgDef* msg = findMsg(code);
 
@@ -639,7 +644,7 @@ void ClusterSerial::sendStatus(uint8_t code) {
 }
 
 void ClusterSerial::sendEvent(uint8_t severity, const char* text) {
-    if (!HardwareConfig::hasClusterSerial || !Config::clusterEnabled) return;
+    if (!HardwareConfig::hasClusterSerial) return;
     uint8_t payload[96] = {};
     payload[0] = severity;
     strncpy((char*)payload + 1, text ? text : "", sizeof(payload) - 2);
@@ -762,7 +767,7 @@ void ClusterSerial::_pollRx() {
 }
 
 void ClusterSerial::tick() {
-    if (!HardwareConfig::hasClusterSerial || !Config::clusterEnabled) return;
+    if (!HardwareConfig::hasClusterSerial) return;
     _pollRx();
 
     auto& ed = EngineData::instance();

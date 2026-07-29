@@ -1,4 +1,4 @@
-"""Registry-native turbine safety qualification for OpenTurbine 1.9+.
+"""Registry-native turbine safety qualification for OpenTurbine 2.0.
 
 The older safety_A..D scripts predate the canonical channel registry.  They can
 set legacy sensors to enabled while the corresponding registry channels remain
@@ -77,12 +77,13 @@ class SafetyQualification:
                 "flame_threshold": 500,
                 "oil_poly": {"a": 0, "b": 0, "c": OIL_C, "d": 0, "x_min": 0, "x_max": 4095},
             },
-            "sequence": {"startup": {"hot_start_tot_threshold": 200}},
+            "sequence": {"startup": {"pre_start_egt_limit_c": 200, "startup_egt_limit_c": 700}},
             "safety": {
                 "check_interval_ms": 20,
                 "flameout_shutdown_ms": 600,
                 "flameout_source": 1,
-                "tot_rise_rate_limit_deg_s": 200,
+                "flameout_egt_below_c": 300,
+                "flameout_egt_fall_rate_c_s": 50,
             },
             "oil_advanced": {"zero_bar": 0.5},
             "relight": {"enabled": False},
@@ -147,6 +148,10 @@ class SafetyQualification:
     def start_running(self):
         self.baseline()
         self.dut.ensure_mode_standby(timeout=25)
+        # This is a synthetic qualification run. Developer Mode keeps all
+        # production safety behavior active but prevents the service hour
+        # meter/start counters from being polluted by the bench campaign.
+        self.dut.ensure_dev_mode(True)
         code, resp = self.dut.start()
         if code != 200:
             raise RuntimeError(f"START rejected: HTTP {code} {resp}")
@@ -229,6 +234,7 @@ class SafetyQualification:
     def hot_start(self):
         self.recover()
         self.baseline(egt=300)
+        self.dut.ensure_dev_mode(True)
         code, resp = self.dut.start()
         t0 = time.time()
         tripped = matched = False
@@ -246,9 +252,49 @@ class SafetyQualification:
         cut_ok, cut_detail = self.safe_cut()
         self.record("HOT_START", True, tripped, matched, round(time.time() - t0, 3), detail.splitlines()[0], cut_ok, cut_detail)
         self.recover()
-        ok, resp = self.runner.dc.patch_cfg({"sequence": {"startup": {"hot_start_tot_threshold": 1000}}})
+        ok, resp = self.runner.dc.patch_cfg({"sequence": {"startup": {"pre_start_egt_limit_c": 1000}}})
         if not ok:
             raise RuntimeError(f"could not raise hot-start threshold for remaining tests: {resp}")
+
+    def startup_overtemp(self):
+        """Prove the STARTUP-only EGT limit without crossing the RUNNING limit."""
+        self.recover()
+        ok, resp = self.runner.dc.patch_cfg({
+            "sequence": {"startup": {
+                "pre_start_egt_limit_c": 1000,
+                "startup_egt_limit_c": 500,
+            }},
+        })
+        if not ok:
+            raise RuntimeError(f"could not configure startup EGT limit: {resp}")
+        self.baseline(egt=120)
+        self.dut.ensure_dev_mode(True)
+        code, resp = self.dut.start()
+        t0 = time.time()
+        if code == 200:
+            # 600 C is deliberately below the normal 700 C continuous limit.
+            # A trip therefore proves the separate STARTUP threshold was used.
+            self.t.set_tot(600)
+            tripped, data = self.dut.poll_until(
+                lambda d: d.get("mode") not in ("STARTUP", "RUNNING"),
+                timeout=5, interval=0.08,
+            )
+            detail = str(data.get("fault_description") or data.get("last_event") or "")
+            matched = "over-temperature" in detail.lower()
+        else:
+            tripped = False
+            matched = False
+            detail = str(resp)
+        cut_ok, cut_detail = self.safe_cut() if tripped else (False, {})
+        self.record("STARTUP_OVERTEMP", code == 200, tripped, matched,
+                    round(time.time() - t0, 3), detail.splitlines()[0],
+                    cut_ok, cut_detail)
+        self.recover()
+        ok, resp = self.runner.dc.patch_cfg({
+            "sequence": {"startup": {"startup_egt_limit_c": 700}},
+        })
+        if not ok:
+            raise RuntimeError(f"could not restore startup EGT limit: {resp}")
 
     def hard_stop(self):
         self.start_running()
@@ -319,21 +365,14 @@ class SafetyQualification:
     def run(self):
         self.install()
         self.hot_start()
+        self.startup_overtemp()
         self.shared_reduced_power_cap()
         self.trip_test("OVERSPEED", lambda: self.t.set("N1", hz(49000)),
                        lambda: self.t.set("N1", hz(60000)), "over-speed", timeout=4)
         self.trip_test("N2_OVERSPEED", lambda: self.t.set("N2", hz(29000)),
                        lambda: self.t.set("N2", hz(36000)), "N2 over-speed", timeout=4)
-        ok, resp = self.runner.dc.patch_cfg({"safety": {"tot_rise_rate_limit_deg_s": 0}})
-        if not ok:
-            raise RuntimeError(f"could not isolate steady overtemperature test: {resp}")
         self.trip_test("OVERTEMP", lambda: self.t.set_tot(650),
                        lambda: self.t.set_tot(800), "over-temperature", timeout=4)
-        ok, resp = self.runner.dc.patch_cfg({"safety": {"tot_rise_rate_limit_deg_s": 200}})
-        if not ok:
-            raise RuntimeError(f"could not re-arm EGT rate protection: {resp}")
-        self.trip_test("EGT_RATE", lambda: self.t.set_tot(120),
-                       lambda: self.t.set_tot(600), "rate-of-rise", timeout=4)
 
         # Isolate ordinary low-oil from the deliberately faster catastrophic
         # near-zero-oil protection. With both armed, a stimulus below both

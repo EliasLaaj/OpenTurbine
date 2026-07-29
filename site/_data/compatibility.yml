@@ -1,7 +1,7 @@
 - component: Classic ESP32 with at least 4 MB flash
   status: Supported
   kind: supported
-- component: ESP32-S3 DevKitC-1 N16R8 target
+- component: ESP32-S3 DevKitC-1-compatible board with at least 8 MB flash
   status: Supported
   kind: supported
 - component: Windows guided setup

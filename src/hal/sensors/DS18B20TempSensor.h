@@ -10,7 +10,7 @@
 //
 //  Single-pin OneWire interface; auto-discovers the first device
 //  on the bus (address cached in begin() — no per-read bus search).
-//  Supports 9–12-bit resolution (default 12-bit).
+//  Supports 9–12-bit resolution (default 10-bit).
 //
 //  Conversion is fully asynchronous — update() triggers the next
 //  conversion at the end of each read, and the scratchpad read is
@@ -36,11 +36,11 @@ public:
     // One configured sensor per bus/pin. External VDD power is required;
     // parasite-powered two-wire mode needs a strong pull-up that is not fitted.
     explicit DS18B20TempSensor(const char* sensorName)
-        : _pin(-1), _resolution(12), _name(sensorName),
+        : _pin(-1), _resolution(10), _name(sensorName),
           _ow(nullptr), _dt(nullptr) {}
 
     // Runtime init — call once at boot (or on pin/resolution change).
-    void begin(int pin, uint8_t resolution = 12) {
+    void begin(int pin, uint8_t resolution = 10) {
         _pin        = (int8_t)pin;
         _resolution = (uint8_t)constrain((int)resolution, 9, 12);
 

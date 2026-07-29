@@ -36,7 +36,11 @@ public:
 
     void tick() override {
         auto& ed = EngineData::instance();
-        if (!ed.dynamicIdleEnabled) return;
+        if (!ed.dynamicIdleEnabled) { reset(); return; }
+        if (source != _lastSource) {
+            reset();
+            _lastSource = source;
+        }
 
         const bool pressureMode = source >= 2;
         const float target = pressureMode ? targetPressure : targetRpm;
@@ -60,6 +64,15 @@ public:
         if (dt <= 0.0f) dt = 0.001f;
         else if (dt > 0.05f) dt = 0.05f;
 
+        if (!installed || !healthy) {
+            _idleFloor = 0.0f;
+            _integrator = 0.0f;
+            _wasEngaged = false;
+            _lastFeedback = _feedbackRate = 0.0f;
+            _feedbackSeenSeq = _feedbackLastMs = 0;
+            return;
+        }
+
         float rate = source == 1 ? ed.n2RpmAccel : (source == 0 ? ed.n1RpmAccel : _feedbackRate);
         if (pressureMode) {
             const uint32_t seq = source == 2 ? ed.p1SampleSeq : ed.p2SampleSeq;
@@ -77,7 +90,7 @@ public:
             rate = _feedbackRate;
         }
 
-        if (!installed || !healthy || feedback > limit) {
+        if (feedback > limit) {
             _idleFloor = 0.0f;
             _integrator = 0.0f;
             _wasEngaged = false;
@@ -146,6 +159,7 @@ public:
         _lastMs = millis();
         _lastFeedback = _feedbackRate = 0.0f;
         _feedbackSeenSeq = _feedbackLastMs = 0;
+        _lastSource = source;
     }
 
 private:
@@ -161,4 +175,5 @@ private:
     float _feedbackRate = 0.0f;
     uint32_t _feedbackSeenSeq = 0;
     uint32_t _feedbackLastMs = 0;
+    int _lastSource = -1;
 };

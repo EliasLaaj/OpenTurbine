@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 from pathlib import Path
+import re
 
 
 def number(value: str) -> int:
@@ -24,13 +25,57 @@ def partitions(path: Path) -> dict[str, tuple[int, int]]:
     return result
 
 
+def linker_region_headroom(path: Path) -> dict[str, tuple[int, int]]:
+    """Return used/total bytes for the constrained internal linker regions."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    regions: dict[str, tuple[int, int]] = {}
+    for name in ("dram0_0_seg", "iram0_0_seg", "rtc_slow_seg"):
+        match = re.search(
+            rf"(?m)^{re.escape(name)}\s+0x([0-9a-f]+)\s+0x([0-9a-f]+)\s+",
+            text,
+        )
+        if not match:
+            raise ValueError(f"{name} is missing from {path}")
+        regions[name] = (int(match.group(1), 16), int(match.group(2), 16))
+
+    def symbol(name: str) -> int:
+        match = re.search(
+            rf"(?m)^\s*0x([0-9a-f]+)\s+{re.escape(name)}\s*=",
+            text,
+        )
+        if not match:
+            raise ValueError(f"{name} is missing from {path}")
+        return int(match.group(1), 16)
+
+    dram_origin, dram_total = regions["dram0_0_seg"]
+    iram_origin, iram_total = regions["iram0_0_seg"]
+    _, rtc_total = regions["rtc_slow_seg"]
+    return {
+        "static DRAM": (symbol("_heap_low_start") - dram_origin, dram_total),
+        "IRAM": (symbol("_iram_end") - iram_origin, iram_total),
+        "RTC slow": (
+            symbol("_rtc_force_slow_end") - symbol("_rtc_data_start"),
+            rtc_total,
+        ),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--partitions", required=True, type=Path)
     parser.add_argument("--firmware", required=True, type=Path)
     parser.add_argument("--filesystem", type=Path)
+    parser.add_argument("--map", type=Path, help="linker map to check internal-memory headroom")
     parser.add_argument("--app-reserve", type=number, default=0x10000)
-    parser.add_argument("--minimum-filesystem", type=number, default=0xC0000)
+    parser.add_argument(
+        "--minimum-filesystem",
+        type=number,
+        default=0xB0000,
+        help="minimum LittleFS partition size (default matches the supported 4 MB layout)",
+    )
+    parser.add_argument("--minimum-dram-headroom", type=number, default=0x100)
+    parser.add_argument("--minimum-iram-headroom", type=number, default=0x8000)
+    parser.add_argument("--minimum-rtc-headroom", type=number, default=0x60)
     args = parser.parse_args()
 
     table = partitions(args.partitions)
@@ -67,10 +112,28 @@ def main() -> int:
                 f"filesystem image {filesystem_size} exceeds partition {littlefs[1]}"
             )
 
-    print(
+    summary = (
         f"OK: firmware={firmware_size}, OTA slot={app0[1]}, headroom={headroom}, "
         f"LittleFS={littlefs[1]}"
     )
+    if args.map:
+        minimums = {
+            "static DRAM": args.minimum_dram_headroom,
+            "IRAM": args.minimum_iram_headroom,
+            "RTC slow": args.minimum_rtc_headroom,
+        }
+        region_summary = []
+        for name, (used, total) in linker_region_headroom(args.map).items():
+            remaining = total - used
+            if remaining < minimums[name]:
+                raise SystemExit(
+                    f"{name} leaves only {remaining} bytes in {args.map}; "
+                    f"required reserve is {minimums[name]}"
+                )
+            region_summary.append(f"{name}={used}/{total} ({remaining} free)")
+        summary += "; " + ", ".join(region_summary)
+
+    print(summary)
     return 0
 
 

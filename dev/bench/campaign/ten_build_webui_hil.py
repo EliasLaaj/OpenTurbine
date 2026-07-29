@@ -168,7 +168,7 @@ class TenBuildRunner:
             "firmware": self.firmware_before,
             "firmware_after": self.firmware_after,
             "firmware_match": self.firmware_after in (None, self.firmware_before),
-            "backup_path": self.backup_path,
+            "backup_path": os.path.relpath(self.backup_path, ROOT).replace(os.sep, "/"),
             "results": self.results,
             "restored": self.restored,
         })
@@ -258,7 +258,7 @@ class TenBuildRunner:
         raise RuntimeError("outputs did not become idle before hardware save")
 
     def patch_fast_config(self) -> None:
-        ok, resp = self.dc.patch_cfg({
+        patch = {
             "tools": TOOLS_FAST,
             "throttle": {
                 "fuel_pump_min_pct": 10,
@@ -278,9 +278,21 @@ class TenBuildRunner:
             "oil_advanced": {"zero_bar": 0.1},
             "safety": {"tot_limit": 750, "tit_limit": 750, "fuel_press_min": 0, "batt_volt_min": 9.5},
             "governor": {"target_rpm": 24000, "kp": 0.00003, "pitch_kp": 0.00003},
-        }, verify=False)
-        if not ok:
-            raise RuntimeError(f"fast config patch failed: {resp}")
+        }
+        last = None
+        for _ in range(5):
+            ok, last = self.dc.patch_cfg(patch, verify=False)
+            if ok:
+                return
+            # The web API can answer just before the post-hardware-save apply
+            # task has fully settled. Re-read once, then retry the identical
+            # bounded patch rather than misreporting a transient as a DUT bug.
+            try:
+                self.dut.config()
+            except Exception:
+                pass
+            time.sleep(0.75)
+        raise RuntimeError(f"fast config patch failed after retries: {last}")
 
     def clear_hw(self, hw) -> None:
         # Preserve the identity/Wi-Fi fields so the AP name stays stable while
@@ -328,8 +340,6 @@ class TenBuildRunner:
                 a["fuel_type"] = 0
             if "fuel_delay_ms" in a:
                 a["fuel_delay_ms"] = 0
-            if "low_rpm_support_enabled" in a:
-                a["low_rpm_support_enabled"] = False
         hw["channel_registry"] = {"version": 1, "inputs": [], "outputs": [], "bindings": []}
         hw["di_channels"] = [
             {"pin": -1, "active_h": False, "debounce_ms": 20, "label": "", "role": "none", "fault_code": "", "fault_msg": "", "active_modes": 31}
@@ -483,6 +493,9 @@ class TenBuildRunner:
         hw["sensors"]["n2_rpm"].update(enabled=True, pin=8, ppr=1.0)
 
     def enable_tot(self, hw):
+        # v2 treats the shared SPI bus as the physical source of truth.  A
+        # thermocouple card cannot silently claim its own duplicate bus pins.
+        hw["spi"].update(enabled=True, sck_pin=36, miso_pin=37, mosi_pin=-1)
         hw["sensors"]["tot"].update(enabled=True, chip="max6675", tc_type="K", clk=36, cs=18, miso=37, mosi=-1)
 
     def enable_oil_press(self, hw, pin=1):
@@ -1109,6 +1122,7 @@ def build_profiles(r: TenBuildRunner):
 
 def main():
     runner = TenBuildRunner(port=os.environ.get("OTBENCH_PORT", "COM3"))
+    requested_profile = os.environ.get("OTBENCH_PROFILE", "").strip()
     restored = False
     try:
         runner.log(f"Backup saved: {runner.backup_path}")
@@ -1119,7 +1133,12 @@ def main():
                 raise RuntimeError(f"{page} served too small ({len(body)} bytes)")
             runner.log(f"  {page}: {len(body)} bytes")
         runner.safe_standby()
-        for spec in build_profiles(runner):
+        profiles = build_profiles(runner)
+        if requested_profile:
+            profiles = [spec for spec in profiles if spec["id"] == requested_profile]
+            if not profiles:
+                raise RuntimeError(f"unknown OTBENCH_PROFILE: {requested_profile}")
+        for spec in profiles:
             runner.run_profile(spec)
             last = runner.results[-1]
             if last["status"] == "error" and "timed out" in (last.get("error") or "").lower():
