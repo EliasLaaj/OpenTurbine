@@ -616,25 +616,73 @@ private:
             }
             if (c.driver >= I2cDigital) {
                 o["i2c_address"] = c.i2cAddress; o["device_channel"] = c.deviceChannel;
-                o["i2c_reference_mv"] = c.i2cReferenceMv;
-                o["loadcell_gain"] = c.loadCellGain; o["loadcell_rate_sps"] = c.loadCellRate;
-                o["loadcell_zero"] = c.loadCellZero; o["loadcell_n_per_count"] = c.loadCellNPerCount;
-                o["lever_arm_m"] = c.leverArmM; o["filter_alpha"] = c.filterAlpha;
+                if (c.i2cReferenceMv != 3300.0f) o["i2c_reference_mv"] = c.i2cReferenceMv;
+                if (c.driver == I2cLoadCell) {
+                    o["loadcell_gain"] = c.loadCellGain;
+                    o["loadcell_rate_sps"] = c.loadCellRate;
+                    o["loadcell_zero"] = c.loadCellZero;
+                    o["loadcell_n_per_count"] = c.loadCellNPerCount;
+                    o["lever_arm_m"] = c.leverArmM;
+                    o["filter_alpha"] = c.filterAlpha;
+                } else if (c.filterAlpha != 1.0f) {
+                    o["filter_alpha"] = c.filterAlpha;
+                }
             }
-            o["min"] = c.minValue; o["max"] = c.maxValue; o["pulses_per_unit"] = c.pulsesPerUnit;
-            o["analog_zero_mv"] = c.analogZeroMv; o["analog_mv_per_unit"] = c.analogMvPerUnit; o["analog_divider"] = c.analogDivider;
-            o["digital_threshold_raw"] = c.digitalThresholdRaw;
-            o["digital_hysteresis_raw"] = c.digitalHysteresisRaw;
-            o["torque_interface"] = c.torqueInterface; o["hx711_clk"] = c.hx711Clk; o["hx711_scale"] = c.hx711Scale; o["hx711_zero"] = c.hx711Zero;
-            o["temp_interface"] = c.temperatureInterface; o["spi_clk"] = c.spiClk; o["spi_cs"] = c.spiCs; o["spi_miso"] = c.spiMiso; o["spi_mosi"] = c.spiMosi; o["tc_type"] = c.tcType;
-            o["temp_resolution"] = c.temperatureResolution; o["ntc_beta"] = c.thermistorBeta; o["ntc_r0"] = c.thermistorR0; o["ntc_r_fixed"] = c.thermistorRFixed; o["ntc_pullup"] = c.thermistorPullup;
-            o["safe_demand"] = c.safeDemand;
-            o["force_safe_on_fault"] = c.forceSafeOnFault;
-            o["min_run_demand"] = c.minimumRunDemand;
+            o["min"] = c.minValue; o["max"] = c.maxValue;
+            if (c.pulsesPerUnit != 1.0f) o["pulses_per_unit"] = c.pulsesPerUnit;
+            if (c.driver == Analog || c.driver == I2cAnalog ||
+                c.analogZeroMv != 0.0f || c.analogMvPerUnit != 1000.0f ||
+                c.analogDivider != 1.0f) {
+                o["analog_zero_mv"] = c.analogZeroMv;
+                o["analog_mv_per_unit"] = c.analogMvPerUnit;
+                o["analog_divider"] = c.analogDivider;
+            }
+            if (c.driver == I2cAnalog || c.digitalThresholdRaw != 2048 ||
+                c.digitalHysteresisRaw != 64) {
+                o["digital_threshold_raw"] = c.digitalThresholdRaw;
+                o["digital_hysteresis_raw"] = c.digitalHysteresisRaw;
+            }
+            if (c.torqueInterface || c.hx711Clk >= 0 ||
+                c.hx711Scale != 1.0f || c.hx711Zero != 0) {
+                o["torque_interface"] = c.torqueInterface;
+                o["hx711_clk"] = c.hx711Clk;
+                o["hx711_scale"] = c.hx711Scale;
+                o["hx711_zero"] = c.hx711Zero;
+            }
+            if (c.temperatureInterface || c.spiClk >= 0 || c.spiCs >= 0 ||
+                c.spiMiso >= 0 || c.spiMosi >= 0) {
+                o["temp_interface"] = c.temperatureInterface;
+                o["spi_clk"] = c.spiClk; o["spi_cs"] = c.spiCs;
+                o["spi_miso"] = c.spiMiso; o["spi_mosi"] = c.spiMosi;
+                o["tc_type"] = c.tcType;
+                o["temp_resolution"] = c.temperatureResolution;
+                o["ntc_beta"] = c.thermistorBeta;
+                o["ntc_r0"] = c.thermistorR0;
+                o["ntc_r_fixed"] = c.thermistorRFixed;
+                o["ntc_pullup"] = c.thermistorPullup;
+            }
+            if (c.safeDemand != 0.0f) o["safe_demand"] = c.safeDemand;
+            if (c.forceSafeOnFault) o["force_safe_on_fault"] = true;
+            if (c.minimumRunDemand != 0.0f) o["min_run_demand"] = c.minimumRunDemand;
             if (c.pwmTimingConfigured) { o["pwm_freq_hz"] = c.pwmFrequency; o["pwm_res_bits"] = c.pwmResolution; }
-            o["invert"] = c.inverted; o["active_high"] = c.activeHigh; o["pullup"] = c.pullup; o["pulldown"] = c.pulldown;
-            o["has_current"] = c.hasCurrent; o["current_pin"] = c.currentPin; o["current_mv_a"] = c.currentMvPerA; o["current_zero_v"] = c.currentZeroV; o["current_max_a"] = c.currentMaxAmps;
-            o["has_flow_monitor"] = c.hasFlowMonitor; o["minimum_flow_l_min"] = c.minimumFlow;
+            if (c.inverted) o["invert"] = true;
+            // Active-high is the electrical default but is rendered as a
+            // checked control by the UI; keep it explicit to avoid changing
+            // the apparent polarity when reopening a compact document.
+            o["active_high"] = c.activeHigh;
+            if (c.pullup) o["pullup"] = true;
+            if (c.pulldown) o["pulldown"] = true;
+            if (c.hasCurrent) {
+                o["has_current"] = true;
+                o["current_pin"] = c.currentPin;
+                o["current_mv_a"] = c.currentMvPerA;
+                o["current_zero_v"] = c.currentZeroV;
+                o["current_max_a"] = c.currentMaxAmps;
+            }
+            if (c.hasFlowMonitor) {
+                o["has_flow_monitor"] = true;
+                o["minimum_flow_l_min"] = c.minimumFlow;
+            }
         }
     }
     bool read(JsonVariantConst v, Direction d) {

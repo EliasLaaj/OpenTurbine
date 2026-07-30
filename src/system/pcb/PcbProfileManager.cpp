@@ -297,6 +297,14 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
     if (buses.size() > MAX_BUSES) {
         delete catalog; strlcpy(_fault, "too many PCB buses", sizeof(_fault)); return false;
     }
+    if (buses.size()) {
+        catalog->buses = new (std::nothrow) Bus[buses.size()];
+        if (!catalog->buses) {
+            delete catalog;
+            strlcpy(_fault, "not enough memory for PCB buses", sizeof(_fault));
+            return false;
+        }
+    }
     for (JsonObjectConst source : buses) {
         Bus& bus = catalog->buses[catalog->busCount++];
         if (!copyText(bus.id, sizeof(bus.id), source["id"] | "", true, "bus.id") ||
@@ -331,6 +339,14 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
     JsonArrayConst devices = root["devices"].as<JsonArrayConst>();
     if (devices.size() > MAX_DEVICES) {
         delete catalog; strlcpy(_fault, "too many PCB devices", sizeof(_fault)); return false;
+    }
+    if (devices.size()) {
+        catalog->devices = new (std::nothrow) Device[devices.size()];
+        if (!catalog->devices) {
+            delete catalog;
+            strlcpy(_fault, "not enough memory for PCB devices", sizeof(_fault));
+            return false;
+        }
     }
     for (JsonObjectConst source : devices) {
         Device& device = catalog->devices[catalog->deviceCount++];
@@ -433,6 +449,12 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
     JsonArrayConst ports = root["ports"].as<JsonArrayConst>();
     if (!ports.size() || ports.size() > MAX_PORTS) {
         delete catalog; strlcpy(_fault, "PCB profile needs 1..48 ports", sizeof(_fault)); return false;
+    }
+    catalog->ports = new (std::nothrow) Port[ports.size()];
+    if (!catalog->ports) {
+        delete catalog;
+        strlcpy(_fault, "not enough memory for PCB ports", sizeof(_fault));
+        return false;
     }
     for (JsonObjectConst source : ports) {
         Port& port = catalog->ports[catalog->portCount++];

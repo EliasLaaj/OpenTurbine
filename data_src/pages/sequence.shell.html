@@ -5,9 +5,9 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine - Sequence</title>
-<link rel="stylesheet" href="/style.css?v=20260723a">
+<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/ui_dialog.js?v=20260723a"></script>
+<script src="/ui_dialog.js?v=20260730a"></script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -97,7 +97,7 @@
 <div id="tab-startup">
   <div class="block-list" id="list-startup"></div>
   <div class="add-row" style="margin-top:.75rem">
-    <select id="add-startup-sel" onchange="updateBlockPreview('startup')"></select>
+    <select id="add-startup-sel" aria-label="Startup block to add" onchange="updateBlockPreview('startup')"></select>
     <button class="add-btn" onclick="addBlock('startup')">+ Add block</button>
     <button class="add-btn" onclick="openCustomBlockDialog('startup')">+ Custom block</button>
   </div>

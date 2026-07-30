@@ -41,7 +41,7 @@ python tools/build_setup_package.py `
 Release packages require both complete driver packages. Keep each full extracted
 vendor folder; a copied installer EXE is rejected. CP210x payloads are packaged
 under `drivers/cp210x/`; WCH CH340/CH341/CH343 payloads are packaged under
-`drivers/wch/`. The generated manifest includes `package_schema: 2` so the EXE
+`drivers/wch/`. The generated manifest includes `package_schema: 3` so the EXE
 and ZIP must come from the same release family.
 
 For local packaging validation only, `--allow-missing-drivers` may be used. Do

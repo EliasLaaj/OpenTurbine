@@ -1,0 +1,115 @@
+[
+  {
+    "name": "t_safe_state",
+    "status": "pass",
+    "duration_s": 0.084,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "PASS",
+        "msg": "DUT settled to STANDBY (mode=STANDBY)"
+      }
+    ]
+  },
+  {
+    "name": "t_stop_switch",
+    "status": "pass",
+    "duration_s": 1.127,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "PASS",
+        "msg": "STOP pressed -> stop_switch_active True (got True)"
+      },
+      {
+        "level": "PASS",
+        "msg": "STOP released -> stop_switch_active False (got False)"
+      }
+    ]
+  },
+  {
+    "name": "t_n1_rpm",
+    "status": "fail",
+    "duration_s": 3.036,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "INFO",
+        "msg": "N1 2000 rpm (33.3 Hz) -> telemetry n1=0"
+      },
+      {
+        "level": "INFO",
+        "msg": "N1 5000 rpm (83.3 Hz) -> telemetry n1=4800"
+      },
+      {
+        "level": "INFO",
+        "msg": "N1 9000 rpm (150.0 Hz) -> telemetry n1=8780"
+      },
+      {
+        "level": "PASS",
+        "msg": "n1 telemetry rises with stimulus"
+      },
+      {
+        "level": "FAIL",
+        "msg": "n1 within tolerance of commanded rpm (allowing PCNT quantization)"
+      }
+    ]
+  },
+  {
+    "name": "t_igniter_output",
+    "status": "skip",
+    "duration_s": 0.184,
+    "skip_reason": "IGN_TEST rejected (HTTP 409):  \u2014 actuator likely not enabled on DUT",
+    "error": null,
+    "checks": []
+  },
+  {
+    "name": "t_starter_en_output",
+    "status": "skip",
+    "duration_s": 0.159,
+    "skip_reason": "STARTER_EN_TEST rejected (HTTP 409):  \u2014 actuator likely not enabled on DUT",
+    "error": null,
+    "checks": []
+  },
+  {
+    "name": "t_start_switch",
+    "status": "pass",
+    "duration_s": 0.921,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "PASS",
+        "msg": "START pressed -> start_switch_active True (got True)"
+      }
+    ]
+  },
+  {
+    "name": "t_n2_rpm",
+    "status": "pass",
+    "duration_s": 2.318,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "INFO",
+        "msg": "N2 3000 rpm -> telemetry n2=3000"
+      },
+      {
+        "level": "INFO",
+        "msg": "N2 7000 rpm -> telemetry n2=7346"
+      },
+      {
+        "level": "PASS",
+        "msg": "n2 telemetry rises with stimulus"
+      },
+      {
+        "level": "PASS",
+        "msg": "n2 within tolerance of commanded rpm (allowing PCNT quantization)"
+      }
+    ]
+  }
+]

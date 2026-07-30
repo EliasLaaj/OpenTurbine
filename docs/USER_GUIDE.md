@@ -542,6 +542,10 @@ Use Ctrl+F for the symptom or keyword.
 | Full engine restore rejected | Use the complete matching `ecu_config.json`; do not cross hardware/settings sections from different profiles. |
 | Wi-Fi password forgotten | Recover over USB and restore/reset configuration. Factory reset removes all settings and calibration. |
 
+Use one active operator browser for the ECU panel. The control loop remains
+independent of the web interface, but sustained parallel page downloads from
+many clients can exhaust the ESP32 network service and require an ECU reset.
+
 ## External display or custom controller
 
 OpenTurbine provides the **OpenTurbine Cluster (OTC)** serial protocol for embedded displays and companion devices.

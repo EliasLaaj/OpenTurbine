@@ -39,13 +39,23 @@ class DUT:
     def _open_retry(self, req, tries=4):
         """urlopen with retries on transient transport errors (the AP drops the
         odd request during mode transitions / WiFi contention). A real HTTP
-        response (4xx/5xx) is an HTTPError and is re-raised immediately."""
+        response (4xx/5xx) is normally re-raised. The ECU's bounded shared
+        JSON buffer can briefly return a retryable busy response while the
+        previous frame drains, so retry only those explicit cases."""
         last = None
         for i in range(tries):
             try:
                 return urllib.request.urlopen(req, timeout=self.timeout)
-            except urllib.error.HTTPError:
-                raise
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8", errors="replace")
+                retryable = e.code in (409, 503) and (
+                    "configuration transfer is in progress" in body
+                    or "ECU is busy" in body
+                )
+                if not retryable or i + 1 >= tries:
+                    raise
+                last = e
+                time.sleep(0.35)
             except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as e:
                 last = e
                 if i >= 1:

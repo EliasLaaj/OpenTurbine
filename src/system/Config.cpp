@@ -1009,7 +1009,13 @@ void Config::load() {
         fullDoc.clear();
         fullDoc.shrinkToFit();
         delay(0);
-    } else if (!EngineData::instance().configLocked) {
+    } else {
+        // HardwareConfig::load() creates the hardware half of a new unified
+        // file before settings are loaded. In PCB mode it also deliberately
+        // locks START until a required STOP input is assigned. That
+        // commissioning lock must not prevent us from completing the missing
+        // settings half: Config::save() preserves the hardware subtree
+        // verbatim, while the lock remains active until Hardware is valid.
         Serial.println("[Config] Settings missing from ecu_config.json - adding defaults");
         strncpy(profileId, HardwareConfig::profileId, sizeof(profileId) - 1);
         profileId[sizeof(profileId) - 1] = '\0';
@@ -1018,17 +1024,6 @@ void Config::load() {
             return;
         }
         profileMatch = true;
-        return;
-    } else {
-        Serial.println("[Config] Settings section missing from ecu_config.json");
-        EngineData::instance().configStorageFault = true;
-        strncpy(EngineData::instance().faultDescription,
-            "Cannot start: ecu_config.json is missing the settings section.\n"
-            "What to do: Use the web UI Tools page to reset config to defaults, "
-            "or re-upload the filesystem image.",
-            sizeof(EngineData::instance().faultDescription) - 1);
-        EngineData::instance().faultDescription[sizeof(EngineData::instance().faultDescription) - 1] = '\0';
-        profileMatch = false;
         return;
     }
 

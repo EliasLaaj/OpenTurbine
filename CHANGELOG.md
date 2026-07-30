@@ -8,6 +8,47 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ---
 
+## [Unreleased]
+
+## [2.0.1] — 2026-07-30
+
+### Changed
+- Hardware setup now explains the shared SPI/I2C wiring required by a selected bus-backed device and opens the relevant wiring controls directly.
+- Calibration now provides a compact fitted-device index for quickly reaching the required sensor or actuator workflow.
+- Standby-only actuator tools report `Locked` with the current engine mode instead of showing `Ready` beside disabled controls.
+- Dashboard commissioning progress now distinguishes successful saves and tool commands from physical verification instead of calling both complete, and upstream hardware changes clear stale downstream activity marks.
+- START confirmation now shows a compact live ECU preflight snapshot with mode, fitted primary feedback, STOP input, safety-bypass state, and startup-sequence length.
+- Confirming START now rechecks that telemetry is current and the dashboard start gate is still open, preventing an obsolete confirmation from submitting after the ECU state changes.
+- Visible fault and startup-abort diagnoses now include direct routes to event evidence, calibration, limits, and standby diagnostics.
+- Browser backup reports that a download was started and asks the operator to confirm the file exists, rather than claiming the browser saved it successfully; advanced manual firmware update also carries an immediate backup reminder.
+- First-run safety/theme overlays and the commissioning guide are deferred to STANDBY/FAULT so a fresh browser cannot cover an already-running dashboard.
+- Registry telemetry no longer duplicates the dedicated calibrated Thrust card.
+- Hardware and Sequence saves now remain available in FAULT, matching the firmware's intended repair-state behavior; related labels consistently say `STANDBY / FAULT`.
+- Visible Wi-Fi terminology is now consistent across Hardware and advanced update controls.
+- Config's `Open (Dev Mode)` badge is now reserved for genuinely active engine modes; FAULT correctly appears as the normal open repair state.
+- Generated Config controls and the remaining static commissioning selectors/sliders now expose their visible technical labels to assistive and keyboard-driven tooling.
+- Manual afterburner fire now requires an explicit confirmation showing the configured action and available live N1/EGT snapshot; AB STOP remains immediate.
+- The Setup Tool clean-install safety gate now leads truthfully to board selection; its later board-specific confirmation remains the actual erase gate.
+- Setup Tool failures now display the exact support-log path actually used, including the normal `%LOCALAPPDATA%` location or the backup folder for an update.
+- Windows Setup Tool 0.6.1 carries these workflow and support-log fixes while retaining package compatibility with the 0.6.0 stable-client baseline.
+- OTBench `verify-wiring` now matches each expected signal to its actual configured subsystem or registry purpose, so an unrelated user of the same GPIO can no longer produce a false pass.
+- PCB-mode START and STOP registry channels no longer conflict with their mirrored legacy control fields in firmware or the Hardware UI.
+- PCB profile catalogs now retry transient busy responses and use independent paged snapshots, preventing a valid final page of connectors from silently appearing missing.
+- PCB profile packaging now enforces the firmware's board, connector, description, supply-label, and polarity field limits; the official S3 profile has been corrected to pass both pack-time and live firmware validation.
+- Channel-registry JSON omits decoder-default fields, keeping fully populated hardware responses inside the shared Classic/S3 buffer. Tools also compacts equivalent defaults from older engine files before restore and retries transient atomic-storage races.
+- OTBench coverage now includes idle RC input, N2 capability without the removed `has_two_shaft` flag, retryable ECU-busy responses, reliable N1 sampling, and an active-low 14-port S3 PCB harness profile.
+- PCB profile catalogs now allocate only the buses, devices, and ports actually present, preserving enough Classic ESP32 heap for DHCP, dynamic APIs, and OTA while retaining the same public profile limits on both targets.
+- First boot with a valid PCB profile now completes the missing settings section even while hardware commissioning keeps START locked.
+- Manual web-asset updates retain whole-set atomic replacement on S3 and use bounded one-file replacement on the Classic ESP32, where the populated 704 KiB filesystem cannot hold two complete UI generations. The recovery Tools page is uploaded last and interrupted uploads remain retryable.
+- Shared CSS and JavaScript now revalidate after maintenance updates instead of remaining immutable for a year under stable filenames, preventing a newly updated page from running with stale styling or behavior.
+- Calibration reports a missing RC idle-input pulse as `NO SIGNAL` instead of inventing a valid 0% position and minimum throttle value.
+- Log now distinguishes the current in-memory session from archived Past Sessions and disables the current-session download when none exists.
+- Config's maximum-N1 warning calls the limit a hard shutdown only when the corresponding Hardware safety is actually enabled.
+- Device identity now exposes a shortened ELF SHA-256 build ID, allowing setup and bench checks to distinguish the exact installed binary instead of relying on the release version alone.
+
+### Known limitations
+- The ECU web interface is designed for one active operator browser. Sustained parallel UI-file downloads from many clients can exhaust the ESP32 network stack and require an ECU reset; control state and outputs remained safe in the reproduced board-only stress test.
+
 ## [2.0.0] — 2026-07-29
 
 ### Added

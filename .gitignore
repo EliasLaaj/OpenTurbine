@@ -17,6 +17,10 @@ flash_fw.log
 *.log
 .codex-*.err
 dist/
+tools/setup_tool/OpenTurbineSetupTool.exe
+
+# Local hardware recovery snapshots created during bench qualification
+.codex-hardware-backups/
 
 # Local PCB-import inspection scratch (source design stays outside the repo)
 .pcb-design-review/
@@ -35,3 +39,6 @@ __pycache__/
 # Bench campaign engine-file snapshots are local recovery artifacts. Curated
 # qualification result JSON may still be committed from this directory.
 dev/bench/results/*_backup_*.json
+
+# Bench PCB binaries are regenerated from the adjacent JSON source profiles.
+dev/bench/pcb_profiles/*.bin

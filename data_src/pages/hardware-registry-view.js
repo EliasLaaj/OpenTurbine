@@ -402,6 +402,10 @@ function registryRoleUsage(direction, c) {
       uses.add('Controller: throttle input mapping');
     } else if (purpose === 'idle') {
       uses.add('Controller: idle input mapping');
+    } else if (purpose === 'start_switch') {
+      uses.add('Core firmware: START command');
+    } else if (purpose === 'stop_switch') {
+      uses.add('Core firmware: hard stop and shutdown command');
     }
   } else {
     const actKey = registryCoreActuatorKey(c);

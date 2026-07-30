@@ -64,7 +64,7 @@ class BuildSetupPackageTests(unittest.TestCase):
                 mock.patch.object(build_setup_package, "read_version", return_value="9.9.9"):
                 manifest = build_setup_package.stage_package(stage, esptool, str(cp210x), str(wch))
             self.assertEqual(manifest["package_schema"], 3)
-            self.assertEqual(manifest["setup_tool_version"], "0.6.0")
+            self.assertEqual(manifest["setup_tool_version"], "0.6.1")
             self.assertEqual(manifest["minimum_setup_tool_version"], "0.6.0")
             self.assertTrue((stage / "drivers" / "cp210x" / "driver.inf").exists())
             self.assertTrue((stage / "drivers" / "wch" / "driver.inf").exists())

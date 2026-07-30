@@ -1,0 +1,296 @@
+{
+  "timestamp": "2026-07-30T08:37:15",
+  "firmware": "2.0.0",
+  "firmware_after": "2.0.0",
+  "firmware_match": true,
+  "rows": [
+    {
+      "name": "RULE_AND_CONTROLLERS_CAN_COMMAND_OUTPUT",
+      "ok": true,
+      "detail": {
+        "throttle_effective": 1.0,
+        "throttle_pulse": {
+          "us": 1999,
+          "hz": 50.0,
+          "duty": 0.1,
+          "level": 1
+        },
+        "igniter_on": true
+      }
+    },
+    {
+      "name": "N1_N2_EGT_PULLBACK_DOMINATES_RULE_AND_GOVERNOR",
+      "ok": true,
+      "detail": {
+        "baseline_effective": 1.0,
+        "pulled_effective": 0.402,
+        "mode": "RUNNING",
+        "event": "Startup complete - engine self-sustained",
+        "baseline_pulse": {
+          "us": 1999,
+          "hz": 50.0,
+          "duty": 0.1,
+          "level": 1
+        },
+        "pulled_pulse": {
+          "us": 1473,
+          "hz": 50.0,
+          "duty": 0.074,
+          "level": 1
+        }
+      }
+    },
+    {
+      "name": "REDUCED_POWER_DOMINATES_RULE_CONTROLLER_AND_PULLBACK",
+      "ok": true,
+      "detail": {
+        "command": {
+          "ok": true
+        },
+        "throttle_effective": 0.3,
+        "stable_effective": 1,
+        "throttle_pulse": {
+          "us": 1298,
+          "hz": 50.0,
+          "duty": 0.065,
+          "level": 1
+        }
+      }
+    },
+    {
+      "name": "N2_FEEDBACK_LOSS_CAPS_FUEL_AND_COMMANDS_COARSE_PITCH",
+      "ok": true,
+      "detail": {
+        "telemetry": {
+          "n2_healthy": false,
+          "limp_mode": true,
+          "throttle_effective": 0.3,
+          "prop_pitch_demand": 1
+        },
+        "fuel_pulse": {
+          "us": 1299,
+          "hz": 50.0,
+          "duty": 0.065,
+          "level": 1
+        },
+        "pitch_output": {
+          "level": 1
+        }
+      }
+    },
+    {
+      "name": "OVERSPEED_SHUTDOWN_OVERRIDES_ACTIVE_RULE_OUTPUTS",
+      "ok": true,
+      "detail": {
+        "pretrip_fuel": 1,
+        "event": "Engine over-speed: RPM exceeded the safety limit.\nWhat to do: Wait for the engine to cool down fully. Check your RPM limit setting in Config and verify throttle calibration before the next st",
+        "physical": {
+          "mode": "SHUTDOWN",
+          "fuel": {
+            "level": 0
+          },
+          "igniter": {
+            "level": 0
+          },
+          "throttle": {
+            "us": 1000,
+            "hz": 50.0,
+            "duty": 0.05,
+            "level": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "OIL_CONTROLLER_RECOVERY_CANNOT_MASK_LOW_OIL_SHUTDOWN",
+      "ok": true,
+      "detail": {
+        "initial_oil_pct": 18,
+        "max_oil_pct": 100.0,
+        "event": "Low oil pressure during operation.\nWhat to do: Do not restart until you have checked the oil level, oil pump, oil lines, and fittings for leaks. Verify oil pressure sensor calibration.",
+        "physical": {
+          "mode": "SHUTDOWN",
+          "fuel": {
+            "level": 0
+          },
+          "igniter": {
+            "level": 0
+          },
+          "throttle": {
+            "us": 1000,
+            "hz": 50.0,
+            "duty": 0.05,
+            "level": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "PHYSICAL_STOP_OVERRIDES_RULES_AND_CONTROLLERS",
+      "ok": true,
+      "detail": {
+        "pre_stop_effective": 1,
+        "event": "Seq: TimedDelay",
+        "physical": {
+          "mode": "SHUTDOWN",
+          "fuel": {
+            "level": 0
+          },
+          "igniter": {
+            "level": 0
+          },
+          "throttle": {
+            "us": 1000,
+            "hz": 50.0,
+            "duty": 0.05,
+            "level": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "RULE_REQUESTED_SHUTDOWN_USES_SAFE_CUT_WITH_CONTROLLERS_ACTIVE",
+      "ok": true,
+      "detail": {
+        "event": "Seq: TimedDelay",
+        "physical": {
+          "mode": "SHUTDOWN",
+          "fuel": {
+            "level": 0
+          },
+          "igniter": {
+            "level": 0
+          },
+          "throttle": {
+            "us": 1000,
+            "hz": 50.0,
+            "duty": 0.05,
+            "level": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "REDUCED_POWER_CAP_DOMINATES_DYNAMIC_IDLE_AND_GOVERNOR",
+      "ok": true,
+      "detail": {
+        "idle_effective": 0.447,
+        "idle_pulse": {
+          "us": 1447,
+          "hz": 50.0,
+          "duty": 0.072,
+          "level": 1
+        },
+        "capped_effective": 0.19,
+        "capped_pulse": {
+          "us": 1177,
+          "hz": 50.0,
+          "duty": 0.059,
+          "level": 1
+        },
+        "command": {
+          "ok": true
+        }
+      }
+    },
+    {
+      "name": "DEV_MODE_RUNNING_RULE_DELETE_ATOMICALLY_RELEASES_OUTPUT",
+      "ok": true,
+      "detail": {
+        "on_telemetry": true,
+        "on_output": {
+          "level": 1
+        },
+        "running_edit": {
+          "code": 200,
+          "response": {
+            "ok": true,
+            "saved": true,
+            "runtime_safe_values_live": true,
+            "block_hardware_apply": "deferred_until_standby"
+          },
+          "igniter_released": true
+        },
+        "off_telemetry": false,
+        "off_output": {
+          "level": 0
+        }
+      }
+    },
+    {
+      "name": "PHYSICAL_STOP_OVERRIDES_ACTIVE_RELIGHT_GOVERNOR_AND_RULE",
+      "ok": true,
+      "detail": {
+        "relight_telemetry": {
+          "relight_armed": true,
+          "relight_attempts": 1,
+          "igniter_on": true,
+          "mode": "RUNNING"
+        },
+        "stop_event": "Seq: TimedDelay",
+        "physical": {
+          "mode": "SHUTDOWN",
+          "fuel": {
+            "level": 0
+          },
+          "igniter": {
+            "level": 0
+          },
+          "throttle": {
+            "us": 1000,
+            "hz": 50.0,
+            "duty": 0.05,
+            "level": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "SIMULTANEOUS_SHAFT_TEMP_AND_OIL_FAULTS_FAIL_SAFE",
+      "ok": true,
+      "detail": {
+        "event": "Engine over-speed: RPM exceeded the safety limit.\nWhat to do: Wait for the engine to cool down fully. Check your RPM limit setting in Config and verify throttle calibration before the next st",
+        "physical": {
+          "mode": "SHUTDOWN",
+          "fuel": {
+            "level": 0
+          },
+          "igniter": {
+            "level": 0
+          },
+          "throttle": {
+            "us": 999,
+            "hz": 50.0,
+            "duty": 0.05,
+            "level": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "RULE_REQUESTED_FAULT_CUTS_OUTPUTS_AND_IDENTIFIES_RULE",
+      "ok": true,
+      "detail": {
+        "mode": "SHUTDOWN",
+        "description": "Control rule fault: hil_rule_fault",
+        "physical": {
+          "mode": "SHUTDOWN",
+          "fuel": {
+            "level": 0
+          },
+          "igniter": {
+            "level": 0
+          },
+          "throttle": {
+            "us": 1000,
+            "hz": 50.0,
+            "duty": 0.05,
+            "level": 1
+          }
+        }
+      }
+    }
+  ],
+  "restored": true,
+  "error": null
+}

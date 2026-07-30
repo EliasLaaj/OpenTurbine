@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
-<script src="/ui_dialog.js?v=20260723a"></script>
+<script src="/ui_dialog.js?v=20260730a"></script>
 <title>OpenTurbine — Log</title>
-<link rel="stylesheet" href="/style.css?v=20260723a">
+<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 </head>
 <body>
@@ -138,7 +138,7 @@
         <span id="session-lock-msg" style="font-size:.72rem;color:var(--yellow);margin-left:.5rem;display:none">Settings locked until STANDBY</span>
       </div>
       <div style="display:flex;flex-direction:column;gap:.4rem">
-        <button onclick="downloadSessionLog()">Download CSV</button>
+        <button id="session-current-download" onclick="downloadSessionLog()" disabled>Download Current CSV</button>
         <button onclick="askClear('sessions')" class="danger">Delete All Sessions</button>
         <div id="session-rows" style="font-size:.72rem;color:var(--dim);margin-top:.2rem"></div>
       </div>
@@ -207,7 +207,7 @@
   </div>
 </main>
 
-<script src="/app.js?v=20260722b"></script>
+<script src="/app.js?v=20260730a"></script>
 <script>
 // ── Tab switching ─────────────────────────────────────────────
 function showTab(tab) {
@@ -637,11 +637,17 @@ function loadSessionCfg() {
   }).then(csv => {
     const rows = csv.trim().split('\n').length - 1;
     const el = document.getElementById('session-rows');
-    if (el) el.textContent = rows + ' rows logged this session';
+    const download = document.getElementById('session-current-download');
+    if (el) el.textContent = rows + ' rows in the current session';
+    if (download) download.disabled = false;
   }).catch(e => {
     const el = document.getElementById('session-rows');
+    const download = document.getElementById('session-current-download');
     const msg = e && e.message ? e.message : '';
-    if (el) el.textContent = msg.includes('STANDBY') ? 'Session log available after STANDBY' : 'No session log yet';
+    if (el) el.textContent = msg.includes('STANDBY')
+      ? 'Current session log available after STANDBY'
+      : 'No current session log; use Past Sessions above';
+    if (download) download.disabled = true;
   });
 }
 

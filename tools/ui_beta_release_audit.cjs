@@ -339,6 +339,12 @@ function enumNames(source, marker) {
     assert.match(mainSource, /EGT relight recovery rise is 0 - EGT-source relight cannot confirm success", false/);
     assert.match(mainSource, /Minimum N1 to fire relight is below Minimum Running N1; the ECU will use the higher Minimum Running N1 value", false/);
     const configSourceCpp = fs.readFileSync(path.join('src', 'system', 'Config.cpp'), 'utf8');
+    assert.match(configSourceCpp,
+      /Settings missing from ecu_config\.json - adding defaults[\s\S]*if \(!save\(\)\)/,
+      'first boot must complete a hardware-only unified file even while PCB commissioning locks START');
+    assert.doesNotMatch(configSourceCpp,
+      /else if \(!EngineData::instance\(\)\.configLocked\) \{[\s\S]*Settings missing from ecu_config\.json - adding defaults/,
+      'a missing required PCB assignment must not block creation of default settings');
     assert.match(configSourceCpp, /return fmaxf\(relightMinRpm, minRpm\)/);
     assert.match(mainSource, /Relight timeout is 0 - igniter can stay active indefinitely during a failed relight attempt", false/);
     assert.match(mainSource, /START blocked: actuator tool active/);
@@ -356,6 +362,12 @@ function enumNames(source, marker) {
     const hardwareHeader = fs.readFileSync(path.join('src', 'system', 'HardwareConfig.h'), 'utf8');
     assert.match(hardwareHeader, /MAX_CUSTOM_BLOCKS = 8/);
     assert.match(hardwareHeader, /struct CustomBlockDef/);
+    const pcbProfileHeader = fs.readFileSync(path.join('src', 'system', 'pcb', 'PcbProfileManager.h'), 'utf8');
+    assert.match(pcbProfileHeader, /Bus\* buses = nullptr/);
+    assert.match(pcbProfileHeader, /Device\* devices = nullptr/);
+    assert.match(pcbProfileHeader, /Port\* ports = nullptr/);
+    assert.doesNotMatch(pcbProfileHeader, /Port ports\[MAX_PORTS\]/,
+      'small classic PCB profiles must not retain the maximum 48-port catalog allocation');
     const hardwareConfig = fs.readFileSync(path.join('src', 'system', 'HardwareConfig.cpp'), 'utf8');
     assert.match(hardwareConfig, /void writeCustomBlocks\(JsonObject doc\)/);
     assert.match(hardwareConfig, /void readCustomBlocks\(const JsonDocument& doc\)/);
@@ -363,7 +375,7 @@ function enumNames(source, marker) {
     assert.match(hardwareConfig, /strncmp\(name, "custom_", 7\) == 0\) return customBlockAvailable\(name\)/);
     const channelRegistry = fs.readFileSync(path.join('src', 'system', 'ChannelRegistry.h'), 'utf8');
     assert.match(channelRegistry, /bool forceSafeOnFault = false/);
-    assert.match(channelRegistry, /o\["force_safe_on_fault"\] = c\.forceSafeOnFault/);
+    assert.match(channelRegistry, /if \(c\.forceSafeOnFault\) o\["force_safe_on_fault"\] = true/);
     assert.match(channelRegistry, /c\.forceSafeOnFault = o\["force_safe_on_fault"\] \| false/);
     const runtimeHardware = fs.readFileSync(path.join('src', 'Hardware.h'), 'utf8');
     assert.match(runtimeHardware, /if \(!ed\.faultShutdownActive\) return/);
@@ -412,14 +424,20 @@ function enumNames(source, marker) {
     assert.doesNotMatch(indexHtml, /20260612b|20260617b|20260619a|20260625a|20260705a|Primary thermal limit/);
     assert.doesNotMatch(indexHtml, />Not saved<|No calibration saved|No successful test recorded/);
     assert.match(indexHtml, /Run a safe actuator or dry-sequence test/);
-    assert.match(indexHtml, /20260723a/);
+    assert.match(indexHtml, /20260730a/);
+    for (const pageName of ['index.html', 'hardware.html', 'config.html', 'calibration.html', 'sequence.html', 'log.html', 'tools.html']) {
+      const pageSource = fs.readFileSync(path.join('data_src', pageName), 'utf8');
+      const sharedRefs = [...pageSource.matchAll(/\/(?:style\.css|app\.js|theme\.js|ui_dialog\.js)\?v=([^"'&]+)/g)];
+      assert.ok(sharedRefs.length > 0, `${pageName} must version its shared assets`);
+      assert.ok(sharedRefs.every(match => match[1] === '20260730a'), `${pageName} has a stale shared-asset cache key`);
+    }
     assert.match(indexHtml, /<body data-page="dashboard">/);
     assert.match(indexHtml, /id="profile-mismatch-banner" style="display:none"/);
     const appSource = fs.readFileSync(path.join('data_src', 'app.js'), 'utf8');
     assert.match(appSource, /let _lastBootCount = null/);
     assert.match(appSource, /nextUptime <= 5 && _lastUptimeS > 5/);
     assert.match(appSource, /bootChanged && usesGlobalTelemetry\(\)/);
-    results.push('dashboard asset cache key and selected-EGT tooltip are beta-current');
+    results.push('all pages use the current shared-asset cache key and selected-EGT tooltip');
 
     await page.goto(`${base}/generate_204`);
     await page.waitForSelector('#n1-card', { state: 'attached' });
@@ -444,15 +462,31 @@ function enumNames(source, marker) {
     results.push('captive portal dashboard entry starts the same 3 Hz telemetry pull as /index.html');
 
     const webServer = fs.readFileSync(path.join('src', 'system', 'web', 'WebServer.cpp'), 'utf8');
-    // Current strategy: shared assets served with no-cache (query-string
-    // ?v= keys bust stale copies; the server does not use immutable caching).
-    assert.match(webServer, /SHARED_ASSET_CACHE = "public, max-age=31536000, immutable"/);
+    // Shared filenames are replaced in place by the maintenance updater, so
+    // every navigation must revalidate CSS/JS instead of retaining an old
+    // immutable copy under the same URL.
+    assert.match(webServer, /SHARED_ASSET_CACHE = "no-cache"/);
     assert.match(webServer, /app\.js\.gz", "application\/javascript", SHARED_ASSET_CACHE/);
     assert.match(webServer, /style\.css\.gz", "text\/css", SHARED_ASSET_CACHE/);
+    results.push('shared CSS and JavaScript are revalidated after maintenance updates');
     assert.match(webServer, /static void _mergeJsonObject\(JsonObject dst, JsonObjectConst patch\)/);
     assert.equal((webServer.match(/_mergeJsonObject\(current\.as<JsonObject>\(\), patch\.as<JsonObjectConst>\(\)\)/g) || []).length, 2);
     assert.doesNotMatch(webServer, /2-level deep merge/);
     results.push('firmware PATCH handlers use recursive JSON merge for nested objects');
+
+    assert.match(webServer, /esp_app_get_description\(\)->app_elf_sha256/);
+    assert.match(webServer, /for \(uint8_t i = 0; i < 8; \+\+i\)/);
+    assert.match(webServer, /doc\["build_id"\] = buildId/);
+    results.push('device identity exposes a per-build ELF fingerprint for exact firmware verification');
+
+    assert.match(webServer, /#if !defined\(OT_PLATFORM_ESP32S3\)[\s\S]*static bool _installAssetRolling/);
+    assert.match(webServer, /if \(!_installAssetRolling\(\(uint16_t\)asset\)\)/);
+    const toolsSource = fs.readFileSync(path.join('data_src', 'tools.html'), 'utf8');
+    const webAssetOrder = toolsSource.match(/const required = \[([\s\S]*?)\];/);
+    assert.ok(webAssetOrder);
+    assert.ok(webAssetOrder[1].lastIndexOf("'tools.html.gz'") >
+              webAssetOrder[1].lastIndexOf("'ui_dialog.js.gz'"));
+    results.push('Classic web asset updates use bounded rolling storage and upload the recovery page last');
 
     await reset(page);
     await page.goto(`${base}/index.html`);

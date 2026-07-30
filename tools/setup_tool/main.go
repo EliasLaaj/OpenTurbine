@@ -31,13 +31,13 @@ import (
 )
 
 const (
-	appVersion                  = "0.6.0"
+	appVersion                  = "0.6.1"
 	packageCompatibilityVersion = "0.6.0"
 	requiredPackageSchema       = 3
 	appTitle                    = "OpenTurbine Setup Tool"
 	ecuBaseURL                  = "http://192.168.4.1"
 	defaultPackageURL           = "https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbine_Recommended.zip"
-	cleanSafetyButtonLabel      = "I understand — continue to erase"
+	cleanSafetyButtonLabel      = "I understand — choose board"
 	updateSafetyButtonLabel     = "My engine is safe — continue update"
 )
 
@@ -1559,7 +1559,7 @@ func (j *Job) fail(err error) {
 	if j.backupPath != "" {
 		secondary = "Open backup folder"
 	}
-	j.ui().update(uiUpdate{screen: screenError, title: "Could not finish", subtitle: subtitleForMode(j.mode), body: body, detail: "A support log was saved in Documents\\OpenTurbine\\SetupTool or next to the engine file backup if one was created.", step: 0, totalSteps: 0, progress: 0, mode: j.mode, secondary: secondary, done: true, backupPath: j.backupPath})
+	j.ui().update(uiUpdate{screen: screenError, title: "Could not finish", subtitle: subtitleForMode(j.mode), body: body, detail: "Support log:\n" + j.logPath(), step: 0, totalSteps: 0, progress: 0, mode: j.mode, secondary: secondary, done: true, backupPath: j.backupPath})
 }
 
 func (j *Job) success(title, body string) {
@@ -1974,10 +1974,7 @@ func gunzipBytes(data []byte) ([]byte, error) {
 }
 
 func (j *Job) writeLog(status, msg string) {
-	dir := j.app.workDir
-	if j.backupPath != "" {
-		dir = filepath.Dir(j.backupPath)
-	}
+	dir := filepath.Dir(j.logPath())
 	_ = os.MkdirAll(dir, 0755)
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -1993,6 +1990,14 @@ func (j *Job) writeLog(status, msg string) {
 		b.WriteString(l + "\r\n")
 	}
 	_ = os.WriteFile(filepath.Join(dir, "update_log.txt"), []byte(b.String()), 0644)
+}
+
+func (j *Job) logPath() string {
+	dir := j.app.workDir
+	if j.backupPath != "" {
+		dir = filepath.Dir(j.backupPath)
+	}
+	return filepath.Join(dir, "update_log.txt")
 }
 
 func friendlyError(s string) string {

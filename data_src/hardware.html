@@ -6,9 +6,9 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Hardware</title>
-<link rel="stylesheet" href="/style.css?v=20260723a">
+<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/ui_dialog.js?v=20260723a"></script>
+<script src="/ui_dialog.js?v=20260730a"></script>
 </head>
 <body>
 <nav>
@@ -72,7 +72,7 @@
       </div>
     </div>
   </div>
-  <div id="standby-warn" class="error-banner" style="display:none">⚠ Engine is not in STANDBY — hardware changes are locked.</div>
+  <div id="standby-warn" class="error-banner" style="display:none">⚠ Hardware changes require STANDBY or FAULT.</div>
 
   <div class="warning-banner" style="margin-bottom:.8rem">
     <strong>Who should edit this page?</strong> The person wiring or commissioning the ECU. The selected physical connection, signal type, and active state must match the actual electrical installation. If you are operating or mechanically setting up an already-wired turbine, import the engine file supplied by the builder and use Config and Calibration; you normally do not need to edit hardware details.
@@ -84,13 +84,13 @@
     <div class="hw-item-card">
       <div class="hw-grid profile-grid">
         <div class="hw-field">
-          <span class="hw-label">Engine name / WiFi network name</span>
+          <span class="hw-label">Engine name / Wi-Fi network name</span>
           <span class="hw-desc">Identifies this engine and its saved setup. It is also used as the ECU Wi-Fi network name. Default: OpenTurbine.</span>
           <input type="text" id="f-profile-id" maxlength="63" placeholder="OpenTurbine" oninput="setProfileId(this.value)">
-          <span id="profile-id-warn" style="display:none;font-size:.68rem;color:var(--yellow)">⚠ Longer than 32 bytes — WiFi limits SSIDs to 32 bytes, so the broadcast AP name will be truncated (the full ID is still used everywhere else).</span>
+          <span id="profile-id-warn" style="display:none;font-size:.68rem;color:var(--yellow)">⚠ Longer than 32 bytes — Wi-Fi limits SSIDs to 32 bytes, so the broadcast AP name will be truncated (the full ID is still used everywhere else).</span>
         </div>
         <div class="hw-field">
-          <span class="hw-label">WiFi AP Password</span>
+          <span class="hw-label">Wi-Fi AP Password</span>
           <span class="hw-desc">Optional password for the Wi-Fi access point. A saved password is retained unless you enter a replacement; blank selects an open network. ⚠ On an open network, anyone who joins the AP can send engine commands — set a password for anything beyond bench use.</span>
           <div style="display:flex;gap:.35rem;align-items:center">
             <input type="password" id="f-wifi-password" maxlength="63" placeholder="(open network)"
@@ -105,13 +105,13 @@
         <div class="hw-field">
           <span class="hw-label">Engine description</span>
           <span class="hw-desc">Optional installation note saved with this engine setup, e.g. "Test bench JT-1".</span>
-          <input type="text" id="f-profile-desc" maxlength="63" oninput="set('profile_desc',this.value)">
+          <input type="text" id="f-profile-desc" aria-label="Engine description" maxlength="63" oninput="set('profile_desc',this.value)">
         </div>
         <div class="hw-field">
-          <span class="hw-label">WiFi TX Power</span>
+          <span class="hw-label">Wi-Fi TX Power</span>
           <span class="hw-desc">Access-point transmit power in dBm. Lower values reduce radio heat/current draw; raise only if you need more range. Default: 8 dBm.</span>
           <div style="display:flex;align-items:center;gap:.6rem">
-            <input type="range" id="f-wifi-tx-power" min="2" max="20" step="1"
+            <input type="range" id="f-wifi-tx-power" aria-label="Wi-Fi transmit power" min="2" max="20" step="1"
               oninput="setWifiTxPower(this.value)" style="flex:1;min-width:130px">
             <span id="f-wifi-tx-power-val" style="font-size:.74rem;color:var(--dim);min-width:3.5rem;text-align:right">8 dBm</span>
           </div>
@@ -487,7 +487,11 @@ function collectPinUsage() {
     usage.get(pin).push({label, group});
   };
   const c = cfg.controls || {};
-  add(c.stop_pin, 'Stop input'); add(c.start_pin, 'Start input');
+  // START/STOP registry channels mirror the legacy controls fields. Count
+  // either representation, not both, or a valid PCB assignment is reported
+  // as conflicting with itself.
+  if (!registryHasPurpose('input', 'stop_switch')) add(c.stop_pin, 'Stop input');
+  if (!registryHasPurpose('input', 'start_switch')) add(c.start_pin, 'Start input');
   const i2c = cfg.i2c || {};
   if (i2c.enabled !== false) {
     add(i2c.sda_pin, 'Shared I2C SDA', 'i2c-sda');
@@ -1010,17 +1014,34 @@ function stopStatusPoll() {
   statusPollTimer = null;
 }
 
+async function fetchHardwareJson(url, attempts = 4) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const response = await fetch(url, {cache:'no-store'});
+      if (response.ok) return await response.json();
+      const detail = await response.json().catch(() => ({}));
+      lastError = new Error(detail.error || `HTTP ${response.status}`);
+      if (![409, 503].includes(response.status)) throw lastError;
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 >= attempts) break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+  }
+  throw lastError || new Error('No response');
+}
+
 async function loadHardware() {
   document.getElementById('save-msg').textContent = 'Loading…';
   try {
-    const r = await fetch('/api/hardware');
-    cfg = await r.json();
+    cfg = await fetchHardwareJson('/api/hardware');
     pcbProfile = cfg._pcb_profile || {state:'absent', ports:[]};
     if (pcbProfile.state === 'valid') {
       const ports = [];
       const total = Number(pcbProfile.port_count || 0);
       for (let offset = 0; offset < total; offset += 12) {
-        const page = await (await fetch(`/api/pcb_profile?offset=${offset}&limit=12`, {cache:'no-store'})).json();
+        const page = await fetchHardwareJson(`/api/pcb_profile?offset=${offset}&limit=12`);
         ports.push(...(page.ports || []));
       }
       pcbProfile.ports = ports;
@@ -3119,6 +3140,10 @@ function registryRoleUsage(direction, c) {
       uses.add('Controller: throttle input mapping');
     } else if (purpose === 'idle') {
       uses.add('Controller: idle input mapping');
+    } else if (purpose === 'start_switch') {
+      uses.add('Core firmware: START command');
+    } else if (purpose === 'stop_switch') {
+      uses.add('Core firmware: hard stop and shutdown command');
     }
   } else {
     const actKey = registryCoreActuatorKey(c);
@@ -4195,13 +4220,13 @@ function renderRegistryBindings() {
     <div class="hw-grid">
       <div class="hw-field">
         <span class="hw-label">Controller use</span>
-        <select onchange="updateRegistryBinding(${i},'key',this.value)">
+        <select aria-label="Controller use ${i + 1}" onchange="updateRegistryBinding(${i},'key',this.value)">
           ${keys.map(k => `<option value="${k}"${String(b.key || '')===k?' selected':''}>${escapeHtmlText(registryBindingLabel(k))}</option>`).join('')}
         </select>
       </div>
       <div class="hw-field">
         <span class="hw-label">Device</span>
-        <select onchange="updateRegistryBinding(${i},'channel',this.value)">${registryChannelOptions(b.channel || '', b.key || '')}</select>
+        <select aria-label="Controller device ${i + 1}" onchange="updateRegistryBinding(${i},'channel',this.value)">${registryChannelOptions(b.channel || '', b.key || '')}</select>
       </div>
       <div style="display:flex;align-items:end;justify-content:flex-end"><button type="button" class="danger remove-action" onclick="removeRegistryBinding(${i})">Remove</button></div>
     </div>
@@ -4260,6 +4285,15 @@ function closeRegistryAddDialog() {
   const modal = document.getElementById('registry-add-modal');
   if (modal) modal.style.display = 'none';
 }
+function openRegistryBusPrerequisite(bus) {
+  const key = bus === 'i2c' ? 'i2c' : 'spi';
+  closeRegistryAddDialog();
+  _workflowEditOpen.add('buses');
+  renderHardwareWorkflowSummaries();
+  const panel = document.getElementById('hardware-buses-panel');
+  panel?.scrollIntoView({behavior:'smooth', block:'start'});
+  document.getElementById(`en-${key}`)?.focus();
+}
 function renderRegistryAddCatalog() {
   const box = document.getElementById('registry-add-catalog');
   if (!box) return;
@@ -4315,10 +4349,10 @@ function selectRegistryAddPreset(index) {
   if (existing > 0 && registryPurposeIsSingleton(_registryAddDirection, purpose))
     return registryAddError(`${preset.label} is already installed. Edit or remove its existing card instead.`);
   if (!pcbProfileActive() && Number(preset.driver) >= 8 && !cfg.i2c?.enabled)
-    return registryAddError(`Enable the shared I2C bus near the top of this page before adding ${preset.label}.`);
+    return registryAddBusPrerequisite('i2c', preset.label);
   if (!pcbProfileActive() && Number(preset.temp_interface) >= 1 &&
       Number(preset.temp_interface) <= 3 && !cfg.spi?.enabled)
-    return registryAddError(`Enable the shared SPI bus near the top of this page before adding ${preset.label}.`);
+    return registryAddBusPrerequisite('spi', preset.label);
   if (pcbProfileActive()) {
     const choices = pcbCompatibleChoices(_registryAddDirection, purpose, preset.role);
     const box = document.getElementById('registry-add-catalog');
@@ -4430,6 +4464,18 @@ function registryAddError(message) {
   const err = document.getElementById('registry-add-error');
   if (!err) return;
   err.textContent = message;
+  err.style.display = '';
+}
+function registryAddBusPrerequisite(bus, deviceLabel) {
+  const err = document.getElementById('registry-add-error');
+  if (!err) return;
+  const i2c = bus === 'i2c';
+  const explanation = i2c
+    ? 'This device uses the shared I2C wiring. Configure SDA and SCL once; its address and channel are selected on the device card.'
+    : 'A MAX thermocouple amplifier uses the shared SPI wiring. Configure SCK and MISO once; each temperature probe then gets its own CS pin.';
+  err.innerHTML = `<strong>${escapeHtmlText(deviceLabel)} needs shared ${i2c ? 'I2C' : 'SPI'} wiring.</strong>
+    <span style="display:block;color:var(--text-2);margin:.3rem 0 .55rem">${explanation}</span>
+    <button type="button" onclick="openRegistryBusPrerequisite('${i2c ? 'i2c' : 'spi'}')">Configure shared ${i2c ? 'I2C' : 'SPI'} wiring</button>`;
   err.style.display = '';
 }
 function addRegistryChannel(direction) {
@@ -5213,7 +5259,7 @@ function clearDirty() {
   updateSaveButton();
 }
 function updateSaveButton() {
-  const locked = (engineMode !== 'STANDBY');
+  const locked = (engineMode !== 'STANDBY' && engineMode !== 'FAULT');
   const hasConflict = _pinConflictBlocking;
   const registryInvalid = cfg ? registryInvalidChannels().length > 0 : false;
   document.getElementById('btn-save').disabled = !_hwDirty || locked || hasConflict || registryInvalid;

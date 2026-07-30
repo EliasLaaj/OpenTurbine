@@ -219,7 +219,7 @@ function clearDirty() {
   updateSaveButton();
 }
 function updateSaveButton() {
-  const locked = (engineMode !== 'STANDBY');
+  const locked = (engineMode !== 'STANDBY' && engineMode !== 'FAULT');
   const hasConflict = _pinConflictBlocking;
   const registryInvalid = cfg ? registryInvalidChannels().length > 0 : false;
   document.getElementById('btn-save').disabled = !_hwDirty || locked || hasConflict || registryInvalid;

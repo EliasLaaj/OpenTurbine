@@ -9,6 +9,9 @@ const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'site', 'assets', 'images');
 const port = 11700 + Math.floor(Math.random() * 400);
 const base = `http://127.0.0.1:${port}`;
+const versionHeader = fs.readFileSync(path.join(root, 'src', 'system', 'version.h'), 'utf8');
+const firmwareVersion = versionHeader.match(/#define\s+OT_VERSION\s+"([^"]+)"/)?.[1];
+if (!firmwareVersion) throw new Error('Could not read OT_VERSION from src/system/version.h');
 
 // A deliberately modest single-shaft example is more useful to a new user
 // than the simulator's exhaustive all-features profile. Values are illustrative
@@ -84,7 +87,7 @@ async function installPublicExample(page) {
 async function setRunState(page, patch = {}) {
   await page.request.post(`${base}/__sim/scenario/full`);
   await page.request.post(`${base}/__sim/data`, { data: {
-    mode: 'RUNNING', fw_version: '2.0.0', uptime_s: 847, last_event: 'RUNNING',
+    mode: 'RUNNING', fw_version: firmwareVersion, uptime_s: 847, last_event: 'RUNNING',
     n1: 58200, n2: 0, tot: 592, oil: 2.35, oil_temp: 74, batt_voltage: 12.4,
     throttle_demand: 0.36, throttle_input_us: 1360, throttle_input_norm: 0.36, rc_throttle_norm: 0.36,
     oil_demand: 2.3, oil_pct: 41, flame: true, max_n1: 61400, max_tot: 628, max_oil_temp: 76,
@@ -92,13 +95,14 @@ async function setRunState(page, patch = {}) {
     idle_target_rpm: 58000, dynamic_idle_enabled: true, relight_enabled: false, relight_armed: false,
     has_n1: true, has_n2: false, has_tot: true, has_tit: false, has_oil_press: true, has_oil_temp: true,
     has_batt_voltage: true, has_throttle: true, has_oil_pump: true, has_oil_loop: true, has_dynamic_idle: true,
-    has_flame: false, has_p1: false, has_p2: false, has_torque: false, has_fuel_press: false, has_fuel_flow: false,
+    has_flame: false, has_p1: false, has_p2: false, has_torque: false, has_thrust: false, has_fuel_press: false, has_fuel_flow: false,
     has_governor: false, has_afterburner: false, has_ab_flame: false, has_glow_plug: false, has_fuel_pump2: false,
     has_prop_pitch: false, has_airstarter: false, has_oil_scavenge: false, has_bleed_valve: false,
     has_glow_current: false, has_igniter_current: false, has_igniter2_current: false, has_oil_pump_current: false,
     glow_current_amps: 0, igniter_current_amps: 0, igniter2_current_amps: 0, oil_pump_current_amps: 0,
     cool_fan_on: false, bench_mode: false, dev_mode: false,
-    labels: { n1: 'N1', n2: 'N2', tot: 'TOT', oil_press: 'Oil Press', oil_temp: 'Oil Temp' }, di_channels: [],
+    labels: { n1: 'N1', n2: 'N2', tot: 'TOT', oil_press: 'Oil Press', oil_temp: 'Oil Temp' },
+    registry_inputs: [], registry_outputs: [], di_channels: [],
     ...patch
   } });
 }

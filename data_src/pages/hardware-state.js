@@ -101,17 +101,34 @@ function stopStatusPoll() {
   statusPollTimer = null;
 }
 
+async function fetchHardwareJson(url, attempts = 4) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const response = await fetch(url, {cache:'no-store'});
+      if (response.ok) return await response.json();
+      const detail = await response.json().catch(() => ({}));
+      lastError = new Error(detail.error || `HTTP ${response.status}`);
+      if (![409, 503].includes(response.status)) throw lastError;
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 >= attempts) break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+  }
+  throw lastError || new Error('No response');
+}
+
 async function loadHardware() {
   document.getElementById('save-msg').textContent = 'Loading…';
   try {
-    const r = await fetch('/api/hardware');
-    cfg = await r.json();
+    cfg = await fetchHardwareJson('/api/hardware');
     pcbProfile = cfg._pcb_profile || {state:'absent', ports:[]};
     if (pcbProfile.state === 'valid') {
       const ports = [];
       const total = Number(pcbProfile.port_count || 0);
       for (let offset = 0; offset < total; offset += 12) {
-        const page = await (await fetch(`/api/pcb_profile?offset=${offset}&limit=12`, {cache:'no-store'})).json();
+        const page = await fetchHardwareJson(`/api/pcb_profile?offset=${offset}&limit=12`);
         ports.push(...(page.ports || []));
       }
       pcbProfile.ports = ports;

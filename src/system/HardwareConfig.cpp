@@ -1904,6 +1904,16 @@ bool validatePlatformPins(const JsonDocument& doc,
             } else if (!gpioAllowed(ch.pin)) {
                 return false;
             }
+            // In PCB mode the canonical START/STOP cards are also used above
+            // to populate stopPin/startPin. Their pins have therefore already
+            // been validated and claimed in the collision set. Do not count
+            // the same physical control a second time as a registry-only
+            // input, or every valid profile-backed START/STOP assignment is
+            // rejected as a self-collision.
+            const bool profileControl = PcbProfileManager::active() &&
+                (!strcmp(ch.purpose, "stop_switch") ||
+                 !strcmp(ch.purpose, "start_switch"));
+            if (profileControl) continue;
             if (registryMirrorsDiChannel(ch)) continue;
             if (!ChannelRegistry::isCoreManagedInput(ch) && !addPin(ch.pin)) return false;
         }

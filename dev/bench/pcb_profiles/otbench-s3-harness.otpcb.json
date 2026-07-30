@@ -1,0 +1,309 @@
+{
+  "format": "openturbine-pcb-profile",
+  "format_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "board": {
+    "id": "otbench-s3-harness",
+    "name": "OTBench ESP32-S3 Harness",
+    "revision": "A",
+    "manufacturer": "OpenTurbine development bench",
+    "description": "Custom dry-bench profile for the ESP32-S3 DUT wired to the classic ESP32 OTBench tester."
+  },
+  "target": {
+    "chip": "esp32-s3",
+    "minimum_flash_mb": 8
+  },
+  "buses": [],
+  "devices": [],
+  "fixed_functions": {
+    "status_led": {
+      "gpio": 48,
+      "type": "neopixel",
+      "safe_demand": 0
+    }
+  },
+  "ports": [
+    {
+      "id": "start_switch",
+      "label": "START switch",
+      "connector": "DUT13 to tester13",
+      "description": "Active-low START input driven open-drain by OTBench.",
+      "modes": [
+        {
+          "id": "switch",
+          "adapter": "digital_input",
+          "endpoint": {
+            "gpio": 13
+          },
+          "active_high": false,
+          "pull": "up"
+        }
+      ]
+    },
+    {
+      "id": "stop_switch",
+      "label": "STOP switch",
+      "connector": "DUT15 to tester14",
+      "description": "Active-low STOP input driven open-drain by OTBench.",
+      "modes": [
+        {
+          "id": "switch",
+          "adapter": "digital_input",
+          "endpoint": {
+            "gpio": 15
+          },
+          "active_high": false,
+          "pull": "up"
+        }
+      ]
+    },
+    {
+      "id": "n1_pulse",
+      "label": "N1 pulse input",
+      "connector": "DUT14 to tester4",
+      "description": "Primary shaft-speed pulse input.",
+      "modes": [
+        {
+          "id": "frequency",
+          "adapter": "pcnt_input",
+          "endpoint": {
+            "gpio": 14
+          },
+          "limits": {
+            "maximum_hz": 20000
+          }
+        }
+      ]
+    },
+    {
+      "id": "n2_pulse",
+      "label": "N2 pulse input",
+      "connector": "DUT8 to tester18",
+      "description": "Power-turbine shaft-speed pulse input.",
+      "modes": [
+        {
+          "id": "frequency",
+          "adapter": "pcnt_input",
+          "endpoint": {
+            "gpio": 8
+          },
+          "limits": {
+            "maximum_hz": 20000
+          }
+        }
+      ]
+    },
+    {
+      "id": "throttle_input",
+      "label": "Throttle analog input",
+      "connector": "DUT4 to tester25",
+      "description": "0-3.3 V throttle demand from the tester DAC.",
+      "modes": [
+        {
+          "id": "analog",
+          "adapter": "analog_input",
+          "endpoint": {
+            "gpio": 4
+          },
+          "reference_mv": 3300,
+          "limits": {
+            "minimum_mv": 0,
+            "maximum_mv": 3300
+          }
+        }
+      ]
+    },
+    {
+      "id": "oil_pressure_input",
+      "label": "Oil pressure analog",
+      "connector": "DUT1 to tester26",
+      "description": "0-3.3 V oil-pressure stimulus from the tester DAC.",
+      "modes": [
+        {
+          "id": "analog",
+          "adapter": "analog_input",
+          "endpoint": {
+            "gpio": 1
+          },
+          "reference_mv": 3300,
+          "limits": {
+            "minimum_mv": 0,
+            "maximum_mv": 3300
+          }
+        }
+      ]
+    },
+    {
+      "id": "flame_input",
+      "label": "Flame threshold input",
+      "connector": "DUT2 to tester27",
+      "description": "Digital rail stimulus used as an analog flame-threshold input.",
+      "modes": [
+        {
+          "id": "analog",
+          "adapter": "analog_input",
+          "endpoint": {
+            "gpio": 2
+          },
+          "reference_mv": 3300,
+          "limits": {
+            "minimum_mv": 0,
+            "maximum_mv": 3300
+          }
+        },
+        {
+          "id": "switch",
+          "adapter": "digital_input",
+          "endpoint": {
+            "gpio": 2
+          }
+        }
+      ]
+    },
+    {
+      "id": "idle_input",
+      "label": "Idle command input",
+      "connector": "DUT5 to tester32",
+      "description": "RC pulse or digital rail stimulus for the idle command.",
+      "modes": [
+        {
+          "id": "servo_pwm",
+          "adapter": "rc_pwm_input",
+          "endpoint": {
+            "gpio": 5
+          },
+          "limits": {
+            "minimum_hz": 20,
+            "maximum_hz": 500
+          }
+        },
+        {
+          "id": "switch",
+          "adapter": "digital_input",
+          "endpoint": {
+            "gpio": 5
+          },
+          "pull": "down"
+        }
+      ]
+    },
+    {
+      "id": "main_fuel_output",
+      "label": "Main fuel servo output",
+      "connector": "DUT40 to tester17",
+      "description": "1000-2000 microsecond main-fuel servo output.",
+      "modes": [
+        {
+          "id": "servo",
+          "adapter": "servo_output",
+          "endpoint": {
+            "gpio": 40
+          },
+          "safe_demand": 0
+        }
+      ]
+    },
+    {
+      "id": "starter_output",
+      "label": "Starter servo output",
+      "connector": "DUT17 to tester19",
+      "description": "Optional proportional starter output; retained for harness continuity checks.",
+      "modes": [
+        {
+          "id": "servo",
+          "adapter": "servo_output",
+          "endpoint": {
+            "gpio": 17
+          },
+          "safe_demand": 0
+        }
+      ]
+    },
+    {
+      "id": "oil_pump_output",
+      "label": "Oil pump PWM output",
+      "connector": "DUT11 to tester21",
+      "description": "Main oil-pump output captured by OTBench.",
+      "modes": [
+        {
+          "id": "pwm",
+          "adapter": "pwm_output",
+          "endpoint": {
+            "gpio": 11
+          },
+          "safe_demand": 0
+        },
+        {
+          "id": "relay",
+          "adapter": "relay_output",
+          "endpoint": {
+            "gpio": 11
+          },
+          "safe_demand": 0
+        }
+      ]
+    },
+    {
+      "id": "fuel_shutoff_output",
+      "label": "Fuel shutoff output",
+      "connector": "DUT12 to tester22",
+      "description": "Active-high fuel shutoff relay output.",
+      "modes": [
+        {
+          "id": "relay",
+          "adapter": "relay_output",
+          "endpoint": {
+            "gpio": 12
+          },
+          "active_high": true,
+          "safe_demand": 0
+        }
+      ]
+    },
+    {
+      "id": "igniter_output",
+      "label": "Igniter output",
+      "connector": "DUT21 to tester23",
+      "description": "Igniter relay or dwell-PWM output.",
+      "modes": [
+        {
+          "id": "relay",
+          "adapter": "relay_output",
+          "endpoint": {
+            "gpio": 21
+          },
+          "active_high": true,
+          "safe_demand": 0
+        },
+        {
+          "id": "pwm",
+          "adapter": "pwm_output",
+          "endpoint": {
+            "gpio": 21
+          },
+          "active_high": true,
+          "safe_demand": 0
+        }
+      ]
+    },
+    {
+      "id": "starter_enable_output",
+      "label": "Starter enable output",
+      "connector": "DUT39 to tester33",
+      "description": "Active-high starter-enable relay output.",
+      "modes": [
+        {
+          "id": "relay",
+          "adapter": "relay_output",
+          "endpoint": {
+            "gpio": 39
+          },
+          "active_high": true,
+          "safe_demand": 0
+        }
+      ]
+    }
+  ]
+}

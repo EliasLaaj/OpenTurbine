@@ -1,0 +1,27 @@
+[
+  {
+    "name": "t_n2_rpm",
+    "status": "pass",
+    "duration_s": 1.898,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "INFO",
+        "msg": "N2 3000 rpm -> telemetry n2=2777"
+      },
+      {
+        "level": "INFO",
+        "msg": "N2 7000 rpm -> telemetry n2=6382"
+      },
+      {
+        "level": "PASS",
+        "msg": "n2 telemetry rises with stimulus"
+      },
+      {
+        "level": "PASS",
+        "msg": "n2 within tolerance of commanded rpm (allowing PCNT quantization)"
+      }
+    ]
+  }
+]

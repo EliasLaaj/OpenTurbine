@@ -1,0 +1,44 @@
+[
+  {
+    "name": "t_start_switch",
+    "status": "pass",
+    "duration_s": 0.334,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "PASS",
+        "msg": "START pressed -> start_switch_active True (got True)"
+      }
+    ]
+  },
+  {
+    "name": "t_n2_rpm",
+    "status": "skip",
+    "duration_s": 0.051,
+    "skip_reason": "N2 is not enabled on the DUT",
+    "error": null,
+    "checks": []
+  },
+  {
+    "name": "t_throttle_output",
+    "status": "pass",
+    "duration_s": 0.6,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "INFO",
+        "msg": "50% throttle -> 1499us 50.0Hz duty=0.075"
+      },
+      {
+        "level": "PASS",
+        "msg": "throttle output has a centred 1.5 ms pulse"
+      },
+      {
+        "level": "PASS",
+        "msg": "throttle output has a 50 Hz servo frame"
+      }
+    ]
+  }
+]

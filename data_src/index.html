@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine</title>
-<link rel="stylesheet" href="/style.css?v=20260723a">
+<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260722g"></script>
-<script src="/ui_dialog.js?v=20260723a"></script>
+<script src="/theme.js?v=20260730a"></script>
+<script src="/ui_dialog.js?v=20260730a"></script>
 </head>
 <body data-page="dashboard">
 <nav>
@@ -36,21 +36,21 @@
   <button onclick="dismissCaptiveBanner()" style="background:none;border:none;color:var(--yellow);font-size:1.2rem;cursor:pointer;margin-left:.8rem;line-height:1">&times;</button>
   </div>
 
-  <!-- Getting Started banner (shown on first run, STANDBY, not yet dismissed) -->
+  <!-- Commissioning banner (shown on first run, STANDBY, not yet dismissed) -->
   <div id="getting-started-banner" class="gs-banner" style="display:none">
     <div class="gs-header">
-      <span class="gs-title">Getting Started</span>
+      <span class="gs-title">Commissioning checklist</span>
       <button class="gs-dismiss" onclick="dismissGettingStarted()" title="Hide this setup guide">Hide guide</button>
     </div>
-    <div id="gs-progress" class="gs-progress">0 of 5 setup steps completed on this browser.</div>
+    <div id="gs-progress" class="gs-progress">0 of 5 setup activities recorded in this browser.</div>
     <ol class="gs-steps">
-      <li data-setup-step="hardware"><a href="/hardware.html">Describe fitted hardware and assign pins</a><span class="gs-step-state">Not confirmed on this browser</span></li>
-      <li data-setup-step="config"><a href="/config.html">Enter and verify engine safety limits</a><span class="gs-step-state">Not confirmed on this browser</span></li>
-      <li data-setup-step="calibration"><a href="/calibration.html">Calibrate fitted sensors and actuators</a><span class="gs-step-state">Not confirmed on this browser</span></li>
-      <li data-setup-step="sequence"><a href="/sequence.html">Review startup and shutdown sequences</a><span class="gs-step-state">Not confirmed on this browser</span></li>
-      <li data-setup-step="tools"><a href="/tools.html">Run a safe actuator or dry-sequence test</a><span class="gs-step-state">Not confirmed on this browser</span></li>
+      <li data-setup-step="hardware" data-setup-done="Hardware saved in this browser"><a href="/hardware.html">Describe fitted hardware and assign pins</a><span class="gs-step-state">No hardware save recorded</span></li>
+      <li data-setup-step="config" data-setup-done="Config saved in this browser"><a href="/config.html">Enter and verify engine safety limits</a><span class="gs-step-state">No config save recorded</span></li>
+      <li data-setup-step="calibration" data-setup-done="Calibration saved in this browser"><a href="/calibration.html">Calibrate fitted sensors and actuators</a><span class="gs-step-state">No calibration save recorded</span></li>
+      <li data-setup-step="sequence" data-setup-done="Sequence saved in this browser"><a href="/sequence.html">Review startup and shutdown sequences</a><span class="gs-step-state">No sequence save recorded</span></li>
+      <li data-setup-step="tools" data-setup-done="Tool command completed in this browser"><a href="/tools.html">Run a safe actuator or dry-sequence test</a><span class="gs-step-state">No tool command recorded</span></li>
     </ol>
-    <div class="gs-step-text" style="margin-top:.55rem">Keep fuel and ignition physically disconnected until every step is verified.</div>
+    <div class="gs-step-text" style="margin-top:.55rem"><b>Progress marks record successful saves or tool commands—not physical verification.</b> Changing upstream hardware clears affected later marks. Keep fuel and ignition physically disconnected until you have checked the actual wiring, readings, actuator direction, failsafes, and sequences.</div>
   </div>
 
   <div id="dev-banner" class="dev-banner" style="display:none">
@@ -107,6 +107,12 @@
   <div id="fault-card" style="display:none">
     <div class="fault-title">⚠ Fault / Abort</div>
     <div class="fault-desc" id="fault-desc-text"></div>
+    <div class="fault-actions" aria-label="Fault investigation">
+      <a href="/log.html">Event evidence</a>
+      <a href="/calibration.html">Check calibration</a>
+      <a href="/config.html">Review limits</a>
+      <a href="/tools.html">Standby diagnostics</a>
+    </div>
   </div>
 
   <!-- Sequence progress (shown during STARTUP / SHUTDOWN) -->
@@ -412,7 +418,7 @@
       <div class="oil-sub">pump: <span id="ab-pump-demand">—</span>%</div>
       <div class="oil-sub" id="ab-fuel-offset-row" style="display:none">main fuel offset: <span id="ab-fuel-offset">—</span>%</div>
       <div class="ab-controls">
-        <button id="btn-ab-fire" class="ab-fire-btn" onclick="sendAbCmd('AB_FIRE')" disabled title="Manual fire is available when Hardware AB trigger source is Manual command only.">MANUAL FIRE</button>
+        <button id="btn-ab-fire" class="ab-fire-btn" onclick="confirmAbFire()" disabled title="Manual fire is available when Hardware AB trigger source is Manual command only.">MANUAL FIRE</button>
         <button id="btn-ab-stop" class="ab-stop-btn" onclick="sendAbCmd('AB_STOP')" disabled>AB STOP</button>
       </div>
     </div>
@@ -518,8 +524,9 @@
   <div id="start-confirm-box">
     <h3>Start Engine?</h3>
     <p id="start-confirm-text">This will begin the startup sequence. Make sure the area is clear and the engine is ready to run.</p>
+    <div id="start-confirm-preflight" class="start-confirm-preflight" aria-live="polite"></div>
     <div class="btns">
-      <button onclick="confirmStart()">Confirm Start</button>
+      <button id="btn-confirm-start" onclick="confirmStart()">Confirm Start</button>
       <button class="danger" onclick="cancelStart()">Cancel</button>
     </div>
   </div>
@@ -577,12 +584,32 @@ function acceptBetaNotice() {
   setStoredFlag(BETA_ACK_KEY);
   const overlay = document.getElementById('beta-ack-overlay');
   if (overlay) overlay.style.display = 'none';
-  if (window.OTTheme) OTTheme.maybeFirstRun();
+  const mode = (_lastData && _lastData.mode) || '';
+  if ((mode === 'STANDBY' || mode === 'FAULT') && window.OTTheme) OTTheme.maybeFirstRun();
 }
 document.addEventListener('DOMContentLoaded', function() {
-  if (!hasBetaNoticeAck()) showBetaNotice();
-  else if (window.OTTheme) OTTheme.maybeFirstRun();
+  // Wait for the first telemetry state. A new browser joining an active
+  // engine must see the operator dashboard, not a first-run overlay.
+  const beta = document.getElementById('beta-ack-overlay');
+  if (beta) beta.style.display = 'none';
 });
+function updateFirstRunForMode(mode) {
+  const setupMode = mode === 'STANDBY' || mode === 'FAULT';
+  updateGettingStartedVisibility(mode);
+  const beta = document.getElementById('beta-ack-overlay');
+  const theme = document.getElementById('theme-firstrun');
+  if (!setupMode) {
+    if (beta) beta.style.display = 'none';
+    if (theme) theme.style.display = 'none';
+    return;
+  }
+  if (!hasBetaNoticeAck()) {
+    if (beta && getComputedStyle(beta).display !== 'flex') showBetaNotice();
+    return;
+  }
+  if (beta) beta.style.display = 'none';
+  if (window.OTTheme) OTTheme.maybeFirstRun();
+}
 function showStartConfirm() {
   if (!hasBetaNoticeAck()) {
     showBetaNotice();
@@ -597,10 +624,46 @@ function showStartConfirm() {
     text.style.color = bench ? 'var(--red)' : '';
     text.style.fontWeight = bench ? '700' : '';
   }
+  renderStartPreflight();
   document.getElementById('start-confirm-overlay').style.display = 'flex';
+  fetch('/api/hardware', { cache:'no-store' })
+    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+    .then(hw => renderStartPreflight(Array.isArray(hw.startup_seq) ? hw.startup_seq.length : null))
+    .catch(() => renderStartPreflight(null, true));
+}
+function renderStartPreflight(sequenceCount, sequenceUnavailable = false) {
+  const box = document.getElementById('start-confirm-preflight');
+  if (!box) return;
+  const d = _lastData || {};
+  const rows = [];
+  const health = ok => ok === false ? '<strong class="bad">FAULT</strong>' : '<strong class="good">OK</strong>';
+  const numeric = (value, digits = 0) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '—';
+  rows.push(['ECU mode', escapeHtmlText(String(d.mode || 'Unknown'))]);
+  if (d.has_n1) rows.push([lbl('n1'), numeric(d.n1, 0) + ' RPM · ' + health(d.n1_healthy)]);
+  const egtKey = d.egt_source === 2 ? 'tit' : (d.egt_source === 1 ? 'tot' : (d.has_tot ? 'tot' : (d.has_tit ? 'tit' : '')));
+  if (egtKey) {
+    const unit = tempUnit();
+    rows.push([lbl(egtKey), numeric(toDispTemp(d[egtKey]), 0) + ' °' + unit + ' · ' + health(d[egtKey + '_healthy'])]);
+  }
+  if (d.has_oil_press) rows.push([lbl('oil_press'), numeric(toDispPress(d.oil), 2) + ' ' + dispPressUnit() + ' · ' + health(d.oil_healthy)]);
+  rows.push(['STOP input', d.stop_switch_active ? '<strong class="bad">ACTIVE</strong>' : 'Released']);
+  rows.push(['Safety state', d.bench_mode ? '<strong class="bad">BENCH MODE — BYPASSED</strong>' : 'Normal checks']);
+  rows.push(['Startup sequence', sequenceUnavailable ? 'Could not read — ECU will still validate START' :
+    (Number.isInteger(sequenceCount) ? sequenceCount + ' block' + (sequenceCount === 1 ? '' : 's') : 'Checking…')]);
+  box.innerHTML = '<div class="start-confirm-preflight-title">Live ECU preflight snapshot</div>' +
+    rows.map(([name, value]) => `<div class="start-confirm-preflight-row"><span>${escapeHtmlText(name)}</span><span>${value}</span></div>`).join('') +
+    '<div class="start-confirm-preflight-note">Live state is checked again when you confirm.</div>';
 }
 function confirmStart() {
   document.getElementById('start-confirm-overlay').style.display = 'none';
+  const dashboardStart = document.getElementById('btn-start');
+  const mode = (_lastData && _lastData.mode) || 'unknown';
+  if (_telemetryStale || !_lastData || mode !== 'STANDBY' || dashboardStart?.disabled) {
+    const reason = _telemetryStale ? 'live telemetry is stale'
+      : (dashboardStart?.title || ('ECU mode is ' + mode));
+    alert('START is no longer available: ' + reason + '.\n\nReview the live dashboard state and try again.');
+    return;
+  }
   // Guard: verify startup sequence is non-empty before sending start
   fetch('/api/hardware').then(r => r.json()).then(hw => {
     const seq = hw.startup_seq || [];
@@ -646,6 +709,22 @@ async function _doStart() {
 function cancelStart() {
   document.getElementById('start-confirm-overlay').style.display = 'none';
 }
+async function confirmAbFire() {
+  const button = document.getElementById('btn-ab-fire');
+  if (!button || button.disabled) return;
+  const d = _lastData || {};
+  const snapshot = [];
+  if (d.has_n1 && Number.isFinite(Number(d.n1))) snapshot.push(lbl('n1') + ' ' + Math.round(Number(d.n1)).toLocaleString() + ' RPM');
+  const egtKey = d.egt_source === 2 ? 'tit' : (d.egt_source === 1 ? 'tot' : (d.has_tot ? 'tot' : (d.has_tit ? 'tit' : '')));
+  if (egtKey && Number.isFinite(Number(d[egtKey]))) snapshot.push(lbl(egtKey) + ' ' + Math.round(toDispTemp(Number(d[egtKey]))) + ' °' + tempUnit());
+  const message = 'This requests the configured afterburner ignition sequence and may energize the AB igniter, fuel valve, and fuel pump.' +
+    (snapshot.length ? '\n\nLive: ' + snapshot.join(' · ') : '') +
+    '\n\nConfirm the engine, fuel system, and test area are ready.';
+  if (!await OTDialog.confirm(message, {
+    title:'Fire afterburner?', confirmText:'Fire afterburner', danger:true
+  })) return;
+  sendAbCmd('AB_FIRE');
+}
 // Close on overlay click
 document.getElementById('start-confirm-overlay').addEventListener('click', function(e) {
   if (e.target === this) cancelStart();
@@ -654,10 +733,8 @@ document.getElementById('start-confirm-overlay').addEventListener('click', funct
 // Getting Started banner — show on first visit, hide once dismissed
 (function() {
   try {
-    if (!hasStoredFlag(GS_DISMISS_KEY)) {
-      const banner = document.getElementById('getting-started-banner');
-      if (banner) banner.style.display = '';
-    }
+    const banner = document.getElementById('getting-started-banner');
+    if (banner) banner.style.display = 'none';
     const progress = window.OTSetup ? OTSetup.state() : {};
     const rows = Array.from(document.querySelectorAll('[data-setup-step]'));
     let complete = 0;
@@ -667,15 +744,22 @@ document.getElementById('start-confirm-overlay').addEventListener('click', funct
       if (done) {
         complete++;
         const status = row.querySelector('.gs-step-state');
-        if (status) status.textContent = 'Completed on this browser';
+        if (status) status.textContent = row.dataset.setupDone || 'Activity recorded in this browser';
       }
     });
     const label = document.getElementById('gs-progress');
     if (label) label.textContent = complete === rows.length
-      ? 'Setup checklist complete on this browser. Re-verify after hardware or engine changes.'
-      : complete + ' of ' + rows.length + ' setup steps completed on this browser.';
+      ? 'All setup activities recorded in this browser. Physical verification is still required.'
+      : complete + ' of ' + rows.length + ' setup activities recorded in this browser.';
   } catch(e) {}
 })();
+
+function updateGettingStartedVisibility(mode) {
+  const banner = document.getElementById('getting-started-banner');
+  if (!banner) return;
+  const setupMode = mode === 'STANDBY' || mode === 'FAULT';
+  banner.style.display = setupMode && !hasStoredFlag(GS_DISMISS_KEY) ? '' : 'none';
+}
 
 function dismissGettingStarted() {
   setStoredFlag(GS_DISMISS_KEY);
@@ -710,6 +794,6 @@ function dismissCaptiveBanner() {
 })();
 </script>
 
-<script src="/app.js?v=20260722b"></script>
+<script src="/app.js?v=20260730a"></script>
 </body>
 </html>

@@ -413,11 +413,12 @@ function renderForm() {
     const min = (!isCb && !isSel && f.min !== undefined) ? ` min="${_roundedDisplay(_fieldToDisplay(f, f.min))}"` : '';
     const max = (!isCb && !isSel && f.max !== undefined) ? ` max="${_roundedDisplay(_fieldToDisplay(f, f.max))}"` : '';
     const step = (!isCb && !isSel) ? _roundedDisplay(_fieldStepToDisplay(f, f.step || 1)) : null;
+    const aria = ` aria-label="${_escHtml(f.label)}"`;
     const inp = isCb
-      ? `<input type="checkbox" id="cf-${f.key}"${val ? ' checked' : ''}${isLocked ? ' disabled' : ''}>`
+      ? `<input type="checkbox" id="cf-${f.key}"${aria}${val ? ' checked' : ''}${isLocked ? ' disabled' : ''}>`
       : isSel
-      ? `<select id="cf-${f.key}"${isLocked ? ' disabled' : ''}>${(f.options||[]).map(o => `<option value="${o.v}"${val == o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select>`
-      : `<input type="number" id="cf-${f.key}" value="${val !== undefined ? val : ''}"
+      ? `<select id="cf-${f.key}"${aria}${isLocked ? ' disabled' : ''}>${(f.options||[]).map(o => `<option value="${o.v}"${val == o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select>`
+      : `<input type="number" id="cf-${f.key}"${aria} value="${val !== undefined ? val : ''}"
         step="${step}"${min}${max}${isLocked ? ' disabled' : ''}>`;
     const wid = f.wrapId ? ` id="${f.wrapId}"` : '';
     const level = f.basic ? 'essential' : 'advanced';

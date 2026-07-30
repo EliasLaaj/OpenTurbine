@@ -60,8 +60,14 @@ function installedBrowser() {
   try {
     await page.goto(base);
     await page.evaluate(() => localStorage.clear());
+    await scenario(page, 'full');
     await page.reload();
     await waitShown(page, '#n1-card', true);
+    await waitShown(page, '#beta-ack-overlay', false);
+    await waitShown(page, '#theme-firstrun', false);
+    await waitShown(page, '#getting-started-banner', false);
+    results.push('first-run overlays and commissioning guide never cover an active engine dashboard');
+    await page.request.post(`${base}/__sim/data`, { data: { mode: 'STANDBY' } });
 
     // Fresh profile → the beta safety notice must appear and gate clicks;
     // acknowledge it the way a tester would, then continue the smoke run.
@@ -77,6 +83,8 @@ function installedBrowser() {
     await waitShown(page, '#theme-firstrun', false);
     assert.equal(await page.evaluate(() => localStorage.getItem('ot_theme_onboarded_v1')), '1');
     results.push('first-run theme chooser appears after the beta notice and is dismissible');
+    await scenario(page, 'full');
+    await waitShown(page, '#getting-started-banner', false);
     assert.equal(await text(page, '#fw-version'), 'vsim-1.0.0');
     assert.equal(await text(page, '#throttle-input-pct'), '50.0');
     assert.equal(await page.evaluate(() =>
@@ -109,7 +117,49 @@ function installedBrowser() {
         !!(adv.compareDocumentPosition(outputs) & Node.DOCUMENT_POSITION_FOLLOWING);
     }), true);
     assert.equal(await text(page, '#hour-start-count'), '12');
+    assert.equal(await page.locator('[data-registry-input-id="thrust_main"]').count(), 0);
+    assert.equal(await page.locator('#thrust-card').isVisible(), true);
+    await page.locator('#btn-ab-fire').click();
+    assert.equal(await text(page, '#ot-dialog-title'), 'Fire afterburner?');
+    assert.match(await text(page, '#ot-dialog-message'), /AB igniter, fuel valve, and fuel pump.*N1.*RPM.*TOT.*°C/is);
+    await page.locator('#ot-dialog-cancel').click();
     results.push('dashboard prioritizes primary data, oil cards, and actuator outputs below start/stop');
+    results.push('manual afterburner fire requires a live-state confirmation while AB stop remains immediate');
+    await page.request.post(`${base}/__sim/data`, { data: {
+      mode: 'STANDBY', bench_mode: false, stop_switch_active: false,
+      has_n1: true, n1: 0, n1_healthy: true,
+      has_tot: true, has_tit: true, egt_source: 1, tot: 24, tot_healthy: true,
+      has_oil_press: true, oil: 0, oil_healthy: true
+    } });
+    await page.waitForFunction(() => document.getElementById('mode-badge')?.textContent === 'STANDBY');
+    await page.evaluate(() => showStartConfirm());
+    await page.waitForFunction(() => !document.getElementById('start-confirm-preflight')?.textContent?.includes('Checking'));
+    const startPreflight = await text(page, '#start-confirm-preflight');
+    assert.match(startPreflight, /ECU mode\s*STANDBY/i);
+    assert.match(startPreflight, /N1\s*0 RPM\s*·\s*OK/i);
+    assert.match(startPreflight, /TOT\s*24 °C\s*·\s*OK/i);
+    assert.match(startPreflight, /Oil Press\s*0\.00 bar\s*·\s*OK/i);
+    assert.match(startPreflight, /STOP input\s*Released/i);
+    assert.match(startPreflight, /Safety state\s*Normal checks/i);
+    assert.match(startPreflight, /Startup sequence\s*\d+ blocks?/i);
+    await page.evaluate(() => cancelStart());
+    const staleStartRequestSent = await page.evaluate(() => {
+      _telemetryStale = true;
+      let sent = false;
+      const originalFetch = window.fetch;
+      window.fetch = (...args) => {
+        if (String(args[0]).includes('/api/hardware')) sent = true;
+        return originalFetch(...args);
+      };
+      confirmStart();
+      window.fetch = originalFetch;
+      _telemetryStale = false;
+      return sent;
+    });
+    assert.equal(staleStartRequestSent, false);
+    assert.match(await text(page, '.ot-dialog-message'), /START is no longer available.*telemetry is stale/is);
+    await page.locator('#ot-dialog-confirm').click();
+    results.push('start confirmation exposes a compact live ECU preflight snapshot before command');
     assert.equal((await text(page, '#getting-started-banner')).match(/[⚙🔧📋🔨▶]/u), null);
     assert.equal(await page.locator('.gs-steps a').first().evaluate(el => getComputedStyle(el).color), 'rgb(245, 245, 247)');
     results.push('getting-started checklist uses the high-contrast text colour for plain-text actions');
@@ -214,7 +264,9 @@ function installedBrowser() {
     await scenario(page, 'fault');
     await waitShown(page, '#fault-card', true);
     assert.equal(await text(page, '#fault-desc-text'), 'Oil pressure below running minimum');
-    results.push('fault scenario exposes the fault card and current diagnosis');
+    for (const route of ['/log.html', '/calibration.html', '/config.html', '/tools.html'])
+      assert.equal(await page.locator(`#fault-card a[href="${route}"]`).count(), 1);
+    results.push('fault scenario exposes the current diagnosis and direct investigation routes');
 
     await scenario(page, 'full');
     await page.goto(`${base}/config.html`);

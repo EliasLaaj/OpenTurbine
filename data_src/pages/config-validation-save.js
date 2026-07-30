@@ -76,8 +76,11 @@ function runValidation() {
   if (n1PullbackEnabled && rpmLimit > 0 &&
       ((n1PullbackSoft > 0 && n1PullbackSoft >= rpmLimit) ||
        (n1PullbackFull > 0 && n1PullbackFull >= rpmLimit))) {
+    const n1LimitLabel = hwCfg.safety?.overspeed
+      ? 'the hard N1 shutdown limit'
+      : 'Maximum N1 Speed';
     warnings.push({section:'Engine Protection Limits', key:'warn-n1-pullback-trip',
-      msg:'⚠ N1 pullback starts or reaches full authority at/above the hard N1 shutdown limit. Set both pullback points below the trip.'});
+      msg:`⚠ N1 pullback starts or reaches full authority at/above ${n1LimitLabel}. Set both pullback points below that limit.`});
   }
 
   const governorTargetNow = fv('gv_tr');
@@ -286,8 +289,12 @@ async function validateBeforeSave(cfg) {
   const pbN1Full = Number(gv(cfg, 'throttle', 'pullback_n1_hard_rpm') || 0);
   if (pbN1Enabled && Number(rpmLimit) > 0 &&
       ((pbN1Soft > 0 && pbN1Soft >= rpmLimit) ||
-       (pbN1Full > 0 && pbN1Full >= rpmLimit)))
-    warns.push('N1 pullback should begin and reach full authority below Maximum N1 Speed (' + rpmLimit + ' RPM), otherwise the hard shutdown can occur before gradual reduction is effective.');
+       (pbN1Full > 0 && pbN1Full >= rpmLimit))) {
+    const consequence = hwCfg.safety?.overspeed
+      ? 'the hard shutdown can occur before gradual reduction is effective'
+      : 'gradual reduction cannot finish before the configured maximum';
+    warns.push('N1 pullback should begin and reach full authority below Maximum N1 Speed (' + rpmLimit + ' RPM), otherwise ' + consequence + '.');
+  }
   const governorTarget = Number(gv(cfg, 'governor', 'target_rpm') || 0);
   if (hwCfg.controllers?.governor && hasN2 && governorTarget <= 0)
     warns.push('Automatic N2 speed control is enabled in Hardware, but Target N2 RPM is 0. The governor remains inactive until you enter the rated output-shaft speed.');

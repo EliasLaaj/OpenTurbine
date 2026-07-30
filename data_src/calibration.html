@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Calibration</title>
-<link rel="stylesheet" href="/style.css?v=20260723a">
+<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/ui_dialog.js?v=20260723a"></script>
+<script src="/ui_dialog.js?v=20260730a"></script>
 </head>
 <body>
 <nav>
@@ -26,6 +26,13 @@
       <h1 class="page-title">Calibration</h1>
       <p class="page-subtitle">View live sensor readings and calibrate fitted inputs and actuators.</p>
     </div>
+  </div>
+  <div id="calibration-jump-wrap" class="calibration-jump">
+    <label for="calibration-jump">Jump to fitted calibration</label>
+    <select id="calibration-jump" aria-label="Jump to fitted calibration" onchange="jumpToCalibration(this.value)">
+      <option value="">Choose a sensor or actuator…</option>
+    </select>
+    <span id="calibration-jump-count"></span>
   </div>
 
   <div class="sensor-row" id="thrust-cal-row" style="display:none">
@@ -645,7 +652,7 @@
 
 </main>
 
-<script src="/app.js?v=20260722b"></script>
+<script src="/app.js?v=20260730a"></script>
 <script>
 let live = {};
 let oilPts = [];
@@ -709,6 +716,42 @@ function hwAbFlameEnabled(hw) {
 function setRowVisible(id, visible) {
   const el = document.getElementById(id);
   if (el) el.style.display = visible ? '' : 'none';
+  scheduleCalibrationJumpRefresh();
+}
+let calibrationJumpRefreshQueued = false;
+function scheduleCalibrationJumpRefresh() {
+  if (calibrationJumpRefreshQueued) return;
+  calibrationJumpRefreshQueued = true;
+  Promise.resolve().then(() => {
+    calibrationJumpRefreshQueued = false;
+    refreshCalibrationJump();
+  });
+}
+function refreshCalibrationJump() {
+  const select = document.getElementById('calibration-jump');
+  const wrap = document.getElementById('calibration-jump-wrap');
+  if (!select || !wrap) return;
+  const current = select.value;
+  const rows = Array.from(document.querySelectorAll('.sensor-row[id]'))
+    .filter(row => row.style.display !== 'none')
+    .map(row => ({
+      id: row.id,
+      label: (row.querySelector('.sensor-name')?.textContent || row.id)
+        .replace(/\s+/g, ' ').trim()
+    }));
+  select.innerHTML = '<option value="">Choose a sensor or actuator…</option>' +
+    rows.map(row => `<option value="${row.id}">${row.label}</option>`).join('');
+  if (rows.some(row => row.id === current)) select.value = current;
+  const count = document.getElementById('calibration-jump-count');
+  if (count) count.textContent = `${rows.length} fitted calibration${rows.length === 1 ? '' : 's'}`;
+  wrap.style.display = rows.length > 1 ? '' : 'none';
+}
+function jumpToCalibration(id) {
+  const target = document.getElementById(id);
+  if (!target || target.style.display === 'none') return;
+  document.querySelectorAll('.deep-link-target').forEach(el => el.classList.remove('deep-link-target'));
+  target.classList.add('deep-link-target');
+  target.scrollIntoView({behavior:'smooth', block:'start'});
 }
 function revealCalibrationDeepLink() {
   const id = decodeURIComponent(String(location.hash || '').replace(/^#/, ''));
@@ -1043,13 +1086,16 @@ window.applyData = function(d) {
   }
   if (idleInputType === 'servo') {
     // Servo signal: show µs, bar over rcMin–rcMax
-    const us = d.idle_input_us ?? rcMin;
-    setText('cal-idle-raw', us + ' µs');
-    const idlePosP = Math.round(((us - rcMin) / (rcMax - rcMin)) * 100);
-    setText('cal-idle-pct', Math.max(0, Math.min(100, idlePosP)) + '%');
+    const us = Number(d.idle_input_us);
+    const hasIdleSignal = Number.isFinite(us) && us > 0;
+    setText('cal-idle-raw', hasIdleSignal ? us + ' µs' : 'NO SIGNAL');
+    const idlePosP = hasIdleSignal
+      ? Math.round(((us - rcMin) / (rcMax - rcMin)) * 100)
+      : 0;
+    setText('cal-idle-pct', hasIdleSignal ? Math.max(0, Math.min(100, idlePosP)) + '%' : '—');
     setText('idle-range-lo', rcMin + ' µs');
     setText('idle-range-hi', rcMax + ' µs');
-    bar('bar-idle', us, rcMin, rcMax, true);
+    bar('bar-idle', hasIdleSignal ? us : rcMin, rcMin, rcMax, hasIdleSignal);
   } else {
     // ADC: show counts, bar over 0–4095
     const idleRaw = d.idle_input_raw ?? 0;
@@ -1062,12 +1108,14 @@ window.applyData = function(d) {
   }
   // Idle→throttle % mapping (same regardless of signal type)
   {
+    const idleUs = Number(d.idle_input_us);
+    const hasIdleSignal = Number.isFinite(idleUs) && idleUs > 0;
     const idleNorm = idleInputType === 'servo'
-      ? Math.max(0, Math.min(1, ((d.idle_input_us ?? rcMin) - rcMin) / (rcMax - rcMin)))
+      ? (hasIdleSignal ? Math.max(0, Math.min(1, (idleUs - rcMin) / (rcMax - rcMin))) : null)
       : Math.max(0, Math.min(1, ((d.idle_input_raw ?? rcMin) - rcMin) / (rcMax - rcMin)));
     const idleThLo = cfg.throttle?.fuel_pump_min_pct ?? 0;
     const idleThHi = cfg.throttle?.idle_max_pct ?? 18;
-    setText('cal-idle-thr', (idleThLo + idleNorm * (idleThHi - idleThLo)).toFixed(1) + '%');
+    setText('cal-idle-thr', idleNorm === null ? '—' : (idleThLo + idleNorm * (idleThHi - idleThLo)).toFixed(1) + '%');
   }
 
   // ── Oil temp / batt volt / torque rows ───────────────────────

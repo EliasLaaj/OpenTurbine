@@ -111,7 +111,11 @@ function collectPinUsage() {
     usage.get(pin).push({label, group});
   };
   const c = cfg.controls || {};
-  add(c.stop_pin, 'Stop input'); add(c.start_pin, 'Start input');
+  // START/STOP registry channels mirror the legacy controls fields. Count
+  // either representation, not both, or a valid PCB assignment is reported
+  // as conflicting with itself.
+  if (!registryHasPurpose('input', 'stop_switch')) add(c.stop_pin, 'Stop input');
+  if (!registryHasPurpose('input', 'start_switch')) add(c.start_pin, 'Start input');
   const i2c = cfg.i2c || {};
   if (i2c.enabled !== false) {
     add(i2c.sda_pin, 'Shared I2C SDA', 'i2c-sda');

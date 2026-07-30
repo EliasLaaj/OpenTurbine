@@ -473,6 +473,9 @@ function applyData(d) {
   }
   Object.assign(_lastData, d);
   d = _lastData;
+  if (typeof window.updateFirstRunForMode === 'function') {
+    window.updateFirstRunForMode(d.mode);
+  }
   if (d.uptime_s !== undefined && Number.isFinite(Number(d.uptime_s))) {
     _lastUptimeS = Number(d.uptime_s);
   }
@@ -1827,12 +1830,12 @@ function registryOutputAlreadyHasCoreCard(ch) {
 }
 const DASHBOARD_CORE_INPUT_PURPOSES = new Set([
   'n1_speed','n2_speed','tot','tit','oil_pressure','oil_temperature','fuel_pressure',
-  'fuel_flow','p1_pressure','p2_pressure','flame','torque','battery_voltage','throttle','idle'
+  'fuel_flow','p1_pressure','p2_pressure','flame','torque','thrust','battery_voltage','throttle','idle'
 ]);
 const DASHBOARD_CORE_INPUT_IDS = new Set([
   'n1_main','primary_n1','n2_main','primary_n2','tot_main','primary_egt','tit_main',
   'oil_pressure_main','oil_temperature','fuel_pressure','fuel_flow','p1_main','p1',
-  'p2_main','p2','flame_main','torque_main','battery_voltage','batt_voltage_main',
+  'p2_main','p2','flame_main','torque_main','thrust_main','battery_voltage','batt_voltage_main',
   'operator_throttle','operator_idle','throttle_input','idle_input'
 ]);
 function registryInputAlreadyHasCoreCard(ch) {

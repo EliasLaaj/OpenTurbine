@@ -6,9 +6,9 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine - Sequence</title>
-<link rel="stylesheet" href="/style.css?v=20260723a">
+<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/ui_dialog.js?v=20260723a"></script>
+<script src="/ui_dialog.js?v=20260730a"></script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -98,7 +98,7 @@
 <div id="tab-startup">
   <div class="block-list" id="list-startup"></div>
   <div class="add-row" style="margin-top:.75rem">
-    <select id="add-startup-sel" onchange="updateBlockPreview('startup')"></select>
+    <select id="add-startup-sel" aria-label="Startup block to add" onchange="updateBlockPreview('startup')"></select>
     <button class="add-btn" onclick="addBlock('startup')">+ Add block</button>
     <button class="add-btn" onclick="openCustomBlockDialog('startup')">+ Custom block</button>
   </div>
@@ -3647,8 +3647,8 @@ function validateCustomBlockLimits() {
 async function saveAll() {
   if (!_seqDirty) return;
   await refreshEngineStatus();
-  if (engineMode !== 'STANDBY') {
-    setSaveStatus('Warning: Engine must be in STANDBY to save');
+  if (engineMode !== 'STANDBY' && engineMode !== 'FAULT') {
+    setSaveStatus('Warning: Engine must be in STANDBY or FAULT to save');
     return;
   }
   collectRules();
@@ -3742,7 +3742,7 @@ function setSaveStatus(msg) {
 }
 
 function updateSequenceSaveControls() {
-  const canSave = _seqDirty && engineMode === 'STANDBY';
+  const canSave = _seqDirty && (engineMode === 'STANDBY' || engineMode === 'FAULT');
   const save = document.getElementById('save-btn');
   const discard = document.getElementById('seq-discard-btn');
   if (save) save.disabled = !canSave;
@@ -3775,13 +3775,13 @@ async function discardSequenceChanges() {
 // ------ WebSocket for engine mode ------------------------------------------------------------------------------------------------------------------------------------------
 function updateEngineMode(mode) {
   engineMode = mode;
-  const active = (engineMode === 'STANDBY');
+  const active = (engineMode === 'STANDBY' || engineMode === 'FAULT');
   updateSequenceSaveControls();
   if (!active) {
-    setSaveStatus(`Warning: Engine is ${engineMode} - stop engine to save`);
+    setSaveStatus(`Warning: Engine is ${engineMode} - STANDBY or FAULT is required to save`);
   } else {
     const status = document.getElementById('save-status');
-    if (status && /Engine is .*stop engine/.test(status.textContent)) {
+    if (status && /Engine is .*required to save/.test(status.textContent)) {
       setSaveStatus(_seqDirty ? 'Unsaved changes — save to apply' : 'No unsaved changes');
     }
   }

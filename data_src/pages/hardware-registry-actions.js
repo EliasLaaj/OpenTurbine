@@ -322,13 +322,13 @@ function renderRegistryBindings() {
     <div class="hw-grid">
       <div class="hw-field">
         <span class="hw-label">Controller use</span>
-        <select onchange="updateRegistryBinding(${i},'key',this.value)">
+        <select aria-label="Controller use ${i + 1}" onchange="updateRegistryBinding(${i},'key',this.value)">
           ${keys.map(k => `<option value="${k}"${String(b.key || '')===k?' selected':''}>${escapeHtmlText(registryBindingLabel(k))}</option>`).join('')}
         </select>
       </div>
       <div class="hw-field">
         <span class="hw-label">Device</span>
-        <select onchange="updateRegistryBinding(${i},'channel',this.value)">${registryChannelOptions(b.channel || '', b.key || '')}</select>
+        <select aria-label="Controller device ${i + 1}" onchange="updateRegistryBinding(${i},'channel',this.value)">${registryChannelOptions(b.channel || '', b.key || '')}</select>
       </div>
       <div style="display:flex;align-items:end;justify-content:flex-end"><button type="button" class="danger remove-action" onclick="removeRegistryBinding(${i})">Remove</button></div>
     </div>
@@ -387,6 +387,15 @@ function closeRegistryAddDialog() {
   const modal = document.getElementById('registry-add-modal');
   if (modal) modal.style.display = 'none';
 }
+function openRegistryBusPrerequisite(bus) {
+  const key = bus === 'i2c' ? 'i2c' : 'spi';
+  closeRegistryAddDialog();
+  _workflowEditOpen.add('buses');
+  renderHardwareWorkflowSummaries();
+  const panel = document.getElementById('hardware-buses-panel');
+  panel?.scrollIntoView({behavior:'smooth', block:'start'});
+  document.getElementById(`en-${key}`)?.focus();
+}
 function renderRegistryAddCatalog() {
   const box = document.getElementById('registry-add-catalog');
   if (!box) return;
@@ -442,10 +451,10 @@ function selectRegistryAddPreset(index) {
   if (existing > 0 && registryPurposeIsSingleton(_registryAddDirection, purpose))
     return registryAddError(`${preset.label} is already installed. Edit or remove its existing card instead.`);
   if (!pcbProfileActive() && Number(preset.driver) >= 8 && !cfg.i2c?.enabled)
-    return registryAddError(`Enable the shared I2C bus near the top of this page before adding ${preset.label}.`);
+    return registryAddBusPrerequisite('i2c', preset.label);
   if (!pcbProfileActive() && Number(preset.temp_interface) >= 1 &&
       Number(preset.temp_interface) <= 3 && !cfg.spi?.enabled)
-    return registryAddError(`Enable the shared SPI bus near the top of this page before adding ${preset.label}.`);
+    return registryAddBusPrerequisite('spi', preset.label);
   if (pcbProfileActive()) {
     const choices = pcbCompatibleChoices(_registryAddDirection, purpose, preset.role);
     const box = document.getElementById('registry-add-catalog');
@@ -557,6 +566,18 @@ function registryAddError(message) {
   const err = document.getElementById('registry-add-error');
   if (!err) return;
   err.textContent = message;
+  err.style.display = '';
+}
+function registryAddBusPrerequisite(bus, deviceLabel) {
+  const err = document.getElementById('registry-add-error');
+  if (!err) return;
+  const i2c = bus === 'i2c';
+  const explanation = i2c
+    ? 'This device uses the shared I2C wiring. Configure SDA and SCL once; its address and channel are selected on the device card.'
+    : 'A MAX thermocouple amplifier uses the shared SPI wiring. Configure SCK and MISO once; each temperature probe then gets its own CS pin.';
+  err.innerHTML = `<strong>${escapeHtmlText(deviceLabel)} needs shared ${i2c ? 'I2C' : 'SPI'} wiring.</strong>
+    <span style="display:block;color:var(--text-2);margin:.3rem 0 .55rem">${explanation}</span>
+    <button type="button" onclick="openRegistryBusPrerequisite('${i2c ? 'i2c' : 'spi'}')">Configure shared ${i2c ? 'I2C' : 'SPI'} wiring</button>`;
   err.style.display = '';
 }
 function addRegistryChannel(direction) {

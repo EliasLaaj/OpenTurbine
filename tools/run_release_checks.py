@@ -65,8 +65,15 @@ def main() -> int:
     run("turbine setup matrix", [node, "tools/turbine_setup_matrix_test.cjs"])
     run("I2C and load-cell audit", [node, "tools/i2c_support_audit.cjs"])
     run(
-        "setup-package Python tests",
-        [python, "-m", "unittest", "tools/test_build_setup_package.py"],
+        "Python release-tool and bench tests",
+        [
+            python,
+            "-m",
+            "unittest",
+            "tools/test_build_setup_package.py",
+            "tools/test_pcb_profile.py",
+            "dev/bench/harness/test_verify_wiring.py",
+        ],
     )
     run("setup-tool Go tests", [go, "test", "./..."], ROOT / "tools" / "setup_tool")
 

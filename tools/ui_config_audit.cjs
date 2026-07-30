@@ -50,6 +50,10 @@ function auditConfigStructure() {
     assert.match(logSource, new RegExp(`data-bit="${bit}"`), `${bit.toUpperCase()} logging must be configured on the Log page`);
   assert.equal(fields.some(field => field.pathText.startsWith('session_log.')), false,
     'Session logging settings must not be duplicated on Config');
+  assert.match(logSource, /id="session-current-download"[^>]*disabled/,
+    'The current-session download must start disabled until its API confirms a log exists');
+  assert.match(logSource, /No current session log; use Past Sessions above/,
+    'The empty current-session state must not contradict the archived Past Sessions list');
   assert.match(sequenceSource, /rule-mode-standby-/, 'Control rules must expose Standby as an active state');
   assert.doesNotMatch(sequenceSource, /rule-mode-all-|All operating states/, 'Control rules must not hide states behind an all-operating shortcut');
   assert.match(sequenceSource, /Output when switch is ON/, 'Binary rules must use direct ON/OFF output values');
@@ -413,6 +417,15 @@ async function goto(page, route, waitSelector) {
     assert.ok(n2RelationshipWarnings.some(text => /windmilling oil protection can never activate/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /both zero/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /Pre-start EGT maximum/i.test(text)), n2WarningDetail);
+    const n1PullbackWithoutTrip = await page.evaluate(() => {
+      hwCfg.safety.overspeed = false;
+      runValidation();
+      return Array.from(document.querySelectorAll('.cfg-inline-warn'))
+        .map(el => el.textContent)
+        .find(text => /N1 pullback/i.test(text)) || '';
+    });
+    assert.match(n1PullbackWithoutTrip, /Maximum N1 Speed/);
+    assert.doesNotMatch(n1PullbackWithoutTrip, /hard N1 shutdown/);
     results.push('config warns about unsafe shaft, hot-start and windmilling-oil relationships');
     await goto(page, 'config.html', '#cf-tot_limit');
     assert.equal(await page.locator('#dev-mode-tools-link').getAttribute('href'), '/tools.html#card-dev-mode');
@@ -576,6 +589,12 @@ async function goto(page, route, waitSelector) {
     assert.match(await page.locator('#cal-th-raw').textContent(), /us|µs/);
     assert.match(await page.locator('#cal-idle-raw').textContent(), /us|µs/);
     results.push('calibration rows and servo/ADC units follow fitted hardware and telemetry type');
+
+    await patchData(page, { idle_input_type: 'servo', idle_input_us: 0 });
+    await page.waitForFunction(() => document.querySelector('#cal-idle-raw')?.textContent === 'NO SIGNAL');
+    assert.equal(await page.locator('#cal-idle-pct').textContent(), '—');
+    assert.equal(await page.locator('#cal-idle-thr').textContent(), '—');
+    results.push('missing idle RC pulses are shown as no signal, not a valid zero position');
 
     await reset(page);
     await goto(page, 'log.html', '#tab-session');

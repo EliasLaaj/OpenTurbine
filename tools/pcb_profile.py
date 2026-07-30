@@ -84,6 +84,10 @@ def validate_profile(profile: dict, *, strict: bool = False) -> list[str]:
     for key, limit in (("name", 47), ("revision", 15)):
         _require(isinstance(board.get(key), str) and 0 < len(board[key]) <= limit,
                  f"board.{key} must be 1..{limit} characters")
+    for key, limit in (("manufacturer", 31), ("description", 95)):
+        value = board.get(key, "")
+        _require(isinstance(value, str) and len(value) <= limit,
+                 f"board.{key} must be at most {limit} characters")
 
     target = profile.get("target")
     _require(isinstance(target, dict) and target.get("chip") in TARGET_IDS,
@@ -214,6 +218,9 @@ def validate_profile(profile: dict, *, strict: bool = False) -> list[str]:
         _require(isinstance(item.get("divider"), (int, float)) and
                  1 <= item["divider"] <= 100,
                  "fixed_functions.supply_voltage divider must be 1..100")
+        label = item.get("label", "ECU supply voltage")
+        _require(isinstance(label, str) and len(label) <= 31,
+                 "fixed_functions.supply_voltage label must be at most 31 characters")
         gpio(item["gpio"], "fixed_functions.supply_voltage")
         claim_gpio(item["gpio"], "fixed_functions.supply_voltage")
     for key in ("cluster_serial", "mavlink"):
@@ -228,6 +235,12 @@ def validate_profile(profile: dict, *, strict: bool = False) -> list[str]:
         port_id = stable_id(port, f"ports[{index}]")
         _require(isinstance(port.get("label"), str) and 0 < len(port["label"]) <= 31,
                  f"port {port_id} label must be 1..31 characters")
+        connector = port.get("connector", "")
+        description = port.get("description", "")
+        _require(isinstance(connector, str) and len(connector) <= 23,
+                 f"port {port_id} connector must be at most 23 characters")
+        _require(isinstance(description, str) and len(description) <= 79,
+                 f"port {port_id} description must be at most 79 characters")
         modes = port.get("modes")
         _require(isinstance(modes, list) and 0 < len(modes) <= MAX_MODES,
                  f"port {port_id} must have 1..{MAX_MODES} modes")
@@ -245,6 +258,9 @@ def validate_profile(profile: dict, *, strict: bool = False) -> list[str]:
                      f"port {port_id}/{mode_id} has invalid adapter")
             _require(mode.get("pull", "none") in {"none", "up", "down"},
                      f"port {port_id}/{mode_id} pull must be none, up, or down")
+            if "active_high" in mode:
+                _require(isinstance(mode["active_high"], bool),
+                         f"port {port_id}/{mode_id} active_high must be boolean")
             if "reference_mv" in mode:
                 _require(isinstance(mode["reference_mv"], (int, float)) and
                          1000 <= mode["reference_mv"] <= 5500,

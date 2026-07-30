@@ -228,6 +228,16 @@
     mark(step) {
       try {
         const state = JSON.parse(localStorage.getItem(setupKey) || '{}');
+        // An upstream commissioning change makes selected later evidence stale.
+        // Keep this conservative: these are browser activity marks, never a
+        // substitute for the operator's physical verification.
+        const invalidates = {
+          hardware: ['config', 'calibration', 'sequence', 'tools'],
+          config: ['tools'],
+          calibration: ['tools'],
+          sequence: ['tools']
+        };
+        (invalidates[step] || []).forEach(key => delete state[key]);
         state[step] = Date.now();
         localStorage.setItem(setupKey, JSON.stringify(state));
       } catch (_) {}

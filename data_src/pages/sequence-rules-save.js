@@ -652,8 +652,8 @@ function validateCustomBlockLimits() {
 async function saveAll() {
   if (!_seqDirty) return;
   await refreshEngineStatus();
-  if (engineMode !== 'STANDBY') {
-    setSaveStatus('Warning: Engine must be in STANDBY to save');
+  if (engineMode !== 'STANDBY' && engineMode !== 'FAULT') {
+    setSaveStatus('Warning: Engine must be in STANDBY or FAULT to save');
     return;
   }
   collectRules();
@@ -747,7 +747,7 @@ function setSaveStatus(msg) {
 }
 
 function updateSequenceSaveControls() {
-  const canSave = _seqDirty && engineMode === 'STANDBY';
+  const canSave = _seqDirty && (engineMode === 'STANDBY' || engineMode === 'FAULT');
   const save = document.getElementById('save-btn');
   const discard = document.getElementById('seq-discard-btn');
   if (save) save.disabled = !canSave;

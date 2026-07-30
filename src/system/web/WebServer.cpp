@@ -33,6 +33,7 @@ extern AnalogThSensor     g_sensorAbFlame;
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_heap_caps.h>
+#include <esp_app_desc.h>
 #include <ESPmDNS.h>
 #include <DNSServer.h>
 #include <Arduino.h>
@@ -163,8 +164,13 @@ static bool _claimWebRx(AsyncWebServerRequest* req, size_t index) {
     bool claimed = false;
     portENTER_CRITICAL(&s_webRxMux);
     if (index == 0) {
-        if (g_webRxOwner &&
-            (g_webRxResponseLease || (millis() - g_webRxClaimMs) < 10000)) {
+        // A client can disappear after the response acquires the shared
+        // buffer but before AsyncWebServer calls its final fill/destructor.
+        // Never let that abandoned response lease deadlock every later JSON
+        // request indefinitely. Ten seconds is far longer than a 16 KiB local
+        // AP transfer, while the owner check in _releaseWebRx() prevents a
+        // late destructor from releasing a newer claimant.
+        if (g_webRxOwner && (millis() - g_webRxClaimMs) < 10000) {
             portEXIT_CRITICAL(&s_webRxMux);
             req->send(409, "application/json",
                       "{\"error\":\"Another configuration transfer is in progress\"}");
@@ -354,7 +360,7 @@ static const char* _commandPreflightRejectReason(const OTPacket& pkt) {
     }
     if (const char* hw = _missingHardwareForCommand(pkt)) return hw;
     if (_isStandbyToolCommand(pkt.cmd) && !_isStandbyLike(ed.mode)) {
-        return "Command is only available in STANDBY";
+        return "Command is only available in STANDBY or FAULT";
     }
     if (_startsTimedActuatorTest(pkt) && _outputsActiveForOta()) {
         return "Another actuator output is already active";
@@ -368,14 +374,14 @@ static const char* _commandPreflightRejectReason(const OTPacket& pkt) {
         }
     }
     if (pkt.cmd == OTCommand::TOGGLE_DEV_MODE && !_isStandbyLike(ed.mode)) {
-        return "Developer Mode can only be changed in STANDBY";
+        return "Developer Mode can only be changed in STANDBY or FAULT";
     }
     if (pkt.cmd == OTCommand::TOGGLE_BENCH_MODE) {
-        if (!_isStandbyLike(ed.mode)) return "Bench Mode can only be changed in STANDBY";
+        if (!_isStandbyLike(ed.mode)) return "Bench Mode can only be changed in STANDBY or FAULT";
         if (!ed.devMode) return "Enable Developer Mode before Bench Mode";
     }
     if (pkt.cmd == OTCommand::TOGGLE_SAFETY_CHECKS) {
-        if (!_isStandbyLike(ed.mode)) return "Safety bypass can only be changed in STANDBY";
+        if (!_isStandbyLike(ed.mode)) return "Safety bypass can only be changed in STANDBY or FAULT";
         if (!ed.devMode || !ed.benchMode) return "Enable Developer Mode and Bench Mode before safety bypass";
     }
     if ((pkt.cmd == OTCommand::TOGGLE_DYNAMIC_IDLE || pkt.cmd == OTCommand::TOGGLE_LIMP_MODE)
@@ -427,7 +433,7 @@ static const char* _startPreflightRejectReason() {
                "Everything except START still works - fix and save the configuration to reboot into STANDBY.";
     }
     if (ed.mode != SysMode::STANDBY) {
-        return "Engine is not in STANDBY";
+        return "Engine is not in STANDBY or FAULT";
     }
     if (!Config::profileMatch || ed.configLocked) {
         return "Configuration is locked or profile ID does not match";
@@ -517,6 +523,25 @@ static void _finishAssetUpload() {
     _assetUploadMask = 0;
     _assetUploadInProgress = false;
 }
+
+#if !defined(OT_PLATFORM_ESP32S3)
+// Classic's 704 KiB LittleFS cannot hold both complete UI generations once
+// configuration and logs are present. Install one completed upload at a time,
+// retaining only that file's old copy until its replacement is in place.
+static bool _installAssetRolling(uint16_t i) {
+    String target = _assetPath(i, false);
+    String temp = _assetPath(i, true);
+    String backup = _assetBackupPath(i);
+    if (LittleFS.exists(backup)) LittleFS.remove(backup);
+    if (LittleFS.exists(target) && !LittleFS.rename(target, backup)) return false;
+    if (!LittleFS.rename(temp, target)) {
+        if (LittleFS.exists(backup)) LittleFS.rename(backup, target);
+        return false;
+    }
+    if (LittleFS.exists(backup)) LittleFS.remove(backup);
+    return true;
+}
+#endif
 
 static void _recoverInterruptedAssetUpdate() {
     bool hasBackup = false;
@@ -716,7 +741,11 @@ static void _sendGzipAsset(AsyncWebServerRequest* req, const char* path,
     req->send(resp);
 }
 
-static constexpr const char* SHARED_ASSET_CACHE = "public, max-age=31536000, immutable";
+// Shared asset filenames intentionally stay stable so the maintenance updater
+// can replace them in place. They must be revalidated on navigation; an
+// immutable year-long cache otherwise keeps old CSS/JS after a successful UI
+// update even though the HTML itself was refreshed.
+static constexpr const char* SHARED_ASSET_CACHE = "no-cache";
 
 static void _finalizeJsonResponse(AsyncWebServerResponse* resp) {
     if (!resp) return;
@@ -771,7 +800,7 @@ private:
 class BorrowedWebRxJsonResponse final : public AsyncAbstractResponse {
 public:
     BorrowedWebRxJsonResponse(AsyncWebServerRequest* owner, size_t len, int status = 200)
-        : _owner(owner), _index(0) {
+        : _owner(owner), _index(0), _released(false) {
         _code = status;
         _contentType = "application/json";
         _contentLength = len;
@@ -779,21 +808,32 @@ public:
 
     ~BorrowedWebRxJsonResponse() override { _releaseWebRx(_owner); }
     bool _sourceValid() const override {
-        return _owner && g_webRxStorage && g_webRxOwner == _owner;
+        return _released || (_owner && g_webRxStorage && g_webRxOwner == _owner);
     }
 
     size_t _fillBuffer(uint8_t* out, size_t maxLen) override {
-        if (!_sourceValid() || _index >= _contentLength) return 0;
+        if (_released || !_sourceValid() || _index >= _contentLength) return 0;
         size_t count = _contentLength - _index;
         if (count > maxLen) count = maxLen;
         memcpy(out, g_webRxBuf + _index, count);
         _index += count;
+        // AsyncWebServer may retain the response object for the lifetime of a
+        // keep-alive connection. The shared source is no longer needed once
+        // its final bytes have been copied into TCP's send buffers, so release
+        // it here instead of blocking every later configuration transfer until
+        // the response destructor eventually runs.
+        if (_index >= _contentLength) {
+            _releaseWebRx(_owner);
+            _owner = nullptr;
+            _released = true;
+        }
         return count;
     }
 
 private:
     AsyncWebServerRequest* _owner;
     size_t _index;
+    bool _released;
 };
 
 // Large read-only JSON documents cannot afford a second 7-16 KB heap-backed
@@ -1607,8 +1647,16 @@ void WebServer::_setupRoutes() {
         const bool otaAllowed = standbyLike && !outputsActive && !_maintenanceUploadInProgress();
 
         JsonDocument doc;
+        char buildId[17] = {};
+        static constexpr char HEX_DIGITS[] = "0123456789abcdef";
+        const uint8_t* elfSha = esp_app_get_description()->app_elf_sha256;
+        for (uint8_t i = 0; i < 8; ++i) {
+            buildId[i * 2] = HEX_DIGITS[elfSha[i] >> 4];
+            buildId[i * 2 + 1] = HEX_DIGITS[elfSha[i] & 0x0F];
+        }
         doc["project"] = "OpenTurbine";
         doc["firmware_version"] = OT_VERSION;
+        doc["build_id"] = buildId;
         doc["target"] = target;
         doc["chip"] = chip;
         doc["state"] = sysModeStr(ed.mode);
@@ -2053,7 +2101,7 @@ void WebServer::_setupRoutes() {
         }
         if (!_isStandbyLike(EngineData::instance().mode)) {
             req->send(423, "application/json",
-                "{\"error\":\"Engine must be in STANDBY to delete session logs\"}");
+                "{\"error\":\"Engine must be in STANDBY or FAULT to delete session logs\"}");
             return;
         }
         File dir = LittleFS.open("/logs");
@@ -2090,7 +2138,7 @@ void WebServer::_setupRoutes() {
         }
         if (!_isStandbyLike(EngineData::instance().mode)) {
             req->send(423, "application/json",
-                "{\"error\":\"Engine must be in STANDBY to perform factory reset\"}");
+                "{\"error\":\"Engine must be in STANDBY or FAULT to perform factory reset\"}");
             return;
         }
         // Same idle-outputs rule as OTA/restore: this path reboots, and a
@@ -2327,6 +2375,7 @@ void WebServer::_setupRoutes() {
                 return;
             }
             bool ok = !_assetUploadError && _assetUploadMask == WEB_ASSET_ALL;
+#if defined(OT_PLATFORM_ESP32S3)
             if (ok) {
                 for (uint16_t i = 0; i < WEB_ASSET_COUNT; i++) {
                     String target = _assetPath(i, false);
@@ -2359,6 +2408,7 @@ void WebServer::_setupRoutes() {
                     if (LittleFS.exists(backup)) LittleFS.remove(backup);
                 }
             }
+#endif
             req->send(ok ? 200 : 400, "application/json",
                 ok ? "{\"ok\":true,\"reboot\":true}"
                    : "{\"ok\":false,\"error\":\"Web asset update failed; upload the full asset set again\"}");
@@ -2415,6 +2465,14 @@ void WebServer::_setupRoutes() {
             }
             if (final) {
                 _assetTempFile.close();
+#if !defined(OT_PLATFORM_ESP32S3)
+                if (!_installAssetRolling((uint16_t)asset)) {
+                    Serial.printf("[WebAssets] Could not install %s\n", filename.c_str());
+                    _assetUploadError = true;
+                    _discardAssetTemps();
+                    return;
+                }
+#endif
                 _assetUploadMask |= (1u << asset);
             }
         });
@@ -2528,7 +2586,11 @@ void WebServer::_setupRoutes() {
             return;
         }
         size_t n = serializeJson(doc, g_webTxBuf, sizeof(g_webTxBuf));
-        _sendBorrowedWebRxJson(req, g_webTxBuf, n);
+        // Profile pages are fetched back-to-back during Hardware-page load.
+        // Give each page its own bounded response snapshot so a keep-alive
+        // response cannot hold the shared request buffer and make the next
+        // catalog page appear to be missing.
+        _sendOwnedJson(req, g_webTxBuf, n);
     });
 
     // POST /api/hardware — validate + replace the hardware section, schedule reboot
@@ -2552,7 +2614,7 @@ void WebServer::_setupRoutes() {
             // Only allow hardware changes in STANDBY (or FAULT — the repair path)
             if (!_isStandbyLike(EngineData::instance().mode)) {
                 req->send(423, "application/json",
-                    "{\"error\":\"Engine must be in STANDBY to change hardware config\"}");
+                    "{\"error\":\"Engine must be in STANDBY or FAULT to change hardware config\"}");
                 return;
             }
             // Hardware save schedules a reboot — same idle-outputs rule as
@@ -2733,7 +2795,7 @@ void WebServer::_setupRoutes() {
             // chunk (double send corrupts ESPAsyncWebServer response state).
             if (index == 0 && !_isStandbyLike(EngineData::instance().mode)) {
                 req->send(409, "application/json",
-                    "{\"ok\":false,\"error\":\"engine not in STANDBY\"}");
+                    "{\"ok\":false,\"error\":\"engine not in STANDBY or FAULT\"}");
                 return;
             }
             if (!_appendWebRx(req, data, len, index)) return;
@@ -2746,7 +2808,7 @@ void WebServer::_setupRoutes() {
             // Re-check on completion: the engine may have left STANDBY between chunks.
             if (!_isStandbyLike(EngineData::instance().mode)) {
                 req->send(409, "application/json",
-                    "{\"ok\":false,\"error\":\"engine not in STANDBY\"}");
+                    "{\"ok\":false,\"error\":\"engine not in STANDBY or FAULT\"}");
                 return;
             }
             JsonDocument patch;
@@ -2958,7 +3020,7 @@ void WebServer::_setupRoutes() {
                 }
                 if (!_isStandbyLike(EngineData::instance().mode) || _outputsActiveForOta()) {
                     req->send(423, "application/json",
-                        "{\"error\":\"Engine must be idle in STANDBY to upload config\"}");
+                        "{\"error\":\"Engine must be idle in STANDBY or FAULT to upload config\"}");
                     return;
                 }
                 _configRestoreOwner = req;
@@ -2984,7 +3046,7 @@ void WebServer::_setupRoutes() {
 
             if (!_isStandbyLike(EngineData::instance().mode)) {
                 req->send(423, "application/json",
-                    "{\"error\":\"Engine must be in STANDBY to upload config\"}");
+                    "{\"error\":\"Engine must be in STANDBY or FAULT to upload config\"}");
                 _finishConfigRestore();
                 return;
             }

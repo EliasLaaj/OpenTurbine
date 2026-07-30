@@ -1,13 +1,13 @@
 // ------ WebSocket for engine mode ------------------------------------------------------------------------------------------------------------------------------------------
 function updateEngineMode(mode) {
   engineMode = mode;
-  const active = (engineMode === 'STANDBY');
+  const active = (engineMode === 'STANDBY' || engineMode === 'FAULT');
   updateSequenceSaveControls();
   if (!active) {
-    setSaveStatus(`Warning: Engine is ${engineMode} - stop engine to save`);
+    setSaveStatus(`Warning: Engine is ${engineMode} - STANDBY or FAULT is required to save`);
   } else {
     const status = document.getElementById('save-status');
-    if (status && /Engine is .*stop engine/.test(status.textContent)) {
+    if (status && /Engine is .*required to save/.test(status.textContent)) {
       setSaveStatus(_seqDirty ? 'Unsaved changes — save to apply' : 'No unsaved changes');
     }
   }

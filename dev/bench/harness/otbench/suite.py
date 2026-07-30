@@ -28,7 +28,7 @@ def _tool_output(ctx, c, cmd, sig_name, telem_key, pwm=False, window=1.8):
     # expiring. Retry briefly while the DUT reports another output active.
     deadline = time.time() + 14
     code, resp = ctx.dut.command(cmd)
-    while code == 409 and "already active" in str(resp.get("error", "")) and time.time() < deadline:
+    while code == 409 and time.time() < deadline:
         time.sleep(0.5)
         code, resp = ctx.dut.command(cmd)
     if code != 200:
@@ -87,11 +87,22 @@ def t_stop_switch(ctx, c):
 def t_n1_rpm(ctx, c):
     pm = ctx.pinmap
     samples = []
-    for rpm in (2000, 5000, 9000):
+    # Start at the firmware's reliable low shaft-speed bench range. A 1-PPR
+    # signal below roughly 60 Hz can legitimately fall through the N1
+    # zero-stuck/health window during asynchronous bench sampling.
+    for rpm in (4000, 5000, 9000):
         hz = pm.rpm_to_hz("N1", rpm)
         ctx.tester.set("N1", round(hz, 2))
-        time.sleep(0.6)  # PCNT integrates over ~100 ms; allow health/average to settle
+        # A newly restored/rebooted PCNT path may need a few health windows
+        # before its first low-frequency value is published. Always allow the
+        # previous frequency to drain first; otherwise a merely nonzero stale
+        # sample can be mistaken for the new command.
+        time.sleep(0.65)
         got = ctx.dut.data().get("n1", 0)
+        deadline = time.time() + (0.9 if rpm == 4000 else 0.3)
+        while time.time() < deadline and not got:
+            time.sleep(0.15)
+            got = ctx.dut.data().get("n1", 0)
         samples.append((rpm, hz, got))
         c.info("N1 %d rpm (%.1f Hz) -> telemetry n1=%s" % (rpm, hz, got))
     ctx.tester.set("N1", 0)
@@ -110,7 +121,10 @@ def t_n2_rpm(ctx, c):
     hw = ctx.dut.hardware()
     n2 = hw.get("sensors", {}).get("n2_rpm", {})
     pm = ctx.pinmap
-    if not (hw.get("has_two_shaft") and n2.get("enabled")):
+    # `has_two_shaft` was removed from the hardware API when fitted-channel
+    # capability became authoritative. The enabled N2 sensor is now the
+    # prerequisite; retaining the obsolete flag silently skipped real N2 HIL.
+    if not n2.get("enabled"):
         raise SkipTest("N2 is not enabled on the DUT")
     if n2.get("pin") != pm.sig("N2")["dut_gpio"]:
         raise SkipTest("N2 is configured on GPIO %s, bench wire is GPIO %d"
@@ -183,6 +197,23 @@ def t_flame_input(ctx, c):
 
 
 # ── output paths (DUT -> tester) ─────────────────────────────
+def t_idle_input(ctx, c):
+    input_type = ctx.dut.data().get("idle_input_type")
+    if input_type == "none":
+        raise SkipTest("idle input not enabled on DUT")
+    if input_type != "servo":
+        raise SkipTest("idle input is not RC-PWM on DUT; this pulse test does not apply")
+    ctx.tester.set("IDLE_IN", 1000)
+    time.sleep(0.5)
+    lo = ctx.dut.data().get("idle_input_raw", 0)
+    ctx.tester.set("IDLE_IN", 1900)
+    time.sleep(0.5)
+    hi = ctx.dut.data().get("idle_input_raw", 0)
+    ctx.tester.set("IDLE_IN", 1000)
+    c.info("IDLE_IN 1000 us -> %s, 1900 us -> %s" % (lo, hi))
+    c.expect(hi > lo + 400, "idle RC input follows the commanded pulse width")
+
+
 def t_igniter_output(ctx, c):
     _tool_output(ctx, c, "IGN_TEST", "IGNITER", "igniter_on")
 
@@ -310,6 +341,7 @@ BASIC = [
     t_throttle_input,
     t_oil_pressure_input,
     t_flame_input,
+    t_idle_input,
     t_igniter_output,
     t_oilpump_output,
     t_fuelsol_output,

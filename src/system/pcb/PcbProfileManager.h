@@ -69,9 +69,13 @@ public:
         char targetChip[12] = {};
         uint8_t formatMajor = 0, formatMinor = 0;
         Origin origin = Origin::Unknown;
-        Bus buses[MAX_BUSES] = {};
-        Device devices[MAX_DEVICES] = {};
-        Port ports[MAX_PORTS] = {};
+        // Allocate only the fitted catalog. A maximum-size Port contains four
+        // modes and substantial user-facing text; reserving all 48 ports for
+        // every profile consumed nearly all remaining classic ESP32 heap even
+        // for a small seven-port board, starving DHCP and web responses.
+        Bus* buses = nullptr;
+        Device* devices = nullptr;
+        Port* ports = nullptr;
         uint8_t busCount = 0, deviceCount = 0, portCount = 0;
         bool hasStatusLed = false, hasBuzzer = false;
         int8_t statusLedGpio = -1, buzzerGpio = -1;
@@ -86,6 +90,12 @@ public:
         char supplyVoltageLabel[32] = {};
         char clusterSerialBusId[24] = {};
         char mavlinkBusId[24] = {};
+
+        ~Catalog() {
+            delete[] buses;
+            delete[] devices;
+            delete[] ports;
+        }
     };
 
     static void begin();

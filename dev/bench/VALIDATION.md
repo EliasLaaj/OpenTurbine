@@ -18,15 +18,15 @@ either target to a build-only-by-a-few-bytes state.
 
 Systematic hardware-in-the-loop validation of the OpenTurbine firmware on the
 bench rig, aimed at finding defects **before** they reach a real turbine engine.
-The current release candidate is OpenTurbine 2.0.0. DUT and tester roles may be
+The current release candidate is OpenTurbine 2.0.1. DUT and tester roles may be
 swapped between the ESP32-S3 and Classic ESP32 as a campaign requires. Tests
 drive physical ADC/PCNT/SPI/digital paths where wired and use explicit simulator
 coverage for unavailable I²C devices.
 
 The first findings below are retained historical v1.x campaign evidence. Use
-the **v2.0.0 release-candidate HIL** section and newer dated result files for
-current sign-off; superseded EGT-rate and old configuration behavior are not v2
-requirements.
+the **v2.0.0 release-candidate HIL** section as the baseline and the newer
+2.0.1 verification audit and dated result files for current sign-off;
+superseded EGT-rate and old configuration behavior are not v2 requirements.
 
 Legend: ✅ pass · ⚠️ anomaly/concern · ❌ bug · ⏭️ not physically testable
 

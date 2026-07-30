@@ -1,0 +1,90 @@
+[
+  {
+    "name": "t_n1_rpm",
+    "status": "fail",
+    "duration_s": 4.174,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "INFO",
+        "msg": "N1 2000 rpm (33.3 Hz) -> telemetry n1=0"
+      },
+      {
+        "level": "INFO",
+        "msg": "N1 5000 rpm (83.3 Hz) -> telemetry n1=4556"
+      },
+      {
+        "level": "INFO",
+        "msg": "N1 9000 rpm (150.0 Hz) -> telemetry n1=9000"
+      },
+      {
+        "level": "PASS",
+        "msg": "n1 telemetry rises with stimulus"
+      },
+      {
+        "level": "FAIL",
+        "msg": "n1 within tolerance of commanded rpm (allowing PCNT quantization)"
+      }
+    ]
+  },
+  {
+    "name": "t_start_switch",
+    "status": "pass",
+    "duration_s": 0.576,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "PASS",
+        "msg": "START pressed -> start_switch_active True (got True)"
+      }
+    ]
+  },
+  {
+    "name": "t_n2_rpm",
+    "status": "pass",
+    "duration_s": 1.756,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "INFO",
+        "msg": "N2 3000 rpm -> telemetry n2=3021"
+      },
+      {
+        "level": "INFO",
+        "msg": "N2 7000 rpm -> telemetry n2=6792"
+      },
+      {
+        "level": "PASS",
+        "msg": "n2 telemetry rises with stimulus"
+      },
+      {
+        "level": "PASS",
+        "msg": "n2 within tolerance of commanded rpm (allowing PCNT quantization)"
+      }
+    ]
+  },
+  {
+    "name": "t_throttle_output",
+    "status": "pass",
+    "duration_s": 0.67,
+    "skip_reason": null,
+    "error": null,
+    "checks": [
+      {
+        "level": "INFO",
+        "msg": "50% throttle -> 1498us 50.0Hz duty=0.075"
+      },
+      {
+        "level": "PASS",
+        "msg": "throttle output has a centred 1.5 ms pulse"
+      },
+      {
+        "level": "PASS",
+        "msg": "throttle output has a 50 Hz servo frame"
+      }
+    ]
+  }
+]

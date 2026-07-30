@@ -99,7 +99,7 @@ window.applyData = function(d) {
     if (locked) {
       badge.textContent  = 'Locked';
       badge.style.color  = 'var(--red)';
-    } else if (d.dev_mode && d.mode && d.mode !== 'STANDBY') {
+    } else if (d.dev_mode && ['STARTUP','RUNNING','SHUTDOWN'].includes(d.mode)) {
       badge.textContent  = 'Open (Dev Mode)';
       badge.style.color  = 'var(--yellow)';
     } else {

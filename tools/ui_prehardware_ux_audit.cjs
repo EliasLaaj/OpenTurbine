@@ -106,17 +106,49 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
 
     await goto(page, 'index.html', '#getting-started-banner');
     await page.evaluate(() => localStorage.clear());
+    await patchData(page, { mode: 'STANDBY' });
     await page.reload();
     await page.waitForSelector('#getting-started-banner');
     const gs = await text(page, '#getting-started-banner');
+    assert.match(gs, /Commissioning checklist/i);
     assert.match(gs, /Hardware/i);
     assert.match(gs, /safety limits/i);
     assert.match(gs, /Calibrate/i);
+    assert.match(gs, /not physical verification/i);
+    assert.doesNotMatch(gs, /completed on this browser/i);
     assert.equal(await page.locator('#getting-started-banner a[href="/hardware.html"]').count(), 1);
     assert.equal(await page.locator('#getting-started-banner a[href="/config.html"]').count(), 1);
     assert.equal(await page.locator('#getting-started-banner a[href="/calibration.html"]').count(), 1);
-    results.push('first-boot checklist gives a clear hardware -> config -> calibration path');
+    await page.evaluate(() => localStorage.setItem('openturbine_setup_progress_v1',
+      JSON.stringify({ hardware: Date.now(), tools: Date.now() })));
+    await page.reload();
+    await page.waitForSelector('#getting-started-banner');
+    assert.match(await text(page, '#gs-progress'), /2 of 5 setup activities recorded/i);
+    assert.match(await text(page, '[data-setup-step="hardware"] .gs-step-state'), /Hardware saved/i);
+    assert.match(await text(page, '[data-setup-step="tools"] .gs-step-state'), /Tool command completed/i);
+    await page.evaluate(() => {
+      localStorage.setItem('openturbine_setup_progress_v1', JSON.stringify({
+        hardware: 1, config: 1, calibration: 1, sequence: 1, tools: 1
+      }));
+      OTSetup.mark('hardware');
+    });
+    assert.deepEqual(await page.evaluate(() => Object.keys(OTSetup.state()).sort()), ['hardware']);
+    results.push('commissioning checklist gives a clear setup path without presenting browser activity as physical verification');
 
+    const blankResponse = await page.request.post(`${base}/__sim/blank`);
+    assert.equal(blankResponse.ok(), true);
+    await goto(page, 'hardware.html', '#f-profile-id');
+    await page.locator('button[onclick="addRegistryChannel(\'input\')"]').click();
+    await page.locator('#registry-add-catalog .registry-add-option', { hasText: 'TOT / EGT' }).click();
+    assert.match(await text(page, '#registry-add-error'), /MAX thermocouple amplifier.*shared SPI wiring.*SCK and MISO.*CS pin/is);
+    const spiSetupButton = page.locator('#registry-add-error button[onclick="openRegistryBusPrerequisite(\'spi\')"]');
+    assert.equal(await spiSetupButton.count(), 1);
+    await spiSetupButton.click();
+    assert.equal(await visible(page, '#hardware-buses-editor'), true);
+    assert.equal(await page.locator('#en-spi').evaluate(el => document.activeElement === el), true);
+    results.push('bus-dependent devices explain the electrical prerequisite and lead directly to its wiring controls');
+
+    await reset(page);
     await goto(page, 'hardware.html', '#f-profile-id');
     assert.match(await text(page, '#save-msg'), /Loaded|Converted/i);
     assert.equal(await page.locator('#btn-save').isDisabled(), true);
@@ -134,6 +166,15 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(await text(page, '#save-msg'), /Loaded/i);
     results.push('canonical inventory exposes every fitted sensor, actuator, AB control and invalid board pin before save');
 
+    await goto(page, 'calibration.html', '#calibration-jump');
+    const calibrationTargets = await page.locator('#calibration-jump option').allTextContents();
+    for (const expected of ['Minimum Reliable Fuel-Pump Output', 'Oil Pressure', 'Flame / Ignition', 'Throttle Input', 'Battery Voltage'])
+      assert.ok(calibrationTargets.some(label => label.includes(expected)), `calibration jump list should include ${expected}`);
+    await page.locator('#calibration-jump').selectOption('oil-press-cal-row');
+    assert.equal(await page.locator('#oil-press-cal-row').evaluate(row => row.classList.contains('deep-link-target')), true);
+    results.push('calibration page provides a compact index of fitted sensors and actuators');
+
+    await goto(page, 'hardware.html', '#f-profile-id');
     await page.locator('button[onclick="addRegistryChannel(\'input\')"]').click();
     const inputAddChoices = await page.locator('#registry-add-catalog').evaluate(catalog =>
       Object.fromEntries(Array.from(catalog.querySelectorAll('button')).map(button => [
@@ -316,6 +357,14 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     const originalDescription = await profileDescription.inputValue();
     assert.equal(await page.locator('#btn-save').isDisabled(), true);
     assert.equal(await page.locator('#btn-discard').isDisabled(), true);
+    assert.deepEqual(
+      await page.evaluate(() => registryRoleUsage('input', { purpose:'start_switch', role:'switch' })),
+      ['Core firmware: START command']
+    );
+    assert.deepEqual(
+      await page.evaluate(() => registryRoleUsage('input', { purpose:'stop_switch', role:'switch' })),
+      ['Core firmware: hard stop and shutdown command']
+    );
     await profileDescription.fill(originalDescription + ' changed');
     assert.equal(await page.locator('#btn-save').isDisabled(), false);
     assert.equal(await page.locator('#btn-discard').isDisabled(), false);
@@ -757,6 +806,12 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     results.push('session log page handles empty log state without breaking controls');
 
     await reset(page);
+    await goto(page, 'tools.html', '#tool-area');
+    assert.match(await text(page, '#lock-warn'), /Stop engine/i);
+    assert.match(await text(page, '#state-OIL_PRIME'), /Locked.*RUNNING/i);
+    assert.equal(await page.locator('#btn-OIL_PRIME').isDisabled(), true);
+    results.push('running-engine tool cards say they are locked instead of contradicting disabled controls with Ready');
+
     await patchData(page, {
       config_version_mismatch: true,
       flash_free_kb: 24,
@@ -767,6 +822,8 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await goto(page, 'tools.html', '#tool-area');
     assert.match(await text(page, '#cfg-version-mismatch-banner'), /schema mismatch|review/i);
     assert.match(await text(page, '#card-WEB-ASSETS'), /without erasing config or logs/i);
+    assert.match(await text(page, '#manual-update-tools'), /Download and verify a complete engine file/i);
+    assert.match(await page.locator('body').evaluate(() => backupConfig.toString()), /Download started.*Confirm the complete engine file appears in Downloads/s);
     assert.equal(await visible(page, '#card-TOGGLE_BENCH_MODE'), false);
     await patchData(page, { dev_mode: true });
     await page.waitForFunction(() => {
@@ -775,6 +832,41 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     }, null, { timeout: 3000 });
     assert.equal(await visible(page, '#card-TOGGLE_BENCH_MODE'), true);
     results.push('tools page surfaces schema/version warnings and gates bench mode behind dev mode');
+
+    await reset(page);
+    await scenario(page, 'fault');
+    await goto(page, 'hardware.html', '#f-profile-desc');
+    await page.evaluate(() => {
+      engineMode = 'FAULT';
+      _hwDirty = true;
+      _pinConflictBlocking = false;
+      cfg.channel_registry = { version:1, inputs:[], outputs:[], bindings:[] };
+      updateSaveButton();
+    });
+    assert.equal(await page.locator('#btn-save').isDisabled(), false);
+    assert.equal(await visible(page, '#standby-warn'), false);
+    await goto(page, 'sequence.html', '#save-btn');
+    await page.evaluate(() => {
+      _seqDirty = true;
+      updateEngineMode('FAULT');
+      updateSequenceSaveControls();
+    });
+    assert.equal(await page.locator('#save-btn').isDisabled(), false);
+    results.push('Hardware and Sequence keep their firmware-supported FAULT repair save path available');
+
+    await reset(page);
+    await goto(page, 'config.html', '#cfg-form');
+    assert.equal(await page.locator('#cfg-form input:not([aria-label]), #cfg-form select:not([aria-label])').count(), 0);
+    assert.ok((await page.locator('#preset-sel').getAttribute('aria-label'))?.length > 0);
+    await goto(page, 'hardware.html', '#f-profile-desc');
+    assert.ok((await page.locator('#f-profile-desc').getAttribute('aria-label'))?.length > 0);
+    assert.ok((await page.locator('#f-wifi-tx-power').getAttribute('aria-label'))?.length > 0);
+    assert.equal(await page.locator('#registry-bindings select:not([aria-label])').count(), 0);
+    await goto(page, 'sequence.html', '#add-startup-sel');
+    assert.ok((await page.locator('#add-startup-sel').getAttribute('aria-label'))?.length > 0);
+    await goto(page, 'tools.html', '#cooldown-slider');
+    assert.ok((await page.locator('#cooldown-slider').getAttribute('aria-label'))?.length > 0);
+    results.push('visible generated settings and static commissioning selectors expose programmatic labels');
 
     for (const route of ['index.html', 'hardware.html', 'config.html', 'sequence.html', 'calibration.html', 'tools.html', 'log.html']) {
       await assertNoSevereLayoutIssues(page, route, { width: 390, height: 844 });

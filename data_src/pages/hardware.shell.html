@@ -5,9 +5,9 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Hardware</title>
-<link rel="stylesheet" href="/style.css?v=20260723a">
+<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/ui_dialog.js?v=20260723a"></script>
+<script src="/ui_dialog.js?v=20260730a"></script>
 </head>
 <body>
 <nav>
@@ -71,7 +71,7 @@
       </div>
     </div>
   </div>
-  <div id="standby-warn" class="error-banner" style="display:none">⚠ Engine is not in STANDBY — hardware changes are locked.</div>
+  <div id="standby-warn" class="error-banner" style="display:none">⚠ Hardware changes require STANDBY or FAULT.</div>
 
   <div class="warning-banner" style="margin-bottom:.8rem">
     <strong>Who should edit this page?</strong> The person wiring or commissioning the ECU. The selected physical connection, signal type, and active state must match the actual electrical installation. If you are operating or mechanically setting up an already-wired turbine, import the engine file supplied by the builder and use Config and Calibration; you normally do not need to edit hardware details.
@@ -83,13 +83,13 @@
     <div class="hw-item-card">
       <div class="hw-grid profile-grid">
         <div class="hw-field">
-          <span class="hw-label">Engine name / WiFi network name</span>
+          <span class="hw-label">Engine name / Wi-Fi network name</span>
           <span class="hw-desc">Identifies this engine and its saved setup. It is also used as the ECU Wi-Fi network name. Default: OpenTurbine.</span>
           <input type="text" id="f-profile-id" maxlength="63" placeholder="OpenTurbine" oninput="setProfileId(this.value)">
-          <span id="profile-id-warn" style="display:none;font-size:.68rem;color:var(--yellow)">⚠ Longer than 32 bytes — WiFi limits SSIDs to 32 bytes, so the broadcast AP name will be truncated (the full ID is still used everywhere else).</span>
+          <span id="profile-id-warn" style="display:none;font-size:.68rem;color:var(--yellow)">⚠ Longer than 32 bytes — Wi-Fi limits SSIDs to 32 bytes, so the broadcast AP name will be truncated (the full ID is still used everywhere else).</span>
         </div>
         <div class="hw-field">
-          <span class="hw-label">WiFi AP Password</span>
+          <span class="hw-label">Wi-Fi AP Password</span>
           <span class="hw-desc">Optional password for the Wi-Fi access point. A saved password is retained unless you enter a replacement; blank selects an open network. ⚠ On an open network, anyone who joins the AP can send engine commands — set a password for anything beyond bench use.</span>
           <div style="display:flex;gap:.35rem;align-items:center">
             <input type="password" id="f-wifi-password" maxlength="63" placeholder="(open network)"
@@ -104,13 +104,13 @@
         <div class="hw-field">
           <span class="hw-label">Engine description</span>
           <span class="hw-desc">Optional installation note saved with this engine setup, e.g. "Test bench JT-1".</span>
-          <input type="text" id="f-profile-desc" maxlength="63" oninput="set('profile_desc',this.value)">
+          <input type="text" id="f-profile-desc" aria-label="Engine description" maxlength="63" oninput="set('profile_desc',this.value)">
         </div>
         <div class="hw-field">
-          <span class="hw-label">WiFi TX Power</span>
+          <span class="hw-label">Wi-Fi TX Power</span>
           <span class="hw-desc">Access-point transmit power in dBm. Lower values reduce radio heat/current draw; raise only if you need more range. Default: 8 dBm.</span>
           <div style="display:flex;align-items:center;gap:.6rem">
-            <input type="range" id="f-wifi-tx-power" min="2" max="20" step="1"
+            <input type="range" id="f-wifi-tx-power" aria-label="Wi-Fi transmit power" min="2" max="20" step="1"
               oninput="setWifiTxPower(this.value)" style="flex:1;min-width:130px">
             <span id="f-wifi-tx-power-val" style="font-size:.74rem;color:var(--dim);min-width:3.5rem;text-align:right">8 dBm</span>
           </div>

@@ -1,0 +1,154 @@
+{
+  "format": "openturbine-pcb-profile",
+  "format_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "board": {
+    "id": "classic-devboard-pcb-test",
+    "name": "Classic ESP32 PCB-mode Test",
+    "revision": "A",
+    "manufacturer": "OpenTurbine development bench",
+    "description": "Custom dry-bench profile matching the currently configured classic ESP32 development board."
+  },
+  "target": {
+    "chip": "esp32",
+    "minimum_flash_mb": 4,
+    "reviewed_strapping_gpio": [2, 15]
+  },
+  "buses": [],
+  "devices": [],
+  "fixed_functions": {
+    "status_led": {
+      "gpio": 2,
+      "type": "gpio",
+      "active_high": true,
+      "safe_demand": 0
+    }
+  },
+  "ports": [
+    {
+      "id": "start_switch",
+      "label": "START switch",
+      "connector": "GPIO13",
+      "description": "Active-low START input with an internal pull-up.",
+      "modes": [
+        {
+          "id": "switch",
+          "adapter": "digital_input",
+          "endpoint": {
+            "gpio": 13
+          },
+          "active_high": false,
+          "pull": "up"
+        }
+      ]
+    },
+    {
+      "id": "stop_switch",
+      "label": "STOP switch",
+      "connector": "GPIO15",
+      "description": "Active-low STOP input with an internal pull-up.",
+      "modes": [
+        {
+          "id": "switch",
+          "adapter": "digital_input",
+          "endpoint": {
+            "gpio": 15
+          },
+          "active_high": false,
+          "pull": "up"
+        }
+      ]
+    },
+    {
+      "id": "throttle_input",
+      "label": "Throttle analog input",
+      "connector": "GPIO32",
+      "description": "ADC1 input for the operator throttle signal.",
+      "modes": [
+        {
+          "id": "analog",
+          "adapter": "analog_input",
+          "endpoint": {
+            "gpio": 32
+          },
+          "reference_mv": 3300,
+          "limits": {
+            "minimum_mv": 0,
+            "maximum_mv": 3300
+          }
+        }
+      ]
+    },
+    {
+      "id": "idle_input",
+      "label": "Idle analog input",
+      "connector": "GPIO33",
+      "description": "ADC1 input for the operator idle signal.",
+      "modes": [
+        {
+          "id": "analog",
+          "adapter": "analog_input",
+          "endpoint": {
+            "gpio": 33
+          },
+          "reference_mv": 3300,
+          "limits": {
+            "minimum_mv": 0,
+            "maximum_mv": 3300
+          }
+        }
+      ]
+    },
+    {
+      "id": "main_fuel_output",
+      "label": "Main fuel servo output",
+      "connector": "GPIO22",
+      "description": "1000-2000 microsecond main-fuel servo output.",
+      "modes": [
+        {
+          "id": "servo",
+          "adapter": "servo_output",
+          "endpoint": {
+            "gpio": 22
+          },
+          "safe_demand": 0
+        }
+      ]
+    },
+    {
+      "id": "oil_pump_output",
+      "label": "Oil pump PWM output",
+      "connector": "GPIO4",
+      "description": "Main oil-pump PWM output.",
+      "modes": [
+        {
+          "id": "pwm",
+          "adapter": "pwm_output",
+          "endpoint": {
+            "gpio": 4
+          },
+          "safe_demand": 0
+        }
+      ]
+    },
+    {
+      "id": "igniter_output",
+      "label": "Igniter relay output",
+      "connector": "GPIO21",
+      "description": "Active-high igniter relay output.",
+      "modes": [
+        {
+          "id": "relay",
+          "adapter": "relay_output",
+          "endpoint": {
+            "gpio": 21
+          },
+          "active_high": true,
+          "safe_demand": 0
+        }
+      ]
+    }
+  ]
+}

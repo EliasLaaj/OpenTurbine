@@ -117,6 +117,9 @@ func TestEsptoolV5AndMultiFileProgress(t *testing.T) {
 }
 
 func TestPrimaryButtonActions(t *testing.T) {
+	if cleanSafetyButtonLabel != "I understand — choose board" {
+		t.Fatalf("clean-install safety gate must describe the next selection step, got %q", cleanSafetyButtonLabel)
+	}
 	tests := map[string]string{
 		cleanSafetyButtonLabel:  "start",
 		updateSafetyButtonLabel: "start",
@@ -127,6 +130,18 @@ func TestPrimaryButtonActions(t *testing.T) {
 		if got := primaryButtonAction(label); got != want {
 			t.Fatalf("label %q: got action %q, want %q", label, got, want)
 		}
+	}
+}
+
+func TestJobLogPathMatchesWriteLocation(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "setup-data")
+	job := &Job{app: &App{workDir: work}}
+	if got, want := job.logPath(), filepath.Join(work, "update_log.txt"); got != want {
+		t.Fatalf("default log path = %q, want %q", got, want)
+	}
+	job.backupPath = filepath.Join(t.TempDir(), "backups", "engine.json")
+	if got, want := job.logPath(), filepath.Join(filepath.Dir(job.backupPath), "update_log.txt"); got != want {
+		t.Fatalf("backup log path = %q, want %q", got, want)
 	}
 }
 
@@ -211,7 +226,7 @@ func TestManifestCompatibilityUsesMinimumToolVersion(t *testing.T) {
 	if err := validateManifestCompatibility(base); err != nil {
 		t.Fatalf("newer client must accept an older compatible baseline: %v", err)
 	}
-	base.MinimumSetupToolVersion = "0.6.1"
+	base.MinimumSetupToolVersion = "0.6.2"
 	if err := validateManifestCompatibility(base); err == nil {
 		t.Fatal("client must reject a package that requires a newer setup tool")
 	}

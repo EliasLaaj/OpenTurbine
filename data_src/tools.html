@@ -4,10 +4,10 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Tools</title>
-<link rel="stylesheet" href="/style.css?v=20260723a">
+<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260722g"></script>
-<script src="/ui_dialog.js?v=20260723a"></script>
+<script src="/theme.js?v=20260730a"></script>
+<script src="/ui_dialog.js?v=20260730a"></script>
 <style>
 .test-settings-card{width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .test-settings-head,.test-settings-foot{flex:0 0 auto;padding:1rem}
@@ -32,7 +32,7 @@
   <div id="tools-page-head" class="page-heading">
     <div class="page-heading-main">
       <h1 class="page-title">Tools</h1>
-      <p class="page-subtitle">Standby-only tests, diagnostics, backups, software updates and device maintenance.</p>
+      <p class="page-subtitle">STANDBY/FAULT tests, diagnostics, backups, software updates and device maintenance.</p>
     </div>
     <div class="page-heading-actions">
       <button id="btn-test-settings" onclick="openTestSettings()" title="Edit actuator-test durations, output levels, and the shared safety confirmation preference.">Tool settings</button>
@@ -83,7 +83,7 @@
   </div>
 </main>
 
-<script src="/app.js?v=20260722b"></script>
+<script src="/app.js?v=20260730a"></script>
 <script>
 // ── Tool definitions ──────────────────────────────────────────
 // durationMs=0  → instant toggle, no progress bar
@@ -314,7 +314,7 @@ function renderTools() {
     </div>
     <div id="cooldown-start-ui">
       <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.5rem">
-        <input type="range" id="cooldown-slider" min="60" max="300" step="10" value="120"
+        <input type="range" id="cooldown-slider" aria-label="Extra cooldown duration" min="60" max="300" step="10" value="120"
                style="flex:1"
                oninput="document.getElementById('cooldown-slider-val').textContent=this.value+' s'">
         <span id="cooldown-slider-val" style="font-size:.75rem;color:var(--dim);min-width:3.5rem;text-align:right">120 s</span>
@@ -367,6 +367,7 @@ function renderTools() {
     <div style="font-size:.72rem;color:var(--dim);line-height:1.5;margin:.25rem 0 .65rem">
       For normal updates, use <b style="color:var(--text)">OpenTurbine Setup Tool → Update and keep my setup</b>.
       The controls below are for developers who already have matching compiled files for this exact ESP32 target.
+      Download and verify a complete engine file before a manual firmware upload.
     </div>
   <div class="tool-card" id="card-OTA" title="Upload firmware only. Upload web UI assets separately when dashboard pages also change.">
     <div class="tool-header">
@@ -380,7 +381,7 @@ function renderTools() {
       <div class="tool-desc" style="flex:1">
         Upload a compiled firmware <code>.bin</code> file directly from your device.
         This updates firmware only; web pages are stored in LittleFS and must be uploaded separately.
-        Works over WiFi AP — no internet needed. ESP32 reboots automatically.
+        Works over Wi-Fi AP — no internet needed. ESP32 reboots automatically.
       </div>
       <label style="cursor:pointer">
         <input type="file" id="ota-file" accept=".bin" style="display:none" onchange="startOTA(this)">
@@ -447,7 +448,7 @@ function renderTools() {
   <div class="tool-card" id="card-factory-reset" style="border-color:var(--red);margin-top:.75rem">
     <div class="tool-header">
       <div class="tool-name" style="color:var(--red)">Factory Reset</div>
-      <div class="tool-state off" id="state-factory-reset">Standby only</div>
+      <div class="tool-state off" id="state-factory-reset">STANDBY / FAULT</div>
     </div>
     <div class="tool-footer">
       <div class="tool-desc" style="color:var(--dim)">
@@ -474,7 +475,7 @@ function renderTools() {
       <div class="tool-desc" style="color:var(--dim)">
         Unlocks Bench Mode for dry sequence runs, live configuration changes,
         and development-only safety diagnostics. Normal timed actuator checks
-        below remain available in STANDBY with confirmation.
+        below remain available in STANDBY or FAULT with confirmation.
         <b style="color:var(--red)">Never enable during engine operation.</b>
       </div>
       <button id="btn-dev-mode" onclick="toggleDevMode()" class="danger">Enable Dev Mode</button>
@@ -489,7 +490,7 @@ function renderTools() {
       <div class="tool-desc" style="color:var(--dim)">
         Makes sequencer sensor/fault waits complete for dry actuator and timing testing.
         It also bypasses safety fault shutdowns.
-        <b style="color:var(--yellow)">Enable Developer Mode first. Standby only. Never use with fuel or a running engine.</b>
+        <b style="color:var(--yellow)">Enable Developer Mode first. STANDBY/FAULT only. Never use with fuel or a running engine.</b>
       </div>
       <button id="btn-TOGGLE_BENCH_MODE" onclick="toggleBenchMode()" class="danger" disabled>Enable Bench Mode</button>
     </div>
@@ -685,6 +686,19 @@ function setAllButtons(forcedOff) {
   const frBtn = document.getElementById('btn-factory-reset');
   if (frBtn) frBtn.disabled = forcedOff || !inStandby;
 }
+function refreshTimedToolLockStates() {
+  const locked = !isStandbyLike(engineMode);
+  TOOLS.filter(tool => tool.durationMs > 0).forEach(tool => {
+    if (activeId === tool.id) return;
+    const state = document.getElementById('state-' + tool.id);
+    if (!state) return;
+    if (locked) {
+      setState(tool.id, `Locked · ${engineMode}`, 'off');
+    } else if (state.textContent.startsWith('Locked ·')) {
+      setState(tool.id, 'Ready', '');
+    }
+  });
+}
 
 // ── WS integration ────────────────────────────────────────────
 const _base = window.applyData;
@@ -702,7 +716,10 @@ window.applyData = function(d) {
   if (mb) { mb.textContent = d.mode; mb.className = 'mode-badge ' + d.mode; }
   const lw = document.getElementById('lock-warn');
   if (lw) lw.style.display = !isStandbyLike(d.mode) ? '' : 'none';
-  if (!activeTick) setAllButtons(false);
+  if (!activeTick) {
+    setAllButtons(false);
+    refreshTimedToolLockStates();
+  }
   updateLoopDiagnostics(d);
 
   // Toggle state badges
@@ -1037,9 +1054,9 @@ function backupConfig() {
       a.download = 'OpenTurbine_' + profilePart + ts + '.json';
       a.click();
       URL.revokeObjectURL(url);
-      document.getElementById('cfg-backup-state').textContent = 'Downloaded';
+      document.getElementById('cfg-backup-state').textContent = 'Download started';
       document.getElementById('cfg-backup-state').className   = 'tool-state done';
-      if (msg) { msg.textContent = 'Complete engine file downloaded successfully.'; msg.style.color = 'var(--green)'; msg.style.display = ''; }
+      if (msg) { msg.textContent = 'Download started. Confirm the complete engine file appears in Downloads before relying on it.'; msg.style.color = 'var(--green)'; msg.style.display = ''; }
       setTimeout(() => {
         document.getElementById('cfg-backup-state').textContent = 'Ready';
         document.getElementById('cfg-backup-state').className   = 'tool-state off';
@@ -1088,6 +1105,34 @@ async function factoryReset() {
 }
 
 // ── Config restore ────────────────────────────────────────────
+function compactEngineFileForRestore(text) {
+  const root = JSON.parse(text);
+  const registry = root?.hardware?.channel_registry;
+  const defaults = {
+    pulses_per_unit:1,
+    analog_zero_mv:0, analog_mv_per_unit:1000, analog_divider:1,
+    digital_threshold_raw:2048, digital_hysteresis_raw:64,
+    torque_interface:0, hx711_clk:-1, hx711_scale:1, hx711_zero:0,
+    temp_interface:0, spi_clk:-1, spi_cs:-1, spi_miso:-1, spi_mosi:-1,
+    tc_type:'K', temp_resolution:10, ntc_beta:3950, ntc_r0:10000,
+    ntc_r_fixed:10000, ntc_pullup:true,
+    safe_demand:0, force_safe_on_fault:false, min_run_demand:0,
+    pwm_freq_hz:5000, pwm_res_bits:10,
+    invert:false, pullup:false, pulldown:false,
+    has_current:false, current_pin:-1, current_mv_a:100,
+    current_zero_v:1.65, current_max_a:0,
+    has_flow_monitor:false, minimum_flow_l_min:0
+  };
+  for (const channel of [...(registry?.inputs || []), ...(registry?.outputs || [])]) {
+    if (!channel || typeof channel !== 'object') continue;
+    for (const [key, value] of Object.entries(defaults)) {
+      // These are decoder defaults, so omitting an exact match is lossless.
+      if (Object.is(channel[key], value)) delete channel[key];
+    }
+  }
+  return JSON.stringify(root);
+}
+
 async function restoreConfig(input) {
   const file = input.files[0];
   if (!file) return;
@@ -1115,10 +1160,10 @@ async function restoreConfig(input) {
         response = await fetch('/api/ecu_config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: ev.target.result
+          body: compactEngineFileForRestore(ev.target.result)
         });
-        if (response.status !== 503 || attempt === 2) return response;
-        document.getElementById('cfg-backup-state').textContent = 'Waiting for ECU memory…';
+        if (![500, 503].includes(response.status) || attempt === 2) return response;
+        document.getElementById('cfg-backup-state').textContent = 'Waiting for ECU storage…';
         await new Promise(resolve => setTimeout(resolve, 2200));
       }
       return response;
@@ -1217,9 +1262,9 @@ function startWebAssetsUpdate(input) {
     return;
   }
   const required = [
-    'app.js.gz', 'calibration.html.gz', 'config.html.gz', 'hardware.html.gz',
-    'index.html.gz', 'log.html.gz', 'sequence.html.gz', 'style.css.gz',
-    'theme.js.gz', 'tools.html.gz', 'ui_dialog.js.gz'
+    'calibration.html.gz', 'config.html.gz', 'hardware.html.gz', 'index.html.gz',
+    'log.html.gz', 'sequence.html.gz', 'app.js.gz', 'style.css.gz',
+    'theme.js.gz', 'ui_dialog.js.gz', 'tools.html.gz'
   ];
   const names = new Set(files.map(f => f.name));
   const missing = required.filter(name => !names.has(name));

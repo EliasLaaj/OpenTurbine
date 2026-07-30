@@ -184,6 +184,73 @@ def _walk(obj, path=""):
         yield path, obj
 
 
+def _enabled_pin(section, key):
+    item = section.get(key, {}) if isinstance(section, dict) else {}
+    if not isinstance(item, dict) or not item.get("enabled"):
+        return set()
+    pin = item.get("pin")
+    return {pin} if isinstance(pin, int) and pin >= 0 else set()
+
+
+def _registry_pins(hw, direction, purposes):
+    registry = hw.get("channel_registry", {})
+    channels = registry.get(direction, []) if isinstance(registry, dict) else []
+    return {
+        channel.get("pin")
+        for channel in channels
+        if isinstance(channel, dict)
+        and channel.get("purpose") in purposes
+        and isinstance(channel.get("pin"), int)
+        and channel["pin"] >= 0
+    }
+
+
+def _configured_signal_pins(hw):
+    """Return GPIOs assigned to each bench signal by the matching subsystem.
+
+    GPIO ownership alone is insufficient: for example, I2C SDA on GPIO8 must
+    not make verify-wiring claim that the optional N2 input is configured.
+    Accept both legacy adapters and canonical registry channels, but only for
+    the semantic role represented by each OTBench signal.
+    """
+    controls = hw.get("controls", {})
+    sensors = hw.get("sensors", {})
+    actuators = hw.get("actuators", {})
+
+    def control_pin(key):
+        pin = controls.get(key) if isinstance(controls, dict) else None
+        return {pin} if isinstance(pin, int) and pin >= 0 else set()
+
+    return {
+        "START": control_pin("start_pin"),
+        "STOP": control_pin("stop_pin"),
+        "N1": _enabled_pin(sensors, "n1_rpm")
+              | _registry_pins(hw, "inputs", {"n1_speed"}),
+        "N2": _enabled_pin(sensors, "n2_rpm")
+              | _registry_pins(hw, "inputs", {"n2_speed"}),
+        "THROTTLE_IN": _enabled_pin(sensors, "throttle_input")
+                       | _registry_pins(hw, "inputs", {"throttle"}),
+        "OILP": _enabled_pin(sensors, "oil_press")
+                | _registry_pins(hw, "inputs", {"oil_pressure"}),
+        "FLAME": _enabled_pin(sensors, "flame")
+                 | _registry_pins(hw, "inputs", {"flame"}),
+        "IDLE_IN": _enabled_pin(sensors, "idle_input")
+                   | _registry_pins(hw, "inputs", {"idle"}),
+        "THROTTLE_OUT": _enabled_pin(actuators, "throttle")
+                        | _registry_pins(hw, "outputs", {"main_fuel"}),
+        "STARTER_OUT": _enabled_pin(actuators, "starter")
+                       | _registry_pins(hw, "outputs", {"starter"}),
+        "OILPUMP_OUT": _enabled_pin(actuators, "oil_pump")
+                       | _registry_pins(hw, "outputs", {"oil_pump"}),
+        "FUEL_SOL": _enabled_pin(actuators, "fuel_sol")
+                    | _registry_pins(hw, "outputs", {"fuel_shutoff"}),
+        "IGNITER": _enabled_pin(actuators, "igniter")
+                   | _registry_pins(hw, "outputs", {"igniter"}),
+        "STARTER_EN": _enabled_pin(actuators, "starter_en")
+                      | _registry_pins(hw, "outputs", {"starter_en", "starter_enable"}),
+    }
+
+
 def cmd_verify_wiring(args):
     pm = PinMap()
     dut = make_dut(args)
@@ -193,7 +260,7 @@ def cmd_verify_wiring(args):
         sys.exit("Could not GET /api/hardware: %s" % e)
     pins = {p: v for p, v in _walk(hw)
             if p.split("/")[-1].endswith("pin") and isinstance(v, int) and v >= 0}
-    used = set(pins.values())
+    signal_pins = _configured_signal_pins(hw)
     print("DUT reports these GPIOs in use:")
     for p, v in sorted(pins.items(), key=lambda kv: kv[1]):
         print("  GPIO %-3d  %s" % (v, p))
@@ -201,11 +268,15 @@ def cmd_verify_wiring(args):
     problems = 0
     for s in pm.signals:
         g = s["dut_gpio"]
-        status = "ok" if g in used else "NOT reported in use"
-        if g not in used:
+        configured = signal_pins.get(s["name"], set())
+        status = "ok" if g in configured else (
+            "configured on GPIO " + ", ".join(str(pin) for pin in sorted(configured))
+            if configured else "NOT configured"
+        )
+        if g not in configured:
             problems += 1
         print("  %-13s GPIO %-3d  ot=%-22s  %s" % (s["name"], g, s["ot_signal"], status))
-    print("\n%d signal GPIO(s) not found in DUT config — enable/repin them on the Hardware page."
+    print("\n%d signal(s) do not match the DUT config — enable/repin them on the Hardware page."
           % problems if problems else "\nAll pin-map GPIOs are present in the DUT config.")
     return 0
 
