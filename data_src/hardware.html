@@ -486,7 +486,8 @@ function collectPinUsage() {
     usage.get(pin).push({label, group});
   };
   const c = cfg.controls || {};
-  if (pcbProfileActive()) {
+  const profileActive = pcbProfileActive();
+  if (profileActive) {
     const profileName = pcbProfile.name || pcbProfile.id || 'PCB profile';
     (pcbProfile.reserved_gpio || []).forEach(pin =>
       add(pin, `${profileName} reserved GPIO`, 'pcb-reserved'));
@@ -497,24 +498,31 @@ function collectPinUsage() {
   if (!registryHasPurpose('input', 'stop_switch')) add(c.stop_pin, 'Stop input');
   if (!registryHasPurpose('input', 'start_switch')) add(c.start_pin, 'Start input');
   const i2c = cfg.i2c || {};
-  if (i2c.enabled !== false) {
+  if (i2c.enabled !== false && !(profileActive && pcbProfile?.bus_ownership?.i2c)) {
     add(i2c.sda_pin, 'Shared I2C SDA', 'i2c-sda');
     add(i2c.scl_pin, 'Shared I2C SCL', 'i2c-scl');
     add(i2c.interrupt_pin, 'TCA9554 interrupt');
   }
   const spi = cfg.spi || {};
-  if (spi.enabled) {
+  if (spi.enabled && !(profileActive && pcbProfile?.bus_ownership?.spi)) {
     add(spi.sck_pin, 'Shared SPI SCK', 'spi-clk');
     add(spi.miso_pin, 'Shared SPI MISO', 'spi-miso');
     add(spi.mosi_pin, 'Shared SPI MOSI', 'spi-mosi');
   }
   const statusLed = cfg.actuators?.status_led;
-  if (statusLed?.enabled !== false) add(statusLed?.pin, 'Status LED');
+  if (statusLed?.enabled !== false &&
+      !(profileActive && pcbProfile?.fixed_functions?.status_led?.available))
+    add(statusLed?.pin, 'Status LED');
   const cl = cfg.cluster_serial || {};
-  if (cl.enabled) { add(cl.tx_pin, 'Cluster Serial TX'); add(cl.rx_pin, 'Cluster Serial RX'); }
+  if (cl.enabled && !(profileActive && pcbProfile?.fixed_functions?.cluster_serial?.available)) {
+    add(cl.tx_pin, 'Cluster Serial TX'); add(cl.rx_pin, 'Cluster Serial RX');
+  }
   const mv = cfg.mavlink || {};
-  if (mv.enabled) add(mv.tx_pin, 'MAVLink TX');
-  if (cfg.buzzer?.enabled) add(cfg.buzzer.pin, 'Buzzer');
+  if (mv.enabled && !(profileActive && pcbProfile?.fixed_functions?.mavlink?.available))
+    add(mv.tx_pin, 'MAVLink TX');
+  if (cfg.buzzer?.enabled &&
+      !(profileActive && pcbProfile?.fixed_functions?.buzzer?.available))
+    add(cfg.buzzer.pin, 'Buzzer');
   const abt = cfg.ab_trigger || {};
   if (hardwareHasAfterburner()) {
     if (abt.source === 2) add(abt.switch_pin, 'AB switch');
@@ -525,6 +533,9 @@ function collectPinUsage() {
   const r = registryRoot();
   (r.inputs || []).forEach(ch => {
     if (!ch || ch.installed === false) return;
+    if (profileActive && (ch.physical_port ||
+        (ch.purpose === 'battery_voltage' &&
+         pcbProfile?.fixed_functions?.supply_voltage?.available))) return;
     if (registryTorqueIsHx711(ch)) {
       const label = registryDisplayName('input', ch, ch.id || 'Torque');
       add(ch.pin, `${label} DOUT`);
@@ -541,6 +552,7 @@ function collectPinUsage() {
   });
   (r.outputs || []).forEach(ch => {
     if (!ch || ch.installed === false) return;
+    if (profileActive && ch.physical_port) return;
     const label = registryDisplayName('output', ch, ch.id || 'Registry output');
     add(ch.pin, label);
     const actuatorKey = registryCoreActuatorKey(ch);
@@ -5136,7 +5148,7 @@ function shareableSpiEntries(entries) {
 }
 
 function checkPinConflicts() {
-  // Use the same hardware-object inventory as save preflight. Hidden legacy
+  // Use the same hardware-object inventory as save validation. Hidden legacy
   // controls must never invent conflicts for an inactive sensor mode or an AB
   // trigger source that is not selected.
   const conflicts = _checkGpioConflicts().map(c => ({
@@ -5878,7 +5890,7 @@ async function saveHardware() {
     // Dedicated AB flame sensor pin is backend-required when enabled
     if (cfg.ab_flame?.enabled) requirePin(cfg.ab_flame, 'pin', 'AB Flame Sensor');
   }
-  // Backend-required pins the preflight used to miss — the save looked
+  // Backend-required pins the validation used to miss — the save looked
   // complete, then the backend rejected it.
   if (cfg.mavlink?.enabled) requirePin(cfg.mavlink, 'tx_pin', 'MAVLink TX');
   for (const [key, label] of [['glow_plug','Glow Current'], ['igniter','Igniter 1 Current'],

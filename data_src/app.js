@@ -743,7 +743,7 @@ function applyData(d) {
   // Mode badge
   const badge = document.getElementById('mode-badge');
   if (badge) {
-    badge.textContent = d.mode || '—';
+    badge.textContent = d.limp_override_sensor ? ((d.mode || '—') + ' · REDUCED POWER') : (d.mode || '—');
     badge.className   = 'mode-badge ' + (d.mode || '');
   }
 
@@ -752,6 +752,15 @@ function applyData(d) {
   if (devBanner) devBanner.style.display = d.dev_mode ? '' : 'none';
   const benchBanner = document.getElementById('bench-banner');
   if (benchBanner) benchBanner.style.display = d.bench_mode ? '' : 'none';
+  const limitedBanner = document.getElementById('limited-run-banner');
+  if (limitedBanner) {
+    limitedBanner.style.display = d.limp_override_sensor ? '' : 'none';
+    if (d.limp_override_sensor) {
+      limitedBanner.textContent = 'REDUCED-POWER MODE — ' + d.limp_override_sensor +
+        ' is overridden; fuel is capped at ' + Number(d.limp_throttle_cap || 0).toFixed(0) +
+        '% and afterburner is disabled.';
+    }
+  }
   const logDropBanner = document.getElementById('session-log-drop-banner');
   if (logDropBanner) {
     const dropped = Number(d.session_dropped_rows || 0);
@@ -760,12 +769,12 @@ function applyData(d) {
       logDropBanner.textContent = 'Session log dropped ' + dropped + ' row' + (dropped === 1 ? '' : 's') + '. CSV for this run is incomplete.';
     }
   }
-  const flightDropBanner = document.getElementById('flight-log-drop-banner');
-  if (flightDropBanner) {
-    const dropped = Number(d.flight_dropped_events || 0);
-    flightDropBanner.style.display = dropped > 0 ? '' : 'none';
+  const eventDropBanner = document.getElementById('event-log-drop-banner');
+  if (eventDropBanner) {
+    const dropped = Number(d.event_dropped_events ?? 0);
+    eventDropBanner.style.display = dropped > 0 ? '' : 'none';
     if (dropped > 0) {
-      flightDropBanner.textContent = 'Event recorder dropped ' + dropped + ' event' + (dropped === 1 ? '' : 's') + '. Event log may be incomplete.';
+      eventDropBanner.textContent = 'Event recorder dropped ' + dropped + ' event' + (dropped === 1 ? '' : 's') + '. Event log may be incomplete.';
     }
   }
   const storageBanner = document.getElementById('config-storage-banner');
@@ -793,12 +802,12 @@ function applyData(d) {
       startBtn._startTimeout = null;
     }
   }
-  // Mirror the backend start-preflight reasons visible in telemetry, so
+  // Mirror the backend start-check reasons visible in telemetry, so
   // START is disabled with an explanation instead of accepting the click
   // and rejecting it server-side (backend remains the authority).
   let startBlock = '';
   if (!running) {
-    if (d.mode === 'FAULT')                startBlock = 'ECU is in FAULT — fix config/profile first';
+    if (d.mode === 'FAULT')                startBlock = String(d.fault_description || d.hardware_fault || d.last_event || 'ECU startup validation failed');
     else if (d.stop_switch_active)         startBlock = 'STOP switch is active';
     else if (d.profile_match === false)    startBlock = 'Profile mismatch — upload a matching config';
     // (boot config-load failure enters FAULT mode, caught above; telemetry
@@ -819,6 +828,11 @@ function applyData(d) {
     sbr.style.display = show ? '' : 'none';
     if (show) sbr.textContent = '⚠ ' + startBlock;
   }
+  const limitedStart = document.getElementById('btn-limited-start');
+  const limitedNote = document.getElementById('limited-start-note');
+  const limitedAllowed = d.mode === 'STANDBY' && d.limited_start_allowed === true;
+  if (limitedStart) limitedStart.style.display = limitedAllowed ? '' : 'none';
+  if (limitedNote) limitedNote.style.display = limitedAllowed ? '' : 'none';
   setDisabled('btn-stop',  !running);
   setHwActive('btn-start', !!d.start_switch_active);
   setHwActive('btn-stop',  !!d.stop_switch_active);
@@ -845,9 +859,14 @@ function applyData(d) {
   const faultCard = document.getElementById('fault-card');
   if (faultCard) {
     const hasFaultDesc = d.fault_description && d.fault_description.length > 0;
-    const showFault = hasFaultDesc && (d.mode === 'FAULT' || d.mode === 'STANDBY' || d.mode === 'SHUTDOWN');
+    const showFault = (hasFaultDesc || limitedAllowed) &&
+      (d.mode === 'FAULT' || d.mode === 'STANDBY' || d.mode === 'SHUTDOWN');
     faultCard.style.display = showFault ? '' : 'none';
-    if (showFault) setText('fault-desc-text', d.fault_description);
+    if (showFault) {
+      setText('fault-desc-text', hasFaultDesc ? d.fault_description :
+        ('Cannot start normally: ' + (d.limited_start_sensor || 'a required sensor') +
+         ' feedback is unavailable.'));
+    }
   }
 
   // ── Profile mismatch banner ───────────────────────────────

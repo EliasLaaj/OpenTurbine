@@ -61,7 +61,7 @@ If Windows warns about the Setup Tool, confirm the file came from the official [
 | Windows guided setup | Supported |
 | macOS/Linux graphical installer | Not currently available |
 | Manual source build | Advanced/developer path |
-| Certified aviation use | Not certified |
+| Certified use | Not certified |
 
 > **Experimental engine-control software:** Verify all limits, outputs, shutdown paths, and sequences on a restrained test setup. Use an independent physical fuel/power stop. OpenTurbine does not make an engine safe or replace suitable drivers, fusing, sensors, or operating judgment.
 

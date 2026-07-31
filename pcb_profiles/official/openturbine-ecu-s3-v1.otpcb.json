@@ -203,8 +203,8 @@
       ]
     },
 
-    {"id": "switch_input_1", "label": "Switch input 1", "connector": "Switch Input 1", "description": "TCA9554 digital switch input", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 0}]},
-    {"id": "switch_input_2", "label": "Switch input 2", "connector": "Switch Input 2", "description": "TCA9554 digital switch input", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 1}]},
+    {"id": "switch_input_1", "label": "Switch input 1", "connector": "Switch Input 1", "description": "TCA9554 digital switch input; assigned to STOP by default", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 0, "active_high": false, "default": {"id": "stop_switch", "name": "STOP Switch", "role": "digital_switch", "purpose": "stop_switch"}}]},
+    {"id": "switch_input_2", "label": "Switch input 2", "connector": "Switch Input 2", "description": "TCA9554 digital switch input; assigned to START by default", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 1, "active_high": false, "default": {"id": "start_switch", "name": "START Switch", "role": "digital_switch", "purpose": "start_switch"}}]},
     {"id": "switch_input_3", "label": "Switch input 3", "connector": "Switch Input 3", "description": "TCA9554 digital switch input", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 2}]},
     {"id": "switch_input_4", "label": "Switch input 4", "connector": "Switch Input 4", "description": "TCA9554 digital switch input", "modes": [{"id": "digital", "adapter": "i2c_digital_input", "device": "io_expander", "channel": 3}]},
 

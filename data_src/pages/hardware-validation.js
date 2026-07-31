@@ -77,7 +77,7 @@ function shareableSpiEntries(entries) {
 }
 
 function checkPinConflicts() {
-  // Use the same hardware-object inventory as save preflight. Hidden legacy
+  // Use the same hardware-object inventory as save validation. Hidden legacy
   // controls must never invent conflicts for an inactive sensor mode or an AB
   // trigger source that is not selected.
   const conflicts = _checkGpioConflicts().map(c => ({

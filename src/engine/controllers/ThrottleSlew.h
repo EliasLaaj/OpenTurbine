@@ -83,12 +83,18 @@ public:
         // feedback. In normal operation this interlock must still prevent a
         // fuel increase with missing speed or temperature feedback.
         if (!ed.benchMode &&
-            ((FeedbackRequirements::n1ForProtectionOrControl() && !ed.n1Healthy) ||
-             (FeedbackRequirements::n2ForProtectionOrControl() && !ed.n2Healthy) ||
-             (FeedbackRequirements::egtForProtectionOrControl() && !Config::primaryEgtHealthy(ed)) ||
-             (FeedbackRequirements::p1ForProtectionOrControl() && !ed.p1Healthy) ||
-             (FeedbackRequirements::p2ForProtectionOrControl() && !ed.p2Healthy) ||
-             (FeedbackRequirements::torqueForProtectionOrControl() && !ed.torqueHealthy))) {
+            ((FeedbackRequirements::n1ForProtectionOrControl() && !ed.n1Healthy &&
+              !FeedbackRequirements::isOverridden(ed, FeedbackRequirements::N1)) ||
+             (FeedbackRequirements::n2ForProtectionOrControl() && !ed.n2Healthy &&
+              !FeedbackRequirements::isOverridden(ed, FeedbackRequirements::N2)) ||
+             (FeedbackRequirements::egtForProtectionOrControl() && !Config::primaryEgtHealthy(ed) &&
+              !FeedbackRequirements::isOverridden(ed, FeedbackRequirements::EGT)) ||
+             (FeedbackRequirements::p1ForProtectionOrControl() && !ed.p1Healthy &&
+              !FeedbackRequirements::isOverridden(ed, FeedbackRequirements::P1)) ||
+             (FeedbackRequirements::p2ForProtectionOrControl() && !ed.p2Healthy &&
+              !FeedbackRequirements::isOverridden(ed, FeedbackRequirements::P2)) ||
+             (FeedbackRequirements::torqueForProtectionOrControl() && !ed.torqueHealthy &&
+              !FeedbackRequirements::isOverridden(ed, FeedbackRequirements::TORQUE)))) {
             if (target > _current) target = _current;
         }
 

@@ -140,15 +140,15 @@ function installedBrowser() {
     } });
     await page.waitForFunction(() => document.getElementById('mode-badge')?.textContent === 'STANDBY');
     await page.evaluate(() => showStartConfirm());
-    await page.waitForFunction(() => !document.getElementById('start-confirm-preflight')?.textContent?.includes('Checking'));
-    const startPreflight = await text(page, '#start-confirm-preflight');
-    assert.match(startPreflight, /ECU mode\s*STANDBY/i);
-    assert.match(startPreflight, /N1\s*0 RPM\s*·\s*OK/i);
-    assert.match(startPreflight, /TOT\s*24 °C\s*·\s*OK/i);
-    assert.match(startPreflight, /Oil Press\s*0\.00 bar\s*·\s*OK/i);
-    assert.match(startPreflight, /STOP input\s*Released/i);
-    assert.match(startPreflight, /Safety state\s*Normal checks/i);
-    assert.match(startPreflight, /Startup sequence\s*\d+ blocks?/i);
+    await page.waitForFunction(() => !document.getElementById('start-confirm-checks')?.textContent?.includes('Checking'));
+    const startChecks = await text(page, '#start-confirm-checks');
+    assert.match(startChecks, /ECU mode\s*STANDBY/i);
+    assert.match(startChecks, /N1\s*0 RPM\s*·\s*OK/i);
+    assert.match(startChecks, /TOT\s*24 °C\s*·\s*OK/i);
+    assert.match(startChecks, /Oil Press\s*0\.00 bar\s*·\s*OK/i);
+    assert.match(startChecks, /STOP input\s*Released/i);
+    assert.match(startChecks, /Safety state\s*Normal checks/i);
+    assert.match(startChecks, /Startup sequence\s*\d+ blocks?/i);
     await page.evaluate(() => cancelStart());
     const staleStartRequestSent = await page.evaluate(() => {
       _telemetryStale = true;
@@ -166,7 +166,7 @@ function installedBrowser() {
     assert.equal(staleStartRequestSent, false);
     assert.match(await text(page, '.ot-dialog-message'), /START is no longer available.*telemetry is stale/is);
     await page.locator('#ot-dialog-confirm').click();
-    results.push('start confirmation exposes a compact live ECU preflight snapshot before command');
+    results.push('start confirmation exposes compact live ECU start checks before command');
     assert.equal((await text(page, '#getting-started-banner')).match(/[⚙🔧📋🔨▶]/u), null);
     assert.equal(await page.locator('.gs-steps a').first().evaluate(el => getComputedStyle(el).color), 'rgb(245, 245, 247)');
     results.push('getting-started checklist uses the high-contrast text colour for plain-text actions');

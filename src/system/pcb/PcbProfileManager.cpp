@@ -476,7 +476,22 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
             if (!copyText(mode.id, sizeof(mode.id), modeSource["id"] | "", true, "mode.id") ||
                 !copyText(mode.adapter, sizeof(mode.adapter), modeSource["adapter"] | "", true, "mode.adapter") ||
                 !copyText(mode.deviceId, sizeof(mode.deviceId), modeSource["device"] | "", false, "mode.device") ||
+                !copyText(mode.defaultId, sizeof(mode.defaultId), modeSource["default"]["id"] | "", false, "mode.default.id") ||
+                !copyText(mode.defaultName, sizeof(mode.defaultName), modeSource["default"]["name"] | "", false, "mode.default.name") ||
+                !copyText(mode.defaultRole, sizeof(mode.defaultRole), modeSource["default"]["role"] | "", false, "mode.default.role") ||
+                !copyText(mode.defaultPurpose, sizeof(mode.defaultPurpose), modeSource["default"]["purpose"] | "", false, "mode.default.purpose") ||
                 !idValid(mode.id, sizeof(mode.id))) { delete catalog; return false; }
+            const bool hasDefault = mode.defaultId[0] || mode.defaultName[0] ||
+                                    mode.defaultRole[0] || mode.defaultPurpose[0];
+            const bool completeDefault = mode.defaultId[0] && mode.defaultName[0] &&
+                                         mode.defaultRole[0] && mode.defaultPurpose[0];
+            if (hasDefault && (!completeDefault ||
+                !idValid(mode.defaultId, sizeof(mode.defaultId)))) {
+                delete catalog;
+                strlcpy(_fault, "PCB port mode has an incomplete or invalid default assignment",
+                        sizeof(_fault));
+                return false;
+            }
             mode.channel = modeSource["channel"] | 0;
             mode.gpio = modeSource["endpoint"]["gpio"] | -1;
             mode.activeHigh = modeSource["active_high"] | true;
@@ -503,6 +518,16 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
                 continue;
             }
             const bool output = strstr(mode.adapter, "output") != nullptr;
+            if (hasDefault) {
+                const auto direction = output ? ChannelRegistry::Output : ChannelRegistry::Input;
+                if (!ChannelRegistry::roleValid(direction, mode.defaultRole) ||
+                    !ChannelRegistry::purposeValid(direction, mode.defaultPurpose)) {
+                    delete catalog;
+                    strlcpy(_fault, "PCB port mode default has an invalid role or purpose",
+                            sizeof(_fault));
+                    return false;
+                }
+            }
             if (!validTargetPin(mode.gpio, output) ||
                 (output && (!mode.hasSafeDemand || mode.safeDemand < 0.0f || mode.safeDemand > 1.0f))) {
                 delete catalog; strlcpy(_fault, "PCB port mode has invalid GPIO or safe state", sizeof(_fault)); return false;
@@ -736,6 +761,13 @@ void PcbProfileManager::toJson(JsonObject out, bool includePorts,
                 m["device"] = mode.deviceId;
                 const Device* device = findDevice(mode.deviceId);
                 if (device) m["device_driver"] = device->driver;
+            }
+            if (mode.defaultId[0]) {
+                JsonObject assignment = m["default"].to<JsonObject>();
+                assignment["id"] = mode.defaultId;
+                assignment["name"] = mode.defaultName;
+                assignment["role"] = mode.defaultRole;
+                assignment["purpose"] = mode.defaultPurpose;
             }
             if ((!strcmp(mode.adapter, "i2c_adc_input") ||
                  !strcmp(mode.adapter, "i2c_adc_digital_input")) &&

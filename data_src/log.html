@@ -29,7 +29,7 @@
       <button onclick="loadLog()">Refresh</button>
       <button onclick="downloadLog('raw')" title="Download newline-delimited JSON: one detailed event object per line for diagnostics and scripts.">Event NDJSON</button>
       <button onclick="downloadLog('csv')" title="Download the recent event window as a small spreadsheet-friendly CSV. Use NDJSON for the complete black-box event log.">Event CSV</button>
-      <button onclick="askClear('flightlog')" class="danger">Clear</button>
+      <button onclick="askClear('eventlog')" class="danger">Clear</button>
     </div>
   </div>
   <div style="font-size:.74rem;color:var(--dim);padding:.55rem .75rem;border:1px solid var(--border);border-radius:6px;background:var(--surface);margin-bottom:.8rem;line-height:1.55">
@@ -526,7 +526,7 @@ function askClear(target) {
   const title   = document.getElementById('clear-confirm-title');
   const body    = document.getElementById('clear-confirm-body');
   const btn     = document.getElementById('clear-confirm-btn');
-  if (target === 'flightlog') {
+  if (target === 'eventlog') {
     title.textContent = 'Clear event log?';
     body.textContent  = 'This will permanently delete all recorded events. This cannot be undone.';
     btn.textContent   = 'Yes, clear event log';
@@ -549,7 +549,7 @@ async function assertOkResponse(r) {
   throw new Error(body || ('HTTP ' + r.status));
 }
 
-async function waitForFlightLogClear() {
+async function waitForEventLogClear() {
   for (let i = 0; i < 10; i++) {
     await new Promise(resolve => setTimeout(resolve, 150));
     const r = await fetch('/api/log');
@@ -561,7 +561,7 @@ async function waitForFlightLogClear() {
 
 function confirmClear() {
   document.getElementById('clear-confirm-overlay').style.display = 'none';
-  if (_clearTarget === 'flightlog') {
+  if (_clearTarget === 'eventlog') {
     fetch('/api/command', {
       method: 'POST',
       body: JSON.stringify({ cmd: 'CLEAR_LOG' }),
@@ -569,7 +569,7 @@ function confirmClear() {
     }).then(async r => {
       const body = await r.json().catch(() => ({}));
       if (!r.ok || body.ok === false) throw new Error(body.error || body.reason || ('HTTP ' + r.status));
-    }).then(() => waitForFlightLogClear())
+    }).then(() => waitForEventLogClear())
       .then(() => loadLog())
       .catch(e => alert('Clear log failed: ' + e.message));
   } else if (_clearTarget === 'sessions') {

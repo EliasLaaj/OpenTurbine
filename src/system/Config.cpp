@@ -1068,11 +1068,11 @@ void Config::load() {
         }
     }
     if (loadWarning[0]) {
-        // Boot-only flight-log markers for out-of-cap safety limits (see the
+        // Boot-only event-log markers for out-of-cap safety limits (see the
         // accept+warn block in _fromDoc). Emitted here, not in _fromDoc,
-        // because boot load runs on Core 1 — the flight recorder's only
+        // because boot load runs on Core 1 — the event recorder's only
         // permitted producer core; web uploads (Core 0) get the persistent
-        // telemetry notice without a flight-log record.
+        // telemetry notice without an event-log record.
         if (rpmLimit > 500000.0f)
             FlightRecorder::logConfigChange("load_warning:rpm_limit", rpmLimit, 500000.0f);
         if (totLimit > 1400.0f)

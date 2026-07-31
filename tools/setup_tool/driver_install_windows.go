@@ -180,7 +180,23 @@ func bootloaderFailureDriverRecommendation(recommendation driverRecommendation) 
 		recommendation.Detail += "\n\nNo COM port is assigned to this detected USB bridge. Any other COM port shown by Windows may belong to a different device."
 		return recommendation
 	}
-	return bootloaderNoAnswerDriverRecommendation()
+	fallback := bootloaderNoAnswerDriverRecommendation()
+	// A COM port proves that a serial driver is loaded, not that the correct
+	// bridge driver is healthy. Keep repair available after a failed ESP probe.
+	if kind == driverCP210x || kind == driverWCH {
+		fallback.Message += "\n\nIf BOOT/RESET and closing other serial apps do not help, reinstall or repair the detected bridge driver below."
+		fallback.Detail += "\n\nDetected hardware ID: " +
+			strings.Join(recommendation.Device.HardwareIDs, ", ")
+		fallback.Choices = recommendation.Choices
+		fallback.Device = recommendation.Device
+	} else {
+		fallback.Message += "\n\nYou can also repair the USB bridge driver manually below after checking the chip or USB VID."
+		fallback.Choices = []driverChoice{
+			{Kind: driverCP210x, Label: "Repair CP210x"},
+			{Kind: driverWCH, Label: "Repair WCH"},
+		}
+	}
+	return fallback
 }
 
 func detectUSBBridgeDevices() []usbBridgeDevice {

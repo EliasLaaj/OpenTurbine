@@ -83,9 +83,15 @@ expect('configuration writes and START share an atomic gate',
   main.includes('ConfigApplyGate::tryBeginStartTransition') &&
   main.includes('ConfigApplyGate::tryBeginCoreApply'));
 expect('START readiness is consumer-aware on both command paths',
-  feedback.includes('allRequiredStartFeedbackHealthy') &&
-  main.includes('FeedbackRequirements::allRequiredStartFeedbackHealthy') &&
-  web.includes('FeedbackRequirements::allRequiredStartFeedbackHealthy'));
+  feedback.includes('requiredStartFailureMask') &&
+  main.includes('FeedbackRequirements::requiredStartFailureMask') &&
+  web.includes('FeedbackRequirements::eligibleSingleStartOverride'));
+expect('sensor-fault restart is one-sensor-only and keeps reduced-power safeguards',
+  feedback.includes('(failed & (failed - 1UL)) != 0') &&
+  feedback.includes('startupConsumes(failed)') &&
+  main.includes('ed.limpOverrideSensor = limited ? overrideSensor') &&
+  safety.includes('MULTIPLE_SENSOR_FAILURE') &&
+  web.includes('Afterburner is disabled during a sensor-fault reduced-power run'));
 expect('limp and governor feedback failure command coarse pitch',
   hardware.includes('ed.limpMode && hw.hasPropPitch') &&
   governor.includes('_pitchCurrent + maxStep'));
@@ -274,7 +280,8 @@ expect('valid slow igniter PWM cycles have sufficient LEDC timer resolution',
   hwConfig.includes('intRange(actuators["igniter2"], "rest_ms", 1, 200)'));
 expect('reduced-power caps total main fuel after the afterburner offset',
   hardware.includes('ed.throttleDemand + ed.abFuelOffset') &&
-  hardware.indexOf('if (ed.limpMode && ed.mode == SysMode::RUNNING)') >
+  hardware.indexOf('if (ed.limpMode &&',
+    hardware.indexOf('ed.throttleDemand + ed.abFuelOffset')) >
     hardware.indexOf('ed.throttleDemand + ed.abFuelOffset'));
 expect('startup feedback follows actual block consumers',
   feedback.includes('startupHas("FlameConfirm")') &&

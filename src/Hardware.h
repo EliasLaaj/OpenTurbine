@@ -2344,6 +2344,8 @@ namespace Hardware {
         if (!ed.hardwareReady) Serial.printf("[HW] START readiness fault: %s\n", ed.hardwareFault);
     }
 
+    inline void allOff();
+
     // ── Actuator update: EngineData demands → physical signals ─
     inline void updateActuators() {
         auto& hw = HardwareConfig::instance();
@@ -2360,7 +2362,8 @@ namespace Hardware {
             // Reduced-Power Mode promises a cap on the actual main-fuel output.
             // Enforce it after the AB offset is composed so afterburner compressor-
             // fuel coordination cannot bypass a manual or feedback-loss cap.
-            if (ed.limpMode && ed.mode == SysMode::RUNNING) {
+            if (ed.limpMode &&
+                (ed.mode == SysMode::STARTUP || ed.mode == SysMode::RUNNING)) {
                 demand = min(demand,
                              constrain(Config::limpMaxThrottlePct / 100.0f, 0.0f, 1.0f));
             }
@@ -2752,7 +2755,8 @@ namespace Hardware {
         auto  mode = ed.mode;
         if (mode != SysMode::RUNNING && mode != SysMode::STARTUP) return;
 
-        if (ed.limpMode && mode == SysMode::RUNNING) {
+        if (ed.limpMode &&
+            (mode == SysMode::STARTUP || mode == SysMode::RUNNING)) {
             float cap = constrain(Config::limpMaxThrottlePct / 100.0f, 0.0f, 1.0f);
             if (ed.throttleDemand > cap) ed.throttleDemand = cap;
         }

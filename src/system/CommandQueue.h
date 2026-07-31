@@ -13,6 +13,7 @@
 
 enum class OTCommand : uint8_t {
     START,
+    START_LIMITED,        // reduced-power restart with one eligible failed sensor
     STOP,
     FUEL_PRIME,
     OIL_PRIME,

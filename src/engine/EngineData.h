@@ -181,6 +181,7 @@ struct EngineData {
     volatile bool     skipSafetyChecks   = false;  // DEV_MODE only
     volatile bool     standbyOilFeedActive = false; // windmill protection: oil pump running in STANDBY
     volatile bool     benchMode          = false;  // bench/debug: blocks complete on timer, safety bypassed
+    volatile uint32_t limpOverrideSensor = 0;      // one failed feedback sensor explicitly overridden for restart
     volatile bool     dynamicIdleEnabled = true;
     volatile bool     limpMode           = false;
     volatile bool     stopSwitchActive   = false;

@@ -38,6 +38,13 @@ public:
         char id[24] = {};
         char adapter[24] = {};
         char deviceId[24] = {};
+        // Optional first-boot assignment supplied by the flashed PCB profile.
+        // This is intended for controls physically fitted to the board (for
+        // example its labelled START/STOP inputs), not turbine-specific loads.
+        char defaultId[20] = {};
+        char defaultName[16] = {};
+        char defaultRole[18] = {};
+        char defaultPurpose[20] = {};
         uint8_t channel = 0;
         int8_t gpio = -1;
         bool activeHigh = true;

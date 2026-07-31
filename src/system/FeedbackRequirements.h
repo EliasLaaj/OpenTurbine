@@ -8,6 +8,48 @@
 // controller, or configured startup block consumes it. Merely fitting a
 // telemetry sensor must never block START, cap fuel, or latch limp mode.
 namespace FeedbackRequirements {
+    enum Sensor : uint32_t {
+        NONE          = 0,
+        N1            = 1UL << 0,
+        N2            = 1UL << 1,
+        EGT           = 1UL << 2,
+        P1            = 1UL << 3,
+        P2            = 1UL << 4,
+        TORQUE        = 1UL << 5,
+        OIL_PRESSURE  = 1UL << 6,
+        OIL_TEMP      = 1UL << 7,
+        FUEL_PRESSURE = 1UL << 8,
+        BATTERY       = 1UL << 9,
+        FLAME         = 1UL << 10,
+        THROTTLE      = 1UL << 11,
+        IDLE          = 1UL << 12,
+        GLOW_CURRENT  = 1UL << 13
+    };
+
+    inline bool isOverridden(const EngineData& ed, Sensor sensor) {
+        return (ed.limpOverrideSensor & (uint32_t)sensor) != 0;
+    }
+
+    inline const char* sensorName(uint32_t sensor) {
+        switch (sensor) {
+            case N1: return "N1 speed";
+            case N2: return "N2 speed";
+            case EGT: return "engine temperature";
+            case P1: return "Pressure 1";
+            case P2: return "Pressure 2";
+            case TORQUE: return "torque";
+            case OIL_PRESSURE: return "oil pressure";
+            case OIL_TEMP: return "oil temperature";
+            case FUEL_PRESSURE: return "fuel pressure";
+            case BATTERY: return "supply voltage";
+            case FLAME: return "flame";
+            case THROTTLE: return "throttle input";
+            case IDLE: return "idle input";
+            case GLOW_CURRENT: return "glow current";
+            default: return "unknown sensor";
+        }
+    }
+
     inline bool startupHas(const char* name) {
         for (int i = 0; i < HardwareConfig::startupSeqLen; ++i)
             if (!strcmp(HardwareConfig::startupSeq[i], name)) return true;
@@ -107,32 +149,95 @@ namespace FeedbackRequirements {
 
     // Telemetry-only sensors are intentionally absent. Every member of this
     // set is consumed by an enabled safety, controller, or startup block.
-    inline bool allRequiredStartFeedbackHealthy(const EngineData& ed, uint32_t now) {
+    inline uint32_t requiredStartFailureMask(const EngineData& ed, uint32_t now) {
+        uint32_t failed = NONE;
         if (n1ForStart() && (!HardwareConfig::hasN1Rpm || !ed.n1Healthy || now - ed.n1SampleMs > 500UL))
-            return false;
+            failed |= N1;
         if (n2ForStart() && (!HardwareConfig::hasN2Rpm || !ed.n2Healthy || now - ed.n2SampleMs > 500UL))
-            return false;
+            failed |= N2;
         if ((p1ForProtectionOrControl() || (startupHas("SafetyHold") && Config::safetyHoldCheckP1)) &&
-            (!HardwareConfig::hasP1 || !ed.p1Healthy)) return false;
+            (!HardwareConfig::hasP1 || !ed.p1Healthy)) failed |= P1;
         if ((p2ForProtectionOrControl() || (startupHas("SafetyHold") && Config::safetyHoldCheckP2)) &&
-            (!HardwareConfig::hasP2 || !ed.p2Healthy)) return false;
-        if (torqueForProtectionOrControl() && (!HardwareConfig::hasTorque || !ed.torqueHealthy)) return false;
+            (!HardwareConfig::hasP2 || !ed.p2Healthy)) failed |= P2;
+        if (torqueForProtectionOrControl() && (!HardwareConfig::hasTorque || !ed.torqueHealthy)) failed |= TORQUE;
         if (egtForStart()) {
             const uint32_t sampleMs = Config::effectiveEgtSource() == 2 ? ed.titSampleMs : ed.totSampleMs;
             if (Config::effectiveEgtSource() == 0 || !Config::primaryEgtHealthy(ed) ||
-                now - sampleMs > 1000UL) return false;
+                now - sampleMs > 1000UL) failed |= EGT;
         }
-        if (oilPressureForStart() && !ed.oilHealthy) return false;
-        if (!allOilLoopFeedbackHealthy(ed)) return false;
-        if (HardwareConfig::safetyOilTempHigh && HardwareConfig::hasOilTemp && !ed.oilTempHealthy) return false;
-        if (HardwareConfig::safetyFuelPressLow && HardwareConfig::hasFuelPress && !ed.fuelPressHealthy) return false;
-        if (HardwareConfig::safetyBattLow && HardwareConfig::hasBattVoltage && !ed.battHealthy) return false;
-        if (flameForStart() && !ed.flameHealthy) return false;
-        if (HardwareConfig::hasThrottleInput && !ed.throttleInputValid) return false;
+        if (oilPressureForStart() && !ed.oilHealthy) failed |= OIL_PRESSURE;
+        if (!allOilLoopFeedbackHealthy(ed)) failed |= OIL_PRESSURE;
+        if (HardwareConfig::safetyOilTempHigh && HardwareConfig::hasOilTemp && !ed.oilTempHealthy) failed |= OIL_TEMP;
+        if (HardwareConfig::safetyFuelPressLow && HardwareConfig::hasFuelPress && !ed.fuelPressHealthy) failed |= FUEL_PRESSURE;
+        if (HardwareConfig::safetyBattLow && HardwareConfig::hasBattVoltage && !ed.battHealthy) failed |= BATTERY;
+        if (flameForStart() && !ed.flameHealthy) failed |= FLAME;
+        if (HardwareConfig::hasThrottleInput && !ed.throttleInputValid) failed |= THROTTLE;
         if (HardwareConfig::hasIdleInput &&
-            (startupHas("FuelPumpIdle") || startupHas("ModifiedIdle")) && !ed.idleInputValid) return false;
+            (startupHas("FuelPumpIdle") || startupHas("ModifiedIdle")) && !ed.idleInputValid) failed |= IDLE;
         if (Config::glowWaitUntilHot && startupHas("GlowPreheat") &&
-            (!HardwareConfig::hasGlowCurrentSensor || !ed.glowCurrentHealthy)) return false;
-        return true;
+            (!HardwareConfig::hasGlowCurrentSensor || !ed.glowCurrentHealthy)) failed |= GLOW_CURRENT;
+        return failed;
+    }
+
+    inline bool allRequiredStartFeedbackHealthy(const EngineData& ed, uint32_t now) {
+        return requiredStartFailureMask(ed, now) == NONE;
+    }
+
+    inline bool startupConsumes(uint32_t sensor) {
+        switch (sensor) {
+            case N1:
+                return startupHas("StarterSpin") || startupHas("Spool") ||
+                       (startupHas("SafetyHold") && Config::safetyHoldCheckN1);
+            case N2:
+                return startupHas("GovernorHold") ||
+                       (startupHas("SafetyHold") && Config::safetyHoldCheckN2);
+            case EGT:
+                return startupHas("TempConfirm") || startupHas("WaitTOTCool") ||
+                       (startupHas("SafetyHold") && Config::safetyHoldCheckEgt);
+            case P1: return startupHas("SafetyHold") && Config::safetyHoldCheckP1;
+            case P2: return startupHas("SafetyHold") && Config::safetyHoldCheckP2;
+            case OIL_PRESSURE:
+                return startupHas("OilPrime") ||
+                       (startupHas("SafetyHold") && Config::safetyHoldCheckOil);
+            case FLAME:
+                return startupHas("FlameConfirm") ||
+                       (startupHas("SafetyHold") && Config::safetyHoldCheckFlame);
+            default: return false;
+        }
+    }
+
+    inline uint32_t eligibleSingleStartOverride(const EngineData& ed, uint32_t now) {
+        const uint32_t failed = requiredStartFailureMask(ed, now);
+        if (failed == NONE || (failed & (failed - 1UL)) != 0) return NONE;
+        if (failed == THROTTLE || failed == IDLE || failed == GLOW_CURRENT) return NONE;
+        if (failed == OIL_PRESSURE && HardwareConfig::hasOilLoop) return NONE;
+        if (startupConsumes(failed)) return NONE;
+        return failed;
+    }
+
+    inline uint32_t protectionFailureMask(const EngineData& ed, uint32_t now) {
+        uint32_t failed = NONE;
+        if (n1ForProtectionOrControl() &&
+            (!HardwareConfig::hasN1Rpm || !ed.n1Healthy || now - ed.n1SampleMs > 500UL)) failed |= N1;
+        if (n2ForProtectionOrControl() &&
+            (!HardwareConfig::hasN2Rpm || !ed.n2Healthy || now - ed.n2SampleMs > 500UL)) failed |= N2;
+        if (egtForProtectionOrControl()) {
+            const uint32_t sampleMs = Config::effectiveEgtSource() == 2 ? ed.titSampleMs : ed.totSampleMs;
+            if (Config::effectiveEgtSource() == 0 || !Config::primaryEgtHealthy(ed) ||
+                now - sampleMs > 1000UL) failed |= EGT;
+        }
+        if (p1ForProtectionOrControl() && !ed.p1Healthy) failed |= P1;
+        if (p2ForProtectionOrControl() && !ed.p2Healthy) failed |= P2;
+        if (torqueForProtectionOrControl() && !ed.torqueHealthy) failed |= TORQUE;
+        if ((HardwareConfig::safetyLowOil || HardwareConfig::safetyOilZero) &&
+            HardwareConfig::hasOilPress && !ed.oilHealthy) failed |= OIL_PRESSURE;
+        if (HardwareConfig::hasOilLoop && !allOilLoopFeedbackHealthy(ed)) failed |= OIL_PRESSURE;
+        if (HardwareConfig::safetyOilTempHigh && HardwareConfig::hasOilTemp && !ed.oilTempHealthy) failed |= OIL_TEMP;
+        if (HardwareConfig::safetyFuelPressLow && HardwareConfig::hasFuelPress && !ed.fuelPressHealthy) failed |= FUEL_PRESSURE;
+        if (HardwareConfig::safetyBattLow && HardwareConfig::hasBattVoltage && !ed.battHealthy) failed |= BATTERY;
+        if (HardwareConfig::safetyFlameout && effectiveFlameoutSource() == 1 &&
+            HardwareConfig::hasFlame && !ed.flameHealthy) failed |= FLAME;
+        if (HardwareConfig::hasThrottleInput && !ed.throttleInputValid) failed |= THROTTLE;
+        return failed;
     }
 }

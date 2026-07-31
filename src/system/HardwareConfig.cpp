@@ -2410,7 +2410,9 @@ void HardwareConfig::load() {
         if (!save()) {
             inhibitStartForHardwareConfigFailure(
                 "Cannot start: hardware configuration storage is unavailable.", true);
-        } else if (PcbProfileManager::active() && stopPin < 0) {
+        } else if (PcbProfileManager::active() &&
+                   !registryHasPurpose(&channelRegistry, ChannelRegistry::Input,
+                                       "stop_switch")) {
             inhibitStartForHardwareConfigFailure(
                 "Cannot start: assign the required Stop switch to a PCB connection in Hardware.");
         }
@@ -2502,7 +2504,9 @@ void HardwareConfig::load() {
         return;
     }
     _fromDoc(workDoc);
-    if (PcbProfileManager::active() && stopPin < 0) {
+    if (PcbProfileManager::active() &&
+        !registryHasPurpose(&channelRegistry, ChannelRegistry::Input,
+                            "stop_switch")) {
         inhibitStartForHardwareConfigFailure(
             "Cannot start: assign the required Stop switch to a PCB connection in Hardware.");
     }
@@ -3075,7 +3079,9 @@ void HardwareConfig::applyDefaults() {
         PcbProfileResolver::applyFixedBuses();
         PcbProfileResolver::applyFixedPeripherals();
         char fixedProfileReason[128] = {};
-        if (!PcbProfileResolver::resolve(channelRegistry, fixedProfileReason,
+        if (!PcbProfileResolver::addProfileDefaults(channelRegistry, fixedProfileReason,
+                                                    sizeof(fixedProfileReason)) ||
+            !PcbProfileResolver::resolve(channelRegistry, fixedProfileReason,
                                          sizeof(fixedProfileReason))) {
             inhibitStartForHardwareConfigFailure(
                 fixedProfileReason[0] ? fixedProfileReason :

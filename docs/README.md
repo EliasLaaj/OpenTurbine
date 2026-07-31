@@ -12,7 +12,7 @@ configuration.
 
 - Support hobby turbine installations broadly: turbojets, APUs, generators, turboshafts, turboprops, test rigs, and unusual custom systems.
 - Keep the ordinary path understandable, but preserve advanced configuration rather than deciding what a user is allowed to build.
-- Derive visibility and suggestions from fitted hardware. Do not silently impose aircraft assumptions or one preferred turbine architecture.
+- Derive visibility and suggestions from fitted hardware. Do not silently impose one installation type or preferred turbine architecture.
 - Treat examples and suggested values as unverified starting points, never as authoritative limits.
 - Require user action only for immediate safety, destructive operations, or configuration integrity. Prefer warnings and clear consequences when informed choice is possible.
 - Keep the classic ESP32 target viable; its application partition has little remaining headroom, so firmware-size impact is a release concern.

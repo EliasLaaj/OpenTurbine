@@ -68,7 +68,7 @@
   <div id="session-log-drop-banner" style="display:none;background:color-mix(in srgb, var(--yellow) 7%, transparent);border:1px solid color-mix(in srgb, var(--yellow) 40%, transparent);border-radius:7px;padding:.55rem 1rem;margin-bottom:.6rem;font-size:.82rem;color:var(--yellow);text-align:center">
     Session log dropped rows. CSV for this run is incomplete.
   </div>
-  <div id="flight-log-drop-banner" style="display:none;background:color-mix(in srgb, var(--yellow) 7%, transparent);border:1px solid color-mix(in srgb, var(--yellow) 40%, transparent);border-radius:7px;padding:.55rem 1rem;margin-bottom:.6rem;font-size:.82rem;color:var(--yellow);text-align:center">
+  <div id="event-log-drop-banner" style="display:none;background:color-mix(in srgb, var(--yellow) 7%, transparent);border:1px solid color-mix(in srgb, var(--yellow) 40%, transparent);border-radius:7px;padding:.55rem 1rem;margin-bottom:.6rem;font-size:.82rem;color:var(--yellow);text-align:center">
     Event recorder dropped events. Event log may be incomplete.
   </div>
   <div id="config-storage-banner" style="display:none;background:color-mix(in srgb, var(--red) 10%, transparent);border:1px solid color-mix(in srgb, var(--red) 55%, transparent);border-radius:7px;padding:.65rem 1rem;margin-bottom:.7rem;font-size:.82rem;color:var(--red);line-height:1.5">
@@ -103,14 +103,23 @@
 
   <!-- Fault/abort description card -->
   <div id="fault-card" style="display:none">
-    <div class="fault-title">⚠ Fault / Abort</div>
+    <div class="fault-title">⚠ Startup locked — exact reason</div>
     <div class="fault-desc" id="fault-desc-text"></div>
+    <button id="btn-limited-start" style="display:none;margin-top:.75rem"
+            onclick="confirmLimitedStart()">START IN REDUCED-POWER MODE</button>
+    <div id="limited-start-note" class="fault-desc" style="display:none;margin-top:.45rem">
+      One eligible failed sensor can be acknowledged explicitly. The normal
+      startup sequence and every unrelated interlock remain active.
+    </div>
     <div class="fault-actions" aria-label="Fault investigation">
       <a href="/log.html">Event evidence</a>
       <a href="/calibration.html">Check calibration</a>
       <a href="/config.html">Review limits</a>
       <a href="/tools.html">Standby diagnostics</a>
     </div>
+  </div>
+  <div id="limited-run-banner" class="error-banner" style="display:none">
+    REDUCED-POWER MODE — one sensor is overridden; fuel is capped and afterburner is disabled.
   </div>
 
   <!-- Sequence progress (shown during STARTUP / SHUTDOWN) -->
@@ -527,7 +536,7 @@
   <div id="start-confirm-box">
     <h3>Start Engine?</h3>
     <p id="start-confirm-text">This will begin the startup sequence. Make sure the area is clear and the engine is ready to run.</p>
-    <div id="start-confirm-preflight" class="start-confirm-preflight" aria-live="polite"></div>
+    <div id="start-confirm-checks" class="start-confirm-checks" aria-live="polite"></div>
     <div class="btns">
       <button id="btn-confirm-start" onclick="confirmStart()">Confirm Start</button>
       <button class="danger" onclick="cancelStart()">Cancel</button>
@@ -627,15 +636,15 @@ function showStartConfirm() {
     text.style.color = bench ? 'var(--red)' : '';
     text.style.fontWeight = bench ? '700' : '';
   }
-  renderStartPreflight();
+  renderStartChecks();
   document.getElementById('start-confirm-overlay').style.display = 'flex';
   fetch('/api/hardware', { cache:'no-store' })
     .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
-    .then(hw => renderStartPreflight(Array.isArray(hw.startup_seq) ? hw.startup_seq.length : null))
-    .catch(() => renderStartPreflight(null, true));
+    .then(hw => renderStartChecks(Array.isArray(hw.startup_seq) ? hw.startup_seq.length : null))
+    .catch(() => renderStartChecks(null, true));
 }
-function renderStartPreflight(sequenceCount, sequenceUnavailable = false) {
-  const box = document.getElementById('start-confirm-preflight');
+function renderStartChecks(sequenceCount, sequenceUnavailable = false) {
+  const box = document.getElementById('start-confirm-checks');
   if (!box) return;
   const d = _lastData || {};
   const rows = [];
@@ -653,9 +662,9 @@ function renderStartPreflight(sequenceCount, sequenceUnavailable = false) {
   rows.push(['Safety state', d.bench_mode ? '<strong class="bad">BENCH MODE — BYPASSED</strong>' : 'Normal checks']);
   rows.push(['Startup sequence', sequenceUnavailable ? 'Could not read — ECU will still validate START' :
     (Number.isInteger(sequenceCount) ? sequenceCount + ' block' + (sequenceCount === 1 ? '' : 's') : 'Checking…')]);
-  box.innerHTML = '<div class="start-confirm-preflight-title">Live ECU preflight snapshot</div>' +
-    rows.map(([name, value]) => `<div class="start-confirm-preflight-row"><span>${escapeHtmlText(name)}</span><span>${value}</span></div>`).join('') +
-    '<div class="start-confirm-preflight-note">Live state is checked again when you confirm.</div>';
+  box.innerHTML = '<div class="start-confirm-checks-title">Live ECU start checks</div>' +
+    rows.map(([name, value]) => `<div class="start-confirm-checks-row"><span>${escapeHtmlText(name)}</span><span>${value}</span></div>`).join('') +
+    '<div class="start-confirm-checks-note">Live state is checked again when you confirm.</div>';
 }
 function confirmStart() {
   document.getElementById('start-confirm-overlay').style.display = 'none';
@@ -708,6 +717,19 @@ async function _doStart() {
       }
     }, 3000);
   }
+}
+async function confirmLimitedStart() {
+  const d = _lastData || {};
+  const sensor = String(d.limited_start_sensor || 'failed sensor');
+  const cap = Number.isFinite(Number(d.limp_throttle_cap)) ? Number(d.limp_throttle_cap).toFixed(0) : 'configured';
+  const accepted = confirm(
+    'Start in REDUCED-POWER MODE?\n\nOverride: ' + sensor +
+    '\nFuel cap: ' + cap + '%\n\nThe protection provided by this sensor will be unavailable. All other startup checks, interlocks, limits, STOP/estop functions, and outputs remain under normal control. A second required sensor failure will stop the engine.'
+  );
+  if (!accepted) return;
+  const result = await sendCmd('/api/start-limited');
+  if (!result || !result.ok) return;
+  document.getElementById('start-confirm-overlay').style.display = 'none';
 }
 function cancelStart() {
   document.getElementById('start-confirm-overlay').style.display = 'none';

@@ -428,6 +428,24 @@ public:
         // remove that protection. ThrottleSlew freezes fuel increases at once;
         // confirmation prevents one quantised JUMP sample from latching the
         // persistent Reduced-Power Mode.
+        if ((m == SysMode::STARTUP || m == SysMode::RUNNING) &&
+            ed.limpOverrideSensor != FeedbackRequirements::NONE) {
+            const uint32_t observedFailure =
+                m == SysMode::STARTUP
+                    ? FeedbackRequirements::requiredStartFailureMask(ed, millis())
+                    : FeedbackRequirements::protectionFailureMask(ed, millis());
+            const uint32_t additionalFailure =
+                observedFailure & ~ed.limpOverrideSensor;
+            if (additionalFailure != FeedbackRequirements::NONE) {
+                snprintf(ed.faultDescription, sizeof(ed.faultDescription),
+                         "Reduced-power operation stopped: %s feedback also failed while %s was overridden.",
+                         FeedbackRequirements::sensorName(additionalFailure & (~additionalFailure + 1UL)),
+                         FeedbackRequirements::sensorName(ed.limpOverrideSensor));
+                _trigger("MULTIPLE_SENSOR_FAILURE");
+                return;
+            }
+        }
+
         if (m == SysMode::RUNNING && !ed.limpMode) {
             const bool n1Blind = HardwareConfig::hasN1Rpm &&
                 FeedbackRequirements::n1ForProtectionOrControl() && !ed.n1Healthy;
@@ -727,6 +745,14 @@ private:
             "What to do: The engine has been shut down to prevent compressor damage. "
             "Check throttle slew rate settings, compressor inlet for blockage, "
             "and reduce throttle advance rate to prevent recurrence.";
+        else if (strcmp(code, "MULTIPLE_SENSOR_FAILURE") == 0) {
+            static char multipleSensorDesc[192];
+            snprintf(multipleSensorDesc, sizeof(multipleSensorDesc),
+                     "Reduced-power operation stopped: another required sensor failed while %s was overridden. "
+                     "Inspect both sensor circuits before restarting.",
+                     FeedbackRequirements::sensorName(ed.limpOverrideSensor));
+            desc = multipleSensorDesc;
+        }
         // Fallback for unknown / DI-channel fault codes — generate a generic message
         char _fallbackDesc[192];
         if (!desc) {

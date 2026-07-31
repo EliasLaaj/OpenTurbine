@@ -192,7 +192,7 @@ public:
     static uint32_t wsIntervalMs;        // Browser telemetry request interval (ms; >=333)
     static uint32_t snapshotIntervalMs;  // FlightRecorder RUNNING_SNAP rate (ms)
     static uint32_t controlLoopHz;       // Main ECU loop target frequency (Hz)
-    static bool     logStandby;          // include periodic flight-log snapshots while idle
+    static bool     logStandby;          // include periodic event-log snapshots while idle
 
     // ── Starter assist ────────────────────────────────────────
     static bool     starterAssistEnabled;

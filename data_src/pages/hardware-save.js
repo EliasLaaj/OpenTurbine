@@ -456,7 +456,7 @@ async function saveHardware() {
     // Dedicated AB flame sensor pin is backend-required when enabled
     if (cfg.ab_flame?.enabled) requirePin(cfg.ab_flame, 'pin', 'AB Flame Sensor');
   }
-  // Backend-required pins the preflight used to miss — the save looked
+  // Backend-required pins the validation used to miss — the save looked
   // complete, then the backend rejected it.
   if (cfg.mavlink?.enabled) requirePin(cfg.mavlink, 'tx_pin', 'MAVLink TX');
   for (const [key, label] of [['glow_plug','Glow Current'], ['igniter','Igniter 1 Current'],

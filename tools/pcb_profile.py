@@ -264,7 +264,23 @@ def validate_profile(profile: dict, *, strict: bool = False) -> list[str]:
             if "reference_mv" in mode:
                 _require(isinstance(mode["reference_mv"], (int, float)) and
                          1000 <= mode["reference_mv"] <= 5500,
-                         f"port {port_id}/{mode_id} reference_mv must be 1000..5500")
+                          f"port {port_id}/{mode_id} reference_mv must be 1000..5500")
+            if "default" in mode:
+                default = mode["default"]
+                _require(isinstance(default, dict),
+                         f"port {port_id}/{mode_id} default must be an object")
+                _require(isinstance(default.get("id"), str) and
+                         len(default["id"]) <= 19 and ID_RE.fullmatch(default["id"]),
+                         f"port {port_id}/{mode_id} default ID is invalid")
+                _require(isinstance(default.get("name"), str) and
+                         0 < len(default["name"]) <= 15,
+                         f"port {port_id}/{mode_id} default name must be 1..15 characters")
+                _require(isinstance(default.get("role"), str) and
+                         0 < len(default["role"]) <= 17,
+                         f"port {port_id}/{mode_id} default role must be 1..17 characters")
+                _require(isinstance(default.get("purpose"), str) and
+                         0 < len(default["purpose"]) <= 19,
+                         f"port {port_id}/{mode_id} default purpose must be 1..19 characters")
             if adapter not in ADAPTERS:
                 warnings.append(f"port {port_id}/{mode_id} uses adapter {adapter!r} not supported by this firmware")
             if "device" in mode:

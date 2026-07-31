@@ -216,6 +216,37 @@ bool PcbProfileResolver::resolve(ChannelRegistry& registry,
     return true;
 }
 
+bool PcbProfileResolver::addProfileDefaults(ChannelRegistry& registry,
+                                            char* reason, size_t reasonSize) {
+    if (!PcbProfileManager::active()) return !PcbProfileManager::faulted();
+    const auto* catalog = PcbProfileManager::catalog();
+    if (!catalog) return fail(reason, reasonSize, "PCB profile catalog is unavailable");
+    for (uint8_t i = 0; i < catalog->portCount; ++i) {
+        const auto& port = catalog->ports[i];
+        for (uint8_t j = 0; j < port.modeCount; ++j) {
+            const auto& mode = port.modes[j];
+            if (!mode.defaultId[0]) continue;
+            ChannelRegistry::Channel channel;
+            channel.installed = true;
+            channel.direction = strstr(mode.adapter, "output")
+                ? ChannelRegistry::Output : ChannelRegistry::Input;
+            channel.driver = channel.direction == ChannelRegistry::Input
+                ? ChannelRegistry::Digital : ChannelRegistry::Relay;
+            strlcpy(channel.id, mode.defaultId, sizeof(channel.id));
+            strlcpy(channel.name, mode.defaultName, sizeof(channel.name));
+            strlcpy(channel.role, mode.defaultRole, sizeof(channel.role));
+            strlcpy(channel.purpose, mode.defaultPurpose, sizeof(channel.purpose));
+            strlcpy(channel.physicalPortId, port.id, sizeof(channel.physicalPortId));
+            strlcpy(channel.physicalModeId, mode.id, sizeof(channel.physicalModeId));
+            channel.safeDemand = 0.0f;
+            if (!registry.add(channel))
+                return fail(reason, reasonSize,
+                            "PCB profile default assignment could not be added");
+        }
+    }
+    return true;
+}
+
 void PcbProfileResolver::applyFixedBuses() {
     if (!PcbProfileManager::active()) return;
     const auto* catalog = PcbProfileManager::catalog();

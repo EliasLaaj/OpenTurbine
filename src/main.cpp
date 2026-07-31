@@ -1857,6 +1857,12 @@ static void checkABTrigger() {
         }
         return;
     }
+    if (ed.limpOverrideSensor != FeedbackRequirements::NONE) {
+        _abTriggerPrev = triggerAsserted;
+        if (ed.abMode != ABMode::Off && ed.abMode != ABMode::ShuttingDown)
+            enterABShutdown();
+        return;
+    }
 
     // ── State transitions ────────────────────────────────────
     // Rising-edge latch: only re-enter from Off/Fault on a fresh trigger assertion.
@@ -2162,6 +2168,7 @@ static void enterStandby() {
     _relightBeginEgt       = 0.0f;
     _manualOilPct          = 0.0f;
     ed.limpMode           = false;
+    ed.limpOverrideSensor = FeedbackRequirements::NONE;
     ed.clusterCode        = 0;
     ed.fuelEverOpened     = false;
     // AB cleanup
@@ -2310,7 +2317,7 @@ static void handleCommand(const OTPacket& pkt) {
 
     if (WebServer::otaInProgress() &&
         pkt.cmd != OTCommand::STOP && pkt.cmd != OTCommand::AB_STOP) {
-        if (pkt.cmd == OTCommand::START) {
+        if (pkt.cmd == OTCommand::START || pkt.cmd == OTCommand::START_LIMITED) {
             strncpy(ed.lastEvent, "START blocked: maintenance upload in progress", sizeof(ed.lastEvent) - 1);
         }
         Serial.println("[OT] Command blocked: maintenance upload in progress");
@@ -2323,7 +2330,7 @@ static void handleCommand(const OTPacket& pkt) {
     // seconds before ESP.restart() fires.
     if (WebServer::rebootPending() &&
         pkt.cmd != OTCommand::STOP && pkt.cmd != OTCommand::AB_STOP) {
-        if (pkt.cmd == OTCommand::START) {
+        if (pkt.cmd == OTCommand::START || pkt.cmd == OTCommand::START_LIMITED) {
             strncpy(ed.lastEvent, "START blocked: rebooting to apply saved configuration", sizeof(ed.lastEvent) - 1);
         }
         Serial.println("[OT] Command blocked: reboot pending to apply configuration");
@@ -2332,13 +2339,27 @@ static void handleCommand(const OTPacket& pkt) {
 
     switch (pkt.cmd) {
         case OTCommand::START:
+        case OTCommand::START_LIMITED: {
+            const bool limited = pkt.cmd == OTCommand::START_LIMITED;
+            uint32_t overrideSensor = FeedbackRequirements::NONE;
+            if (limited && ed.mode == SysMode::STANDBY) {
+                overrideSensor =
+                    FeedbackRequirements::eligibleSingleStartOverride(ed, millis());
+            }
+            if (limited && overrideSensor == FeedbackRequirements::NONE) {
+                strncpy(ed.lastEvent,
+                        "REDUCED-POWER START blocked: sensor fault is not eligible",
+                        sizeof(ed.lastEvent) - 1);
+                break;
+            }
             if (ed.mode == SysMode::FAULT) {
                 // faultDescription still carries the boot-time reason
                 strncpy(ed.lastEvent, "START blocked: ECU is in FAULT state", sizeof(ed.lastEvent) - 1);
                 Serial.println("[OT] START blocked: FAULT state - fix config/profile and reboot");
                 break;
             }
-            if (ed.mode == SysMode::STANDBY && Config::profileMatch && !ed.configLocked) {
+            if (ed.mode == SysMode::STANDBY &&
+                Config::profileMatch && !ed.configLocked) {
                 if (HardwareConfig::startPin >= 0 && !ed.startReleasedSinceBoot) {
                     strncpy(ed.lastEvent, "START blocked: release START after boot", sizeof(ed.lastEvent) - 1);
                     break;
@@ -2356,7 +2377,9 @@ static void handleCommand(const OTPacket& pkt) {
                 }
                 if (!ed.skipSafetyChecks && !ed.benchMode) {
                     unsigned long sn = millis();
-                    if (!FeedbackRequirements::allRequiredStartFeedbackHealthy(ed, sn)) {
+                    const uint32_t failed =
+                        FeedbackRequirements::requiredStartFailureMask(ed, sn);
+                    if (failed != (limited ? overrideSensor : FeedbackRequirements::NONE)) {
                         strncpy(ed.lastEvent, "START blocked: critical feedback not fresh", sizeof(ed.lastEvent) - 1);
                         strncpy(ed.faultDescription,
                                 "Cannot start: feedback used by configured control, safety, or startup logic is unhealthy or stale. Check wiring and calibration.",
@@ -2545,12 +2568,17 @@ static void handleCommand(const OTPacket& pkt) {
                     break;
                 }
                 ed.mode = SysMode::STARTUP;
+                ed.limpOverrideSensor = limited ? overrideSensor : FeedbackRequirements::NONE;
+                ed.limpMode = limited;
                 ConfigApplyGate::release();
                 ResetRecovery::markActive();
                 ed.faultShutdownActive = false;
                 _buzzerPattern = 3; _buzzerStep = 0;  // double chirp: sequence starting
                 ed.faultDescription[0] = '\0';  // clear previous fault/abort description
-                strncpy(ed.lastEvent, "Start sequence initiated", sizeof(ed.lastEvent) - 1);
+                strncpy(ed.lastEvent,
+                        limited ? "Reduced-power restart: one sensor overridden"
+                                : "Start sequence initiated",
+                        sizeof(ed.lastEvent) - 1);
                 Hardware::applyConfig();  // re-apply config before each start
                 if (!ed.benchMode && !ed.devMode) {
                     Config::incStartAttemptCount(); // guarded RMW
@@ -2561,9 +2589,16 @@ static void handleCommand(const OTPacket& pkt) {
                 g_sequencer.startSequence(_startupBlocks, _startupCount,
                                           HardwareConfig::startupEnterActions,
                                           HardwareConfig::startupExitActions);
-                Serial.println("[OT] START commanded");
+                if (limited) {
+                    Serial.printf("[OT] REDUCED-POWER START: %s overridden, fuel cap %.0f%%\n",
+                                  FeedbackRequirements::sensorName(overrideSensor),
+                                  (double)Config::limpMaxThrottlePct);
+                } else {
+                    Serial.println("[OT] START commanded");
+                }
             }
             break;
+        }
 
         case OTCommand::STOP:
             if (ed.mode == SysMode::RUNNING || ed.mode == SysMode::STARTUP) {
@@ -2767,6 +2802,7 @@ static void handleCommand(const OTPacket& pkt) {
                 && HardwareConfig::abTriggerSource == 0
                 && (HardwareConfig::hasAbSol || HardwareConfig::hasAbPump)
                 && ed.mode == SysMode::RUNNING
+                && ed.limpOverrideSensor == FeedbackRequirements::NONE
                 && (ed.abMode == ABMode::Off || ed.abMode == ABMode::Fault))
             {
                 Serial.println("[AB] Manual fire command received");
@@ -2925,14 +2961,36 @@ static void handleCommand(const OTPacket& pkt) {
 // to the STOP path.
 static constexpr unsigned long SWITCH_DEBOUNCE_MS = 30;
 
+static bool registryControlInput(const char* purpose, bool& configured,
+                                 bool& healthy) {
+    auto& hw = HardwareConfig::instance();
+    auto& ed = EngineData::instance();
+    configured = false;
+    healthy = false;
+    for (uint8_t i = 0; i < hw.channelRegistry.inputCount; ++i) {
+        const auto& channel = hw.channelRegistry.inputs[i];
+        if (!channel.installed || strcmp(channel.purpose, purpose)) continue;
+        configured = true;
+        healthy = ed.registryInputHealthy[i];
+        return healthy && ed.registryInputValue[i] >= 0.5f;
+    }
+    return false;
+}
+
 static void checkStopSwitch() {
     auto& ed = EngineData::instance();
     auto& hc  = HardwareConfig::instance();
-    if (hc.stopPin < 0) {
+    bool registryConfigured = false, registryHealthy = false;
+    const bool registryRaw = registryControlInput("stop_switch",
+                                                   registryConfigured,
+                                                   registryHealthy);
+    if (hc.stopPin < 0 && !registryConfigured) {
         ed.stopSwitchActive = false;
         return;
     }
-    bool raw = (digitalRead(hc.stopPin) == (hc.stopActiveH ? HIGH : LOW));
+    const bool raw = registryConfigured
+        ? registryRaw
+        : (digitalRead(hc.stopPin) == (hc.stopActiveH ? HIGH : LOW));
     static bool          _rawLast    = false;
     static bool          _debounced  = false;
     static unsigned long _lastChange = 0;
@@ -2959,14 +3017,20 @@ static void checkStartSwitch() {
     // Edge-detect: normalise to active-low convention (cur==LOW means "pressed")
     // so all downstream logic is unchanged regardless of startActiveH.
     auto& hca = HardwareConfig::instance();
-    if (hca.startPin < 0) {
+    bool registryConfigured = false, registryHealthy = false;
+    const bool registryPressed = registryControlInput("start_switch",
+                                                       registryConfigured,
+                                                       registryHealthy);
+    if (hca.startPin < 0 && !registryConfigured) {
         auto& ed = EngineData::instance();
         ed.startSwitchActive = false;
         ed.startReleasedSinceBoot = true;
         return;
     }
-    int  rawLevel = digitalRead(hca.startPin);
-    bool rawPressed = hca.startActiveH ? (rawLevel == HIGH) : (rawLevel == LOW);
+    const int rawLevel = registryConfigured ? HIGH : digitalRead(hca.startPin);
+    const bool rawPressed = registryConfigured
+        ? registryPressed
+        : (hca.startActiveH ? (rawLevel == HIGH) : (rawLevel == LOW));
     // Debounce the raw level first — the edge detect and the manual-relight
     // hold logic below both act on the debounced state.
     static bool          _rawLast    = false;

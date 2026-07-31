@@ -71,7 +71,7 @@ func TestBootloaderFailureKeepsMatchingDriverForBridgeWithoutCOM(t *testing.T) {
 	}
 }
 
-func TestBootloaderFailureDoesNotOfferDriverForBridgeWithCOM(t *testing.T) {
+func TestBootloaderFailureKeepsDriverRepairForBridgeWithCOM(t *testing.T) {
 	recommendation := driverRecommendation{
 		Choices: []driverChoice{{Kind: driverWCH, Label: "Install WCH"}},
 		Device: usbBridgeDevice{
@@ -81,11 +81,14 @@ func TestBootloaderFailureDoesNotOfferDriverForBridgeWithCOM(t *testing.T) {
 		},
 	}
 	got := bootloaderFailureDriverRecommendation(recommendation)
-	if len(got.Choices) != 0 {
-		t.Fatalf("unexpected driver choices for bridge already on COM8: %+v", got)
+	if len(got.Choices) != 1 || got.Choices[0].Kind != driverWCH {
+		t.Fatalf("missing WCH repair choice for bridge already on COM8: %+v", got)
 	}
 	if !strings.Contains(got.Message, "Hold BOOT") {
 		t.Fatalf("missing boot-mode advice: %q", got.Message)
+	}
+	if !strings.Contains(got.Message, "repair") {
+		t.Fatalf("missing driver-repair advice: %q", got.Message)
 	}
 }
 

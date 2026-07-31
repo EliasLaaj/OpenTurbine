@@ -16,6 +16,7 @@ import (
 	"hash/crc32"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -31,7 +32,7 @@ import (
 )
 
 const (
-	appVersion                  = "0.6.1"
+	appVersion                  = "0.6.2"
 	packageCompatibilityVersion = "0.6.0"
 	requiredPackageSchema       = 3
 	appTitle                    = "OpenTurbine Setup Tool"
@@ -187,7 +188,13 @@ type sourcePCBProfile struct {
 			Pull        string   `json:"pull"`
 			SafeDemand  *float64 `json:"safe_demand"`
 			ReferenceMV float64  `json:"reference_mv"`
-			Endpoint    struct {
+			Default     struct {
+				ID      string `json:"id"`
+				Name    string `json:"name"`
+				Role    string `json:"role"`
+				Purpose string `json:"purpose"`
+			} `json:"default"`
+			Endpoint struct {
 				GPIO *int `json:"gpio"`
 			} `json:"endpoint"`
 		} `json:"modes"`
@@ -2134,7 +2141,7 @@ func (a *App) ensurePackageWithProgress(progress func(string, int)) (*Package, e
 	if progress != nil {
 		progress("Downloading the recommended OpenTurbine files from GitHub.", 34)
 	}
-	if err := downloadFileWithProgress(url, dst, func(done, total int64) {
+	downloadProgress := func(done, total int64) {
 		if progress == nil {
 			return
 		}
@@ -2144,7 +2151,9 @@ func (a *App) ensurePackageWithProgress(progress func(string, int)) (*Package, e
 		} else {
 			progress("Downloading OpenTurbine setup files...", 42)
 		}
-	}); err != nil {
+	}
+	usedURL, downloadErr := downloadRecommendedPackage(url, dst, downloadProgress)
+	if downloadErr != nil {
 		if cached != nil {
 			if progress != nil {
 				progress("Could not check GitHub; using the previously downloaded package.", 80)
@@ -2152,12 +2161,12 @@ func (a *App) ensurePackageWithProgress(progress func(string, int)) (*Package, e
 			a.packageReady = cached
 			return cached, nil
 		}
-		return nil, fmt.Errorf("could not download OpenTurbine_Recommended.zip from GitHub Releases. Publish a release asset with that exact name, then try again. Details: %w", err)
+		return nil, fmt.Errorf("could not download OpenTurbine_Recommended.zip from GitHub Releases after trying the release URL, GitHub API asset lookup, and retries. Details: %w", downloadErr)
 	}
 	if progress != nil {
 		progress("Checking downloaded OpenTurbine package checksum.", 78)
 	}
-	if err := verifyRemoteSHA256(url+".sha256", dst); err != nil {
+	if err := verifyRemoteSHA256(usedURL+".sha256", dst); err != nil {
 		_ = os.Remove(dst)
 		return nil, err
 	}
@@ -2179,6 +2188,64 @@ func (a *App) ensurePackageWithProgress(progress func(string, int)) (*Package, e
 	return pkg, nil
 }
 
+func downloadRecommendedPackage(configuredURL, dst string,
+	progress func(done, total int64)) (string, error) {
+	urls := []string{strings.TrimSpace(configuredURL)}
+	if strings.EqualFold(strings.TrimSpace(configuredURL), defaultPackageURL) {
+		if resolved, err := githubLatestReleaseAssetURL("OpenTurbine_Recommended.zip"); err == nil &&
+			resolved != "" && !strings.EqualFold(resolved, configuredURL) {
+			urls = append(urls, resolved)
+		}
+	}
+	var failures []string
+	for _, candidate := range urls {
+		for attempt := 1; attempt <= 3; attempt++ {
+			if err := downloadFileWithProgress(candidate, dst, progress); err == nil {
+				return candidate, nil
+			} else {
+				failures = append(failures,
+					fmt.Sprintf("%s (attempt %d): %v", candidate, attempt, err))
+			}
+		}
+	}
+	return "", errors.New(strings.Join(failures, "; "))
+}
+
+func githubLatestReleaseAssetURL(name string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		"https://api.github.com/repos/elia179/OpenTurbine/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "OpenTurbineSetupTool/"+appVersion)
+	resp, err := downloadHTTPClient().Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("GitHub release lookup returned %s", resp.Status)
+	}
+	var release struct {
+		Assets []struct {
+			Name string `json:"name"`
+			URL  string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&release); err != nil {
+		return "", err
+	}
+	for _, asset := range release.Assets {
+		if asset.Name == name && strings.HasPrefix(strings.ToLower(asset.URL), "https://") {
+			return asset.URL, nil
+		}
+	}
+	return "", fmt.Errorf("latest release has no %s asset", name)
+}
+
 func verifyRemoteSHA256(shaURL, path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -2187,7 +2254,7 @@ func verifyRemoteSHA256(shaURL, path string) error {
 		return err
 	}
 	req.Header.Set("User-Agent", "OpenTurbineSetupTool/"+appVersion)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := downloadHTTPClient().Do(req)
 	if err != nil {
 		return fmt.Errorf("could not download package checksum: %w", err)
 	}
@@ -2222,7 +2289,7 @@ func downloadFileWithProgress(url, dst string, progress func(done, total int64))
 		return err
 	}
 	req.Header.Set("User-Agent", "OpenTurbineSetupTool/"+appVersion)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := downloadHTTPClient().Do(req)
 	if err != nil {
 		return err
 	}
@@ -2251,6 +2318,18 @@ func downloadFileWithProgress(url, dst string, progress func(done, total int64))
 	// Windows does not replace an existing destination with os.Rename.
 	_ = os.Remove(dst)
 	return os.Rename(tmp, dst)
+}
+
+func downloadHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}).DialContext
+	transport.TLSHandshakeTimeout = 30 * time.Second
+	transport.ResponseHeaderTimeout = 45 * time.Second
+	transport.IdleConnTimeout = 45 * time.Second
+	return &http.Client{Transport: transport}
 }
 
 func copyWithProgress(dst io.Writer, src io.Reader, total int64, progress func(done, total int64)) (int64, error) {
@@ -2782,12 +2861,25 @@ func prepareHiddenCommand(cmd *exec.Cmd) {
 }
 
 func detectBoardWithEsptool(esptool, port string) (detectedBoard, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, esptool, "--port", port, "chip_id")
-	prepareEsptoolCommand(cmd)
-	out, err := cmd.CombinedOutput()
-	return parseDetectedBoard(port, string(out), err)
+	var outputs []string
+	var lastErr error
+	// esptool v5 documents hyphenated commands; older bundled versions used
+	// underscores. Accept either package generation without misreporting a
+	// valid ESP/COM port as "board not found".
+	for _, command := range []string{"chip-id", "chip_id"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		cmd := exec.CommandContext(ctx, esptool, "--port", port, command)
+		prepareEsptoolCommand(cmd)
+		out, err := cmd.CombinedOutput()
+		cancel()
+		outputs = append(outputs, string(out))
+		board, parseErr := parseDetectedBoard(port, string(out), err)
+		if parseErr == nil || board.Chip != "" {
+			return board, parseErr
+		}
+		lastErr = parseErr
+	}
+	return parseDetectedBoard(port, strings.Join(outputs, "\n"), lastErr)
 }
 
 func parseDetectedBoard(port, output string, commandErr error) (detectedBoard, error) {
@@ -3157,6 +3249,15 @@ func buildCustomPCBProfile(pkg *Package, target, sourcePath string) (string, []s
 			}
 			isOutput := strings.HasSuffix(mode.Adapter, "_output") || mode.Adapter == "relay_output" ||
 				mode.Adapter == "pwm_output" || mode.Adapter == "servo_output"
+			hasDefault := mode.Default.ID != "" || mode.Default.Name != "" ||
+				mode.Default.Role != "" || mode.Default.Purpose != ""
+			if hasDefault && (!validStableID(mode.Default.ID, 19) ||
+				mode.Default.Name == "" || len(mode.Default.Name) > 15 ||
+				mode.Default.Role == "" || len(mode.Default.Role) > 17 ||
+				mode.Default.Purpose == "" || len(mode.Default.Purpose) > 19) {
+				return "", nil, fmt.Errorf("port %s mode %s has an incomplete or invalid default assignment",
+					port.ID, mode.ID)
+			}
 			if mode.Endpoint.GPIO != nil {
 				if err := checkPin(*mode.Endpoint.GPIO, isOutput, "port "+port.ID+"/"+mode.ID); err != nil {
 					return "", nil, err
@@ -3280,7 +3381,7 @@ func flashUSB(esptool, port, target string, pkg *Package, pcbProfilePath string,
 		}
 		args = append(args, address, p)
 	}
-	logf("Package preflight passed; all flash files are present")
+	logf("Package validation passed; all flash files are present")
 
 	logf("Erasing board for clean USB install / reinstall")
 	eraseCtx, eraseCancel := context.WithTimeout(context.Background(), 4*time.Minute)

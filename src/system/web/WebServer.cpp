@@ -390,6 +390,8 @@ static const char* _commandPreflightRejectReason(const OTPacket& pkt) {
     }
     if (pkt.cmd == OTCommand::AB_FIRE) {
         if (ed.mode != SysMode::RUNNING) return "Afterburner can only be fired while RUNNING";
+        if (ed.limpOverrideSensor != FeedbackRequirements::NONE)
+            return "Afterburner is disabled during a sensor-fault reduced-power run";
         if (HardwareConfig::abTriggerSource != 0) {
             return "Manual FIRE is only available when AB trigger source is Manual command only";
         }
@@ -420,7 +422,7 @@ static bool _startInhibitActive() {
     return false;
 }
 
-static const char* _startPreflightRejectReason() {
+static const char* _startPreflightRejectReason(bool allowEligibleSensorOverride = false) {
     const auto& ed = EngineData::instance();
     // A reboot scheduled by hardware save / factory reset / config restore fires
     // unconditionally in tick() — starting now would reboot mid-startup with the
@@ -453,7 +455,9 @@ static const char* _startPreflightRejectReason() {
     }
     if (!ed.skipSafetyChecks && !ed.benchMode) {
         const uint32_t now = millis();
-        if (!FeedbackRequirements::allRequiredStartFeedbackHealthy(ed, now))
+        if (!FeedbackRequirements::allRequiredStartFeedbackHealthy(ed, now) &&
+            !(allowEligibleSensorOverride &&
+              FeedbackRequirements::eligibleSingleStartOverride(ed, now) != FeedbackRequirements::NONE))
             return "Feedback used by configured control, safety, or startup logic is unhealthy or stale";
     }
     if (ed.stopSwitchActive) {
@@ -522,6 +526,14 @@ static void _finishAssetUpload() {
     _assetUploadOwner = nullptr;
     _assetUploadMask = 0;
     _assetUploadInProgress = false;
+}
+
+static const char* _limitedStartRejectReason() {
+    const auto& ed = EngineData::instance();
+    if (const char* reject = _startPreflightRejectReason(true)) return reject;
+    if (FeedbackRequirements::eligibleSingleStartOverride(ed, millis()) == FeedbackRequirements::NONE)
+        return "Reduced-power restart requires exactly one eligible failed sensor";
+    return nullptr;
 }
 
 #if !defined(OT_PLATFORM_ESP32S3)
@@ -753,6 +765,11 @@ static void _sendGzipAsset(AsyncWebServerRequest* req, const char* path,
 // A web update changes the token, so the browser still fetches the new files.
 static constexpr const char* SHARED_ASSET_CACHE =
     "public, max-age=31536000, immutable";
+// Page documents change only during a maintenance asset update, which reboots
+// the ECU. A short cache keeps repeated back-and-forth navigation off the
+// Classic's Wi-Fi/TCP path while still aging out quickly after an update.
+static constexpr const char* PAGE_ASSET_CACHE =
+    "private, max-age=60";
 
 static void _finalizeJsonResponse(AsyncWebServerResponse* resp) {
     if (!resp) return;
@@ -1071,7 +1088,8 @@ static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool ful
     // Keep this in the same order as Hardware::updateActuators() so the
     // dashboard/logger never claims more fuel than the physical output sees.
     float throttleEffective = constrain(ed.throttleDemand + ed.abFuelOffset, 0.0f, 1.0f);
-    if (ed.limpMode && ed.mode == SysMode::RUNNING) {
+    if (ed.limpMode &&
+        (ed.mode == SysMode::STARTUP || ed.mode == SysMode::RUNNING)) {
         throttleEffective = min(
             throttleEffective,
             constrain(Config::limpMaxThrottlePct / 100.0f, 0.0f, 1.0f));
@@ -1142,7 +1160,7 @@ static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool ful
     doc["session_logger_healthy"] = SessionLogger::healthy();
     doc["session_logger_error"]   = SessionLogger::errorCode();
     doc["session_log_path"]       = SessionLogger::currentPath();
-    doc["flight_dropped_events"] = FlightRecorder::droppedEvents();
+    doc["event_dropped_events"]  = FlightRecorder::droppedEvents();
     doc["log_records"]           = FlightRecorder::recordCount();
     doc["max_n1"]                = (int)ed.maxN1;
     doc["max_n2"]                = (int)ed.maxN2;
@@ -1176,6 +1194,17 @@ static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool ful
     doc["seq_block_total"]       = (int)ed.seqBlockTotal;
     doc["seq_wait_reason"]       = ed.seqWaitReason[0] ? ed.seqWaitReason : nullptr;
     doc["fault_description"]     = ed.faultDescription;
+    doc["limp_override_sensor"]  =
+        ed.limpOverrideSensor != FeedbackRequirements::NONE
+            ? FeedbackRequirements::sensorName(ed.limpOverrideSensor) : nullptr;
+    doc["limited_start_allowed"] = _limitedStartRejectReason() == nullptr;
+    {
+        const uint32_t eligible =
+            FeedbackRequirements::eligibleSingleStartOverride(ed, millis());
+        doc["limited_start_sensor"] =
+            eligible != FeedbackRequirements::NONE
+                ? FeedbackRequirements::sensorName(eligible) : nullptr;
+    }
     // ── Extended sensor values (has_* flags are in the slow section) ───────
     doc["oil_temp"]              = (float)(int)(ed.oilTemp * 10) / 10.0f;
     doc["oil_temp_raw"]          = ed.oilTempRaw;
@@ -1566,37 +1595,35 @@ void WebServer::_setupRoutes() {
     });
     _server.on("/", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
-        _sendGzipAsset(req, "/index.html.gz", "text/html", "no-cache");
+        _sendGzipAsset(req, "/index.html.gz", "text/html", PAGE_ASSET_CACHE);
     });
     _server.on("/index.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
-        _sendGzipAsset(req, "/index.html.gz", "text/html", "no-cache");
+        _sendGzipAsset(req, "/index.html.gz", "text/html", PAGE_ASSET_CACHE);
     });
     _server.on("/hardware.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
-        _sendGzipAsset(req, "/hardware.html.gz", "text/html", "no-cache");
+        _sendGzipAsset(req, "/hardware.html.gz", "text/html", PAGE_ASSET_CACHE);
     });
     _server.on("/calibration.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
-        _sendGzipAsset(req, "/calibration.html.gz", "text/html", "no-cache");
+        _sendGzipAsset(req, "/calibration.html.gz", "text/html", PAGE_ASSET_CACHE);
     });
     _server.on("/config.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
-        // Config is the page most affected by stale HTML paired with newer
-        // app.js/style.css after an update. Never reuse a stored copy.
-        _sendGzipAsset(req, "/config.html.gz", "text/html", "no-store");
+        _sendGzipAsset(req, "/config.html.gz", "text/html", PAGE_ASSET_CACHE);
     });
     _server.on("/sequence.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
-        _sendGzipAsset(req, "/sequence.html.gz", "text/html", "no-cache");
+        _sendGzipAsset(req, "/sequence.html.gz", "text/html", PAGE_ASSET_CACHE);
     });
     _server.on("/log.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
-        _sendGzipAsset(req, "/log.html.gz", "text/html", "no-cache");
+        _sendGzipAsset(req, "/log.html.gz", "text/html", PAGE_ASSET_CACHE);
     });
     _server.on("/tools.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
-        _sendGzipAsset(req, "/tools.html.gz", "text/html", "no-cache");
+        _sendGzipAsset(req, "/tools.html.gz", "text/html", PAGE_ASSET_CACHE);
     });
     _server.on("/ecu_config.json", HTTP_GET, [](AsyncWebServerRequest* req) {
         req->send(403, "text/plain", "Forbidden");
@@ -2532,6 +2559,25 @@ void WebServer::_setupRoutes() {
         }
         _finalizeJsonResponse(resp);
         req->send(resp);
+    });
+
+    // Explicitly accepts one eligible failed sensor and runs the normal
+    // sequence with every unrelated interlock active and the reduced-power
+    // fuel cap enforced in both STARTUP and RUNNING.
+    _server.on("/api/start-limited", HTTP_POST, [](AsyncWebServerRequest* req) {
+        if (_maintenanceUploadInProgress()) {
+            req->send(423, "application/json", "{\"ok\":false,\"error\":\"Maintenance upload in progress\"}");
+            return;
+        }
+        if (const char* reject = _limitedStartRejectReason()) {
+            _sendCommandReject(req, 409, reject);
+            return;
+        }
+        if (CommandQueue::push({ OTCommand::START_LIMITED })) {
+            req->send(200, "application/json", "{\"ok\":true,\"mode\":\"reduced_power\"}");
+        } else {
+            req->send(503, "application/json", "{\"ok\":false,\"error\":\"Command queue full\"}");
+        }
     });
 
     _server.on("/api/hardware/capability", HTTP_GET, [](AsyncWebServerRequest* req) {

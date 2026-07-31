@@ -19,6 +19,6 @@
 - component: Manual source build
   status: Advanced/developer path
   kind: advanced
-- component: Certified aviation use
+- component: Certified use
   status: Not certified
   kind: unavailable

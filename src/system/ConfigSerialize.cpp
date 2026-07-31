@@ -915,7 +915,7 @@ void Config::_fromDoc(const JsonDocument& doc) {
     // ── Accept + warn ─────────────────────────────────────────────
     // Safety-relevant values beyond the recommended caps load as-is but
     // raise a persistent dashboard notice (telemetry "config_load_warning")
-    // and a flight-log marker. Recomputed on every load/upload so the
+    // and an event-log marker. Recomputed on every load/upload so the
     // notice clears once the value is fixed.
     loadWarning[0] = '\0';
     char warnBuf[96];
