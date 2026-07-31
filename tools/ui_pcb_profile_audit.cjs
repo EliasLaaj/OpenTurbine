@@ -55,6 +55,7 @@ function installedBrowser() {
     hardware._pcb_profile = {
       state:'valid', id:'test-s3-pcb', name:'Test S3 Turbine ECU', revision:'B',
       origin:'custom', target_chip:'esp32-s3', port_count:9,
+      bus_ownership:{i2c:true,spi:true}, reserved_gpio:[4,5,8,9,10,11,12,13,17],
       fixed_functions:{
         status_led:{available:true,type:'neopixel'},
         supply_voltage:{available:true,label:'ECU supply voltage'},
@@ -92,6 +93,22 @@ function installedBrowser() {
     assert.equal(await page.locator('#hardware-i2c-card').isVisible(), true);
     assert.equal(await page.locator('#hardware-spi-card').isVisible(), true);
     assert.match(await page.locator('#btn-edit-buses').textContent(), /Done editing/i);
+    const additiveBusState = await page.evaluate(() => {
+      pcbProfile.bus_ownership = {i2c:false, spi:false};
+      pcbProfile.reserved_gpio = [8, 9, 10];
+      cfg.i2c = {enabled:true, sda_pin:8, scl_pin:9, frequency_hz:400000};
+      populate();
+      return {
+        i2cLocked: document.querySelector('#en-i2c').disabled,
+        spiLocked: document.querySelector('#en-spi').disabled,
+        reservedSdaDisabled: document.querySelector('#f-i2c-sda option[value="8"]')?.disabled ?? true,
+        description: document.querySelector('#hardware-buses-panel > .hw-desc').textContent
+      };
+    });
+    assert.deepEqual(additiveBusState, {
+      i2cLocked:false, spiLocked:false, reservedSdaDisabled:true,
+      description:'Buses defined by the flashed PCB profile are shown read-only and cannot be removed. You may add a missing shared bus using only GPIOs that the PCB leaves free.'
+    }, 'PCB mode must permit absent buses while keeping profile-reserved GPIOs unavailable');
     assert.equal(await page.locator('#pcb-profile-identity').isVisible(), true);
     assert.equal(await page.locator('#hardware-cluster-source-panel').isVisible(), false);
     assert.equal(await page.locator('#hardware-mavlink-source-panel').isVisible(), false);

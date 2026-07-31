@@ -1728,6 +1728,13 @@ bool validatePlatformPins(const JsonDocument& doc,
             !addPin(sda) || !addPin(scl)) return false;
         if (interruptPin >= 0 &&
             (!gpioAllowed(interruptPin) || !addPin(interruptPin))) return false;
+        // A PCB profile owns all of its connector and fixed-function GPIOs,
+        // even when it does not provide the shared I2C bus itself. Permit the
+        // user to add that missing bus only on genuinely free header pins.
+        if (PcbProfileManager::active() && !PcbProfileManager::ownsBusKind("i2c") &&
+            (PcbProfileManager::gpioReserved(sda) ||
+             PcbProfileManager::gpioReserved(scl) ||
+             PcbProfileManager::gpioReserved(interruptPin))) return false;
     }
     JsonVariantConst spi = doc["spi"];
     if (!spi.isNull() && !spi.is<JsonObjectConst>()) return false;
@@ -1739,6 +1746,10 @@ bool validatePlatformPins(const JsonDocument& doc,
             (mosi >= 0 && (!outputGpioAllowed(mosi) || mosi == sck || mosi == miso)) ||
             !addPin(sck, 1) || !addPin(miso, 2) ||
             (mosi >= 0 && !addPin(mosi, 3))) return false;
+        if (PcbProfileManager::active() && !PcbProfileManager::ownsBusKind("spi") &&
+            (PcbProfileManager::gpioReserved(sck) ||
+             PcbProfileManager::gpioReserved(miso) ||
+             PcbProfileManager::gpioReserved(mosi))) return false;
     }
 
     if (enabled(sensors["n1_rpm"]) && !addPin(jsonPin(sensors["n1_rpm"], "pin"))) return false;
@@ -2317,8 +2328,8 @@ char HardwareConfig::labelN1[32]        = "N1";
 char HardwareConfig::labelN2[32]        = "N2";
 char HardwareConfig::labelOilPress[32]  = "Oil Press";
 char HardwareConfig::labelOilTemp[32]   = "Oil Temp";
-char HardwareConfig::labelP1[32]        = "P1";
-char HardwareConfig::labelP2[32]        = "P2";
+char HardwareConfig::labelP1[32]        = "Pressure 1";
+char HardwareConfig::labelP2[32]        = "Pressure 2";
 char HardwareConfig::labelFuelPress[32] = "Fuel Press";
 char HardwareConfig::labelFuelFlow[32]  = "Fuel Flow";
 char HardwareConfig::labelStop[32]      = "Stop";
@@ -2837,8 +2848,8 @@ void HardwareConfig::applyDefaults() {
     resetLabel(labelN2,        sizeof(labelN2),        "N2");
     resetLabel(labelOilPress,  sizeof(labelOilPress),  "Oil Press");
     resetLabel(labelOilTemp,   sizeof(labelOilTemp),   "Oil Temp");
-    resetLabel(labelP1,        sizeof(labelP1),        "P1");
-    resetLabel(labelP2,        sizeof(labelP2),        "P2");
+    resetLabel(labelP1,        sizeof(labelP1),        "Pressure 1");
+    resetLabel(labelP2,        sizeof(labelP2),        "Pressure 2");
     resetLabel(labelFuelPress, sizeof(labelFuelPress), "Fuel Press");
     resetLabel(labelFuelFlow,  sizeof(labelFuelFlow),  "Fuel Flow");
     resetLabel(labelStop,      sizeof(labelStop),      "Stop");
@@ -2990,8 +3001,8 @@ void HardwareConfig::applyDefaults() {
     if (hasFuelFlow) addDefaultInput("fuel_flow", "Fuel Flow", "flow", "fuel_flow", fuelFlowPin,
         fuelFlowType == 1 ? ChannelRegistry::Pulse : ChannelRegistry::Analog, fuelFlowPulsesPerLitre, 330.0f);
     if (hasFuelPress) addDefaultInput("fuel_pressure", "Fuel Pressure", "pressure", "fuel_pressure", fuelPressPin, ChannelRegistry::Analog, 1.0f, 330.0f);
-    if (hasP1) addDefaultInput("p1_main", "P1 Pressure", "pressure", "p1_pressure", p1Pin, ChannelRegistry::Analog, 1.0f, 330.0f);
-    if (hasP2) addDefaultInput("p2_main", "P2 Pressure", "pressure", "p2_pressure", p2Pin, ChannelRegistry::Analog, 1.0f, 330.0f);
+    if (hasP1) addDefaultInput("p1_main", "Pressure 1", "pressure", "p1_pressure", p1Pin, ChannelRegistry::Analog, 1.0f, 330.0f);
+    if (hasP2) addDefaultInput("p2_main", "Pressure 2", "pressure", "p2_pressure", p2Pin, ChannelRegistry::Analog, 1.0f, 330.0f);
     if (hasOilTemp) addDefaultTemperature("oil_temperature", "Oil Temperature", "oil_temperature", oilTempChip, oilTempTcType,
         oilTempPin, oilTempPin, oilTempCs, oilTempMiso, oilTempMosi, oilTempResolution, ntcBeta, ntcR0, ntcRFixed);
     if (hasBattVoltage) addDefaultInput("battery_voltage", "Battery Voltage", "voltage", "battery_voltage", battVoltPin, ChannelRegistry::Analog, 1.0f, 1000.0f, battVoltDivider);
@@ -3871,8 +3882,14 @@ void HardwareConfig::_fromDoc(const JsonDocument& doc) {
             if ((c->pin >= 0 && c->driver == ChannelRegistry::Analog) ||
                 c->driver == ChannelRegistry::I2cAnalog) hasOilTemp = true;
         applyAnalog(byIdOrRole(ChannelRegistry::Input, "fuel_pressure", nullptr), hasFuelPress, fuelPressPin);
-        applyAnalog(byIdOrRole(ChannelRegistry::Input, "p1_main", nullptr), hasP1, p1Pin);
-        applyAnalog(byIdOrRole(ChannelRegistry::Input, "p2_main", nullptr), hasP2, p2Pin);
+        if (const auto* pressure1 = byIdOrRole(ChannelRegistry::Input, "p1_main", nullptr)) {
+            applyAnalog(pressure1, hasP1, p1Pin);
+            if (pressure1->name[0]) strlcpy(labelP1, pressure1->name, sizeof(labelP1));
+        }
+        if (const auto* pressure2 = byIdOrRole(ChannelRegistry::Input, "p2_main", nullptr)) {
+            applyAnalog(pressure2, hasP2, p2Pin);
+            if (pressure2->name[0]) strlcpy(labelP2, pressure2->name, sizeof(labelP2));
+        }
         if (const auto* flame = byIdOrRole(ChannelRegistry::Input, "flame_main", nullptr)) {
             if ((flame->pin >= 0 && (flame->driver == ChannelRegistry::Analog ||
                                      flame->driver == ChannelRegistry::Digital)) ||

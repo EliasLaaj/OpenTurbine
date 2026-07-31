@@ -1322,6 +1322,46 @@ main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inpu
   color: var(--dim);
   font-size: .7rem;
 }
+.switch-input-strip {
+  margin-bottom: .5rem;
+}
+.switch-input-strip .card {
+  gap: .45rem;
+}
+.switch-input-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem 1.15rem;
+  align-items: center;
+  color: var(--dim);
+  font-size: .78rem;
+}
+.switch-input-state {
+  display: inline-flex;
+  gap: .38rem;
+  align-items: center;
+  min-width: 0;
+}
+.switch-input-state::before {
+  width: .46rem;
+  height: .46rem;
+  flex: 0 0 .46rem;
+  border-radius: 50%;
+  background: var(--dim);
+  content: '';
+}
+.switch-input-state strong {
+  color: var(--dim);
+  font-size: .7rem;
+  letter-spacing: .04em;
+}
+.switch-input-state.is-on::before {
+  background: var(--green);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--green) 65%, transparent);
+}
+.switch-input-state.is-on strong { color: var(--green); }
+.switch-input-state.is-alarm::before { background: var(--red); }
+.switch-input-state.is-alarm strong { color: var(--red); }
 .context-links strong { color: var(--text-2); font-size: .7rem; }
 .context-links a {
   color: var(--blue);

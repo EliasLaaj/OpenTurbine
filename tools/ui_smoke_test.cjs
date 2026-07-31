@@ -119,6 +119,13 @@ function installedBrowser() {
     assert.equal(await text(page, '#hour-start-count'), '12');
     assert.equal(await page.locator('[data-registry-input-id="thrust_main"]').count(), 0);
     assert.equal(await page.locator('#thrust-card').isVisible(), true);
+    assert.equal(await page.locator('[data-registry-input-id="maintenance_interlock"]').count(), 0);
+    assert.equal(await page.locator('#di-states-wrap').isVisible(), true);
+    assert.match(await text(page, '#di-state-items'), /Maintenance Interlock\s*ON/);
+    assert.equal(await page.locator('#di-state-items .switch-input-state.is-on').count(), 1);
+    assert.deepEqual(await page.evaluate(() => [
+      formatTelemetryAge(5900), formatTelemetryAge(65400), formatTelemetryAge(3723000)
+    ]), ['5 s', '1m 5s', '1h 2m 3s']);
     await page.locator('#btn-ab-fire').click();
     assert.equal(await text(page, '#ot-dialog-title'), 'Fire afterburner?');
     assert.match(await text(page, '#ot-dialog-message'), /AB igniter, fuel valve, and fuel pump.*N1.*RPM.*TOT.*°C/is);
@@ -344,7 +351,7 @@ function installedBrowser() {
     results.push('hardware page restores servo-input source from saved hardware state');
     await page.evaluate(() => addRegistryChannel('input'));
     const inputCatalog = await text(page, '#registry-add-catalog');
-    for (const label of ['Compressor inlet pressure (P1)', 'Compressor discharge pressure (P2)',
+    for (const label of ['Pressure 1', 'Pressure 2',
       'Coolant pressure', 'Coolant temperature', 'Intake / ambient temperature',
       'Low oil pressure switch', 'Zero oil pressure switch', 'Generic PWM duty input']) {
       assert.match(inputCatalog, new RegExp(label.replace(/[()]/g, '\\$&')));

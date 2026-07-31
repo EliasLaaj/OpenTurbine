@@ -4,10 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
-<script src="/ui_dialog.js?v=20260730a"></script>
 <title>OpenTurbine — Log</title>
-<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
+<script src="/theme.js?v=20260731a" data-ot-version="20260731a" data-ot-app="true"></script>
 </head>
 <body>
 <nav>
@@ -107,8 +106,8 @@
           <label class="slog-chk"><input type="checkbox" data-bit="tit">TIT °C</label>
           <label class="slog-chk"><input type="checkbox" data-bit="oil_temp">Oil temp °C</label>
           <label class="slog-chk"><input type="checkbox" data-bit="oil">Oil bar</label>
-          <label class="slog-chk"><input type="checkbox" data-bit="p1">P1 bar</label>
-          <label class="slog-chk"><input type="checkbox" data-bit="p2">P2 bar</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="p1">Pressure 1 bar</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="p2">Pressure 2 bar</label>
           <label class="slog-chk"><input type="checkbox" data-bit="torque">Torque Nm + shaft power W</label>
           <label class="slog-chk"><input type="checkbox" data-bit="thrust">Thrust N</label>
           <label class="slog-chk"><input type="checkbox" data-bit="throttle">Throttle %</label>
@@ -207,7 +206,6 @@
   </div>
 </main>
 
-<script src="/app.js?v=20260730a"></script>
 <script>
 // ── Tab switching ─────────────────────────────────────────────
 function showTab(tab) {
@@ -659,6 +657,13 @@ function _applyLogHwVisibility(hw) {
   const hwOn = key => !!(hw && hw[key]);
   const hasRegistry = (direction, purpose) =>
     !!(hw?.channel_registry?.[direction] || []).some(c => c?.installed !== false && c?.purpose === purpose);
+  const pressureName = (purpose, fallback) => {
+    const channel = (hw?.channel_registry?.inputs || []).find(
+      c => c?.installed !== false && c?.purpose === purpose);
+    return String(channel?.name || fallback).trim() || fallback;
+  };
+  const pressure1Name = pressureName('p1_pressure', 'Pressure 1');
+  const pressure2Name = pressureName('p2_pressure', 'Pressure 2');
 
   // Returns true when the source/feature is active in the hardware section.
   const enabled = bit => {
@@ -699,7 +704,7 @@ function _applyLogHwVisibility(hw) {
     n1: 'N1 RPM sensor', n2: 'N2 RPM sensor',
     tot: 'TOT sensor', tit: 'TIT sensor',
     oil_temp: 'Oil Temperature sensor',
-    oil: 'Oil Pressure sensor', p1: 'P1 sensor', p2: 'P2 sensor',
+    oil: 'Oil Pressure sensor', p1: `${pressure1Name} sensor`, p2: `${pressure2Name} sensor`,
     torque: 'Shaft Torque sensor', starter: 'Starter output',
     oil_pct: 'Oil pump output',
     batt: 'Battery Voltage sensor', fuel_press: 'Fuel Pressure sensor',
@@ -716,6 +721,11 @@ function _applyLogHwVisibility(hw) {
     const input = document.querySelector('[data-bit="' + bit + '"]');
     const lbl   = input ? input.closest('label.slog-chk') : null;
     if (!lbl) return;
+    if (bit === 'p1' || bit === 'p2') {
+      const text = (bit === 'p1' ? pressure1Name : pressure2Name) + ' bar';
+      const textNode = Array.from(lbl.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
+      if (textNode) textNode.nodeValue = text;
+    }
     const on = enabled(bit);
     if (on) {
       // Restore to normal

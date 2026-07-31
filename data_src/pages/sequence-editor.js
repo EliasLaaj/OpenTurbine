@@ -555,8 +555,10 @@ function getEnabledSensors() {
   if (registryInputPurpose('flame')) list.push({key:'flame', label:'Flame Detected', unit:'', def:1, bool:true});
   if (registryInputPurpose('throttle')) list.push({key:'throttle_in', source:'operator_throttle', label:'Throttle Input', unit:'%', def:0, step:1});
   if (registryInputPurpose('idle')) list.push({key:'idle_in', source:'operator_idle', label:'Idle Input', unit:'%', def:0, step:1});
-  if (registryInputPurpose('p1_pressure')) list.push({key:'p1', label:'P1 Pressure', unit:'bar', def:0, step:0.1});
-  if (registryInputPurpose('p2_pressure')) list.push({key:'p2', label:'P2 Pressure', unit:'bar', def:0, step:0.1});
+  const pressure1 = registryInputPurpose('p1_pressure');
+  const pressure2 = registryInputPurpose('p2_pressure');
+  if (pressure1) list.push({key:'p1', label:registryLabel(pressure1, 'Pressure 1'), unit:'bar', def:0, step:0.1});
+  if (pressure2) list.push({key:'p2', label:registryLabel(pressure2, 'Pressure 2'), unit:'bar', def:0, step:0.1});
   if (registryInputPurpose('fuel_flow')) list.push({key:'fuel_flow', label:'Fuel Flow', unit:'', def:0, step:1});
   if (registryInputPurpose('torque')) list.push({key:'torque', label:'Torque', unit:'Nm', def:0, step:1});
   if (registryInputPurpose('thrust')) list.push({key:'thrust', label:'Thrust', unit:'N', def:0, step:1});

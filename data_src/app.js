@@ -4,7 +4,7 @@
 const _labels = {
   tot:'TOT', tit:'TIT', n1:'N1', n2:'N2',
   oil_press:'Oil Press', oil_temp:'Oil Temp',
-  p1:'P1', p2:'P2', fuel_press:'Fuel Press', fuel_flow:'Fuel Flow',
+  p1:'Pressure 1', p2:'Pressure 2', fuel_press:'Fuel Press', fuel_flow:'Fuel Flow',
   stop:'Stop', start:'Start', ab_arm:'AB Arm'
 };
 function lbl(key) { return _labels[key] || key; }
@@ -1222,31 +1222,16 @@ function applyData(d) {
   if (d.di_channels) {
     const wrap = document.getElementById('di-states-wrap');
     if (wrap) {
-      const anyConfigured = d.di_channels.some(ch => ch.pin >= 0);
-      wrap.style.display = anyConfigured ? 'flex' : 'none';
-      d.di_channels.forEach((ch, i) => {
-        if (ch.pin < 0) {
-          const old = document.getElementById('di-badge-' + i);
-          if (old) old.remove();
-          return;
-        }
-        let el = document.getElementById('di-badge-' + i);
-        if (!el) {
-          el = document.createElement('span');
-          el.id = 'di-badge-' + i;
-          el.className = 'di-badge';
-          wrap.appendChild(el);
-        }
-        const name = (ch.label && ch.label.length) ? ch.label : ('DI-' + (i + 1));
-        el.textContent = name + ': ' + (ch.state ? 'ACTIVE' : 'off');
-        // Color by role semantics: only fault/estop are alarming when active.
-        // An active arm switch / interlock / start-inhibit is a normal state
-        // and must not look like a fault.
-        const alarmRole = ch.role === 'fault' || ch.role === 'estop';
-        const activeColor = alarmRole ? 'var(--red)' : 'var(--yellow)';
-        el.style.color = ch.state ? activeColor : 'var(--dim)';
-        el.style.borderColor = ch.state ? activeColor : 'var(--border)';
-      });
+      const registrySwitches = (Array.isArray(d.registry_inputs) ? d.registry_inputs : [])
+        .filter(ch => ch && ch.id && !registryInputAlreadyHasCoreCard(ch) && registryInputIsBinary(ch));
+      if (!registrySwitches.length) {
+        const rows = d.di_channels.filter(ch => ch && ch.pin >= 0).map((ch, i) => ({
+          name: (ch.label && ch.label.length) ? ch.label : ('DI-' + (i + 1)),
+          on: !!ch.state,
+          alarm: ch.role === 'fault' || ch.role === 'estop'
+        }));
+        renderSwitchInputStrip(rows);
+      }
     }
   }
 
@@ -1710,16 +1695,26 @@ async function resetPeaks() {
 }
 
 // ── Boot: prime dashboard via REST for instant first paint, then WS takes over ─
-applyUnitLabels();
-organizeDashboardCards();
-document.addEventListener('DOMContentLoaded', () => {
+function initializeSharedDom() {
+  applyUnitLabels();
+  organizeDashboardCards();
+}
+if (document.readyState === 'loading')
+  document.addEventListener('DOMContentLoaded', initializeSharedDom, { once:true });
+else
+  initializeSharedDom();
+function startDomEnhancements() {
   applyContextTooltips();
   new MutationObserver(records => {
     records.forEach(record => record.addedNodes.forEach(node => {
       if (node.nodeType === 1) applyContextTooltips(node);
     }));
   }).observe(document.body, { childList: true, subtree: true });
-});
+}
+if (document.readyState === 'loading')
+  document.addEventListener('DOMContentLoaded', startDomEnhancements, { once:true });
+else
+  startDomEnhancements();
 window.addEventListener('focus', requestTelemetryNow);
 window.addEventListener('pageshow', (e) => {
   // bfcache restore (iOS Safari back/forward): pagehide tore down the WS and
@@ -1780,12 +1775,23 @@ function setTelemetryStale(stale, ageMs = 0) {
   }
   banner.style.display = _telemetryStale ? '' : 'none';
   if (_telemetryStale) {
-    banner.textContent = `TELEMETRY STALE - last update ${(ageMs / 1000).toFixed(1)} s ago`;
+    banner.textContent = `TELEMETRY STALE - last update ${formatTelemetryAge(ageMs)} ago`;
     ['btn-start','btn-ab-fire'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.disabled = true;
     });
   }
+}
+
+function formatTelemetryAge(ageMs) {
+  const totalSeconds = Math.max(0, Math.floor(Number(ageMs) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) return `${totalMinutes}m ${seconds}s`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${minutes}m ${seconds}s`;
 }
 
 function startStaleMonitor() {
@@ -1888,11 +1894,18 @@ function renderRegistryInputCards(d) {
   }
   const rows = (Array.isArray(d.registry_inputs) ? d.registry_inputs : [])
     .filter(ch => ch && ch.id && !registryInputAlreadyHasCoreCard(ch));
-  if (!rows.length) {
+  const binaryRows = rows.filter(registryInputIsBinary);
+  const cardRows = rows.filter(ch => !registryInputIsBinary(ch));
+  renderSwitchInputStrip(binaryRows.map(ch => ({
+    name: registryDisplayName(ch, 'Switch'),
+    on: Number(ch.value) >= 0.5,
+    alarm: Number(ch.value) >= 0.5 && ['fault','estop'].includes(String(ch.role || ''))
+  })));
+  if (!cardRows.length) {
     host.innerHTML = '';
-    return 0;
+    return rows.length;
   }
-  host.innerHTML = rows.map((ch, i) => {
+  host.innerHTML = cardRows.map((ch, i) => {
     const safeId = String(ch.id || `input_${i}`).replace(/[^a-zA-Z0-9_-]/g, '_');
     const name = registryDisplayName(ch, 'Input');
     const display = registryInputDisplay(ch);
@@ -1905,7 +1918,7 @@ function renderRegistryInputCards(d) {
       <canvas class="sparkline" id="regin-spark-${escapeHtmlText(safeId)}"></canvas>
     </div>`;
   }).join('');
-  rows.forEach((ch, i) => {
+  cardRows.forEach((ch, i) => {
     const safeId = String(ch.id || `input_${i}`).replace(/[^a-zA-Z0-9_-]/g, '_');
     const display = registryInputDisplay(ch);
     if (display.numeric !== null) {
@@ -1915,6 +1928,18 @@ function renderRegistryInputCards(d) {
     }
   });
   return rows.length;
+}
+function renderSwitchInputStrip(rows) {
+  const wrap = document.getElementById('di-states-wrap');
+  const host = document.getElementById('di-state-items');
+  if (!wrap || !host) return;
+  wrap.style.display = rows.length ? '' : 'none';
+  host.innerHTML = rows.map(row => {
+    const cls = row.alarm ? ' is-alarm' : row.on ? ' is-on' : '';
+    return `<span class="switch-input-state${cls}" title="${escapeHtmlText(row.name)} is ${row.on ? 'on' : 'off'}">
+      <span>${escapeHtmlText(row.name)}</span><strong>${row.on ? 'ON' : 'OFF'}</strong>
+    </span>`;
+  }).join('');
 }
 function registryOutputRangeText(ch) {
   const driver = Number(ch?.driver);

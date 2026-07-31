@@ -111,6 +111,11 @@ function collectPinUsage() {
     usage.get(pin).push({label, group});
   };
   const c = cfg.controls || {};
+  if (pcbProfileActive()) {
+    const profileName = pcbProfile.name || pcbProfile.id || 'PCB profile';
+    (pcbProfile.reserved_gpio || []).forEach(pin =>
+      add(pin, `${profileName} reserved GPIO`, 'pcb-reserved'));
+  }
   // START/STOP registry channels mirror the legacy controls fields. Count
   // either representation, not both, or a valid PCB assignment is reported
   // as conflicting with itself.
@@ -190,7 +195,10 @@ function buildPinOptions(currentVal, mode) {
     if (electricalMode === 'adc') { if (!info.adc1) continue; }
     else if (electricalMode === 'out' || electricalMode === 'status-led') { if (info.i) continue; }
     const usedBy = pinUsage.get(g) || [];
-    const usedByOther = g !== current ? usedBy : [];
+    // The current field's own claim is normally ignored, but a PCB reservation
+    // remains authoritative: a stale/manual bus assignment must not make a
+    // profile-owned pin appear free.
+    const usedByOther = g !== current ? usedBy : usedBy.filter(u => u.group === 'pcb-reserved');
     const busShareOk = !!shareGroup && usedByOther.length > 0 && usedByOther.every(u => u.group === shareGroup);
     const disabled = usedByOther.length > 0 && !busShareOk;
     const usedLabels = [...new Set(usedByOther.map(u => u.label).filter(Boolean))].slice(0, 3).join(', ');

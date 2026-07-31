@@ -738,14 +738,21 @@ static void _sendGzipAsset(AsyncWebServerRequest* req, const char* path,
     AsyncWebServerResponse* resp = req->beginResponse(LittleFS, path, contentType);
     resp->addHeader("Content-Encoding", "gzip");
     resp->addHeader("Cache-Control", cacheControl);
+    // A browser can open several parallel transports for HTML, CSS and JS.
+    // Explicitly retire each flash-backed response connection so Classic's
+    // small AsyncTCP pool cannot accumulate idle keep-alive sockets and reset
+    // the remaining cold-load assets.
+    resp->addHeader("Connection", "close");
     req->send(resp);
 }
 
-// Shared asset filenames intentionally stay stable so the maintenance updater
-// can replace them in place. They must be revalidated on navigation; an
-// immutable year-long cache otherwise keeps old CSS/JS after a successful UI
-// update even though the HTML itself was refreshed.
-static constexpr const char* SHARED_ASSET_CACHE = "no-cache";
+// Shared asset filenames stay stable for the maintenance updater, while every
+// HTML page supplies a release-specific ?v= token. Cache that exact version
+// permanently: revalidating four large flash-backed assets on every page change
+// can occupy all browser/TCP slots and leave the next page stuck in "loading".
+// A web update changes the token, so the browser still fetches the new files.
+static constexpr const char* SHARED_ASSET_CACHE =
+    "public, max-age=31536000, immutable";
 
 static void _finalizeJsonResponse(AsyncWebServerResponse* resp) {
     if (!resp) return;

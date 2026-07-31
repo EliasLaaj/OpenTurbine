@@ -146,7 +146,7 @@ function makeHardware() {
     ab_flame: { enabled: true, pin: 32, threshold: 1800 },
     ab_seq: ['ABCheckReady', 'ABSolOpen', 'ABPumpOn', 'ABIgnite', 'ABFlameConfirm', 'ABStabilize'],
     ab_shut_seq: ['ABPumpOff', 'ABSolClose', 'ABIgnOff'],
-    labels: { tot: 'TOT', tit: 'TIT', n1: 'N1', n2: 'N2', oil_press: 'Oil Press', oil_temp: 'Oil Temp', p1: 'P1', p2: 'P2', fuel_press: 'Fuel Press', fuel_flow: 'Fuel Flow', stop: 'Stop', start: 'Start', ab_arm: 'AB Arm' },
+    labels: { tot: 'TOT', tit: 'TIT', n1: 'N1', n2: 'N2', oil_press: 'Oil Press', oil_temp: 'Oil Temp', p1: 'Pressure 1', p2: 'Pressure 2', fuel_press: 'Fuel Press', fuel_flow: 'Fuel Flow', stop: 'Stop', start: 'Start', ab_arm: 'AB Arm' },
     di_channels: [
       { pin: 18, active_h: true, debounce_ms: 20, label: 'Door interlock', role: 'fault', fault_code: 20, fault_msg: 'Door open', active_modes: 7 },
       { pin: -1, active_h: true, debounce_ms: 20, label: '', role: 'none', fault_code: 0, fault_msg: '', active_modes: 0 },
@@ -215,7 +215,8 @@ function fullTelemetry() {
     registry_inputs:[
       {id:'oil_flow',name:'Main Oil Flow',purpose:'oil_flow',role:'flow',value:2.45,healthy:true,min:0,max:20},
       {id:'scavenge_flow',name:'Scavenge Flow',purpose:'scavenge_flow',role:'flow',value:1.72,healthy:true,min:0,max:20},
-      {id:'thrust_main',name:'Thrust',purpose:'thrust',role:'thrust',value:86.4,healthy:true,min:-1000,max:10000}
+      {id:'thrust_main',name:'Thrust',purpose:'thrust',role:'thrust',value:86.4,healthy:true,min:-1000,max:10000},
+      {id:'maintenance_interlock',name:'Maintenance Interlock',purpose:'digital_switch',role:'inhibit_start',driver:0,value:1,healthy:true}
     ],
     registry_outputs:[
       {id:'drain_valve',name:'Drain Valve',purpose:'drain_valve',role:'valve',demand:0}

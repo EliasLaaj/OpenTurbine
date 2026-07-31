@@ -424,12 +424,12 @@ function enumNames(source, marker) {
     assert.doesNotMatch(indexHtml, /20260612b|20260617b|20260619a|20260625a|20260705a|Primary thermal limit/);
     assert.doesNotMatch(indexHtml, />Not saved<|No calibration saved|No successful test recorded/);
     assert.match(indexHtml, /Run a safe actuator or dry-sequence test/);
-    assert.match(indexHtml, /20260730a/);
+    assert.match(indexHtml, /20260731a/);
     for (const pageName of ['index.html', 'hardware.html', 'config.html', 'calibration.html', 'sequence.html', 'log.html', 'tools.html']) {
       const pageSource = fs.readFileSync(path.join('data_src', pageName), 'utf8');
       const sharedRefs = [...pageSource.matchAll(/\/(?:style\.css|app\.js|theme\.js|ui_dialog\.js)\?v=([^"'&]+)/g)];
       assert.ok(sharedRefs.length > 0, `${pageName} must version its shared assets`);
-      assert.ok(sharedRefs.every(match => match[1] === '20260730a'), `${pageName} has a stale shared-asset cache key`);
+      assert.ok(sharedRefs.every(match => match[1] === '20260731a'), `${pageName} has a stale shared-asset cache key`);
     }
     assert.match(indexHtml, /<body data-page="dashboard">/);
     assert.match(indexHtml, /id="profile-mismatch-banner" style="display:none"/);
@@ -465,7 +465,7 @@ function enumNames(source, marker) {
     // Shared filenames are replaced in place by the maintenance updater, so
     // every navigation must revalidate CSS/JS instead of retaining an old
     // immutable copy under the same URL.
-    assert.match(webServer, /SHARED_ASSET_CACHE = "no-cache"/);
+    assert.match(webServer, /max-age=31536000, immutable/);
     assert.match(webServer, /app\.js\.gz", "application\/javascript", SHARED_ASSET_CACHE/);
     assert.match(webServer, /style\.css\.gz", "text\/css", SHARED_ASSET_CACHE/);
     results.push('shared CSS and JavaScript are revalidated after maintenance updates');

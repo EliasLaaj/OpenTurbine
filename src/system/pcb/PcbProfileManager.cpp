@@ -632,6 +632,38 @@ const PcbProfileManager::Bus* PcbProfileManager::findBus(const char* id) {
     return nullptr;
 }
 
+const PcbProfileManager::Bus* PcbProfileManager::findBusKind(const char* kind) {
+    if (!_catalog || !kind) return nullptr;
+    for (uint8_t i = 0; i < _catalog->busCount; ++i)
+        if (!strcmp(_catalog->buses[i].kind, kind)) return &_catalog->buses[i];
+    return nullptr;
+}
+
+bool PcbProfileManager::ownsBusKind(const char* kind) {
+    return findBusKind(kind) != nullptr;
+}
+
+bool PcbProfileManager::gpioReserved(int gpio) {
+    if (!_catalog || gpio < 0) return false;
+    for (uint8_t i = 0; i < _catalog->busCount; ++i) {
+        const Bus& bus = _catalog->buses[i];
+        for (int pin : {bus.sda, bus.scl, bus.interrupt, bus.sck, bus.miso,
+                        bus.mosi, bus.tx, bus.rx, bus.data})
+            if (pin == gpio) return true;
+    }
+    for (uint8_t i = 0; i < _catalog->deviceCount; ++i)
+        if (_catalog->devices[i].selectGpio == gpio) return true;
+    if ((_catalog->hasStatusLed && _catalog->statusLedGpio == gpio) ||
+        (_catalog->hasBuzzer && _catalog->buzzerGpio == gpio) ||
+        (_catalog->hasServoOutputEnable && _catalog->servoOutputEnableGpio == gpio) ||
+        (_catalog->hasSupplyVoltage && _catalog->supplyVoltageGpio == gpio))
+        return true;
+    for (uint8_t i = 0; i < _catalog->portCount; ++i)
+        for (uint8_t j = 0; j < _catalog->ports[i].modeCount; ++j)
+            if (_catalog->ports[i].modes[j].gpio == gpio) return true;
+    return false;
+}
+
 void PcbProfileManager::setServoOutputsEnabled(bool enabled) {
     if (!_catalog || !_catalog->hasServoOutputEnable) return;
     const bool level = enabled == _catalog->servoOutputEnableActiveHigh;
@@ -656,6 +688,12 @@ void PcbProfileManager::toJson(JsonObject out, bool includePorts,
     out["origin"] = _catalog->origin == Origin::Official ? "official" :
                     _catalog->origin == Origin::Custom ? "custom" : "unknown";
     out["port_count"] = _catalog->portCount;
+    JsonObject busOwnership = out["bus_ownership"].to<JsonObject>();
+    busOwnership["i2c"] = ownsBusKind("i2c");
+    busOwnership["spi"] = ownsBusKind("spi");
+    JsonArray reserved = out["reserved_gpio"].to<JsonArray>();
+    for (int gpio = 0; gpio <= 48; ++gpio)
+        if (gpioReserved(gpio)) reserved.add(gpio);
     JsonObject fixed = out["fixed_functions"].to<JsonObject>();
     if (_catalog->hasStatusLed) {
         JsonObject item = fixed["status_led"].to<JsonObject>();

@@ -6,9 +6,8 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Hardware</title>
-<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/ui_dialog.js?v=20260730a"></script>
+<script src="/theme.js?v=20260731a" data-ot-version="20260731a"></script>
 </head>
 <body>
 <nav>
@@ -487,6 +486,11 @@ function collectPinUsage() {
     usage.get(pin).push({label, group});
   };
   const c = cfg.controls || {};
+  if (pcbProfileActive()) {
+    const profileName = pcbProfile.name || pcbProfile.id || 'PCB profile';
+    (pcbProfile.reserved_gpio || []).forEach(pin =>
+      add(pin, `${profileName} reserved GPIO`, 'pcb-reserved'));
+  }
   // START/STOP registry channels mirror the legacy controls fields. Count
   // either representation, not both, or a valid PCB assignment is reported
   // as conflicting with itself.
@@ -566,7 +570,10 @@ function buildPinOptions(currentVal, mode) {
     if (electricalMode === 'adc') { if (!info.adc1) continue; }
     else if (electricalMode === 'out' || electricalMode === 'status-led') { if (info.i) continue; }
     const usedBy = pinUsage.get(g) || [];
-    const usedByOther = g !== current ? usedBy : [];
+    // The current field's own claim is normally ignored, but a PCB reservation
+    // remains authoritative: a stale/manual bus assignment must not make a
+    // profile-owned pin appear free.
+    const usedByOther = g !== current ? usedBy : usedBy.filter(u => u.group === 'pcb-reserved');
     const busShareOk = !!shareGroup && usedByOther.length > 0 && usedByOther.every(u => u.group === shareGroup);
     const disabled = usedByOther.length > 0 && !busShareOk;
     const usedLabels = [...new Set(usedByOther.map(u => u.label).filter(Boolean))].slice(0, 3).join(', ');
@@ -931,6 +938,7 @@ function requestHardwareTelemetry() {
 function stopHardwareTelemetry() {
   wsClosingForNavigation = true;
   if (wsPullTimer) { clearInterval(wsPullTimer); wsPullTimer = null; }
+  if (i2cDiscoveryTimer) { clearInterval(i2cDiscoveryTimer); i2cDiscoveryTimer = null; }
   stopStatusPoll();
   if (ws) {
     try {
@@ -1122,17 +1130,25 @@ function populate() {
   if (spiMosi) spiMosi.innerHTML = buildPinOptions(cfg.spi.mosi_pin ?? -1, 'spi-mosi');
   syncSharedSpiChannels();
   renderRegistryInventory();
-  updateGroupEnabled('grp-i2c', !!cfg.i2c.enabled && !pcbProfileActive());
-  updateGroupEnabled('grp-spi', !!cfg.spi.enabled && !pcbProfileActive());
+  const i2cOwned = pcbOwnsBus('i2c');
+  const spiOwned = pcbOwnsBus('spi');
+  updateGroupEnabled('grp-i2c', !!cfg.i2c.enabled && !i2cOwned);
+  updateGroupEnabled('grp-spi', !!cfg.spi.enabled && !spiOwned);
   const i2cToggle = document.getElementById('en-i2c');
   const spiToggle = document.getElementById('en-spi');
-  if (i2cToggle) i2cToggle.disabled = pcbProfileActive();
-  if (spiToggle) spiToggle.disabled = pcbProfileActive();
+  if (i2cToggle) {
+    i2cToggle.disabled = i2cOwned;
+    i2cToggle.title = i2cOwned ? 'This I2C bus is defined by the flashed PCB profile and cannot be removed.' : '';
+  }
+  if (spiToggle) {
+    spiToggle.disabled = spiOwned;
+    spiToggle.title = spiOwned ? 'This SPI bus is defined by the flashed PCB profile and cannot be removed.' : '';
+  }
   renderI2cDiscovery();
   if (busesPanel) {
     const desc = busesPanel.querySelector(':scope > .hw-desc');
     if (desc && pcbProfileActive())
-      desc.textContent = 'The flashed PCB profile owns these bus pins. They are shown read-only so you can identify the wiring; detected I2C device health is checked automatically.';
+      desc.textContent = 'Buses defined by the flashed PCB profile are shown read-only and cannot be removed. You may add a missing shared bus using only GPIOs that the PCB leaves free.';
   }
   for (const id of ['hardware-cluster-source-panel','hardware-mavlink-source-panel']) {
     const panel = document.getElementById(id);
@@ -1179,7 +1195,7 @@ function populate() {
 }
 
 function setI2cField(key, value) {
-  if (pcbProfileActive()) return;
+  if (pcbOwnsBus('i2c')) return;
   cfg.i2c ||= {};
   cfg.i2c[key] = value;
   updateGroupEnabled('grp-i2c', !!cfg.i2c.enabled);
@@ -1204,7 +1220,7 @@ function syncSharedSpiChannels() {
   });
 }
 function setSpiField(key, value) {
-  if (pcbProfileActive()) return;
+  if (pcbOwnsBus('spi')) return;
   cfg.spi ||= {enabled:false,sck_pin:-1,miso_pin:-1,mosi_pin:-1};
   cfg.spi[key] = value;
   syncSharedSpiChannels();
@@ -1212,6 +1228,9 @@ function setSpiField(key, value) {
   dirty(); updateSaveButton(); refreshAllPins(); renderRegistryInventory();
 }
 function pcbProfileActive() { return pcbProfile?.state === 'valid'; }
+function pcbOwnsBus(kind) {
+  return pcbProfileActive() && pcbProfile?.bus_ownership?.[kind] === true;
+}
 const PCB_ADAPTER_DRIVER = {
   digital_input:0, analog_input:1, pcnt_input:2, rc_pwm_input:3, pwm_duty_input:7,
   spi_thermocouple:1, onewire_temperature:1, i2c_digital_input:8,
@@ -1856,8 +1875,8 @@ const REGISTRY_INPUT_PURPOSES=[
   {value:'tit',label:'Turbine inlet temperature (TIT)',role:'temperature',drivers:[1,9],group:'Engine sensors'},
   {value:'oil_pressure',label:'Oil pressure',role:'pressure',drivers:[1,9],group:'Engine sensors'},
   {value:'fuel_pressure',label:'Fuel pressure',role:'pressure',drivers:[1,9],group:'Engine sensors'},
-  {value:'p1_pressure',label:'Compressor inlet pressure (P1)',role:'pressure',drivers:[1,9],group:'Engine sensors'},
-  {value:'p2_pressure',label:'Compressor discharge pressure (P2)',role:'pressure',drivers:[1,9],group:'Engine sensors'},
+  {value:'p1_pressure',label:'Pressure 1',role:'pressure',drivers:[1,9],group:'Engine sensors'},
+  {value:'p2_pressure',label:'Pressure 2',role:'pressure',drivers:[1,9],group:'Engine sensors'},
   {value:'coolant_pressure',label:'Coolant pressure',role:'pressure',drivers:[1],group:'Engine sensors'},
   {value:'oil_temperature',label:'Oil / gearbox temperature',role:'temperature',drivers:[1,9],group:'Engine sensors'},
   {value:'coolant_temp',label:'Coolant temperature',role:'temperature',drivers:[1,9],group:'Engine sensors'},
@@ -1954,8 +1973,8 @@ const REGISTRY_INPUT_PRESETS=[
   {group:'Engine sensors',purpose:'tot',role:'temperature',label:'TOT / EGT',id:'tot_main',name:'Main TOT',driver:1,temp_interface:2},
   {group:'Engine sensors',purpose:'tit',role:'temperature',label:'TIT',id:'tit_main',name:'Main TIT',driver:1,temp_interface:2},
   {group:'Engine sensors',purpose:'oil_pressure',role:'pressure',label:'Oil pressure',id:'oil_pressure_main',name:'Oil Pressure',driver:1},
-  {group:'Engine sensors',purpose:'p1_pressure',role:'pressure',label:'Compressor inlet pressure (P1)',id:'p1_main',name:'P1 Pressure',driver:1},
-  {group:'Engine sensors',purpose:'p2_pressure',role:'pressure',label:'Compressor discharge pressure (P2)',id:'p2_main',name:'P2 Pressure',driver:1},
+  {group:'Engine sensors',purpose:'p1_pressure',role:'pressure',label:'Pressure 1',id:'p1_main',name:'Pressure 1',driver:1},
+  {group:'Engine sensors',purpose:'p2_pressure',role:'pressure',label:'Pressure 2',id:'p2_main',name:'Pressure 2',driver:1},
   {group:'Engine sensors',purpose:'coolant_pressure',role:'pressure',label:'Coolant pressure',id:'coolant_pressure',name:'Coolant Press',driver:1},
   {group:'Engine sensors',purpose:'oil_temperature',role:'temperature',label:'Oil temperature',id:'oil_temperature',name:'Oil Temp',driver:1},
   {group:'Engine sensors',purpose:'coolant_temp',role:'temperature',label:'Coolant temperature',id:'coolant_temperature',name:'Coolant Temp',driver:1},

@@ -5,10 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine</title>
-<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260730a"></script>
-<script src="/ui_dialog.js?v=20260730a"></script>
+<script src="/theme.js?v=20260731a" data-ot-version="20260731a" data-ot-app="true"></script>
 </head>
 <body data-page="dashboard">
 <nav>
@@ -237,12 +235,12 @@
   <!-- P1 / P2 pressure sensors (shown only when fitted in Hardware) -->
   <section id="pressure-card-bin" class="grid-2 telemetry-card-bin" style="display:none">
     <div class="card" id="p1-card" style="display:none">
-      <div class="label"><span id="lbl-p1">P1</span> <span data-unit="press">bar</span> <span id="p1-health" class="dot"></span></div>
+      <div class="label"><span id="lbl-p1">Pressure 1</span> <span data-unit="press">bar</span> <span id="p1-health" class="dot"></span></div>
       <div class="value small" id="p1">—</div>
       <div class="peak-val">max <span id="max-p1">—</span></div>
     </div>
     <div class="card" id="p2-card" style="display:none">
-      <div class="label"><span id="lbl-p2">P2</span> <span data-unit="press">bar</span> <span id="p2-health" class="dot"></span></div>
+      <div class="label"><span id="lbl-p2">Pressure 2</span> <span data-unit="press">bar</span> <span id="p2-health" class="dot"></span></div>
       <div class="value small" id="p2">—</div>
       <div class="peak-val">max <span id="max-p2">—</span></div>
     </div>
@@ -323,8 +321,13 @@
     ⚠ COMPRESSOR SURGE DETECTED — Engine shutting down
   </div>
 
-  <!-- DI channel state badges (shown only when at least one DI pin is configured) -->
-  <div id="di-states-wrap" style="display:none;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem"></div>
+  <!-- Compact switch-input status strip -->
+  <section id="di-states-wrap" class="switch-input-strip" style="display:none">
+    <div class="card small">
+      <div class="label">Switch Inputs</div>
+      <div id="di-state-items" class="switch-input-items"></div>
+    </div>
+  </section>
 
   <!-- Governor status (shown only when governor enabled) -->
   <section id="governor-section" style="display:none;margin-bottom:.5rem">
@@ -794,6 +797,5 @@ function dismissCaptiveBanner() {
 })();
 </script>
 
-<script src="/app.js?v=20260730a"></script>
 </body>
 </html>

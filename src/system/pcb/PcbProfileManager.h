@@ -111,6 +111,9 @@ public:
     static const Mode* findMode(const Port& port, const char* id);
     static const Device* findDevice(const char* id);
     static const Bus* findBus(const char* id);
+    static const Bus* findBusKind(const char* kind);
+    static bool ownsBusKind(const char* kind);
+    static bool gpioReserved(int gpio);
     // The shared buffer is kept disabled until every configured servo waveform
     // has been attached and initialized.
     static void setServoOutputsEnabled(bool enabled);

@@ -421,8 +421,8 @@ public:
     static char labelN2[32];         // default "N2"
     static char labelOilPress[32];   // default "Oil Press"
     static char labelOilTemp[32];    // default "Oil Temp"
-    static char labelP1[32];         // default "P1"
-    static char labelP2[32];         // default "P2"
+    static char labelP1[32];         // default "Pressure 1"; follows registry channel name
+    static char labelP2[32];         // default "Pressure 2"; follows registry channel name
     static char labelFuelPress[32];  // default "Fuel Press"
     static char labelFuelFlow[32];   // default "Fuel Flow"
     static char labelStop[32];       // default "Stop"

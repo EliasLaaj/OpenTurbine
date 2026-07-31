@@ -4,6 +4,7 @@
    ecu_config.json ui_theme field can be layered on later.) */
 (function () {
   'use strict';
+  var bootScript = document.currentScript;
   var KEY = 'ot_theme';
   var ONBOARD = 'ot_theme_onboarded_v1';
 
@@ -120,5 +121,44 @@
   };
 
   apply(get());
-  reconcileFromDevice();
+  // Classic ESP32 cannot reliably serve four cold browser requests in
+  // parallel. theme.js is the one parser-blocking bootstrap; it then loads
+  // CSS, dialogs and (where requested) the shared app strictly in sequence.
+  // Synchronous same-origin reads are intentional here: they keep the parser
+  // and preload scanner from creating parallel TCP clients on the ECU, and
+  // ensure DOMContentLoaded still means the UI code is ready.
+  function loadBootAssets() {
+    var version = (bootScript && bootScript.getAttribute('data-ot-version')) || '';
+    var suffix = version ? '?v=' + encodeURIComponent(version) : '';
+    function read(url) {
+      try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, false);
+        xhr.send(null);
+        return xhr.status >= 200 && xhr.status < 300 ? xhr.responseText : '';
+      } catch (e) { return ''; }
+    }
+    var sharedCss = read('/style.css' + suffix);
+    if (sharedCss) {
+      var style = document.createElement('style');
+      style.textContent = sharedCss;
+      document.head.appendChild(style);
+    }
+    var dialogs = read('/ui_dialog.js' + suffix);
+    if (dialogs) {
+      var dialogScript = document.createElement('script');
+      dialogScript.textContent = dialogs;
+      document.head.appendChild(dialogScript);
+    }
+    if (bootScript && bootScript.getAttribute('data-ot-app') === 'true') {
+      var app = read('/app.js' + suffix);
+      if (app) {
+        var appScript = document.createElement('script');
+        appScript.textContent = app;
+        document.head.appendChild(appScript);
+      }
+    }
+    reconcileFromDevice();
+  }
+  loadBootAssets();
 })();

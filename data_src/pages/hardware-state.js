@@ -18,6 +18,7 @@ function requestHardwareTelemetry() {
 function stopHardwareTelemetry() {
   wsClosingForNavigation = true;
   if (wsPullTimer) { clearInterval(wsPullTimer); wsPullTimer = null; }
+  if (i2cDiscoveryTimer) { clearInterval(i2cDiscoveryTimer); i2cDiscoveryTimer = null; }
   stopStatusPoll();
   if (ws) {
     try {
@@ -209,17 +210,25 @@ function populate() {
   if (spiMosi) spiMosi.innerHTML = buildPinOptions(cfg.spi.mosi_pin ?? -1, 'spi-mosi');
   syncSharedSpiChannels();
   renderRegistryInventory();
-  updateGroupEnabled('grp-i2c', !!cfg.i2c.enabled && !pcbProfileActive());
-  updateGroupEnabled('grp-spi', !!cfg.spi.enabled && !pcbProfileActive());
+  const i2cOwned = pcbOwnsBus('i2c');
+  const spiOwned = pcbOwnsBus('spi');
+  updateGroupEnabled('grp-i2c', !!cfg.i2c.enabled && !i2cOwned);
+  updateGroupEnabled('grp-spi', !!cfg.spi.enabled && !spiOwned);
   const i2cToggle = document.getElementById('en-i2c');
   const spiToggle = document.getElementById('en-spi');
-  if (i2cToggle) i2cToggle.disabled = pcbProfileActive();
-  if (spiToggle) spiToggle.disabled = pcbProfileActive();
+  if (i2cToggle) {
+    i2cToggle.disabled = i2cOwned;
+    i2cToggle.title = i2cOwned ? 'This I2C bus is defined by the flashed PCB profile and cannot be removed.' : '';
+  }
+  if (spiToggle) {
+    spiToggle.disabled = spiOwned;
+    spiToggle.title = spiOwned ? 'This SPI bus is defined by the flashed PCB profile and cannot be removed.' : '';
+  }
   renderI2cDiscovery();
   if (busesPanel) {
     const desc = busesPanel.querySelector(':scope > .hw-desc');
     if (desc && pcbProfileActive())
-      desc.textContent = 'The flashed PCB profile owns these bus pins. They are shown read-only so you can identify the wiring; detected I2C device health is checked automatically.';
+      desc.textContent = 'Buses defined by the flashed PCB profile are shown read-only and cannot be removed. You may add a missing shared bus using only GPIOs that the PCB leaves free.';
   }
   for (const id of ['hardware-cluster-source-panel','hardware-mavlink-source-panel']) {
     const panel = document.getElementById(id);
@@ -266,7 +275,7 @@ function populate() {
 }
 
 function setI2cField(key, value) {
-  if (pcbProfileActive()) return;
+  if (pcbOwnsBus('i2c')) return;
   cfg.i2c ||= {};
   cfg.i2c[key] = value;
   updateGroupEnabled('grp-i2c', !!cfg.i2c.enabled);
@@ -291,7 +300,7 @@ function syncSharedSpiChannels() {
   });
 }
 function setSpiField(key, value) {
-  if (pcbProfileActive()) return;
+  if (pcbOwnsBus('spi')) return;
   cfg.spi ||= {enabled:false,sck_pin:-1,miso_pin:-1,mosi_pin:-1};
   cfg.spi[key] = value;
   syncSharedSpiChannels();
@@ -299,6 +308,9 @@ function setSpiField(key, value) {
   dirty(); updateSaveButton(); refreshAllPins(); renderRegistryInventory();
 }
 function pcbProfileActive() { return pcbProfile?.state === 'valid'; }
+function pcbOwnsBus(kind) {
+  return pcbProfileActive() && pcbProfile?.bus_ownership?.[kind] === true;
+}
 const PCB_ADAPTER_DRIVER = {
   digital_input:0, analog_input:1, pcnt_input:2, rc_pwm_input:3, pwm_duty_input:7,
   spi_thermocouple:1, onewire_temperature:1, i2c_digital_input:8,

@@ -6,9 +6,8 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine - Sequence</title>
-<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/ui_dialog.js?v=20260730a"></script>
+<script src="/theme.js?v=20260731a" data-ot-version="20260731a"></script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -2592,8 +2591,10 @@ function getEnabledSensors() {
   if (registryInputPurpose('flame')) list.push({key:'flame', label:'Flame Detected', unit:'', def:1, bool:true});
   if (registryInputPurpose('throttle')) list.push({key:'throttle_in', source:'operator_throttle', label:'Throttle Input', unit:'%', def:0, step:1});
   if (registryInputPurpose('idle')) list.push({key:'idle_in', source:'operator_idle', label:'Idle Input', unit:'%', def:0, step:1});
-  if (registryInputPurpose('p1_pressure')) list.push({key:'p1', label:'P1 Pressure', unit:'bar', def:0, step:0.1});
-  if (registryInputPurpose('p2_pressure')) list.push({key:'p2', label:'P2 Pressure', unit:'bar', def:0, step:0.1});
+  const pressure1 = registryInputPurpose('p1_pressure');
+  const pressure2 = registryInputPurpose('p2_pressure');
+  if (pressure1) list.push({key:'p1', label:registryLabel(pressure1, 'Pressure 1'), unit:'bar', def:0, step:0.1});
+  if (pressure2) list.push({key:'p2', label:registryLabel(pressure2, 'Pressure 2'), unit:'bar', def:0, step:0.1});
   if (registryInputPurpose('fuel_flow')) list.push({key:'fuel_flow', label:'Fuel Flow', unit:'', def:0, step:1});
   if (registryInputPurpose('torque')) list.push({key:'torque', label:'Torque', unit:'Nm', def:0, step:1});
   if (registryInputPurpose('thrust')) list.push({key:'thrust', label:'Thrust', unit:'N', def:0, step:1});
@@ -3009,8 +3010,8 @@ const RULE_SENSORS = [
   {v:10,l:'DI Channel 4',u:'0/1',id:'di3',ok:()=>((hwCfg.di_channels?.[3]?.pin ?? -1) >= 0)},
   {v:11,l:'Fuel Pressure',u:'bar',id:'fuel_press',ok:()=>sensorEnabled('fuel_press')},
   {v:12,l:'Fuel Flow',u:'',id:'fuel_flow',ok:()=>sensorEnabled('fuel_flow')},
-  {v:13,l:'P1 Pressure',u:'bar',id:'p1',ok:()=>sensorEnabled('p1')},
-  {v:14,l:'P2 Pressure',u:'bar',id:'p2',ok:()=>sensorEnabled('p2')},
+  {v:13,get l(){return registryLabel(registryInputPurpose('p1_pressure'), 'Pressure 1')},u:'bar',id:'p1',ok:()=>sensorEnabled('p1')},
+  {v:14,get l(){return registryLabel(registryInputPurpose('p2_pressure'), 'Pressure 2')},u:'bar',id:'p2',ok:()=>sensorEnabled('p2')},
   {v:15,l:'Torque',u:'',id:'torque',ok:()=>sensorEnabled('torque')},
   {v:16,l:'Flame Detected',u:'0/1',id:'flame',ok:()=>sensorEnabled('flame')},
   {v:17,l:'Throttle Input',u:'%',id:'operator_throttle',ok:()=>sensorEnabled('throttle_input')},

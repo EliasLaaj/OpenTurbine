@@ -32,6 +32,7 @@ function installedBrowser() {
   const page = await context.newPage();
   let navigationEpoch = 0;
   const requestEpoch = new WeakMap();
+  const pendingRequests = new Map();
   const navigate = async (url, options) => {
     navigationEpoch++;
     const target = new URL(url);
@@ -47,8 +48,13 @@ function installedBrowser() {
     }
     return page.goto(url, options);
   };
-  page.on('request', request => requestEpoch.set(request, navigationEpoch));
+  page.on('request', request => {
+    requestEpoch.set(request, navigationEpoch);
+    pendingRequests.set(request, { url: request.url(), type: request.resourceType(), started: Date.now() });
+  });
+  page.on('requestfinished', request => pendingRequests.delete(request));
   page.on('requestfailed', request => {
+    pendingRequests.delete(request);
     const errorText = request.failure()?.errorText || 'failed';
     const pathname = new URL(request.url()).pathname;
     // Moving to the next page intentionally cancels telemetry requests that
@@ -72,7 +78,16 @@ function installedBrowser() {
   for (let cycle = 0; cycle < cycles; cycle++) {
     for (const route of pages) {
       const started = Date.now();
-      const response = await navigate(base + route, { waitUntil: 'domcontentloaded', timeout: 12000 });
+      let response;
+      try {
+        response = await navigate(base + route, { waitUntil: 'domcontentloaded', timeout: 12000 });
+      } catch (error) {
+        const readyState = await page.evaluate(() => document.readyState).catch(() => 'unavailable');
+        const pending = [...pendingRequests.values()].map(item => ({
+          url: item.url, type: item.type, ageMs: Date.now() - item.started
+        }));
+        throw new Error(`${error.message}\nURL=${page.url()} readyState=${readyState}\nPending requests=${JSON.stringify(pending, null, 2)}`);
+      }
       assert.ok(response && response.ok(), `${route} returned ${response?.status()}`);
       await page.waitForSelector('nav', { timeout: 5000 });
       await page.waitForTimeout(dwellMs);
@@ -83,7 +98,7 @@ function installedBrowser() {
   }
 
   await navigate(`${base}/config.html`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#cf-sf_p1t');
+  await page.waitForSelector('#cf-sf_p1t', { state: 'attached' });
   await page.evaluate(() => {
     document.querySelectorAll('.config-group').forEach(group => { group.open = true; });
   });

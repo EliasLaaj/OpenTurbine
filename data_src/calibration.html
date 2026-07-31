@@ -5,9 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Calibration</title>
-<link rel="stylesheet" href="/style.css?v=20260730a">
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/ui_dialog.js?v=20260730a"></script>
+<script src="/theme.js?v=20260731a" data-ot-version="20260731a" data-ot-app="true"></script>
 </head>
 <body>
 <nav>
@@ -261,7 +260,7 @@
 
   <!-- P1 pressure sensor — two-point calibration -->
   <div class="sensor-row" id="p1-cal-row" style="display:none">
-    <div class="sensor-name">P1 Pressure Sensor</div>
+    <div class="sensor-name" id="p1-cal-name">Pressure 1 Sensor</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Reading (bar)</div><div class="sv-val" id="cal-p1">—</div></div>
       <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-p1-raw">—</div></div>
@@ -269,7 +268,7 @@
     <div class="bar-track"><div class="bar-fill" id="bar-p1" style="width:0%"></div></div>
     <div class="bar-range"><span>0 bar</span><span id="p1-bar-max-label">10 bar</span></div>
     <div class="wizard">
-      <div class="wizard-title">P1 Two-Point Calibration</div>
+      <div class="wizard-title" id="p1-cal-wizard-title">Pressure 1 Two-Point Calibration</div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
         <button style="font-size:.72rem;padding:.25rem .6rem" onclick="p12CalMode('p1','physical')" id="p1-mode-physical" class="primary">Physical capture</button>
         <button style="font-size:.72rem;padding:.25rem .6rem" onclick="p12CalMode('p1','factory')"  id="p1-mode-factory">Factory spec (datasheet)</button>
@@ -296,7 +295,7 @@
         </div>
       </div>
       <div class="wiz-buttons">
-        <button class="primary" onclick="p12Save('p1')">Save P1 Calibration</button>
+        <button class="primary" id="p1-cal-save" onclick="p12Save('p1')">Save Pressure 1 Calibration</button>
         <button onclick="p12Clear('p1')" style="color:var(--dim)">Reset to default</button>
       </div>
       <div id="p1-cal-status" style="font-size:.75rem;color:var(--dim);margin-top:.3rem"></div>
@@ -305,7 +304,7 @@
 
   <!-- P2 pressure sensor — two-point calibration -->
   <div class="sensor-row" id="p2-cal-row" style="display:none">
-    <div class="sensor-name">P2 Pressure Sensor</div>
+    <div class="sensor-name" id="p2-cal-name">Pressure 2 Sensor</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Reading (bar)</div><div class="sv-val" id="cal-p2">—</div></div>
       <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-p2-raw">—</div></div>
@@ -313,7 +312,7 @@
     <div class="bar-track"><div class="bar-fill" id="bar-p2" style="width:0%"></div></div>
     <div class="bar-range"><span>0 bar</span><span id="p2-bar-max-label">10 bar</span></div>
     <div class="wizard">
-      <div class="wizard-title">P2 Two-Point Calibration</div>
+      <div class="wizard-title" id="p2-cal-wizard-title">Pressure 2 Two-Point Calibration</div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
         <button style="font-size:.72rem;padding:.25rem .6rem" onclick="p12CalMode('p2','physical')" id="p2-mode-physical" class="primary">Physical capture</button>
         <button style="font-size:.72rem;padding:.25rem .6rem" onclick="p12CalMode('p2','factory')"  id="p2-mode-factory">Factory spec (datasheet)</button>
@@ -338,7 +337,7 @@
         </div>
       </div>
       <div class="wiz-buttons">
-        <button class="primary" onclick="p12Save('p2')">Save P2 Calibration</button>
+        <button class="primary" id="p2-cal-save" onclick="p12Save('p2')">Save Pressure 2 Calibration</button>
         <button onclick="p12Clear('p2')" style="color:var(--dim)">Reset to default</button>
       </div>
       <div id="p2-cal-status" style="font-size:.75rem;color:var(--dim);margin-top:.3rem"></div>
@@ -652,7 +651,6 @@
 
 </main>
 
-<script src="/app.js?v=20260730a"></script>
 <script>
 let live = {};
 let oilPts = [];
@@ -816,6 +814,16 @@ function refreshOilTempCalMode(sensor) {
 })().then(([c, hw]) => {
   cfg = c;
   c.hardware = hw;
+  for (const [purpose, key, fallback] of [
+    ['p1_pressure', 'p1', 'Pressure 1'],
+    ['p2_pressure', 'p2', 'Pressure 2']
+  ]) {
+    const channel = registryChannelByPurpose(hw, 'inputs', purpose);
+    const name = String(channel?.name || fallback).trim() || fallback;
+    setText(`${key}-cal-name`, `${name} Sensor`);
+    setText(`${key}-cal-wizard-title`, `${name} Two-Point Calibration`);
+    setText(`${key}-cal-save`, `Save ${name} Calibration`);
+  }
   setRowVisible('oil-press-cal-row', hwSensorEnabled(hw, 'oil_press', 'has_oil_press'));
   setRowVisible('flame-cal-row', hwSensorEnabled(hw, 'flame', 'has_flame'));
   setRowVisible('p1-cal-row', hwSensorEnabled(hw, 'p1', 'has_p1'));
