@@ -30,7 +30,7 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 - Manual afterburner fire now requires an explicit confirmation showing the configured action and available live N1/EGT snapshot; AB STOP remains immediate.
 - The Setup Tool clean-install safety gate now leads truthfully to board selection; its later board-specific confirmation remains the actual erase gate.
 - Setup Tool failures now display the exact support-log path actually used, including the normal `%LOCALAPPDATA%` location or the backup folder for an update.
-- Windows Setup Tool 0.6.1 carries these workflow and support-log fixes while retaining package compatibility with the 0.6.0 stable-client baseline.
+- Windows Setup Tool 0.6.2 carries these workflow, recovery-download, board-detection, driver-repair, and support-log fixes while retaining package compatibility with the 0.6.0 stable-client baseline.
 - OTBench `verify-wiring` now matches each expected signal to its actual configured subsystem or registry purpose, so an unrelated user of the same GPIO can no longer produce a false pass.
 - PCB-mode START and STOP registry channels no longer conflict with their mirrored legacy control fields in firmware or the Hardware UI.
 - PCB profile catalogs now retry transient busy responses and use independent paged snapshots, preventing a valid final page of connectors from silently appearing missing.
