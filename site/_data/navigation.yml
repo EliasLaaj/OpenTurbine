@@ -1,5 +1,5 @@
 - label: Windows download
-  url: https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbineSetupTool.exe
+  url: https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbineSetupTool.exe
   primary: true
 - label: Get Started
   url: /get-started/
@@ -12,4 +12,4 @@
 - label: Safety
   url: /safety/
 - label: GitHub
-  url: https://github.com/elia179/OpenTurbine
+  url: https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU

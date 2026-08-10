@@ -3,9 +3,9 @@
 <p align="center">OpenTurbine 2.0 — open-source ESP32 turbine ECU with guided Windows setup and a browser-based dashboard.</p>
 
 <p align="center">
-  <a href="https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbineSetupTool.exe"><strong>Download for Windows</strong></a>
-  &middot; <a href="https://elia179.github.io/OpenTurbine/get-started/">Get Started</a>
-  &middot; <a href="https://elia179.github.io/OpenTurbine/hardware/">Hardware guide</a>
+  <a href="https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbineSetupTool.exe"><strong>Download for Windows</strong></a>
+  &middot; <a href="https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/get-started/">Get Started</a>
+  &middot; <a href="https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/hardware/">Hardware guide</a>
   &middot; <a href="docs/README.md">Developer documentation</a>
 </p>
 
@@ -45,12 +45,12 @@ The normal Windows installation does not require Git, PlatformIO, or source-code
 ## Start with a new board
 
 1. Connect a supported ESP32 board using a USB data cable.
-2. [Download OpenTurbine Setup Tool](https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbineSetupTool.exe).
+2. [Download OpenTurbine Setup Tool](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbineSetupTool.exe).
 3. Choose **Clean install / reinstall** for a blank board, or **Update and keep my setup** for a working controller.
 4. For a clean install, choose **Development board**, a compatible bundled **Official OpenTurbine PCB**, or a chip-matched **Custom PCB profile** supplied with the PCB design.
 5. Follow the Setup Tool, then join the board Wi-Fi and open the address it shows (normally `http://192.168.4.1`).
 
-If Windows warns about the Setup Tool, confirm the file came from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine/releases) page, read the current release notes, and verify the published checksum before continuing.
+If Windows warns about the Setup Tool, confirm the file came from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases) page, read the current release notes, and verify the published checksum before continuing.
 
 ## Supported targets
 
@@ -71,18 +71,18 @@ Configure only the hardware you actually fitted, then verify inputs, limits, cal
 
 ## Documentation
 
-- [Public landing site](https://elia179.github.io/OpenTurbine/)
-- [Get started](https://elia179.github.io/OpenTurbine/get-started/)
-- [Hardware guide](https://elia179.github.io/OpenTurbine/hardware/)
-- [User guide](https://elia179.github.io/OpenTurbine/user-guide/) ([source document](docs/USER_GUIDE.md))
+- [Public landing site](https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/)
+- [Get started](https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/get-started/)
+- [Hardware guide](https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/hardware/)
+- [User guide](https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/user-guide/) ([source document](docs/USER_GUIDE.md))
 - [Moving from a pre-2.0 build](docs/V2_MIGRATION.md)
-- [Troubleshooting](https://elia179.github.io/OpenTurbine/troubleshooting/)
-- [Safety](https://elia179.github.io/OpenTurbine/safety/)
+- [Troubleshooting](https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/troubleshooting/)
+- [Safety](https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/safety/)
 - [Developer documentation](docs/README.md)
 - [PCB profile authoring](pcb_profiles/README.md)
 
 ## Help and status
 
-Use [Setup Help](https://github.com/elia179/OpenTurbine/issues/new?template=setup_help.yml) for Windows, installation, USB, Wi-Fi, and dashboard issues. Use [Bug reports](https://github.com/elia179/OpenTurbine/issues/new?template=bug_report.yml) only for reproducible software behavior, and [Discussions](https://github.com/elia179/OpenTurbine/discussions) for hardware and wiring questions.
+Use [Setup Help](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/issues/new?template=setup_help.yml) for Windows, installation, USB, Wi-Fi, and dashboard issues. Use [Bug reports](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/issues/new?template=bug_report.yml) only for reproducible software behavior, and [Discussions](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/discussions) for hardware and wiring questions.
 
 OpenTurbine is experimental, not a certified engine-control system. Contributions are welcome; read the developer documentation before building source. Released under the [MIT License](LICENSE).

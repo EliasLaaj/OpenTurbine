@@ -13,7 +13,7 @@ The browser is not an emergency stop. A physical, independent stop must remove f
 
 ## Before applying power
 
-- Read the complete [safety and operating guidance](https://github.com/elia179/OpenTurbine/blob/main/docs/USER_GUIDE.md#safety-and-operating-warning).
+- Read the complete [safety and operating guidance](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/blob/main/docs/USER_GUIDE.md#safety-and-operating-warning).
 - Confirm the wiring against the board pin map and check output polarity with the engine disconnected.
 - Use appropriately rated fuses, a common ground plan, and independent means to remove energy from actuators.
 - Make sure a second person can operate the physical stop and that everyone is outside the test area.

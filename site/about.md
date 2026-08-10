@@ -11,4 +11,4 @@ OpenTurbine is an MIT-licensed project for supported ESP32 boards. It is intende
 
 The project provides ESP32 firmware, a browser-based operating interface, configuration and calibration tools, documentation, and a Windows Setup Tool for the supported-board path. It is built for experimentation and bench work; supported hardware and electrical constraints are documented in the [hardware guide]({{ '/hardware/' | relative_url }}).
 
-OpenTurbine is developed in the open. Releases, issue templates, and source history are available on [GitHub](https://github.com/elia179/OpenTurbine). Read the [safety notice]({{ '/safety/' | relative_url }}) before powering or connecting any real hardware.
+OpenTurbine is developed in the open. Releases, issue templates, and source history are available on [GitHub](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU). Read the [safety notice]({{ '/safety/' | relative_url }}) before powering or connecting any real hardware.

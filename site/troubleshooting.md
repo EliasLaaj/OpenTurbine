@@ -9,7 +9,7 @@ Keep fuel, ignition, starter power, and other hazardous loads isolated while dia
 
 ## Windows blocks the Setup Tool
 
-Download only from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine/releases) page. Windows can warn about a new or unsigned application. Confirm the release, its notes, and checksum before using the Windows-provided More info/Run anyway path. Do not disable Windows protection globally or use a copy from an unrelated site.
+Download only from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases) page. Windows can warn about a new or unsigned application. Confirm the release, its notes, and checksum before using the Windows-provided More info/Run anyway path. Do not disable Windows protection globally or use a copy from an unrelated site.
 
 ## CP210x driver installation fails
 
@@ -45,8 +45,8 @@ Back up the full engine file before an update. Use **Update and keep my setup** 
 
 ## Where diagnostic logs are stored
 
-Setup Tool diagnostics are stored in `%LOCALAPPDATA%\OpenTurbine\SetupTool\logs`. Wi-Fi-update backups are normally stored under `Documents\OpenTurbine\Backups`. Remove Wi-Fi passwords, personal network details, and unreviewed engine configuration before attaching material to [Setup Help](https://github.com/elia179/OpenTurbine/issues/new?template=setup_help.yml).
+Setup Tool diagnostics are stored in `%LOCALAPPDATA%\OpenTurbine\SetupTool\logs`. Wi-Fi-update backups are normally stored under `Documents\OpenTurbine\Backups`. Remove Wi-Fi passwords, personal network details, and unreviewed engine configuration before attaching material to [Setup Help](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/issues/new?template=setup_help.yml).
 
 ## Before reporting a bug
 
-Include the supported board target, connection method, fitted hardware, exact symptom, expected behavior, observed behavior, and sanitized logs. Use [Setup Help](https://github.com/elia179/OpenTurbine/issues/new?template=setup_help.yml) for installation, USB, driver, flashing, Wi-Fi, and dashboard questions. Use a bug report only for reproducible software behavior.
+Include the supported board target, connection method, fitted hardware, exact symptom, expected behavior, observed behavior, and sanitized logs. Use [Setup Help](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/issues/new?template=setup_help.yml) for installation, USB, driver, flashing, Wi-Fi, and dashboard questions. Use a bug report only for reproducible software behavior.
