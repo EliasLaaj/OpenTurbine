@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://elia179.github.io/OpenTurbine/sitemap.xml
+Sitemap: https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/sitemap.xml

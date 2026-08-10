@@ -235,7 +235,7 @@ For every output, set a **Power-on state / Boot safe demand** and a **Fault safe
 
 If this ECU previously ran a pre-2.0 build, keep its engine file only as a
 reference and follow the
-[v2 migration guide](https://github.com/elia179/OpenTurbine/blob/main/docs/V2_MIGRATION.md).
+[v2 migration guide](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/blob/main/docs/V2_MIGRATION.md).
 Version 2.0 intentionally changed the hardware model and several startup/safety
 settings; recommission it instead of assuming an old file is safe.
 
@@ -477,13 +477,13 @@ In **Tools**, download the complete engine file before major changes and before 
 
 ### Updates
 
-Use **Update and keep my setup** for a working controller. Use clean install only for a blank board, deliberate erasure or recovery. Do not interrupt power while firmware or web assets are being installed. Read the [release notes](https://github.com/elia179/OpenTurbine/releases) first.
+Use **Update and keep my setup** for a working controller. Use clean install only for a blank board, deliberate erasure or recovery. Do not interrupt power while firmware or web assets are being installed. Read the [release notes](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases) first.
 
 ### Useful fault report
 
 Record the board target, OpenTurbine version, fitted channel list, engine state, active sequence block, exact expected behavior and exact observed behavior. Include sanitized engine backup and logs where appropriate. Setup Tool diagnostics are under `%LOCALAPPDATA%\OpenTurbine\SetupTool\logs`.
 
-Use [symptom-based troubleshooting]({{ '/troubleshooting/' | relative_url }}) or open [Setup Help](https://github.com/elia179/OpenTurbine/issues/new?template=setup_help.yml). Do not share Wi-Fi credentials or sensitive installation details publicly.
+Use [symptom-based troubleshooting]({{ '/troubleshooting/' | relative_url }}) or open [Setup Help](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/issues/new?template=setup_help.yml). Do not share Wi-Fi credentials or sensitive installation details publicly.
 
 <p class="guide-return"><a href="#guide-contents">Back to contents</a></p>
 

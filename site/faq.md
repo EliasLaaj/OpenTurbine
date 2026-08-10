@@ -27,7 +27,7 @@ OpenTurbine 2.0 intentionally replaces older hardware and startup-safety
 behavior. Keep the old file as a reference, but use a clean installation and
 rebuild/review Hardware, Config, Calibration, Sequence, Rules, and every dry
 shutdown test. Read the
-[v2 migration guide](https://github.com/elia179/OpenTurbine/blob/main/docs/V2_MIGRATION.md)
+[v2 migration guide](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/blob/main/docs/V2_MIGRATION.md)
 before moving an engine installation.
 
 ## Can I explore without a turbine? Can GPIO power a pump or igniter?
@@ -44,11 +44,11 @@ Control Rules are small automations in the **Sequence** page. A rule can switch 
 
 ## Why does Windows warn about the Setup Tool?
 
-Download only from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine/releases) page. A new or unsigned release can trigger a Windows warning; check that release’s notes and SHA-256 file.
+Download only from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases) page. A new or unsigned release can trigger a Windows warning; check that release’s notes and SHA-256 file.
 
 ## Where are logs and complete instructions?
 
-Setup Tool diagnostics are under `%LOCALAPPDATA%\OpenTurbine\SetupTool\logs`. The [complete user guide](https://github.com/elia179/OpenTurbine/blob/main/docs/USER_GUIDE.md) covers operating and wiring details. Use [Setup Help](https://github.com/elia179/OpenTurbine/issues/new?template=setup_help.yml) for installation problems.
+Setup Tool diagnostics are under `%LOCALAPPDATA%\OpenTurbine\SetupTool\logs`. The [complete user guide](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/blob/main/docs/USER_GUIDE.md) covers operating and wiring details. Use [Setup Help](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/issues/new?template=setup_help.yml) for installation problems.
 
 ## Is OpenTurbine certified or inherently safe? Does it work on macOS/Linux?
 

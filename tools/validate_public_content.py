@@ -13,7 +13,7 @@ from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
-PUBLIC_ORIGIN = "https://elia179.github.io/OpenTurbine/"
+PUBLIC_ORIGIN = "https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/"
 PUBLIC_PAGES = [
     "index.md", "get-started.md", "hardware.md", "user-guide.md", "troubleshooting.md",
     "safety.md", "faq.md", "developers.md", "about.md", "404.html",
@@ -129,9 +129,10 @@ def output_path(built: Path, href: str, current: Path) -> Path | None:
     path = unquote(parsed.path)
     if not path:
         return current
-    if path.startswith("/OpenTurbine/"):
-        path = path.removeprefix("/OpenTurbine/")
-    elif path == "/OpenTurbine":
+    public_path = urlparse(PUBLIC_ORIGIN).path.rstrip("/")
+    if path.startswith(f"{public_path}/"):
+        path = path.removeprefix(f"{public_path}/")
+    elif path == public_path:
         path = ""
     elif path.startswith("/"):
         return None
@@ -162,7 +163,7 @@ def check_built_site(built: Path, errors: list[str]) -> None:
         if len(parser.descriptions) != 1 or not parser.descriptions[0].strip():
             fail(errors, f"{route} must contain exactly one non-empty meta description")
         if len(parser.canonicals) != 1 or not parser.canonicals[0].startswith(PUBLIC_ORIGIN):
-            fail(errors, f"{route} must contain one HTTPS canonical under /OpenTurbine/")
+            fail(errors, f"{route} must contain one HTTPS canonical under {urlparse(PUBLIC_ORIGIN).path}")
         if route != "404.html" and any("noindex" in value.lower() for value in parser.robots):
             fail(errors, f"public route is accidentally noindexed: {route}")
 
@@ -186,13 +187,13 @@ def check_built_site(built: Path, errors: list[str]) -> None:
             fail(errors, "generated sitemap.xml is missing one or more public routes")
         for url in sitemap_urls:
             parsed = urlparse(url)
-            route = parsed.path.removeprefix("/OpenTurbine/")
+            route = parsed.path.removeprefix(urlparse(PUBLIC_ORIGIN).path)
             target = built / ("index.html" if not route else f"{route.rstrip('/')}/index.html")
             if not target.is_file():
                 fail(errors, f"sitemap URL does not map to a built page: {url}")
 
     robots = built / "robots.txt"
-    if not robots.is_file() or "Sitemap: https://elia179.github.io/OpenTurbine/sitemap.xml" not in robots.read_text(encoding="utf-8"):
+    if not robots.is_file() or "Sitemap: https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/sitemap.xml" not in robots.read_text(encoding="utf-8"):
         fail(errors, "robots.txt is missing or does not reference the public sitemap")
 
     for page, parser in pages.items():
