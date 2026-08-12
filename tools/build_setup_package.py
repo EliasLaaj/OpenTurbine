@@ -269,7 +269,7 @@ def stage_package(stage: Path, esptool: Path, esptool_license: Path | None = Non
         "dataLicense": "CC0-1.0",
         "SPDXID": "SPDXRef-DOCUMENT",
         "name": f"OpenTurbine-{manifest['version']}",
-        "documentNamespace": f"https://github.com/elia179/OpenTurbine/releases/spdx/{commit}",
+        "documentNamespace": f"https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/spdx/{commit}",
         "creationInfo": {
             "created": source_timestamp(),
             "creators": [f"Tool: OpenTurbine Setup package builder {SETUP_TOOL_VERSION}"],
@@ -279,7 +279,7 @@ def stage_package(stage: Path, esptool: Path, esptool_license: Path | None = Non
                 "name": "OpenTurbine",
                 "SPDXID": "SPDXRef-Package-OpenTurbine",
                 "versionInfo": manifest["version"],
-                "downloadLocation": f"https://github.com/elia179/OpenTurbine/tree/{commit}",
+                "downloadLocation": f"https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/tree/{commit}",
                 "filesAnalyzed": False,
                 "licenseConcluded": "MIT",
                 "licenseDeclared": "MIT",

@@ -10,7 +10,7 @@ The project aims to support the variety found in hobby turbines instead of presc
 
 ### Windows—the easy path
 
-**[Download OpenTurbine Setup Tool](https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbineSetupTool.exe)**
+**[Download OpenTurbine Setup Tool](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbineSetupTool.exe)**
 
 1. Connect an ESP32 or supported ESP32-S3 board by USB.
 2. Open `OpenTurbineSetupTool.exe`.
@@ -20,13 +20,13 @@ The project aims to support the variety found in hobby turbines instead of presc
 
 For normal upgrades, choose **Update and keep my setup**. That Wi-Fi path backs up the engine settings and updates firmware and web pages without resetting the existing setup.
 
-If a requested download says **Not Found**, that release asset is not published. Do not download an installer offered by an unrelated third party. Official releases belong at [github.com/elia179/OpenTurbine/releases](https://github.com/elia179/OpenTurbine/releases).
+If a requested download says **Not Found**, that release asset is not published. Do not download an installer offered by an unrelated third party. Official releases belong at [github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases).
 
 ### If Windows blocks the installer
 
 The current installer may be unsigned or may not yet have Microsoft download reputation, so Microsoft Edge, Chrome, or SmartScreen may warn about a new or uncommon application. Windows 11 Smart App Control can block unsigned or untrusted apps more strictly.
 
-Only continue when the file came from the official `elia179/OpenTurbine` release page. In SmartScreen choose **More info → Run anyway**. If a browser blocks the download, open its Downloads panel and choose to keep the file. Do not disable Windows security globally for OpenTurbine. A release may also include a `.sha256` file for checksum verification.
+Only continue when the file came from the official `elia179/OpenTurbine-ESP32-Gas-Turbine-ECU` release page. In SmartScreen choose **More info → Run anyway**. If a browser blocks the download, open its Downloads panel and choose to keep the file. Do not disable Windows security globally for OpenTurbine. A release may also include a `.sha256` file for checksum verification.
 
 The setup tool can install the USB serial driver needed by common CP210x and WCH CH340/CH341/CH343 boards. It detects the connected USB bridge hardware ID and offers only the matching driver. After driver installation it rescans Windows and continues automatically when the matching COM port appears; reconnect or restart only if the tool explicitly asks.
 
@@ -35,7 +35,7 @@ The setup tool can install the USB serial driver needed by common CP210x and WCH
 The graphical setup tool is currently Windows-only. Developers and users comfortable with PlatformIO can install manually:
 
 ```bash
-git clone https://github.com/elia179/OpenTurbine.git
+git clone https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU.git
 cd OpenTurbine
 python tools/build_web_sources.py
 python tools/gzip_data.py
@@ -574,7 +574,7 @@ OTC supports TX-only telemetry or optional two-way commands/subscriptions. Norma
 
 ## Support and reporting problems
 
-Use the repository’s [Issues page](https://github.com/elia179/OpenTurbine/issues) for reproducible problems. Include:
+Use the repository’s [Issues page](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/issues) for reproducible problems. Include:
 
 - Firmware version and ESP32 target
 - What hardware is actually fitted
@@ -592,7 +592,7 @@ Most users can stop reading here. Source layout, manual builds, release packagin
 Quick developer build:
 
 ```bash
-git clone https://github.com/elia179/OpenTurbine.git
+git clone https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU.git
 cd OpenTurbine
 pio run -e esp32dev
 pio run -e esp32s3dev

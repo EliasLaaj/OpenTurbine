@@ -38,7 +38,7 @@ const (
 	requiredPackageSchema       = 4
 	appTitle                    = "OpenTurbine Setup Tool"
 	ecuBaseURL                  = "http://192.168.4.1"
-	defaultPackageURL           = "https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbine_Recommended.zip"
+	defaultPackageURL           = "https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbine_Recommended.zip"
 	cleanSafetyButtonLabel      = "I understand — choose board"
 	updateSafetyButtonLabel     = "My engine is safe — continue update"
 	maxPackageDownloadBytes     = int64(512 << 20)
@@ -2203,7 +2203,7 @@ func githubLatestReleaseAssetURL(name string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET",
-		"https://api.github.com/repos/elia179/OpenTurbine/releases/latest", nil)
+		"https://api.github.com/repos/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest", nil)
 	if err != nil {
 		return "", err
 	}

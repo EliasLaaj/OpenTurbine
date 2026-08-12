@@ -29,7 +29,7 @@ On launch, the app looks for a local `OpenTurbine_Recommended.zip` next to the
 EXE first. If it is not there, it downloads this release asset:
 
 ```text
-https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbine_Recommended.zip
+https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbine_Recommended.zip
 ```
 
 Publish `OpenTurbine_Recommended.zip.sha256` beside it so the tool can verify

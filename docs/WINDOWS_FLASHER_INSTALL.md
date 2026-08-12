@@ -7,9 +7,9 @@ guide.
 
 ## Official download
 
-[`OpenTurbineSetupTool.exe`](https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbineSetupTool.exe)
+[`OpenTurbineSetupTool.exe`](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbineSetupTool.exe)
 
-Only bypass browser or SmartScreen warnings for a file downloaded from the official `elia179/OpenTurbine` release.
+Only bypass browser or SmartScreen warnings for a file downloaded from the official `elia179/OpenTurbine-ESP32-Gas-Turbine-ECU` release.
 
 ## Browser warning
 
