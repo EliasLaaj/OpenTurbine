@@ -65,9 +65,12 @@ class DutTelemetryCacheTests(unittest.TestCase):
     @patch("otbench.dut.subprocess.run")
     @patch("otbench.dut.time.monotonic", side_effect=[100.0, 101.0, 161.0])
     def test_wifi_reconnect_requests_are_throttled(self, _clock, run, _sleep):
-        self.dut._reconnect_wifi()
-        self.dut._reconnect_wifi()
-        self.dut._reconnect_wifi()
+        # The recovery command is intentionally Windows-only; make the test's
+        # platform assumption explicit so it remains meaningful on Linux CI.
+        with patch("otbench.dut.os.name", "nt"):
+            self.dut._reconnect_wifi()
+            self.dut._reconnect_wifi()
+            self.dut._reconnect_wifi()
         self.assertEqual(run.call_count, 2)
 
 
