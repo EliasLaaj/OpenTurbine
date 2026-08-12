@@ -22,9 +22,17 @@ from run_native_behavior_tests import compiler_command, run_fresh_executable
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(label: str, command: list[str], cwd: Path = ROOT) -> None:
+def run(
+    label: str,
+    command: list[str],
+    cwd: Path = ROOT,
+    env_overrides: dict[str, str] | None = None,
+) -> None:
     print(f"\n=== {label} ===", flush=True)
-    result = subprocess.run(command, cwd=cwd, env=os.environ.copy())
+    env = os.environ.copy()
+    if env_overrides:
+        env.update(env_overrides)
+    result = subprocess.run(command, cwd=cwd, env=env)
     if result.returncode:
         raise SystemExit(f"{label} failed with exit code {result.returncode}")
 
@@ -92,7 +100,21 @@ def main() -> int:
         "HIL harness and qualification-contract tests",
         [python, "-m", "unittest", "discover", "-s", "dev/bench/harness", "-p", "test_*.py"],
     )
-    run("setup-tool Go tests", [go, "test", "./..."], ROOT / "tools" / "setup_tool")
+    setup_tool_dir = ROOT / "tools" / "setup_tool"
+    if os.name == "nt":
+        run("setup-tool Go tests", [go, "test", "./..."], setup_tool_dir)
+    else:
+        # The setup tool deliberately uses Windows build tags throughout. A
+        # Linux gate cannot execute its tests, but it must still prove that the
+        # complete Windows package and tests compile. The Windows release gate
+        # above executes the same tests before it is allowed to publish.
+        with tempfile.TemporaryDirectory(prefix="ot-setup-test-") as tmp:
+            run(
+                "setup-tool Windows test compile",
+                [go, "test", "-c", "-o", str(Path(tmp) / "setup_tool_tests.exe"), "./..."],
+                setup_tool_dir,
+                {"GOOS": "windows", "GOARCH": "amd64"},
+            )
 
     if args.skip_build:
         print("\nQuick checks passed (builds intentionally skipped).")
