@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -45,9 +46,26 @@ def compiler_command() -> list[str]:
         return [zig, "c++", "-Wno-nullability-completeness"]
     raise SystemExit("A C++17 host compiler is required for native behavior tests")
 
+
+def arduino_json_include() -> Path:
+    """Return the declared ArduinoJson headers, installing PIO deps if needed."""
+    include = ROOT / ".pio" / "libdeps" / "esp32dev" / "ArduinoJson" / "src"
+    if include.exists():
+        return include
+    # A clean CI checkout has PlatformIO itself but no environment packages yet.
+    # Resolve the dependency from platformio.ini instead of relying on an
+    # untracked developer build directory or vendoring a second copy.
+    subprocess.run([
+        sys.executable, "-m", "platformio", "pkg", "install",
+        "--project-dir", str(ROOT), "--environment", "esp32dev", "--silent",
+    ], check=True)
+    if not include.exists():
+        raise RuntimeError(f"PlatformIO did not install ArduinoJson at {include}")
+    return include
+
 def main() -> int:
     compiler = compiler_command()
-    arduino_json = ROOT / ".pio" / "libdeps" / "esp32dev" / "ArduinoJson" / "src"
+    arduino_json = arduino_json_include()
     host_tmp = ROOT / "artifacts" if os.name == "nt" else None
     if host_tmp is not None:
         host_tmp.mkdir(exist_ok=True)
@@ -65,7 +83,7 @@ def main() -> int:
                 "-std=c++17", "-pthread",
                 "-I", str(ROOT / "dev" / "host" / "fakes"),
                 "-I", str(ROOT),
-                *(["-I", str(arduino_json)] if arduino_json.exists() else []),
+                "-I", str(arduino_json),
                 *sources,
                 "-o", str(exe),
             ], check=True)
