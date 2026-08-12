@@ -49,7 +49,7 @@ The hexadecimal hashes must match.
 
 - Use a USB cable known to carry data.
 - Try another direct USB port without a hub.
-- Install the CP210x or CH340 driver offered by the setup tool when it matches the USB serial chip on the board.
+- Use the official CP210x or WCH driver page opened by the setup tool when it matches the USB serial chip on the board.
 - Disconnect and reconnect the board after driver installation.
 - Close serial monitors and other applications using the COM port.
 - For boards requiring bootloader mode, hold **BOOT**, tap **EN/RESET**, begin installation, and release BOOT when connection starts.

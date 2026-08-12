@@ -20,10 +20,42 @@ def _to_standby(ctx):
     return ok, d
 
 
+def _level_from_state(state, name):
+    return int(state.get(name, state.get(name + "_level", 0)) or 0)
+
+
+def _variable_output_safe(state, signal, actuator):
+    output_type = int(actuator.get("type", 0) or 0)
+    inverted = bool(actuator.get("inverted", False))
+    if output_type == 0:
+        pulse = float(state.get(signal + "_us", 0) or 0)
+        if pulse <= 0:
+            return True
+        expected = float(actuator.get("max_us" if inverted else "min_us", 2000 if inverted else 1000))
+        span = abs(float(actuator.get("max_us", 2000)) - float(actuator.get("min_us", 1000)))
+        return abs(pulse - expected) <= max(40.0, span * 0.06)
+    if output_type == 1:
+        duty = float(state.get(signal + "_duty", 0) or 0)
+        expected = float(actuator.get("pwm_max_pct" if inverted else "pwm_min_pct", 100 if inverted else 0)) / 100.0
+        return abs(duty - expected) <= 0.035
+    expected_level = 1 if not actuator.get("active_h", True) else 0
+    return _level_from_state(state, signal) == expected_level
+
+
+def _relay_output_safe(state, signal, actuator):
+    expected_level = 1 if not actuator.get("active_h", True) else 0
+    return _level_from_state(state, signal) == expected_level
+
+
 def _tool_output(ctx, c, cmd, sig_name, telem_key, pwm=False, window=1.8):
     """Fire a STANDBY actuator self-test command and confirm both the DUT
     telemetry and the tester's pin measurement see it drive."""
     ctx.dut.ensure_mode_standby()
+    actuator_key = {
+        "OILPUMP_OUT": "oil_pump", "FUEL_SOL": "fuel_sol",
+        "IGNITER": "igniter", "STARTER_EN": "starter_en",
+    }.get(sig_name)
+    actuator = ctx.dut.hardware().get("actuators", {}).get(actuator_key, {})
     # Actuator self-tests are mutually exclusive; a previous one may still be
     # expiring. Retry briefly while the DUT reports another output active.
     deadline = time.time() + 14
@@ -38,13 +70,10 @@ def _tool_output(ctx, c, cmd, sig_name, telem_key, pwm=False, window=1.8):
     active_tel = False
     deadline = time.time() + window
     while time.time() < deadline:
-        if pwm:
-            _us, _hz, duty, level = ctx.tester.get_pwm(sig_name)
-            if duty > 0.02 or level == 1:
-                active_pin = True
-        else:
-            if ctx.tester.get_level(sig_name) == 1:
-                active_pin = True
+        state = ctx.tester.state()
+        safe = (_variable_output_safe(state, sig_name, actuator) if pwm else
+                _relay_output_safe(state, sig_name, actuator))
+        active_pin = active_pin or not safe
         if ctx.dut.data().get(telem_key):
             active_tel = True
         if active_pin and active_tel:
@@ -52,7 +81,20 @@ def _tool_output(ctx, c, cmd, sig_name, telem_key, pwm=False, window=1.8):
     c.expect(active_tel, "%s -> DUT telemetry '%s' active" % (cmd, telem_key))
     c.expect(active_pin, "%s -> tester measures %s driven" % (cmd, sig_name))
     # Let this tool expire so the next test starts from a clean idle DUT.
-    ctx.dut.poll_until(lambda x: not x.get(telem_key), timeout=12)
+    telemetry_off, _ = ctx.dut.poll_until(lambda x: not x.get(telem_key), timeout=12)
+    physical_off = False
+    deadline = time.time() + 1.0
+    while time.time() < deadline:
+        state = ctx.tester.state()
+        physical_off = (
+            _variable_output_safe(state, sig_name, actuator) if pwm else
+            _relay_output_safe(state, sig_name, actuator)
+        )
+        if physical_off:
+            break
+        time.sleep(0.04)
+    c.expect(telemetry_off, "%s telemetry returned inactive" % cmd)
+    c.expect(physical_off, "%s physical output returned safe" % cmd)
 
 
 # ── connectivity ─────────────────────────────────────────────
@@ -70,6 +112,38 @@ def t_handshake(ctx, c):
 def t_safe_state(ctx, c):
     ok, d = _to_standby(ctx)
     c.expect(ok, "DUT settled to STANDBY (mode=%s)" % d.get("mode"))
+    state = ctx.tester.state()
+    actuators = ctx.dut.hardware().get("actuators", {})
+    fuel_shutoff_fitted = bool(actuators.get("fuel_sol", {}).get("enabled"))
+    telemetry_safe = (
+        (fuel_shutoff_fitted or float(d.get("throttle_effective") or 0) <= 0.001) and
+        not d.get("fuel_sol_open") and not d.get("igniter_on") and
+        not d.get("igniter2_on") and
+        float(d.get("starter_demand") or 0) <= 0.001 and
+        not d.get("starter_enabled") and not d.get("ab_sol_open") and
+        float(d.get("ab_pump_demand") or 0) <= 0.001 and
+        float(d.get("glow_plug_pct") or 0) <= 0.001 and
+        float(d.get("wet_glow_fuel_pct") or 0) <= 0.001 and
+        float(d.get("fuel_pump2_demand") or 0) <= 0.001 and
+        not d.get("airstarter_open")
+    )
+    c.expect(telemetry_safe, "STANDBY telemetry reports every combustion/starter path safe")
+    physical = []
+    for key, signal, variable in (
+        ("throttle", "THROTTLE_OUT", True),
+        ("starter", "STARTER_OUT", True),
+        ("fuel_sol", "FUEL_SOL", False),
+        ("igniter", "IGNITER", False),
+        ("starter_en", "STARTER_EN", False),
+    ):
+        actuator = actuators.get(key, {})
+        if not actuator.get("enabled") or (key == "throttle" and fuel_shutoff_fitted):
+            continue
+        safe = (_variable_output_safe(state, signal, actuator) if variable else
+                _relay_output_safe(state, signal, actuator))
+        physical.append((key, safe))
+        c.expect(safe, "STANDBY physical %s output is at configured safe demand" % key)
+    c.info("safe-state tester snapshot=%r checked=%r" % (state, physical))
 
 
 # ── input paths (tester -> DUT) ──────────────────────────────
@@ -93,16 +167,17 @@ def t_n1_rpm(ctx, c):
     for rpm in (4000, 5000, 9000):
         hz = pm.rpm_to_hz("N1", rpm)
         ctx.tester.set("N1", round(hz, 2))
-        # A newly restored/rebooted PCNT path may need a few health windows
-        # before its first low-frequency value is published. Always allow the
-        # previous frequency to drain first; otherwise a merely nonzero stale
-        # sample can be mistaken for the new command.
-        time.sleep(0.65)
-        got = ctx.dut.data().get("n1", 0)
-        deadline = time.time() + (0.9 if rpm == 4000 else 0.3)
-        while time.time() < deadline and not got:
-            time.sleep(0.15)
+        # Frequency changes can land on a partial PCNT integration window.
+        # Wait for one settled sample within the same tolerance asserted below
+        # instead of treating a nonzero transition sample as the final value.
+        tolerance = max(650, 0.10 * rpm)
+        deadline = time.time() + 1.6
+        got = 0
+        while time.time() < deadline:
+            time.sleep(0.12)
             got = ctx.dut.data().get("n1", 0)
+            if got and abs(got - rpm) <= tolerance:
+                break
         samples.append((rpm, hz, got))
         c.info("N1 %d rpm (%.1f Hz) -> telemetry n1=%s" % (rpm, hz, got))
     ctx.tester.set("N1", 0)
@@ -133,8 +208,18 @@ def t_n2_rpm(ctx, c):
     samples = []
     for rpm in (3000, 7000):
         ctx.tester.set("N2", pm.rpm_to_hz("N2", rpm))
-        time.sleep(0.7)
-        got = ctx.dut.data().get("n2", 0)
+        # A single read can land on the first partial PCNT window after a
+        # stopped shaft begins producing pulses. Require an acquired sample
+        # inside the same tolerance used below, while retaining a hard timeout
+        # so a missing or intermittent signal still fails qualification.
+        deadline = time.time() + 1.6
+        got = 0
+        tolerance = max(650, 0.10 * rpm)
+        while time.time() < deadline:
+            time.sleep(0.12)
+            got = ctx.dut.data().get("n2", 0)
+            if got and abs(got - rpm) <= tolerance:
+                break
         samples.append((rpm, got))
         c.info("N2 %d rpm -> telemetry n2=%s" % (rpm, got))
     ctx.tester.set("N2", 0)
@@ -257,9 +342,20 @@ def t_throttle_output(ctx, c):
     ctx.tester.reset()
     ctx.dut.ensure_mode_standby()
     c.info("50%% throttle -> %sus %.1fHz duty=%.3f" % (us, hz, duty))
-    c.expect(1400 <= us <= 1600, "throttle output has a centred 1.5 ms pulse")
-    c.expect(45.0 <= hz <= 55.0 and 0.06 <= duty <= 0.09,
-             "throttle output has a 50 Hz servo frame")
+    min_us = float(throttle.get("min_us", 1000))
+    max_us = float(throttle.get("max_us", 2000))
+    expected_us = (min_us + max_us) / 2.0
+    tolerance = max(40.0, abs(max_us - min_us) * 0.08)
+    expected_hz = float(throttle.get("freq_hz", 50) or 50)
+    c.expect(abs(us - expected_us) <= tolerance,
+             "50%% throttle pulse follows configured endpoints (expect %.0f us)" % expected_us)
+    c.expect(abs(hz - expected_hz) <= max(3.0, expected_hz * 0.1),
+             "throttle servo frame follows configured frequency")
+    ctx.dut.command("SET_THROTTLE_PCT", fParam=0.0)
+    off, off_state = ctx.dut.poll_until(
+        lambda d: float(d.get("throttle_effective") or 0) <= 0.001, timeout=2, interval=0.05
+    )
+    c.expect(off, "throttle commissioning command returns to zero demand")
 
 
 # ── advanced (may move the engine state machine) ─────────────
@@ -288,7 +384,11 @@ def t_sequence_bench(ctx, c):
         raise SkipTest("start rejected (HTTP %s): %s" % (code, resp.get("error")))
     saw_oil = False
     saw_ign = False
+    saw_fuel = False
+    saw_starter = False
     blocks = []
+    reached_running = False
+    actuators = ctx.dut.hardware().get("actuators", {})
     try:
         # Sample the tester pins fast (serial only, ~40 ms) so short action-block
         # windows aren't aliased past — the IgniterOn..IgniterOff window is only a
@@ -301,10 +401,32 @@ def t_sequence_bench(ctx, c):
         steady_since = None
         while time.time() < deadline:
             st = ctx.tester.state()
-            if st.get("OILPUMP_OUT_duty", 0) > 0.02 or st.get("OILPUMP_OUT_level") == 1:
+            if (actuators.get("oil_pump", {}).get("enabled") and
+                    not _variable_output_safe(st, "OILPUMP_OUT", actuators["oil_pump"])):
                 saw_oil = True
-            if st.get("IGNITER", 0) == 1:
+            if (actuators.get("igniter", {}).get("enabled") and
+                    not _relay_output_safe(st, "IGNITER", actuators["igniter"])):
                 saw_ign = True
+            fuel_sol_active = (
+                actuators.get("fuel_sol", {}).get("enabled") and
+                not _relay_output_safe(st, "FUEL_SOL", actuators["fuel_sol"])
+            )
+            fuel_pump_active = (
+                actuators.get("throttle", {}).get("enabled") and
+                not _variable_output_safe(st, "THROTTLE_OUT", actuators["throttle"])
+            )
+            if fuel_sol_active or fuel_pump_active:
+                saw_fuel = True
+            starter_active = (
+                actuators.get("starter", {}).get("enabled") and
+                not _variable_output_safe(st, "STARTER_OUT", actuators["starter"])
+            )
+            starter_enable_active = (
+                actuators.get("starter_en", {}).get("enabled") and
+                not _relay_output_safe(st, "STARTER_EN", actuators["starter_en"])
+            )
+            if starter_active or starter_enable_active:
+                saw_starter = True
             now = time.time()
             if now >= next_http:
                 next_http = now + 0.3
@@ -313,9 +435,10 @@ def t_sequence_bench(ctx, c):
                 if blk and (not blocks or blocks[-1] != blk):
                     blocks.append(blk)
                 mode = d.get("mode")
+                reached_running = reached_running or mode == "RUNNING"
                 # Startup finished when we leave STARTUP for a steady RUNNING (bench
                 # mode never returns to STANDBY on its own) or back to STANDBY.
-                if blocks and mode in ("RUNNING", "STANDBY"):
+                if blocks and mode == "RUNNING":
                     if steady_since is None:
                         steady_since = now
                     elif saw_ign and now - steady_since > 1.0:
@@ -331,6 +454,13 @@ def t_sequence_bench(ctx, c):
     c.info("blocks: %s" % (" -> ".join(blocks) if blocks else "(none seen)"))
     c.expect(saw_oil, "oil pump driven during startup sequence")
     c.expect(saw_ign, "igniter fired during startup sequence")
+    startup = ctx.dut.hardware().get("startup_seq", [])
+    if any(block in startup for block in ("FuelOpen", "FuelPumpIdle")):
+        c.expect(saw_fuel, "configured startup fuel action reached a physical fuel output")
+    if any(block in startup for block in ("StarterSpin", "StarterRamp", "StarterOn")):
+        c.expect(saw_starter, "configured starter block reached a physical starter output")
+    c.expect(bool(blocks), "startup exposed sequencer progress")
+    c.expect(reached_running, "bench startup completed into RUNNING rather than aborting")
 
 
 BASIC = [

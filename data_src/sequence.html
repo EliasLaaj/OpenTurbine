@@ -6,8 +6,8 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine - Sequence</title>
-<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260731a" data-ot-version="20260731a"></script>
+<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -81,7 +81,7 @@
       <div class="automation-copy">
         <h3 style="margin:.1rem 0 .35rem">Control Rules</h3>
         <p>Turn an output on at a threshold, or map an input directly to a variable output. Each output can have one rule, so the result is always predictable.</p>
-        <p>Outside the selected engine states—or if its input becomes unavailable—the rule immediately returns its output to the configured off value. Fault hands control to the output's hardware-safe setting.</p>
+        <p>Outside the selected engine states, the rule releases the output and its normal sequencer/controller command resumes. In a selected state, a false or unavailable input applies the configured off value. Fault hands control to the output's hardware-safe setting.</p>
       </div>
       <span id="rules-count-label" style="font-size:.72rem;color:var(--dim);white-space:nowrap">0 / 16 rules</span>
     </div>
@@ -409,7 +409,7 @@ const BLOCKS = {
     label:'Igniter 1 Timed On', type:'action', badgeClass:'badge-action',
     visibleIf: hw => actuatorEnabled('igniter'),
     condition: null, timeout_action:null,
-    desc:'Igniter-1-only block. Prefer Igniter On or Pre-Heat when you want to choose igniter 1, AB / pilot igniter, glow, or wet glow from the block card. This block turns igniter 1 ON and leaves it ON when it exits.',
+    desc:'Igniter-1-only block. Prefer Igniter On or Pre-Heat when you want to choose igniter 1, secondary igniter, glow, or wet glow from the block card. This block turns igniter 1 ON and leaves it ON when it exits.',
     params:[
       {key:'pre_ign_spark_ms', label:'Ignition on time', unit:'ms', type:'int', min:100, max:10000, step:100, def:1500, configKey:'pre_ign_spark_ms'},
     ]
@@ -575,7 +575,7 @@ const BLOCKS = {
     label:'Ignition Output On', type:'action', badgeClass:'badge-action',
     visibleIf: hw => hasIgnitionOutput(hw),
     condition: null, timeout_action:null,
-    desc:'Switch the selected ignition output on. Choose igniter 1, AB / pilot igniter, glow plug, or wet glow from this card.',
+    desc:'Switch the selected ignition output on. Choose igniter 1, secondary igniter, glow plug, or wet glow from this card.',
     params:[]
   },
   IgniterOff: {
@@ -764,7 +764,7 @@ const BLOCKS = {
     visibleIf: hw => hw.di_channels?.some(ch => ch.pin >= 0),
     condition: hw => `DI-${(hw.wait_for_input_ch ?? 0) + 1} ${hw.wait_for_input_state !== false ? '-> active' : '-> inactive'}`,
     timeout_action:'abort',
-    desc:'Holds the sequence until a digital input channel reaches the expected state. Useful for interlocks, limit switches, or external gate signals. On timeout -> ABORT. Set timeout to 0 to wait indefinitely (use with caution - sequence hangs if condition is never met). Note: all WaitForInput blocks in a session share the same channel/state config.',
+    desc:'Holds the sequence until a digital input channel reaches the expected state. Useful for interlocks, limit switches, or external gate signals. The wait is always finite and aborts on timeout. Note: all WaitForInput blocks in a session share the same channel/state config.',
     hwWarnings:[
       { check: hw => hw.di_channels?.some(ch => ch.pin >= 0),
         msg: 'Warning: No digital inputs configured in Hardware. This block will never receive a signal and will always timeout/abort.',
@@ -776,8 +776,8 @@ const BLOCKS = {
         desc:'Digital input channel (DI-1..DI-4). Must match a channel configured in Hardware -> Digital Inputs.'},
       {key:'wait_for_input_state',   label:'Wait until active',        type:'bool', def:true, configKey:'wait_for_input_state',
         desc:'ON = hold until input goes active (high). OFF = hold until input goes inactive (low).'},
-      {key:'wait_for_input_timeout', label:'Timeout',       unit:'ms', type:'int',  min:0, max:60000, step:500, def:0, configKey:'wait_for_input_timeout',
-        desc:'Maximum wait time in ms. 0 = wait indefinitely (no timeout).'},
+      {key:'wait_for_input_timeout', label:'Timeout',       unit:'ms', type:'int',  min:500, max:60000, step:500, def:30000, configKey:'wait_for_input_timeout',
+        desc:'Maximum finite wait time. Remove the block if this gate is not required.'},
     ]
   },
   WaitForInputOff: {
@@ -822,7 +822,7 @@ const BLOCKS = {
     label:'AB Igniter On', type:'action', badgeClass:'badge-action',
     visibleIf: hw => actuatorEnabled('igniter2'),
     condition: null, timeout_action:null,
-    desc:'Enable the afterburner / pilot igniter.',
+    desc:'Enable the afterburner / secondary igniter.',
     params:[]
   },
   ABIgnOff: {
@@ -897,7 +897,7 @@ const BLOCKS = {
   GlowPreheat: {
     label:'Glow Preheat', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Ramps glow plug power linearly from 0 to maxPct over preheatMs, then holds at holdPct. Wet glow pilot fuel follows the hardware delay after glow ON. If a glow current sensor is fitted and "Wait until hot" is checked, the block keeps holding at holdPct until the current drops below the ready threshold. The plug stays at holdPct when this block exits.',
+    desc:'Ramps glow plug power linearly from 0 to maxPct over preheatMs, then holds at holdPct. Wet glow start fuel follows the hardware delay after glow ON. If a glow current sensor is fitted and "Wait until hot" is checked, the block keeps holding at holdPct until the current drops below the ready threshold. The plug stays at holdPct when this block exits.',
     params:[
       {key:'glow_preheat_ms',      label:'Preheat duration',  unit:'ms', type:'int', min:0, max:3600000, step:500, def:10000, configKey:'glow_preheat_ms'},
       {key:'glow_preheat_max_pct', label:'Peak duty',         unit:'%',  type:'float', min:0, max:100, step:5, def:80, configKey:'glow_preheat_max_pct',
@@ -910,9 +910,9 @@ const BLOCKS = {
     visibleIf: hw => actuatorEnabled('glow_plug'),
   },
   FuelPumpRamp: {
-    label:'Pilot / Auxiliary Fuel Pump Ramp', type:'action', badgeClass:'badge-action',
+    label:'Secondary / Auxiliary Fuel Pump Ramp', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Ramps pilot / auxiliary fuel pump demand linearly from startPct to endPct over rampMs. Completes when the ramp finishes. Useful for pilot fuel, turboshaft pre-metering, or staged fuel delivery.',
+    desc:'Ramps secondary / auxiliary fuel pump demand linearly from startPct to endPct over rampMs. Completes when the ramp finishes. Useful for start fuel, turboshaft pre-metering, or staged fuel delivery.',
     params:[
       {key:'fp2_start_pct',      label:'Start %',                     unit:'%',  type:'float', min:0,  max:100,   step:1,   def:0,    configKey:'fp2_start_pct'},
       {key:'fp2_end_pct',        label:'End %',                       unit:'%',  type:'float', min:0,  max:100,   step:1,   def:80,   configKey:'fp2_end_pct'},
@@ -921,33 +921,33 @@ const BLOCKS = {
     visibleIf: hw => actuatorHasProportionalOutput('fuel_pump2'),
   },
   FuelPump2Set: {
-    label:'Pilot / Auxiliary Fuel Pump Set', type:'action', badgeClass:'badge-action',
+    label:'Secondary / Auxiliary Fuel Pump Set', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Sets pilot / auxiliary fuel pump demand to a fixed value immediately. Use for known set-points after a ramp or as a quick preset.',
+    desc:'Sets secondary / auxiliary fuel pump demand to a fixed value immediately. Use for known set-points after a ramp or as a quick preset.',
     params:[
       {key:'fp2_demand_pct',     label:'Demand %',                    unit:'%',  type:'float', min:0, max:100, step:1, def:0, configKey:'fp2_demand_pct'},
     ],
     visibleIf: hw => actuatorHasProportionalOutput('fuel_pump2'),
   },
   FuelPump2On: {
-    label:'Pilot / Auxiliary Fuel Pump On', type:'action', badgeClass:'badge-action',
+    label:'Secondary / Auxiliary Fuel Pump On', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Switches relay-type pilot / auxiliary fuel pump on. This card is shown only when that pump is configured as an on/off output.',
+    desc:'Switches relay-type secondary / auxiliary fuel pump on. This card is shown only when that pump is configured as an on/off output.',
     params:[],
     visibleIf: hw => actuatorEnabled('fuel_pump2') && actuatorIsRelay('fuel_pump2'),
   },
   FuelPump2Off: {
-    label:'Pilot / Auxiliary Fuel Pump Off', type:'action', badgeClass:'badge-action',
+    label:'Secondary / Auxiliary Fuel Pump Off', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Switches relay-type pilot / auxiliary fuel pump off.',
+    desc:'Switches relay-type secondary / auxiliary fuel pump off.',
     params:[],
     visibleIf: hw => actuatorEnabled('fuel_pump2') && actuatorIsRelay('fuel_pump2'),
   },
   GovernorHold: {
     label:'Wait for N2 Speed Control', type:'while', badgeClass:'badge-while',
     condition: hw => `N2 within ${hw.gov_hold_band_rpm ?? 500} rpm of target`,
-    timeout_action:'complete',
-    desc:'Waits until N2 (power turbine) is within bandRpm of the governor target RPM, or until timeoutMs elapses. On timeout, proceeds normally (engine is already in RUNNING - governor will continue to regulate). Use after entering RUNNING to confirm the governor has taken control. Outputs: none (monitoring only).',
+    timeout_action:'fault',
+    desc:'Engages the real N2 speed controller bumplessly from the current demand, then requires healthy N2 feedback inside the selected band for 500 ms. Timeout faults startup and enters safe shutdown.',
     params:[
       {key:'gov_hold_timeout_ms', label:'Timeout', unit:'ms',  type:'int',   min:1000, max:60000, step:500,  def:10000, configKey:'gov_hold_timeout_ms'},
       {key:'gov_hold_band_rpm',   label:'Band',    unit:'rpm', type:'float', min:0, max:1000000000, step:50, def:500, configKey:'gov_hold_band_rpm'},
@@ -1176,7 +1176,7 @@ const BLOCK_INFO = {
     ]
   },
   ImmediateCut: {
-    desc: 'Emergency cut: zeros all main/pilot/afterburner fuel demands, closes fuel valves, and turns off ignition and starter outputs instantly.',
+    desc: 'Emergency cut: zeros all main/start/afterburner fuel demands, closes fuel valves, and turns off ignition and starter outputs instantly.',
     links: []
   },
   FuelPumpIdle: {
@@ -1227,7 +1227,7 @@ const BLOCK_INFO = {
     ]
   },
   GlowPreheat: {
-    desc: 'Ramps glow plug power, then holds. Wet glow pilot fuel follows the hardware fuel delay.',
+    desc: 'Ramps glow plug power, then holds. Wet glow start fuel follows the hardware fuel delay.',
     links: [
       { label: 'Glow Plug Preheat', url: '/config.html#glow-cfg-section' },
     ]
@@ -1239,19 +1239,19 @@ const BLOCK_INFO = {
     ]
   },
   FuelPumpRamp: {
-    desc: 'Ramps pilot / auxiliary fuel pump demand linearly from startPct to endPct over rampMs.',
+    desc: 'Ramps secondary / auxiliary fuel pump demand linearly from startPct to endPct over rampMs.',
     links: []
   },
   FuelPump2Set: {
-    desc: 'Sets pilot / auxiliary fuel pump demand to a fixed value immediately.',
+    desc: 'Sets secondary / auxiliary fuel pump demand to a fixed value immediately.',
     links: []
   },
   FuelPump2On: {
-    desc: 'Switches relay-type pilot / auxiliary fuel pump on.',
+    desc: 'Switches relay-type secondary / auxiliary fuel pump on.',
     links: []
   },
   FuelPump2Off: {
-    desc: 'Switches relay-type pilot / auxiliary fuel pump off.',
+    desc: 'Switches relay-type secondary / auxiliary fuel pump off.',
     links: []
   },
 };
@@ -1299,6 +1299,8 @@ function hideBlockInfo() {
 // ------ App state ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 let hwCfg = {};    // hardware section of ecu_config.json
 let cfg   = {};    // settings section of ecu_config.json
+let loadedHwCfg = {};
+let loadedCfg = {};
 let _seqDirty = false;
 let paramVals = {}; // shared block settings plus per-slot TimedDelay edits
 let activeTab = 'startup';
@@ -1328,10 +1330,11 @@ function actuatorEnabled(key) {
 }
 function actuatorIsRelay(key) {
   const registry = registryOutputPurpose(SEQUENCE_OUTPUT_PURPOSE[key]);
-  return !!registry && Number(registry.driver) === 4;
+  return !!registry && [4,11].includes(Number(registry.driver));
 }
 function actuatorHasProportionalOutput(key) {
-  return actuatorEnabled(key) && !actuatorIsRelay(key);
+  const registry = registryOutputPurpose(SEQUENCE_OUTPUT_PURPOSE[key]);
+  return !!registry && [5,6].includes(Number(registry.driver));
 }
 function registryLabel(c, fallback) {
   const name = (c?.name && c.name.trim()) || c?.id || fallback;
@@ -1494,6 +1497,10 @@ async function loadAll() {
     const abTabBtn = document.getElementById('tab-btn-afterburner');
     if (abTabBtn) abTabBtn.style.display = sequenceHasAfterburner() ? '' : 'none';
     revealSequenceDeepLink();
+    // Keep the post-normalization baseline. Saving can then preserve unrelated
+    // settings changed by another browser while this page was open.
+    loadedHwCfg = cloneSequenceJson(hwCfg);
+    loadedCfg = cloneSequenceJson(cfg);
     clearSequenceDirty('No unsaved changes');
   } catch(e) {
     setSaveStatus('Warning: Load failed: ' + e.message);
@@ -1880,7 +1887,7 @@ function buildFinalStateCard(tab, seq, idleRaw) {
     hasAct('throttle') ? { label:'Main Fuel Pump / Metering Output', val: state.throttle } : null,
     hasAct('fuel_sol') ? { label:'Main Fuel Shutoff',   val: state.fuelSol } : null,
     hasAct('igniter') ? { label:'Igniter',              val: state.igniter } : null,
-    hasAct('igniter2') ? { label:'AB / Pilot Igniter', val: state.igniter2 } : null,
+    hasAct('igniter2') ? { label:'Secondary Igniter', val: state.igniter2 } : null,
     hasAct('starter') ? { label:'Starter',              val: state.starter } : null,
     hasAct('starter_en') ? { label:'Starter Enable',    val: state.starterEn } : null,
     hasAct('oil_pump') ? { label:'Oil Pump',            val: state.oilPump } : null,
@@ -1890,7 +1897,7 @@ function buildFinalStateCard(tab, seq, idleRaw) {
     hasAct('bleed_valve') ? { label:'Bleed Valve',      val: state.bleed } : null,
     hasAct('drain_valve') ? { label:'Drain Valve',      val: state.drainValve || 'closed' } : null,
     hasAct('glow_plug') ? { label:'Glow Plug',          val: state.glow } : null,
-    hasAct('fuel_pump2') ? { label:'Pilot / Auxiliary Fuel Pump',   val: state.fuelPump2 } : null,
+    hasAct('fuel_pump2') ? { label:'Secondary / Auxiliary Fuel Pump',   val: state.fuelPump2 } : null,
     hasAct('prop_pitch') ? { label:'Prop Pitch',         val: state.propPitch } : null,
     hasAct('ab_sol') ? { label:'Afterburner Fuel Valve', val: state.abSol } : null,
     hasAct('ab_pump') ? { label:'AB Fuel Pump', val: state.abPump } : null,
@@ -2024,6 +2031,37 @@ function setAbEntryPercent(key, rawVal) {
   buildParamVals();
   buildAbCriteriaHtml();
   markSequenceDirty('Afterburner entry conditions edited — save to apply');
+}
+
+function cloneSequenceJson(value) {
+  return JSON.parse(JSON.stringify(value ?? {}));
+}
+
+function sequencePlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Apply only differences made on this page to a freshly fetched document.
+// Arrays are intentional units here (sequence order, actions and rules).
+function mergeSequenceEdits(baseline, edited, fresh) {
+  const base = sequencePlainObject(baseline) ? baseline : {};
+  const edit = sequencePlainObject(edited) ? edited : {};
+  const out = sequencePlainObject(fresh) ? cloneSequenceJson(fresh) : {};
+  const keys = new Set([...Object.keys(base), ...Object.keys(edit)]);
+  for (const key of keys) {
+    const hasEdit = Object.prototype.hasOwnProperty.call(edit, key);
+    const before = base[key];
+    const after = edit[key];
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    if (!hasEdit) {
+      delete out[key];
+    } else if (sequencePlainObject(before) && sequencePlainObject(after)) {
+      out[key] = mergeSequenceEdits(before, after, out[key]);
+    } else {
+      out[key] = cloneSequenceJson(after);
+    }
+  }
+  return out;
 }
 function setAbInputEntryPercent(rawVal) {
   if (!hwCfg.ab_trigger) hwCfg.ab_trigger = {};
@@ -2226,13 +2264,13 @@ function ignitionTargets() {
   const a = hwCfg.actuators || {};
   const out = [];
   if (actuatorEnabled('igniter')) out.push({v:0, l:'Igniter 1', info: a.igniter?.coil ? 'coil igniter' : (a.igniter?.pwm ? 'PWM igniter' : 'relay igniter')});
-  if (actuatorEnabled('igniter2')) out.push({v:1, l:'AB / Pilot Igniter', info: a.igniter2?.coil ? 'coil igniter' : (a.igniter2?.pwm ? 'PWM igniter' : 'relay igniter')});
+  if (actuatorEnabled('igniter2')) out.push({v:1, l:'Secondary Igniter', info: a.igniter2?.coil ? 'coil igniter' : (a.igniter2?.pwm ? 'PWM igniter' : 'relay igniter')});
   if (actuatorEnabled('glow_plug')) {
     const glow = a.glow_plug || {};
     const wet = Number(glow.type || 0) === 2;
     const delayS = ((glow.fuel_delay_ms ?? 8000) / 1000).toFixed(1);
     out.push({v:2, l: wet ? 'Wet glow plug' : 'Glow plug',
-      info: wet ? `wet glow plug, pilot fuel starts ${delayS} s after ON` : 'glow plug'});
+      info: wet ? `wet glow plug, start fuel starts ${delayS} s after ON` : 'glow plug'});
   }
   return out.length ? out : [{v:0, l:'Igniter 1', info:'ignition output is not configured'}];
 }
@@ -2258,7 +2296,7 @@ function wetGlowTimingWarning(bname, idx, tab, target) {
   if (waitMs >= delayMs) return '';
   const delayS = (delayMs / 1000).toFixed(delayMs % 1000 ? 1 : 0);
   const waitS = (waitMs / 1000).toFixed(waitMs % 1000 ? 1 : 0);
-  return `<span class="param-desc" style="display:block;font-size:.65rem;color:var(--yellow);line-height:1.35;margin-top:.22rem">Wet glow pilot fuel delay is ${delayS} s, but the next fuel/confirmation step is about ${waitS} s away. Add delay or increase Pre-Heat time if pilot fuel must be burning first.</span>`;
+  return `<span class="param-desc" style="display:block;font-size:.65rem;color:var(--yellow);line-height:1.35;margin-top:.22rem">Wet glow start fuel delay is ${delayS} s, but the next fuel/confirmation step is about ${waitS} s away. Add delay or increase Pre-Heat time if start fuel must be burning first.</span>`;
 }
 
 function buildIgnitionTargetHtml(bname, idx, tab) {
@@ -2551,8 +2589,11 @@ function registryChannelInstalled(channel) {
   if (!channel || channel.installed === false) return false;
   const driver = Number(channel.driver);
   if (driver >= 8 && driver <= 11) {
-    return Number(channel.i2c_address) >= 0x08 && Number(channel.i2c_address) <= 0x77 &&
-      Number(channel.device_channel) >= 0;
+    const address = Number(channel.i2c_address);
+    const validAddress = driver === 10 ? address === 0x2A
+      : (driver === 8 || driver === 11) ? address >= 0x20 && address <= 0x27
+      : driver === 9 && address >= 0x10 && address <= 0x17;
+    return validAddress && Number(channel.device_channel) >= 0;
   }
   const tempInterface = Number(channel.temp_interface || 0);
   if (tempInterface >= 1 && tempInterface <= 3) {
@@ -2603,7 +2644,7 @@ function getEnabledSensors() {
   });
   if (registryInputPurpose('ab_flame'))
                                   list.push({key:'ab_flame',   label:'AB Flame',         unit:'',     def:1,    bool:true});
-  if ((hw.ab_trigger?.input_pin ?? -1) >= 0)
+  if ((hw.ab_trigger?.input_pin ?? -1) >= 0 || registryInputPurpose('ab_command'))
                                   list.push({key:'ab_input',   label:'AB Input',         unit:'%',    def:50,   step:1});
   const a = hw.actuators || {};
   if (registryOutputPurpose('glow_plug') && a.glow_plug?.has_current)
@@ -2611,15 +2652,15 @@ function getEnabledSensors() {
   if (registryOutputPurpose('igniter') && a.igniter?.has_current)
                                   list.push({key:'igniter_current', label:'Igniter 1 Current', unit:'A', def:1, step:0.1});
   if (registryOutputPurpose('ab_igniter') && a.igniter2?.has_current)
-                                  list.push({key:'igniter2_current', label:'AB / Pilot Igniter Current', unit:'A', def:1, step:0.1});
+                                  list.push({key:'igniter2_current', label:'Secondary Igniter Current', unit:'A', def:1, step:0.1});
   if (registryOutputPurpose('oil_pump') && a.oil_pump?.has_current)
                                   list.push({key:'oil_pump_current', label:'Oil Pump Current', unit:'A', def:1, step:0.1});
-  if ((hw.controls?.start_pin ?? -1) >= 0)
+  if ((hw.controls?.start_pin ?? -1) >= 0 || registryInputPurpose('start_switch'))
                                   list.push({key:'start_switch', label:'Start Switch',   unit:'',     def:1,    bool:true});
-  if ((hw.controls?.stop_pin ?? -1) >= 0)
+  if ((hw.controls?.stop_pin ?? -1) >= 0 || registryInputPurpose('stop_switch'))
                                   list.push({key:'stop_switch',  label:'Stop Switch',    unit:'',     def:1,    bool:true});
   (hw.channel_registry?.inputs || []).forEach((c, i) => {
-    if (!c || c.installed === false || (c.pin ?? -1) < 0) return;
+    if (!registryChannelInstalled(c)) return;
     if (registryInputCoreBound(c)) return;
     const role = String(c.role || '');
     const binary = Number(c.driver) === 0 || ['digital_switch','fault','estop','inhibit_start','sequence_gate','ab_arm','ab_fire','limp_mode','flame'].includes(role);
@@ -2638,7 +2679,7 @@ function getEnabledActuators() {
   const demandLabel = (act, pctLabel, relayLabel) => isOnOff(act) ? relayLabel : pctLabel;
   const effectiveAct = (fallbackActuator, purpose) => {
     const registry = registryOutputPurpose(purpose);
-    return registry ? { ...fallbackActuator, enabled:true, type: Number(registry.driver) === 4 ? 2 : (Number(registry.driver) === 5 ? 1 : 0) } : null;
+    return registry ? { ...fallbackActuator, enabled:true, type: [4,11].includes(Number(registry.driver)) ? 2 : (Number(registry.driver) === 5 ? 1 : 0) } : null;
   };
   const throttleAct = effectiveAct(a.throttle, 'main_fuel');
   const starterAct = effectiveAct(a.starter, 'starter');
@@ -2651,22 +2692,22 @@ function getEnabledActuators() {
   if (oilPumpAct) list.push({key:'oil_pump', label:demandLabel(oilPumpAct, 'Oil Pump %', 'Oil Pump Relay'), mode: isOnOff(oilPumpAct) ? 'relay':'pct'});
   if (registryOutputPurpose('fuel_shutoff')) list.push({key:'fuel_sol', label:'Main Fuel Shutoff', mode:'relay'});
   if (registryOutputPurpose('igniter')) list.push({key:'igniter', label:'Igniter 1', mode:'relay'});
-  if (registryOutputPurpose('ab_igniter')) list.push({key:'igniter2', label:hasAB ? 'Afterburner Igniter' : 'AB / Pilot Igniter', mode:'relay'});
+  if (registryOutputPurpose('ab_igniter')) list.push({key:'igniter2', label:hasAB ? 'Afterburner Igniter' : 'Secondary Igniter', mode:'relay'});
   if (registryOutputPurpose('air_starter')) list.push({key:'airstarter_sol', label:'Air Starter Valve', mode:'relay'});
   if (registryOutputPurpose('cooling_fan')) list.push({key:'cool_fan', label:'Cooling Fan', mode:'relay'});
   if (registryOutputPurpose('scavenge_pump')) list.push({key:'oil_scavenge_pump', label:'Oil Scavenge Pump', mode:'relay'});
   if (registryOutputPurpose('bleed_valve') || registryOutputPurpose('valve')?.id === 'bleed_valve') list.push({key:'bleed_valve', label:'Bleed Valve', mode:'relay'});
-  if (registryOutputPurpose('glow_plug')) list.push({key:'glow_plug', label:Number(registryOutputPurpose('glow_plug').driver) === 4 ? 'Glow Plug Relay' : 'Glow Plug %', mode:Number(registryOutputPurpose('glow_plug').driver) === 4 ? 'relay':'pct'});
+  if (registryOutputPurpose('glow_plug')) list.push({key:'glow_plug', label:actuatorIsRelay('glow_plug') ? 'Glow Plug Relay' : 'Glow Plug %', mode:actuatorIsRelay('glow_plug') ? 'relay':'pct'});
   const fuelPump2Act = effectiveAct(a.fuel_pump2, 'fuel_pump');
-  if (fuelPump2Act) list.push({key:'fuel_pump2', label:demandLabel(fuelPump2Act, 'Pilot / Auxiliary Fuel Pump %', 'Pilot / Auxiliary Fuel Pump Relay'), mode:isOnOff(fuelPump2Act) ? 'relay':'pct'});
+  if (fuelPump2Act) list.push({key:'fuel_pump2', label:demandLabel(fuelPump2Act, 'Secondary / Auxiliary Fuel Pump %', 'Secondary / Auxiliary Fuel Pump Relay'), mode:isOnOff(fuelPump2Act) ? 'relay':'pct'});
   if (propPitchAct) list.push({key:'prop_pitch', label:demandLabel(propPitchAct, 'Prop Pitch %', 'Prop Pitch Relay'), mode: isOnOff(propPitchAct) ? 'relay':'pct'});
   // AB outputs
   if (hasAB && registryOutputPurpose('ab_valve')) list.push({key:'ab_sol', label:'Afterburner Fuel Valve', mode:'relay'});
   const abPumpAct = effectiveAct(a.ab_pump, 'ab_pump');
   if (hasAB && abPumpAct) list.push({key:'ab_pump', label:demandLabel(abPumpAct, 'AB Fuel Pump %', 'AB Fuel Pump Relay'), mode:isOnOff(abPumpAct) ? 'relay':'pct'});
   (hwCfg.channel_registry?.outputs || []).forEach((c, i) => {
-    if (!c || c.installed === false || (c.pin ?? -1) < 0 || registryOutputCoreBound(c)) return;
-    const relay = Number(c.driver) === 4;
+    if (!registryChannelInstalled(c) || registryOutputCoreBound(c)) return;
+    const relay = [4,11].includes(Number(c.driver));
     list.push({key:c.id, target:c.id, label:registryLabel(c, `Output ${i+1}`) + (relay ? '' : ' %'), mode:relay ? 'relay':'pct'});
   });
   return list;
@@ -3019,11 +3060,11 @@ const RULE_SENSORS = [
   {v:19,l:'AB Flame',u:'0/1',id:'ab_flame',ok:()=>sensorEnabled('ab_flame')},
   {v:20,l:'Glow Current',u:'A',id:'glow_current',ok:()=>actuatorEnabled('glow_plug') && !!hwCfg.actuators?.glow_plug?.has_current},
   {v:21,l:'Igniter 1 Current',u:'A',id:'igniter_current',ok:()=>actuatorEnabled('igniter') && !!hwCfg.actuators?.igniter?.has_current},
-  {v:22,l:'AB / Pilot Igniter Current',u:'A',id:'igniter2_current',ok:()=>actuatorEnabled('igniter2') && !!hwCfg.actuators?.igniter2?.has_current},
+  {v:22,l:'Secondary Igniter Current',u:'A',id:'igniter2_current',ok:()=>actuatorEnabled('igniter2') && !!hwCfg.actuators?.igniter2?.has_current},
   {v:23,l:'Oil Pump Current',u:'A',id:'oil_pump_current',ok:()=>actuatorEnabled('oil_pump') && !!hwCfg.actuators?.oil_pump?.has_current},
-  {v:24,l:'AB Input',u:'%',id:'ab_input',ok:()=>!!((hwCfg.ab_trigger?.input_pin ?? -1) >= 0)},
-  {v:25,l:'Start Switch',u:'0/1',id:'start_switch',ok:()=>((hwCfg.controls?.start_pin ?? -1) >= 0)},
-  {v:26,l:'Stop Switch',u:'0/1',id:'stop_switch',ok:()=>((hwCfg.controls?.stop_pin ?? -1) >= 0)},
+  {v:24,l:'AB Input',u:'%',id:'ab_input',ok:()=>((hwCfg.ab_trigger?.input_pin ?? -1) >= 0 || !!registryInputPurpose('ab_command'))},
+  {v:25,l:'Start Switch',u:'0/1',id:'start_switch',ok:()=>((hwCfg.controls?.start_pin ?? -1) >= 0 || !!registryInputPurpose('start_switch'))},
+  {v:26,l:'Stop Switch',u:'0/1',id:'stop_switch',ok:()=>((hwCfg.controls?.stop_pin ?? -1) >= 0 || !!registryInputPurpose('stop_switch'))},
   {v:27,l:'Thrust',u:'N',id:'thrust',ok:()=>!!registryInputPurpose('thrust')}
 ];
 const RULE_OPS = [
@@ -3033,14 +3074,14 @@ const RULE_OPS = [
 const RULE_OUTPUTS = [
   {v:0,l:'Cooling Fan',id:'cooling_fan_main',ok:()=>actuatorEnabled('cool_fan')},
   {v:1,l:'Bleed Valve',id:'bleed_valve_main',ok:()=>actuatorEnabled('bleed_valve')},
-  {v:2,l:'Pilot / Auxiliary Fuel Pump',id:'fuel_pump',ok:()=>actuatorEnabled('fuel_pump2')},
+  {v:2,l:'Secondary / Auxiliary Fuel Pump',id:'fuel_pump',ok:()=>actuatorEnabled('fuel_pump2')},
   {v:3,l:'Oil Scavenge Pump',id:'oil_scavenge_main',ok:()=>actuatorEnabled('oil_scavenge_pump')},
   {v:4,l:'Throttle Demand',id:'main_fuel',ok:()=>actuatorEnabled('throttle')},
   {v:5,l:'Starter Demand',id:'starter_main',ok:()=>actuatorEnabled('starter')},
   {v:7,l:'Oil Pump Demand',id:'oil_pump_main',ok:()=>actuatorEnabled('oil_pump')},
   {v:8,l:'Main Fuel Shutoff',id:'fuel_shutoff',ok:()=>actuatorEnabled('fuel_sol')},
   {v:9,l:'Igniter',id:'igniter',ok:()=>actuatorEnabled('igniter')},
-  {v:10,l:'AB / Pilot Igniter',id:'ab_igniter',ok:()=>actuatorEnabled('igniter2')},
+  {v:10,l:'Secondary Igniter',id:'ab_igniter',ok:()=>actuatorEnabled('igniter2')},
   {v:11,l:'Afterburner Fuel Valve',id:'ab_solenoid',ok:()=>actuatorEnabled('ab_sol')},
   {v:12,l:'Afterburner Fuel Pump',id:'ab_pump',ok:()=>actuatorEnabled('ab_pump')},
   {v:13,l:'Request Shutdown',id:'request_shutdown',ok:()=>true},
@@ -3057,34 +3098,44 @@ const RULE_REGISTRY_INPUT_BASE = 80;
 const RULE_REGISTRY_OUTPUT_BASE = 64;
 const RULE_CORE_INPUT_IDS = new Set([
   'n1_main','primary_n1','n2_main','primary_n2','tot_main','primary_egt',
-  'oil_pressure_main','operator_throttle','operator_idle','idle_input','idle_input_main',
-  'battery_voltage','batt_voltage','batt_voltage_main'
+  'tit_main','oil_pressure_main','oil_temperature','fuel_pressure','fuel_flow',
+  'p1_main','p2_main','torque_main','flame_main','thrust_main',
+  'operator_throttle','operator_idle','idle_input','idle_input_main',
+  'battery_voltage','batt_voltage','batt_voltage_main','ab_flame_main',
+  'ab_command','start_switch','stop_switch'
+]);
+const RULE_CORE_INPUT_PURPOSES = new Set([
+  'n1_speed','n2_speed','tot','tit','oil_pressure','oil_temperature','fuel_pressure',
+  'fuel_flow','p1_pressure','p2_pressure','torque','thrust','flame','battery_voltage',
+  'throttle','idle','ab_flame','ab_command','start_switch','stop_switch'
 ]);
 const RULE_CORE_OUTPUT_IDS = new Set([
-  'main_fuel_output','main_fuel','throttle',
+  'main_fuel_output','main_fuel',
   'main_starter','starter','starter_main',
-  'starter_enable','starter_enable_main',
+  'starter_enable',
   'oil_pump','oil_pump_main',
-  'cooling_fan','cooling_fan_main','cool_fan',
-  'oil_scavenge_main','oil_scavenge_pump','scavenge_pump',
+  'cooling_fan','cooling_fan_main',
+  'oil_scavenge_main','scavenge_pump',
   'bleed_valve','bleed_valve_main',
-  'igniter','igniter_main','ab_igniter','igniter2','igniter2_main',
-  'main_fuel_shutoff','fuel_shutoff','fuel_sol','fuel_solenoid_main',
-  'ab_solenoid','ab_solenoid_main','ab_sol',
-  'air_starter','airstarter_main','airstarter_sol',
-  'fuel_pump','fuel_pump2','fuel_pump2_main',
-  'ab_pump','ab_pump_main','prop_pitch','prop_pitch_main','glow_plug','glow_plug_main'
+  'igniter','ab_igniter','igniter2_main',
+  'main_fuel_shutoff','fuel_shutoff',
+  'ab_solenoid','air_starter','fuel_pump','ab_pump','prop_pitch','glow_plug'
 ]);
 const RULE_CORE_OUTPUT_BINDINGS = new Set(['main_fuel_output','main_fuel_shutoff','main_starter']);
+const RULE_CORE_OUTPUT_PURPOSES = new Set([
+  'main_fuel','fuel_shutoff','starter','starter_enable','oil_pump','scavenge_pump',
+  'cooling_fan','fuel_pump','igniter','ab_igniter','ab_valve','glow_plug','ab_pump',
+  'prop_pitch','air_starter'
+]);
 function plainRegistryName(raw, fallback = '') {
   const text = String(raw || '').trim();
   const key = text.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const direct = {
     user_throttle:'Throttle Input', operator_throttle:'Throttle Input', operator_thrott:'Throttle Input', throttle_input:'Throttle Input',
     user_idle:'Idle Input', operator_idle:'Idle Input', idle_input:'Idle Input',
-    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Pilot / Auxiliary Fuel Pump', main_fuel:'Main Fuel Pump',
+    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Secondary / Auxiliary Fuel Pump', main_fuel:'Main Fuel Pump',
     flame:'Flame Sensor', flame_main:'Flame Sensor', coolant_pump:'Coolant Pump',
-    coolant_temperature:'Coolant Temperature', pilot_fuel:'Pilot Gas', purge_valve:'Purge Valve',
+    coolant_temperature:'Coolant Temperature', pilot_fuel:'Start Fuel', purge_valve:'Purge Valve',
     air_starter:'Air Starter', prop_pitch:'Prop Pitch', nozzle_actuator:'Nozzle Actuator'
   };
   if (direct[key]) return direct[key];
@@ -3141,25 +3192,40 @@ function registryRuleUnit(c) {
   return '';
 }
 function registryInputCoreBound(c) {
-  return RULE_CORE_INPUT_IDS.has(String(c?.id || ''));
+  if (!c) return false;
+  if (RULE_CORE_INPUT_IDS.has(String(c.id || ''))) return true;
+  const purpose = String(c.purpose || '');
+  if (!RULE_CORE_INPUT_PURPOSES.has(purpose)) return false;
+  const peers = (hwCfg.channel_registry?.inputs || []).filter(item =>
+    registryChannelInstalled(item) && String(item.purpose || '') === purpose);
+  const preferred = peers.find(item => RULE_CORE_INPUT_IDS.has(String(item.id || '')));
+  return (preferred || peers[0]) === c;
 }
 function registryRuleSensors() {
   const inputs = hwCfg.channel_registry?.inputs || [];
   const visible = inputs.map((c, i) => ({c, i})).filter(({c}) =>
-    c?.installed !== false && (c?.pin ?? -1) >= 0 && !registryInputCoreBound(c));
+    registryChannelInstalled(c) && !registryInputCoreBound(c));
   return visible.map(({c, i}) => ({
     v: RULE_REGISTRY_INPUT_BASE + i,
     id: c.id,
     l: registryChannelLabel(c, `Input ${i + 1}`),
     u: registryRuleUnit(c),
-    ok: () => c?.installed !== false && (c?.pin ?? -1) >= 0
+    ok: () => registryChannelInstalled(c)
   }));
 }
 function registryOutputCoreBound(c) {
   if (!c?.id) return false;
   const id = String(c.id || '');
+  const purpose = String(c.purpose || '');
+  if (!RULE_CORE_OUTPUT_PURPOSES.has(purpose)) return false;
+  const bindingKey = ({main_fuel:'main_fuel_output',fuel_shutoff:'main_fuel_shutoff',starter:'main_starter'})[purpose];
+  const binding = bindingKey && (hwCfg.channel_registry?.bindings || []).find(b => String(b?.key || '') === bindingKey);
+  if (binding) return String(binding.channel || '') === id;
   if (RULE_CORE_OUTPUT_IDS.has(id)) return true;
-  return (hwCfg.channel_registry?.bindings || []).some(b => RULE_CORE_OUTPUT_BINDINGS.has(String(b?.key || '')) && String(b?.channel || '') === id);
+  const peers = (hwCfg.channel_registry?.outputs || []).filter(item =>
+    registryChannelInstalled(item) && String(item.purpose || '') === purpose);
+  const preferred = peers.find(item => RULE_CORE_OUTPUT_IDS.has(String(item.id || '')));
+  return (preferred || peers[0]) === c;
 }
 function registryRuleOutputs() {
   const outputs = hwCfg.channel_registry?.outputs || [];
@@ -3168,7 +3234,7 @@ function registryRuleOutputs() {
     id: c.id,
     driver: c.driver,
     l: `${registryChannelLabel(c, `Output ${i + 1}`)} (custom output)`,
-    ok: () => c?.installed !== false && (c?.pin ?? -1) >= 0 && !registryOutputCoreBound(c)
+    ok: () => registryChannelInstalled(c) && !registryOutputCoreBound(c)
   }));
 }
 function ruleSensors() { return RULE_SENSORS.concat(registryRuleSensors()); }
@@ -3405,8 +3471,8 @@ function ruleOutputLabel(v) {
 }
 function firstGenericAnalogRuleSensor() {
   const inputs = hwCfg.channel_registry?.inputs || [];
-  const index = inputs.findIndex(c => c?.installed !== false && (c?.pin ?? -1) >= 0 &&
-    Number(c.driver) === 1 && c.role === 'generic' && !registryInputCoreBound(c));
+  const index = inputs.findIndex(c => registryChannelInstalled(c) &&
+    [1,9].includes(Number(c.driver)) && c.role === 'generic' && !registryInputCoreBound(c));
   return index >= 0 ? RULE_REGISTRY_INPUT_BASE + index : undefined;
 }
 function firstGenericPwmRuleOutput() {
@@ -3536,12 +3602,23 @@ function collectRules() {
 function ruleWarnings(rules) {
   const warnings = [];
   const byAct = new Map();
+  const ownership = new Map();
+  const addOwner = (target, owner) => {
+    if (!target) return;
+    const list = ownership.get(target) || [];
+    if (!list.includes(owner)) list.push(owner);
+    ownership.set(target, list);
+  };
   rules.forEach((rule, index) => {
     if (!rule.enabled) return;
     if (Number(rule.actuator) === 13 || Number(rule.actuator) === 14) return;
     const list = byAct.get(rule.actuator) || [];
     list.push(index + 1);
     byAct.set(rule.actuator, list);
+    if ((Number(rule.mode_mask ?? 14) & 4) !== 0) {
+      const output = ruleOutputs().find(o => o.v === Number(rule.actuator));
+      addOwner(rule.target || output?.id, `rule ${rule.name || '#' + (index + 1)}`);
+    }
     if (!Number(rule.mode_mask ?? 14)) warnings.push(`Rule ${rule.name || '#' + (index + 1)} has no active mode selected.`);
   });
   byAct.forEach((list, act) => {
@@ -3549,6 +3626,17 @@ function ruleWarnings(rules) {
       const out = ruleOutputs().find(o => o.v === Number(act))?.l || ('output ' + act);
       warnings.push(`${list.length} enabled rules target ${out}. Give each output only one rule.`);
     }
+  });
+  const controllers = hwCfg.controllers || {};
+  const prop = registryOutputPurpose('prop_pitch');
+  if (controllers.dynamic_idle) addOwner('main_fuel', 'Automatic Idle');
+  if (controllers.governor) addOwner(prop?.id || 'main_fuel', prop ? 'N2 governor (pitch)' : 'N2 governor (fuel)');
+  if (controllers.oil_loop) (hwCfg.oil_loops || []).filter(l => l?.enabled !== false).forEach(l => addOwner(l.pump_output, 'oil-pressure controller'));
+  ownership.forEach((owners, target) => {
+    if (owners.length < 2) return;
+    const channel = (hwCfg.channel_registry?.outputs || []).find(c => c.id === target);
+    const label = channel?.name || ruleOutputs().find(o => o.id === target)?.l || target;
+    warnings.push(`${label} has overlapping RUNNING owners: ${owners.join(', ')}. The later rule command is final; keep this only if intentional.`);
   });
   return warnings;
 }
@@ -3654,6 +3742,22 @@ async function saveAll() {
   }
   collectRules();
   ['startup','shutdown','afterburner','ab-shut'].forEach(ensureActionSlots);
+  // This page intentionally saves sequence hardware and settings atomically.
+  // Merge its edits onto the latest documents first so a long-open browser tab
+  // cannot silently restore unrelated older settings.
+  try {
+    const [latestHw, latestCfg] = await Promise.all([
+      fetchJsonWithRetry('/api/hardware'),
+      fetchJsonWithRetry('/api/config')
+    ]);
+    hwCfg = mergeSequenceEdits(loadedHwCfg, hwCfg, latestHw);
+    cfg = mergeSequenceEdits(loadedCfg, cfg, latestCfg);
+    // Live bus discovery is response metadata, not engine configuration.
+    delete hwCfg._i2c_discovery;
+  } catch (e) {
+    setSaveStatus('Warning: Could not refresh engine file: ' + e.message);
+    return;
+  }
   const ruleErrors = validateRulesForSave();
   if (ruleErrors.length) {
     setSaveStatus('Warning: Control rule hardware mismatch');
@@ -3696,6 +3800,8 @@ async function saveAll() {
   setSaveStatus('Saving engine file...');
   // Sequence order and block parameters belong to one engine file; save both atomically.
   try {
+    if (typeof stopSequenceTelemetry === 'function') stopSequenceTelemetry();
+    await new Promise(resolve => setTimeout(resolve, 250));
     const cfgRes = await fetch('/api/ecu_config', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ hardware: hwCfg, settings: cfg })
@@ -3731,7 +3837,9 @@ function reconnect(attempts=0) {
   fetch('/api/data').then(r => {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     document.getElementById('reboot-overlay').classList.remove('show');
-    loadAll();
+    return loadAll();
+  }).then(() => {
+    startSequenceTelemetryForPlatform();
   }).catch(() => {
     if (attempts < 20) setTimeout(() => reconnect(attempts+1), 1000);
     else document.getElementById('reboot-count').textContent = 'Reload page';
@@ -3847,6 +3955,11 @@ function startWS() {
   };
   ws.onerror = () => { try { ws.close(); } catch(_) {} };
 }
+function startSequenceTelemetryForPlatform() {
+  seqClosingForNavigation = false;
+  if (hwCfg?.platform === 'esp32') startStatusPoll();
+  else startWS();
+}
 function stopSequenceTelemetry() {
   seqClosingForNavigation = true;
   if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
@@ -3866,12 +3979,8 @@ window.addEventListener('beforeunload', stopSequenceTelemetry);
 window.addEventListener('ot:navigation-start', stopSequenceTelemetry);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
-  seqClosingForNavigation = false;
-  startStatusPoll();
-  startWS();
+  startSequenceTelemetryForPlatform();
 });
-startStatusPoll();
-
 // ------ Sequence validation banner ---------------------------------------------------------------------------------------------------------------------------------------
 function _applySeqValidation(d) {
   const issues   = d.seq_issues   || [];
@@ -3910,8 +4019,10 @@ function _applySeqValidation(d) {
 }
 
 // ------ Init ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-loadAll();
-startWS();
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadAll();
+  startSequenceTelemetryForPlatform();
+}, { once:true });
 </script>
 </body>
 </html>

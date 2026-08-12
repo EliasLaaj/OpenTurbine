@@ -72,6 +72,11 @@ function startWS() {
   };
   ws.onerror = () => { try { ws.close(); } catch(_) {} };
 }
+function startSequenceTelemetryForPlatform() {
+  seqClosingForNavigation = false;
+  if (hwCfg?.platform === 'esp32') startStatusPoll();
+  else startWS();
+}
 function stopSequenceTelemetry() {
   seqClosingForNavigation = true;
   if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
@@ -91,12 +96,8 @@ window.addEventListener('beforeunload', stopSequenceTelemetry);
 window.addEventListener('ot:navigation-start', stopSequenceTelemetry);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
-  seqClosingForNavigation = false;
-  startStatusPoll();
-  startWS();
+  startSequenceTelemetryForPlatform();
 });
-startStatusPoll();
-
 // ------ Sequence validation banner ---------------------------------------------------------------------------------------------------------------------------------------
 function _applySeqValidation(d) {
   const issues   = d.seq_issues   || [];
@@ -135,5 +136,7 @@ function _applySeqValidation(d) {
 }
 
 // ------ Init ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-loadAll();
-startWS();
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadAll();
+  startSequenceTelemetryForPlatform();
+}, { once:true });

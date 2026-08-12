@@ -1,0 +1,92 @@
+{
+  "timestamp": "2026-08-12T10:34:37",
+  "firmware": "2.0.1",
+  "firmware_after": "2.0.1",
+  "firmware_match": true,
+  "rows": [
+    {
+      "name": "DEV_MODE_APPLIES_MARKED_LIVE_FIELD_WHILE_RUNNING",
+      "ok": true,
+      "detail": {
+        "http": 200,
+        "response": {
+          "ok": true,
+          "saved": true,
+          "applying": true,
+          "live_now": false
+        },
+        "mode": "RUNNING",
+        "saved_ramp_up_ms": 250
+      }
+    },
+    {
+      "name": "NO_N1_FINALSTOP_USES_CONFIGURED_DELAY",
+      "ok": true,
+      "detail": {
+        "elapsed_s": 2.265,
+        "last_event": "Seq: FinalStop"
+      }
+    },
+    {
+      "name": "OIL_STAYS_ON_THROUGH_DELAY_THEN_STANDBY_FORCES_OFF",
+      "ok": true,
+      "detail": {
+        "before": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 1.0,
+          "level": 1
+        },
+        "during": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 1.0,
+          "level": 1
+        },
+        "after": {
+          "us": 0,
+          "hz": 0.0,
+          "duty": 0.0,
+          "level": 0
+        },
+        "shutdown_mode": "SHUTDOWN"
+      }
+    },
+    {
+      "name": "RUNNING_BLOCK_CHANGE_REJECTED_THEN_STOPPED_CHANGE_APPLIES",
+      "ok": true,
+      "detail": {
+        "elapsed_s": 1.406,
+        "running_edit": {
+          "http": 423,
+          "response": {
+            "ok": false,
+            "error": "while running, only fields marked Applies live may be changed; stop the engine for all other settings"
+          }
+        },
+        "stopped_edit": {
+          "http": 200,
+          "response": {
+            "ok": true,
+            "saved": true,
+            "applying": true
+          }
+        },
+        "configured_timeout_ms": 1000,
+        "last_event": "Seq: FinalStop"
+      }
+    },
+    {
+      "name": "NORMAL_RUNNING_MODE_LOCKS_EVEN_MARKED_LIVE_FIELDS",
+      "ok": true,
+      "detail": {
+        "http": 423,
+        "response": {
+          "error": "settings are read-only during STARTUP and SHUTDOWN; RUNNING permits only marked live fields when Developer Mode was enabled before start"
+        }
+      }
+    }
+  ],
+  "restored": true,
+  "error": null
+}

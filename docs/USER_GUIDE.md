@@ -244,9 +244,9 @@ Enter the real pull-up resistance, NTC R₀, and beta value. For another analog 
 
 ### Torque, thrust, and load-cell sensors
 
-Torque can use an **Analog 0–3.3 V transmitter**, **HX711 load-cell amplifier**, or a detected **NAU7802**. An HX711 requires two GPIOs: DOUT is an ECU input and SCK is an ECU output.
+Torque can use an **Analog 0–3.3 V transmitter**, **TLA2528 analog channel**, **HX711 load-cell amplifier**, or a detected **NAU7802**. Thrust supports the same conditioned local/TLA2528 analog transmitters and NAU7802 bridge channels. An HX711 requires two GPIOs: DOUT is an ECU input and SCK is an ECU output.
 
-For a NAU7802, use Calibration to capture unloaded zero and a known force/mass. Thrust is stored in newtons. Torque uses the calibrated force multiplied by the entered perpendicular lever arm in metres and is stored in newton-metres. The known-load wizard accepts N, kg mass, g, kgf, or lbf and converts them to canonical newtons. Do not treat default scale or zero values as a calibration.
+For a NAU7802, use Calibration to capture unloaded zero and a known force/mass. Thrust is stored in newtons. Torque uses the calibrated force multiplied by the entered perpendicular lever arm in metres and is stored in newton-metres. The known-load wizard accepts N, kg mass, g, kgf, or lbf and converts them to canonical newtons. Conditioned analog transmitters use the normal linear or advanced sensor-curve calibration. Do not treat default scale or zero values as a calibration.
 
 ### DS18B20 temperature sensor
 
@@ -310,7 +310,7 @@ Open **Hardware** and describe the actual installation. Do not enable a sensor o
 - Use **Installed Channel Inventory** for channels that rules, sequences, and controller bindings need to reference by ID. The stable ID is the machine key; keep it short, unique, and unchanged after other features reference it. The display name is safe to edit.
 - Inventory inputs can be digital, analog, pulse/frequency, or RC PWM. Digital switch roles can feed existing DI behaviors such as inhibit-start, E-stop, AB arm/fire, limp mode, sequence gate, and fault inputs. Registry-driven DI behavior currently uses the existing active-low/pull-up default unless a legacy DI channel supplies richer switch metadata.
 - Inventory outputs can be relay, PWM, or servo/ESC. Relay outputs quantize at the driver boundary; PWM and servo outputs preserve the full 0-100% demand used by rules, sequences, tools, and controllers.
-- General valves, bleed valves, purge/pilot valves, and air-starter actuators may use relay, PWM, or servo endpoints. The standard air-starter sequence blocks remain deliberately on/off, so a PWM/servo air-starter card moves between its configured 0% and 100% endpoints. Dedicated hard fuel-shutoff and afterburner-shutoff purposes remain relay-only.
+- General valves, bleed valves, purge/start-fuel valves, and air-starter actuators may use relay, PWM, or servo endpoints. The standard air-starter sequence blocks remain deliberately on/off, so a PWM/servo air-starter card moves between its configured 0% and 100% endpoints. Dedicated hard fuel-shutoff and afterburner-shutoff purposes remain relay-only.
 - Repeatable outputs with the same role are allowed. For example, `Oil Pump 1` can be the main bound pump while `Oil Pump 2` is controlled by rules, sequences, tools, or another oil loop.
 - The standard `AB igniter` inventory output bridges to the existing Igniter 2 / afterburner ignition path when it uses the standard `ab_igniter` or `igniter2_main` ID.
 - Confirm the correct ESP32 target.
@@ -341,7 +341,7 @@ Review at least:
 
 For a two-shaft engine, also review the hard N2 shutdown limit, N2 gradual-pullback points, governor target/band, any N2-based idle target, and the external-cluster N2 warning. OpenTurbine warns when those values do not leave sensible ordering below the hard trip, but the operator remains responsible for the actual margins.
 
-If using multiple oil systems, define each oil loop with its pressure input, pump output, target pressure, deadband, and min/max demand. The first enabled loop feeds the primary oil controller; additional enabled loops drive their own selected registry pump outputs before rules run.
+If using multiple oil systems, define each oil loop with its pressure input, pump output, target pressure, deadband, and min/max demand. The first enabled loop feeds primary oil status and cooldown control; additional loops drive their own explicitly selected pumps. A target may be fixed, follow the previous final effective core-fuel demand, or map from N1/N2 shaft speed. Fuel-following deliberately uses the final protected/rule-adjusted core-fuel command from the preceding control tick, not afterburner fuel. Relay pumps use true on/off pressure hysteresis for accumulator/relief systems; PWM/servo pumps expose proportional minimum and maximum demand. Rules run afterward and therefore remain the final optional command owner.
 
 `0` can mean disabled, automatic, or unlimited depending on the field. Read the description beside that specific control.
 
@@ -352,7 +352,7 @@ Treat N2 protection as a chain of separate functions, not one interchangeable RP
 1. **Calibrate the N2 input.** Enter the real pulses per revolution and compare Dashboard N2 against an independent tachometer at several speeds.
 2. **Enter Maximum N2 Speed.** This is the independent hard shutdown trip for the free power-turbine/output shaft. Use only an authoritative engine, gearbox, driven-load, or propeller-system limit referred to the same measurement point.
 3. **Configure gradual N2 pullback if used.** `Begin N2 Throttle Reduction` should be below `Full N2 Throttle Reduction`, and both should normally be below Maximum N2 Speed. Pullback reduces fuel as the shaft approaches the limit; it is not the shutdown itself.
-4. **Configure the governor if used.** The governor target plus its no-correction band must leave operating margin below Maximum N2 Speed. In fuel-control mode the governor adjusts fuel directly. In propeller-pitch mode it changes propeller load while the pilot/operator retains fuel authority.
+4. **Configure the governor if used.** The governor target plus its no-correction band must leave operating margin below Maximum N2 Speed. In fuel-control mode the governor adjusts fuel directly. In propeller-pitch mode it changes propeller load while the operator retains fuel authority.
 5. **Check other N2 consumers.** An N2-based automatic-idle target and an external-cluster N2 warning should also remain below the hard trip.
 6. **Enable N2 overspeed in Hardware.** Hardware owns whether the safety is armed; Config owns its RPM limit. START is blocked if the safety is enabled with no fitted N2 source or a zero hard limit.
 7. **Prove the shutdown path without fuel.** Drive or simulate N2 first below and then above the configured trip. Verify the ECU enters shutdown/fault and physically removes fuel, ignition, and relevant actuator demand.
@@ -366,8 +366,8 @@ The Dashboard N2 gauge uses the hard shutdown limit. `OFF` means the hard N2 saf
 - **Predictive limit protection** projects N1/N2 speed, P1/P2 pressure, selected TOT/TIT, and torque from their measured rise rates, then begins a gentler approach before the current reading reaches the soft point. Start with reactive/simple behavior unless predictive tuning has been validated on the engine.
 - **Sensor timing** is tied to real samples rather than Dashboard/control-loop refreshes. Shaft pulse inputs average over a longer window at low pulse rates and automatically publish faster as speed rises. Pressure, torque, and temperature rates update only when their driver reports a new measurement, so increasing the web refresh rate does not change controller behavior.
 - **Automatic Idle Control** trims fuel near idle using one selected N1, N2, P1, or P2 source. N1/N2 speed control is the normal proven approach; P1/P2 control is explicitly experimental. RPM and pressure sources have separate target, deadband, and disengagement values. Verify the selected sensor is calibrated and that disconnecting it enters reduced-power mode without a fuel increase.
-- **Automatic N2 speed control** uses either fuel or proportional propeller pitch. Start response gains low, verify correction direction with a simulated speed error, and increase gains only while watching for hunting.
-- **Oil-pressure control** adjusts the selected pump to the configured target. Its target must remain above the low-pressure shutdown threshold. Sensor failure uses the configured delay and fallback demand; validate that fallback physically.
+- **Automatic N2 speed control** uses proportional fuel, proportional propeller pitch, or deliberate fine/coarse relay pitch. Start response gains low, verify correction direction with a simulated speed error, and increase gains only while watching for hunting.
+- **Oil-pressure control** adjusts each explicitly selected pump to its configured fixed, effective-fuel, N1, or N2 pressure target. Its target must remain above the low-pressure shutdown threshold. A relay pump switches fully off/on around its target and deadband; use that only with plumbing designed for two-position pressure control. Sensor failure uses the configured delay and fallback demand; validate that fallback physically.
 - **Reduced-power mode** caps throttle after its configured digital input or rule requests it. Treat it as a degraded-operation feature, not a substitute for stopping after a mechanical or lubrication fault.
 - **Pulsed Starter Assist** repeatedly applies and releases proportional starter output during `StarterSpin` while healthy N1 remains below its configured threshold. These torque impulses can help Bendix drives and splined couplings engage; once the threshold is reached, normal ramped starter control continues. It needs no runtime arming, never operates in RUNNING, and cancels for that startup attempt if N1 becomes unhealthy. With load power isolated, use the short STANDBY-only Tools test to verify direction and output before a live start.
 - **Windmilling oil protection** can run the oil pump in STANDBY while N1 or N2 remains above its threshold. A zero pressure target uses the configured fixed pump output. A nonzero target uses the normal oil-pressure controller, with that pump output as its minimum floor. Verify the selected shaft, mode, and that the pump releases after rotation stops.
@@ -386,7 +386,10 @@ Manual relight and cooldown override are operator tools. They remain subject to 
 
 Afterburner support is shown only when the corresponding fuel and ignition hardware is fitted. Review the trigger source, arm requirement, ignition method, flame/EGT confirmation, pump range, main-fuel offset, stabilization time, and shutdown order.
 
+The dedicated AB command may be a native analog/RC input or an addressable registry/I2C input. Both use the same normalized command, disconnect guard, Control Rule source, sequence-condition source, and shared RC/PWM signal-loss timeout. If an arm input is required, it remains continuous permission after firing; removing permission starts the configured AB shutdown sequence.
+
 - AB arm is permission, not a fire command.
+- A selected request may remain in **Arming** while minimum N1, maximum light-off EGT, throttle, or pre-fuel flame/EGT evidence is not ready. Those are waiting conditions, not failed ignition attempts. Once AB fuel/ignition actually starts, a sequence fault latches until the request is released before retrying.
 - Confirm the AB valve and pump close immediately on STOP or fault.
 - Use flame confirmation or a defensible EGT-rise method where possible.
 - A custom AB ignition sequence must include the explicit confirmation block; select sensor, EGT rise, or the clearly labelled unverified timed mode.
@@ -402,13 +405,18 @@ After a run, the summary reports available duration, peaks, and the minimum heal
 
 ### 3. Calibration
 
+For ordinary analog sensors, start with the visible two-point wizard or the sensor's linear voltage/current specification. This covers the common 0.5–4.5 V and 4–20 mA pressure, flow, temperature-transmitter, torque, and voltage inputs. If a resistive sender or its datasheet is not linear, open that input's **Advanced sensor curve** on Hardware and enter 2–6 measured or manufacturer points. ADC values must increase; physical values may consistently rise or fall. The ECU interpolates between points and clamps beyond the two endpoints, avoiding polynomial overshoot. A curve is optional and replaces the linear offset/scale only for that channel.
+
+NTC thermistors normally use their dedicated resistance/beta model. If an automotive or manufacturer-specific NTC is supplied only as a temperature table, its Hardware card may instead use the same raw-ADC-to-temperature curve while retaining the dedicated NTC wiring setup. Thermocouple interfaces, pulse/frequency sensors, HX711/NAU7802 load cells, and digital probes keep their dedicated calibration models. Always compare the finished reading against an independent reference at several points before enabling a protection or controller that depends on it. Local ADC and TLA2528 I²C ADC channels use the same saved calibration behavior.
+
 Calibrate only while the engine is in STANDBY/FAULT and the installation is made safe.
 
 - **Fuel pump minimum:** run the slow sweep, stop when the pump first turns, fine-adjust, and verify several reliable restarts before saving.
 - **Oil pressure:** capture the correct ambient zero reference, then use physical gauge points, automatic fitting, an explicit straight/curved fit, or sensor sensitivity in mV/bar.
 - **Oil pump minimum:** sweep upward slowly and stop when the pump or pressure response begins.
 - **Throttle and idle inputs:** hold each endpoint during the one-second capture. The ECU adds a small endpoint margin.
-- **Flame sensor:** capture the no-flame noise floor with the igniter operating. Keep the threshold close enough to detect weak light-off flame. The last-run average is reference information, not an automatic threshold.
+- **Flame sensor:** direct digital detectors need only the correct active-high/active-low choice. ADC detectors use active-above/below, a threshold, and hysteresis. Capture the no-flame noise floor with the igniter operating, keep the threshold close enough to detect weak light-off flame, and use only enough hysteresis to prevent noise chatter. The last-run average is reference information, not an automatic threshold.
+- **ADC-backed switches:** capture the normal inactive state and the active state. Calibration calculates polarity, a midpoint threshold, and a noise-aware hysteresis; review the result, then save. Hysteresis is required to prevent vibration or electrical ripple near the threshold from rapidly changing the logical state. Direct digital switches do not use these fields.
 - **Temperature:** use NTC datasheet values or four well-spaced known temperature points.
 - **Current sensors:** use captured zero/reference current or datasheet zero voltage and mV/A sensitivity at the ECU ADC pin.
 - **Oil flow meters:** calibrate main and scavenge meters separately in L/min. Enable monitoring on the matching pump Hardware card and set that pump's own minimum flow.
@@ -442,7 +450,7 @@ The editor also supports entry conditions, per-step enter/exit side actions, aft
 Open **Sequence → Control Rules** for small automations that do not belong in the ordered startup or shutdown sequence. A rule can switch one output at a threshold with hysteresis, or map a fitted input range linearly to a variable PWM/servo output range.
 
 - Select All states, or Starting, Running, and/or Shutdown.
-- Outside those states—or if the input becomes unavailable—the output returns to its configured off value.
+- Outside those states, the rule releases ownership and the last applicable non-rule command resumes. While a selected state is active, a false or unavailable condition applies the configured off value.
 - Hysteresis prevents rapid switching near a threshold. For “above 100 °C” with 5 °C hysteresis, the output turns on above 100 °C and stays on until the input falls to 95 °C.
 - Mapping clamps below/above its input limits and is useful for testing proportional outputs from a potentiometer.
 - Keep one enabled rule per output. Hardware fault-safe behavior still owns faults.
@@ -475,7 +483,7 @@ Test outputs individually:
 
 The browser is not the emergency stop. Verify the independent physical stop before continuing.
 
-Developer Mode exposes diagnostics and allows Bench Mode. Bench Mode bypasses safety shutdowns and sensor waits for dry testing; it must never be enabled for a fueled or mechanically powered engine. `Skip safety checks` is similarly a development-only control, not an operating mode.
+Developer Mode exposes diagnostics and allows Bench Mode. While RUNNING, it permits live saves only for the small set of physically adaptable controller tuning fields identified as **Applies live** (throttle ramps, governor tuning, and automatic-idle tuning). Hardware assignments, calibration, modes, sensor sources, safety structure, and sequences stay read-only and must be saved outside RUNNING. This avoids a mixed old/new controller configuration. Bench Mode bypasses safety shutdowns and sensor waits for dry testing; it must never be enabled for a fueled or mechanically powered engine. `Skip safety checks` is similarly a development-only control, not an operating mode.
 
 ## Pre-start review
 
@@ -504,6 +512,12 @@ In **Tools**, download the full engine file before an update. It contains hardwa
 
 Use **OpenTurbine Setup Tool → Update and keep my setup** for normal Wi-Fi updates. It backs up the engine settings and does not perform a factory reset. Use **Clean install / reinstall** for a blank board, corrupted installation, intentional clean start, or partition-table change; that USB path erases everything on the selected board.
 
+Classic ESP32 v2.0.1 and later rebalance the clean-install partition table to leave more
+room for firmware updates. Existing boards may update over Wi-Fi because the
+image still fits the earlier slots, but only a USB clean install applies the new
+table. The Setup Tool cannot preserve settings or logs across that erase, so
+download them first.
+
 Do not interrupt power during firmware or web-asset installation.
 
 After an update, reconnect to the ECU, verify the displayed firmware version, open every main page once, confirm the hardware/profile identity still matches, and repeat a dry STOP/output-safety check before introducing fuel. A normal update preserves configuration; it cannot prove that an old configuration is safe for newly added features.
@@ -511,7 +525,7 @@ After an update, reconnect to the ECU, verify the displayed firmware version, op
 ### Recovery
 
 - If the ECU Wi-Fi appears but pages fail, reinstall/update the web assets.
-- If the board does not appear over USB, try a data cable, another USB port, the driver button offered by the setup tool, and the board’s BOOT/RESET procedure.
+- If the board does not appear over USB, try a data cable, another USB port, the official driver page opened by the setup tool, and the board’s BOOT/RESET procedure.
 - If a configuration error puts the ECU in FAULT, the web interface remains available for repair.
 - If a restored engine file is rejected, verify that it is a complete matching OpenTurbine `ecu_config.json`, not only one section.
 - Factory reset erases hardware, settings, calibration, and logs. Back up first.
@@ -542,9 +556,11 @@ Use Ctrl+F for the symptom or keyword.
 | Full engine restore rejected | Use the complete matching `ecu_config.json`; do not cross hardware/settings sections from different profiles. |
 | Wi-Fi password forgotten | Recover over USB and restore/reset configuration. Factory reset removes all settings and calibration. |
 
-Use one active operator browser for the ECU panel. The control loop remains
-independent of the web interface, but sustained parallel page downloads from
-many clients can exhaust the ESP32 network service and require an ECU reset.
+Use exactly one active browser tab for the ECU panel. This applies to both
+Classic ESP32 and ESP32-S3 targets. Close the old tab before opening the panel
+in another tab, window, browser, phone, or computer. The control loop remains
+independent of the web interface, but simultaneous dashboard clients can
+exhaust the ESP32 network service and require an ECU reset.
 
 ## External display or custom controller
 

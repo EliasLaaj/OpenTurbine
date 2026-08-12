@@ -7,9 +7,7 @@ Run after both firmware environments and their LittleFS images have been built:
     pio run -e esp32dev -t buildfs
     pio run -e esp32s3dev
     pio run -e esp32s3dev -t buildfs
-    python tools/build_setup_package.py --esptool C:\path\to\esptool.exe \
-        --cp210x-driver C:\path\to\extracted\CP210x_Windows_Drivers \
-        --ch340-driver C:\path\to\extracted\wch-serial-drivers
+    python tools/build_setup_package.py --esptool C:\path\to\esptool.exe
 
 The output ZIP is intentionally deterministic enough for release checks and is
 validated before it is written.
@@ -18,11 +16,14 @@ validated before it is written.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import json
 import re
 import shutil
+import subprocess
+import struct
 import sys
 import tempfile
 import zipfile
@@ -65,9 +66,72 @@ COMMON_FLASH = [
     ("0xe000", "boot_app0.bin"),
     ("0x10000", "firmware.bin"),
 ]
-PACKAGE_SCHEMA = 3
-SETUP_TOOL_VERSION = "0.6.2"
-MINIMUM_SETUP_TOOL_VERSION = "0.6.0"
+PACKAGE_SCHEMA = 4
+SETUP_TOOL_VERSION = "0.7.0"
+MINIMUM_SETUP_TOOL_VERSION = "0.7.0"
+ESPTOOL_VERSION = "5.3.0"
+
+
+def source_commit() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+def source_dirty() -> bool:
+    """Report source changes while ignoring generated local artifact output."""
+    try:
+        changed = subprocess.check_output(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=ROOT,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return True
+    for line in changed.splitlines():
+        path = line[3:].replace("\\", "/")
+        if not path.startswith("artifacts/"):
+            return True
+    return False
+
+
+def source_timestamp() -> str:
+    try:
+        value = subprocess.check_output(
+            ["git", "show", "-s", "--format=%cI", "HEAD"], cwd=ROOT, text=True
+        ).strip()
+        return datetime.fromisoformat(value).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return "1970-01-01T00:00:00Z"
+
+
+def image_metadata(path: Path, filename: str, target: str, version: str) -> dict:
+    data = path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    return {
+        "file": filename,
+        "target": target,
+        "bytes": len(data),
+        "sha256": digest,
+        "version": version,
+        "build_id": runtime_build_id(data) if filename == "firmware.bin" else "",
+        "source_commit": source_commit(),
+        "source_dirty": source_dirty(),
+    }
+
+
+def runtime_build_id(firmware: bytes) -> str:
+    # ESP application images place esp_app_desc_t at the start of segment 0
+    # (24-byte image header + 8-byte segment header). Its magic and embedded
+    # ELF SHA are the same values returned by /api/device_info at runtime.
+    app_desc = 32
+    elf_sha = app_desc + 144
+    if len(firmware) < elf_sha + 8 or struct.unpack_from("<I", firmware, app_desc)[0] != 0xABCD5432:
+        raise RuntimeError("firmware.bin does not contain a valid ESP application descriptor")
+    return firmware[elf_sha:elf_sha + 8].hex()
 
 
 def load_profile_tool():
@@ -121,6 +185,20 @@ def find_esptool(provided: str | None) -> Path | None:
     return None
 
 
+def verify_esptool(path: Path) -> None:
+    try:
+        result = subprocess.run(
+            [str(path), "version"], capture_output=True, text=True, timeout=30, check=True
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"esptool self-check failed: {exc}") from exc
+    output = result.stdout + result.stderr
+    if not re.search(rf"\b{re.escape(ESPTOOL_VERSION)}\b", output):
+        raise RuntimeError(
+            f"Expected standalone esptool {ESPTOOL_VERSION}; self-check reported: {output.strip()}"
+        )
+
+
 def partition_offset(csv_name: str, partition_name: str) -> str:
     path = ROOT / csv_name
     for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -153,40 +231,14 @@ def copy_required(src: Path, dst: Path, missing: list[str]) -> None:
         missing.append(str(src.relative_to(ROOT) if src.is_relative_to(ROOT) else src))
 
 
-def copy_driver_package(src: str | None, dst: Path, *, label: str) -> None:
-    if not src:
-        return
-    path = Path(src).expanduser()
-    if not path.exists():
-        raise RuntimeError(f"Driver package not found: {path}")
-    source_dir = path if path.is_dir() else path.parent
-    has_inf = any(source_dir.rglob("*.inf"))
-    has_cat = any(source_dir.rglob("*.cat"))
-    has_sys = any(source_dir.rglob("*.sys"))
-    if not has_inf:
-        raise RuntimeError(
-            f"{label} driver package {source_dir} has no .inf file. Pass the complete "
-            "extracted signed INF/CAT/SYS driver folder, not an installer EXE."
-        )
-    if not has_cat:
-        raise RuntimeError(
-            f"{label} driver package {source_dir} has no .cat signature file. Pass the "
-            "complete unmodified vendor driver package."
-        )
-    if not has_sys:
-        raise RuntimeError(
-            f"{label} driver package {source_dir} has no .sys driver payload. Pass the "
-            "complete unmodified vendor driver package."
-        )
-    shutil.copytree(source_dir, dst, dirs_exist_ok=True)
-
-
-def stage_package(stage: Path, esptool: Path, cp210x: str | None, ch340: str | None) -> dict:
+def stage_package(stage: Path, esptool: Path, esptool_license: Path | None = None) -> dict:
     missing: list[str] = []
     (stage / "tools").mkdir(parents=True, exist_ok=True)
     copy_required(esptool, stage / "tools" / "esptool.exe", missing)
-    copy_driver_package(cp210x, stage / "drivers" / "cp210x", label="CP210x")
-    copy_driver_package(ch340, stage / "drivers" / "wch", label="WCH")
+    license_path = esptool_license or (esptool.parent / "LICENSE")
+    copy_required(license_path, stage / "tools" / "esptool-LICENSE", missing)
+    copy_required(ROOT / "LICENSE", stage / "LICENSE", missing)
+    copy_required(ROOT / "THIRD_PARTY_NOTICES.md", stage / "THIRD_PARTY_NOTICES.md", missing)
 
     boot_app0 = find_boot_app0()
     if boot_app0 is None:
@@ -199,8 +251,59 @@ def stage_package(stage: Path, esptool: Path, cp210x: str | None, ch340: str | N
         "package_schema": PACKAGE_SCHEMA,
         "setup_tool_version": SETUP_TOOL_VERSION,
         "minimum_setup_tool_version": MINIMUM_SETUP_TOOL_VERSION,
+        "source_commit": source_commit(),
+        "source_dirty": source_dirty(),
+        "bundled_tools": {
+            "esptool": {
+                "version": ESPTOOL_VERSION,
+                "source": f"https://github.com/espressif/esptool/tree/v{ESPTOOL_VERSION}",
+                "license": "GPL-2.0-or-later",
+                "sha256": hashlib.sha256(esptool.read_bytes()).hexdigest(),
+            }
+        },
         "targets": {},
     }
+    commit = manifest["source_commit"]
+    sbom = {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": f"OpenTurbine-{manifest['version']}",
+        "documentNamespace": f"https://github.com/elia179/OpenTurbine/releases/spdx/{commit}",
+        "creationInfo": {
+            "created": source_timestamp(),
+            "creators": [f"Tool: OpenTurbine Setup package builder {SETUP_TOOL_VERSION}"],
+        },
+        "packages": [
+            {
+                "name": "OpenTurbine",
+                "SPDXID": "SPDXRef-Package-OpenTurbine",
+                "versionInfo": manifest["version"],
+                "downloadLocation": f"https://github.com/elia179/OpenTurbine/tree/{commit}",
+                "filesAnalyzed": False,
+                "licenseConcluded": "MIT",
+                "licenseDeclared": "MIT",
+            },
+            {
+                "name": "esptool",
+                "SPDXID": "SPDXRef-Package-esptool",
+                "versionInfo": ESPTOOL_VERSION,
+                "downloadLocation": f"https://github.com/espressif/esptool/tree/v{ESPTOOL_VERSION}",
+                "filesAnalyzed": False,
+                "licenseConcluded": "GPL-2.0-or-later",
+                "licenseDeclared": "GPL-2.0-or-later",
+                "checksums": [{
+                    "algorithm": "SHA256",
+                    "checksumValue": manifest["bundled_tools"]["esptool"]["sha256"],
+                }],
+            },
+        ],
+        "relationships": [
+            {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-OpenTurbine"},
+            {"spdxElementId": "SPDXRef-Package-OpenTurbine", "relationshipType": "CONTAINS", "relatedSpdxElement": "SPDXRef-Package-esptool"},
+        ],
+    }
+    (stage / "SBOM.spdx.json").write_text(json.dumps(sbom, indent=2) + "\n", encoding="utf-8")
     profile_tool = load_profile_tool()
     for target_file in sorted((ROOT / "pcb_profiles" / "targets").glob("*.json")):
         copy_required(target_file, stage / "pcb_profiles" / "targets" / target_file.name, missing)
@@ -237,9 +340,15 @@ def stage_package(stage: Path, esptool: Path, cp210x: str | None, ch340: str | N
                 f"({app_partition_bytes - firmware_bytes} bytes free)",
                 file=sys.stderr,
             )
-        usb_flash = [{"address": meta["bootloader_address"], "file": "bootloader.bin"}]
-        usb_flash.extend({"address": address, "file": filename} for address, filename in COMMON_FLASH)
-        usb_flash.append({"address": littlefs_address, "file": "littlefs.bin"})
+        version = manifest["version"]
+        flash_layout = [(meta["bootloader_address"], "bootloader.bin"), *COMMON_FLASH,
+                        (littlefs_address, "littlefs.bin")]
+        usb_flash = []
+        for address, filename in flash_layout:
+            entry = {"address": address}
+            entry.update(image_metadata(env_stage / filename, filename, env, version))
+            usb_flash.append(entry)
+        firmware_digest = hashlib.sha256((env_stage / "firmware.bin").read_bytes()).hexdigest()
         official_profiles = []
         expected_profile_chip = "esp32-s3" if env == "esp32s3dev" else "esp32"
         for source in sorted((ROOT / "pcb_profiles" / "official").glob("*.otpcb.json")):
@@ -264,6 +373,8 @@ def stage_package(stage: Path, esptool: Path, cp210x: str | None, ch340: str | N
             "chip": meta["chip"],
             "firmware_ota": "firmware.bin",
             "firmware_bytes": firmware_bytes,
+            "firmware_sha256": firmware_digest,
+            "build_id": runtime_build_id((env_stage / "firmware.bin").read_bytes()),
             "app_partition_bytes": app_partition_bytes,
             "web_assets": "web_assets",
             "usb_flash": usb_flash,
@@ -303,13 +414,7 @@ def write_sha256(output: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--esptool", help="Path to the Windows esptool.exe to bundle.")
-    parser.add_argument("--cp210x-driver", help="Extracted Silicon Labs CP210x driver folder (or a file inside it).")
-    parser.add_argument("--ch340-driver", help="Extracted WCH CH340 driver folder (or a file inside it).")
-    parser.add_argument(
-        "--allow-missing-drivers",
-        action="store_true",
-        help="Build without one or both driver packages (development only; do not use for releases).",
-    )
+    parser.add_argument("--esptool-license", help="Path to the matching esptool GPL license file.")
     parser.add_argument(
         "--output",
         default=str(ROOT / "dist" / "setup_tool" / "OpenTurbine_Recommended.zip"),
@@ -321,18 +426,20 @@ def main() -> int:
     if esptool is None:
         print("error: esptool.exe was not found; pass --esptool C:\\path\\to\\esptool.exe", file=sys.stderr)
         return 2
-    if not args.allow_missing_drivers and (not args.cp210x_driver or not args.ch340_driver):
-        print(
-            "error: release packages require both --cp210x-driver and --ch340-driver; "
-            "use --allow-missing-drivers only for local development",
-            file=sys.stderr,
-        )
+    try:
+        verify_esptool(esptool)
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    esptool_license = Path(args.esptool_license).resolve() if args.esptool_license else None
+    if esptool_license is not None and not esptool_license.is_file():
+        print(f"error: esptool license was not found: {esptool_license}", file=sys.stderr)
         return 2
 
     output = Path(args.output).resolve()
     with tempfile.TemporaryDirectory(prefix="openturbine_setup_") as tmp:
         stage = Path(tmp)
-        manifest = stage_package(stage, esptool, args.cp210x_driver, args.ch340_driver)
+        manifest = stage_package(stage, esptool, esptool_license)
         write_zip(stage, output)
     sha_path = write_sha256(output)
 

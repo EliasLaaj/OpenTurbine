@@ -3,7 +3,7 @@
 Compress web assets from data_src/ into data/ as .gz files.
 Run this after editing any HTML/JS/CSS file, then do: pio run -t uploadfs
 """
-import gzip, os
+import gzip, hashlib, os
 
 from build_web_sources import main as build_web_sources
 
@@ -11,6 +11,11 @@ SRC = os.path.join(os.path.dirname(__file__), "..", "data_src")
 DST = os.path.join(os.path.dirname(__file__), "..", "data")
 
 EXTS = {".html", ".js", ".css"}
+WEB_ASSETS = [
+    "app.js.gz", "calibration.html.gz", "config.html.gz", "hardware.html.gz",
+    "index.html.gz", "log.html.gz", "sequence.html.gz", "style.css.gz",
+    "tools.html.gz", "theme.js.gz", "ui_dialog.js.gz",
+]
 
 build_web_sources()
 
@@ -34,5 +39,16 @@ for fname in os.listdir(SRC):
     src_kb = os.path.getsize(src_path) / 1024
     dst_kb = os.path.getsize(dst_path) / 1024
     print(f"  {fname}: {src_kb:.0f}KB -> {dst_kb:.0f}KB gz")
+
+digest = hashlib.sha256()
+for fname in WEB_ASSETS:
+    digest.update(fname.encode("utf-8"))
+    with open(os.path.join(DST, fname), "rb") as asset:
+        for chunk in iter(lambda: asset.read(65536), b""):
+            digest.update(chunk)
+marker_tmp = os.path.join(DST, ".assets_complete.tmp")
+with open(marker_tmp, "w", encoding="ascii", newline="\n") as marker:
+    marker.write(digest.hexdigest() + "\n")
+os.replace(marker_tmp, os.path.join(DST, ".assets_complete"))
 
 print("Done. Flash with uploadfs once, or choose all generated data/*.gz files in Tools > Web UI Assets Update.")

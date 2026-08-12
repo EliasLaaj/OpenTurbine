@@ -48,6 +48,45 @@ class PcbProfileValidationTests(unittest.TestCase):
         ):
             pcb_profile.validate_profile(profile, strict=True)
 
+    def test_compatible_non_switch_default_is_accepted(self):
+        profile = copy.deepcopy(self.official)
+        mode = next(port for port in profile["ports"] if port["id"] == "adc_1")["modes"][0]
+        mode["default"] = {
+            "id": "oil_pressure_main", "name": "Oil Pressure",
+            "role": "pressure", "purpose": "oil_pressure",
+        }
+        self.assertEqual([], pcb_profile.validate_profile(profile, strict=True))
+
+    def test_incompatible_default_is_rejected_before_flash(self):
+        profile = copy.deepcopy(self.official)
+        mode = next(port for port in profile["ports"] if port["id"] == "power_output_1")["modes"][0]
+        mode["default"] = {
+            "id": "main_fuel", "name": "Main Fuel",
+            "role": "fuel", "purpose": "main_fuel",
+        }
+        with self.assertRaisesRegex(pcb_profile.ProfileError, "incompatible with adapter"):
+            pcb_profile.validate_profile(profile, strict=True)
+
+    def test_extended_profile_purposes_follow_runtime_contract(self):
+        self.assertTrue(pcb_profile._default_compatible(
+            "i2c_adc_input", "oil_flow", "flow"))
+        self.assertTrue(pcb_profile._default_compatible(
+            "i2c_adc_input", "scavenge_flow", "flow"))
+        self.assertTrue(pcb_profile._default_compatible(
+            "i2c_digital_output", "drain_valve", "valve"))
+        self.assertFalse(pcb_profile._default_compatible(
+            "spi_thermocouple", "coolant_temp", "temperature"))
+        self.assertTrue(pcb_profile._default_compatible(
+            "onewire_temperature", "intake_temperature", "temperature"))
+        self.assertFalse(pcb_profile._default_compatible(
+            "i2c_load_cell", "oil_pressure", "pressure"))
+        self.assertFalse(pcb_profile._default_compatible(
+            "relay_output", "main_fuel", "fuel"))
+        self.assertTrue(pcb_profile._default_compatible(
+            "analog_input", "generic", "pressure"))
+        self.assertFalse(pcb_profile._default_compatible(
+            "i2c_load_cell", "generic", "pressure"))
+
 
 if __name__ == "__main__":
     unittest.main()

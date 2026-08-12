@@ -190,13 +190,13 @@ function ignitionTargets() {
   const a = hwCfg.actuators || {};
   const out = [];
   if (actuatorEnabled('igniter')) out.push({v:0, l:'Igniter 1', info: a.igniter?.coil ? 'coil igniter' : (a.igniter?.pwm ? 'PWM igniter' : 'relay igniter')});
-  if (actuatorEnabled('igniter2')) out.push({v:1, l:'AB / Pilot Igniter', info: a.igniter2?.coil ? 'coil igniter' : (a.igniter2?.pwm ? 'PWM igniter' : 'relay igniter')});
+  if (actuatorEnabled('igniter2')) out.push({v:1, l:'Secondary Igniter', info: a.igniter2?.coil ? 'coil igniter' : (a.igniter2?.pwm ? 'PWM igniter' : 'relay igniter')});
   if (actuatorEnabled('glow_plug')) {
     const glow = a.glow_plug || {};
     const wet = Number(glow.type || 0) === 2;
     const delayS = ((glow.fuel_delay_ms ?? 8000) / 1000).toFixed(1);
     out.push({v:2, l: wet ? 'Wet glow plug' : 'Glow plug',
-      info: wet ? `wet glow plug, pilot fuel starts ${delayS} s after ON` : 'glow plug'});
+      info: wet ? `wet glow plug, start fuel starts ${delayS} s after ON` : 'glow plug'});
   }
   return out.length ? out : [{v:0, l:'Igniter 1', info:'ignition output is not configured'}];
 }
@@ -222,7 +222,7 @@ function wetGlowTimingWarning(bname, idx, tab, target) {
   if (waitMs >= delayMs) return '';
   const delayS = (delayMs / 1000).toFixed(delayMs % 1000 ? 1 : 0);
   const waitS = (waitMs / 1000).toFixed(waitMs % 1000 ? 1 : 0);
-  return `<span class="param-desc" style="display:block;font-size:.65rem;color:var(--yellow);line-height:1.35;margin-top:.22rem">Wet glow pilot fuel delay is ${delayS} s, but the next fuel/confirmation step is about ${waitS} s away. Add delay or increase Pre-Heat time if pilot fuel must be burning first.</span>`;
+  return `<span class="param-desc" style="display:block;font-size:.65rem;color:var(--yellow);line-height:1.35;margin-top:.22rem">Wet glow start fuel delay is ${delayS} s, but the next fuel/confirmation step is about ${waitS} s away. Add delay or increase Pre-Heat time if start fuel must be burning first.</span>`;
 }
 
 function buildIgnitionTargetHtml(bname, idx, tab) {
@@ -515,8 +515,11 @@ function registryChannelInstalled(channel) {
   if (!channel || channel.installed === false) return false;
   const driver = Number(channel.driver);
   if (driver >= 8 && driver <= 11) {
-    return Number(channel.i2c_address) >= 0x08 && Number(channel.i2c_address) <= 0x77 &&
-      Number(channel.device_channel) >= 0;
+    const address = Number(channel.i2c_address);
+    const validAddress = driver === 10 ? address === 0x2A
+      : (driver === 8 || driver === 11) ? address >= 0x20 && address <= 0x27
+      : driver === 9 && address >= 0x10 && address <= 0x17;
+    return validAddress && Number(channel.device_channel) >= 0;
   }
   const tempInterface = Number(channel.temp_interface || 0);
   if (tempInterface >= 1 && tempInterface <= 3) {
@@ -567,7 +570,7 @@ function getEnabledSensors() {
   });
   if (registryInputPurpose('ab_flame'))
                                   list.push({key:'ab_flame',   label:'AB Flame',         unit:'',     def:1,    bool:true});
-  if ((hw.ab_trigger?.input_pin ?? -1) >= 0)
+  if ((hw.ab_trigger?.input_pin ?? -1) >= 0 || registryInputPurpose('ab_command'))
                                   list.push({key:'ab_input',   label:'AB Input',         unit:'%',    def:50,   step:1});
   const a = hw.actuators || {};
   if (registryOutputPurpose('glow_plug') && a.glow_plug?.has_current)
@@ -575,15 +578,15 @@ function getEnabledSensors() {
   if (registryOutputPurpose('igniter') && a.igniter?.has_current)
                                   list.push({key:'igniter_current', label:'Igniter 1 Current', unit:'A', def:1, step:0.1});
   if (registryOutputPurpose('ab_igniter') && a.igniter2?.has_current)
-                                  list.push({key:'igniter2_current', label:'AB / Pilot Igniter Current', unit:'A', def:1, step:0.1});
+                                  list.push({key:'igniter2_current', label:'Secondary Igniter Current', unit:'A', def:1, step:0.1});
   if (registryOutputPurpose('oil_pump') && a.oil_pump?.has_current)
                                   list.push({key:'oil_pump_current', label:'Oil Pump Current', unit:'A', def:1, step:0.1});
-  if ((hw.controls?.start_pin ?? -1) >= 0)
+  if ((hw.controls?.start_pin ?? -1) >= 0 || registryInputPurpose('start_switch'))
                                   list.push({key:'start_switch', label:'Start Switch',   unit:'',     def:1,    bool:true});
-  if ((hw.controls?.stop_pin ?? -1) >= 0)
+  if ((hw.controls?.stop_pin ?? -1) >= 0 || registryInputPurpose('stop_switch'))
                                   list.push({key:'stop_switch',  label:'Stop Switch',    unit:'',     def:1,    bool:true});
   (hw.channel_registry?.inputs || []).forEach((c, i) => {
-    if (!c || c.installed === false || (c.pin ?? -1) < 0) return;
+    if (!registryChannelInstalled(c)) return;
     if (registryInputCoreBound(c)) return;
     const role = String(c.role || '');
     const binary = Number(c.driver) === 0 || ['digital_switch','fault','estop','inhibit_start','sequence_gate','ab_arm','ab_fire','limp_mode','flame'].includes(role);
@@ -602,7 +605,7 @@ function getEnabledActuators() {
   const demandLabel = (act, pctLabel, relayLabel) => isOnOff(act) ? relayLabel : pctLabel;
   const effectiveAct = (fallbackActuator, purpose) => {
     const registry = registryOutputPurpose(purpose);
-    return registry ? { ...fallbackActuator, enabled:true, type: Number(registry.driver) === 4 ? 2 : (Number(registry.driver) === 5 ? 1 : 0) } : null;
+    return registry ? { ...fallbackActuator, enabled:true, type: [4,11].includes(Number(registry.driver)) ? 2 : (Number(registry.driver) === 5 ? 1 : 0) } : null;
   };
   const throttleAct = effectiveAct(a.throttle, 'main_fuel');
   const starterAct = effectiveAct(a.starter, 'starter');
@@ -615,22 +618,22 @@ function getEnabledActuators() {
   if (oilPumpAct) list.push({key:'oil_pump', label:demandLabel(oilPumpAct, 'Oil Pump %', 'Oil Pump Relay'), mode: isOnOff(oilPumpAct) ? 'relay':'pct'});
   if (registryOutputPurpose('fuel_shutoff')) list.push({key:'fuel_sol', label:'Main Fuel Shutoff', mode:'relay'});
   if (registryOutputPurpose('igniter')) list.push({key:'igniter', label:'Igniter 1', mode:'relay'});
-  if (registryOutputPurpose('ab_igniter')) list.push({key:'igniter2', label:hasAB ? 'Afterburner Igniter' : 'AB / Pilot Igniter', mode:'relay'});
+  if (registryOutputPurpose('ab_igniter')) list.push({key:'igniter2', label:hasAB ? 'Afterburner Igniter' : 'Secondary Igniter', mode:'relay'});
   if (registryOutputPurpose('air_starter')) list.push({key:'airstarter_sol', label:'Air Starter Valve', mode:'relay'});
   if (registryOutputPurpose('cooling_fan')) list.push({key:'cool_fan', label:'Cooling Fan', mode:'relay'});
   if (registryOutputPurpose('scavenge_pump')) list.push({key:'oil_scavenge_pump', label:'Oil Scavenge Pump', mode:'relay'});
   if (registryOutputPurpose('bleed_valve') || registryOutputPurpose('valve')?.id === 'bleed_valve') list.push({key:'bleed_valve', label:'Bleed Valve', mode:'relay'});
-  if (registryOutputPurpose('glow_plug')) list.push({key:'glow_plug', label:Number(registryOutputPurpose('glow_plug').driver) === 4 ? 'Glow Plug Relay' : 'Glow Plug %', mode:Number(registryOutputPurpose('glow_plug').driver) === 4 ? 'relay':'pct'});
+  if (registryOutputPurpose('glow_plug')) list.push({key:'glow_plug', label:actuatorIsRelay('glow_plug') ? 'Glow Plug Relay' : 'Glow Plug %', mode:actuatorIsRelay('glow_plug') ? 'relay':'pct'});
   const fuelPump2Act = effectiveAct(a.fuel_pump2, 'fuel_pump');
-  if (fuelPump2Act) list.push({key:'fuel_pump2', label:demandLabel(fuelPump2Act, 'Pilot / Auxiliary Fuel Pump %', 'Pilot / Auxiliary Fuel Pump Relay'), mode:isOnOff(fuelPump2Act) ? 'relay':'pct'});
+  if (fuelPump2Act) list.push({key:'fuel_pump2', label:demandLabel(fuelPump2Act, 'Secondary / Auxiliary Fuel Pump %', 'Secondary / Auxiliary Fuel Pump Relay'), mode:isOnOff(fuelPump2Act) ? 'relay':'pct'});
   if (propPitchAct) list.push({key:'prop_pitch', label:demandLabel(propPitchAct, 'Prop Pitch %', 'Prop Pitch Relay'), mode: isOnOff(propPitchAct) ? 'relay':'pct'});
   // AB outputs
   if (hasAB && registryOutputPurpose('ab_valve')) list.push({key:'ab_sol', label:'Afterburner Fuel Valve', mode:'relay'});
   const abPumpAct = effectiveAct(a.ab_pump, 'ab_pump');
   if (hasAB && abPumpAct) list.push({key:'ab_pump', label:demandLabel(abPumpAct, 'AB Fuel Pump %', 'AB Fuel Pump Relay'), mode:isOnOff(abPumpAct) ? 'relay':'pct'});
   (hwCfg.channel_registry?.outputs || []).forEach((c, i) => {
-    if (!c || c.installed === false || (c.pin ?? -1) < 0 || registryOutputCoreBound(c)) return;
-    const relay = Number(c.driver) === 4;
+    if (!registryChannelInstalled(c) || registryOutputCoreBound(c)) return;
+    const relay = [4,11].includes(Number(c.driver));
     list.push({key:c.id, target:c.id, label:registryLabel(c, `Output ${i+1}`) + (relay ? '' : ' %'), mode:relay ? 'relay':'pct'});
   });
   return list;

@@ -215,11 +215,20 @@ bool hasIgniter2Current() { return HardwareConfig::hasIgniter2CurrentSensor; }
 bool hasOilPumpCurrent() { return HardwareConfig::hasOilPumpCurrentSensor; }
 bool hasThrottleInput() { return HardwareConfig::hasThrottleInput; }
 bool hasIdleInput() { return HardwareConfig::hasIdleInput; }
+bool hasRegistryAbCommand() {
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i) {
+        const auto& input = HardwareConfig::channelRegistry.inputs[i];
+        if (!strcmp(input.purpose, "ab_command") &&
+            ChannelRegistry::channelAddressable(input)) return true;
+    }
+    return false;
+}
 // AB input is live when it is the trigger source OR the pump command source
 // (Config::abPumpControlMode == 2) — matching Hardware::updateSensors' gate,
 // so a cluster can always see the signal the operator is modulating with.
 bool hasAbInput() {
-    return HardwareConfig::hasAfterburner && HardwareConfig::abInputPin >= 0 &&
+    return HardwareConfig::hasAfterburner &&
+           (HardwareConfig::abInputPin >= 0 || hasRegistryAbCommand()) &&
            (HardwareConfig::abTriggerSource == 3 || Config::abPumpControlMode == 2);
 }
 bool hasDI1() { return HardwareConfig::diCh[0].pin >= 0; }
@@ -315,7 +324,7 @@ static const FieldDef FIELDS[] = {
     { F_THROTTLE_PCT,   U_PERCENT, 1, "THROTTLE_PCT",   "Main fuel pct",  hasThrottle,    rThrottle,         true },
     { F_STARTER_PCT,    U_PERCENT, 1, "STARTER_PCT",    "Starter pct",    hasStarter,     rStarter,          true },
     { F_OIL_PUMP_PCT,   U_PERCENT, 1, "OIL_PUMP_PCT",   "Oil pump pct",   hasOilPump,     rOilPump,          true },
-    { F_FUEL_PUMP2_PCT, U_PERCENT, 1, "FUEL_PUMP2_PCT", "Pilot/aux fuel pump pct", hasFuelPump2,   rFuelPump2,        true },
+    { F_FUEL_PUMP2_PCT, U_PERCENT, 1, "FUEL_PUMP2_PCT", "Secondary/aux fuel pump pct", hasFuelPump2,   rFuelPump2,        true },
     { F_AB_PUMP_PCT,    U_PERCENT, 1, "AB_PUMP_PCT",    "AB pump pct",    hasAbPump,      rAbPump,           true },
     { F_PROP_PITCH_PCT, U_PERCENT, 1, "PROP_PITCH_PCT", "Prop pitch pct", hasPropPitch,   rPropPitch,        true },
     { F_GLOW_PCT,       U_PERCENT, 1, "GLOW_PCT",       "Glow pct",       hasGlow,        rGlow,             true },
@@ -325,7 +334,7 @@ static const FieldDef FIELDS[] = {
     { F_OIL_TARGET_BAR, U_BAR,     2, "OIL_TARGET_BAR", "Oil target",     hasOilPump,     rOilTarget,        false },
     { F_FUEL_SOL,       U_BOOL,    0, "FUEL_SOL",       "Main fuel shutoff", hasFuelSol,   rFuelSol,           false },
     { F_IGNITER1,       U_BOOL,    0, "IGNITER1",       "Igniter 1",      hasIgniter,     rIgniter1,         false },
-    { F_IGNITER2,       U_BOOL,    0, "IGNITER2",       "AB / pilot igniter", hasIgniter2, rIgniter2,         false },
+    { F_IGNITER2,       U_BOOL,    0, "IGNITER2",       "secondary igniter", hasIgniter2, rIgniter2,         false },
     { F_STARTER_ENABLE, U_BOOL,    0, "STARTER_ENABLE", "Starter enable", hasStarterEn,   rStarterEnable,    false },
     { F_COOL_FAN,       U_BOOL,    0, "COOL_FAN",       "Cool fan",       hasCoolFan,     rCoolFan,          false },
     { F_AIRSTARTER,     U_BOOL,    0, "AIRSTARTER",     "Air starter valve", hasAirstarter, rAirstarter,      false },

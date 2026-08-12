@@ -1,8 +1,9 @@
 """HTTP client for the OpenTurbine DUT (ESP32-S3) web API.
 
-Uses only the Python standard library. Telemetry is read by polling
-/api/data, which carries the full EngineData snapshot (mode, sensor values,
-actuator demands, sequence progress, health flags, bench/dev mode, ...).
+Uses only the Python standard library. A full /api/data snapshot seeds static
+fields, then the compact /api/telemetry endpoint supplies live values. This
+matches the real UI and avoids repeatedly allocating and transferring the
+largest ECU JSON document during long HIL campaigns.
 """
 
 import http.client
@@ -16,13 +17,23 @@ import urllib.request
 
 
 class DUT:
-    def __init__(self, base="http://192.168.4.1", timeout=4.0):
+    def __init__(self, base=None, timeout=4.0):
+        base = base or os.environ.get("OTBENCH_DUT", "http://192.168.4.1")
         self.base = base.rstrip("/")
         self.timeout = timeout
+        self._data_base = None
+        self._last_wifi_reconnect = 0.0
 
     def _reconnect_wifi(self):
         if os.name != "nt":
             return
+        # A netsh connect issued while Windows is already associating tears
+        # down that attempt and starts over. Throttle recovery requests so API
+        # retry loops cannot keep the adapter permanently disconnected.
+        now = time.monotonic()
+        if now - self._last_wifi_reconnect < 60.0:
+            return
+        self._last_wifi_reconnect = now
         try:
             subprocess.run(
                 ["netsh", "wlan", "connect", "name=OpenTurbine", "ssid=OpenTurbine", "interface=Wi-Fi"],
@@ -53,15 +64,19 @@ class DUT:
                     or "ECU is busy" in body
                 )
                 if not retryable or i + 1 >= tries:
+                    # HTTPError is also the response stream. Preserve the body
+                    # before re-raising; otherwise _body() sees an exhausted
+                    # stream and hides the ECU's useful validation reason.
+                    e.otbench_body = body
                     raise
                 last = e
                 time.sleep(0.35)
             except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as e:
                 last = e
-                if i >= 1:
-                    self._reconnect_wifi()
-                else:
-                    time.sleep(0.4)
+                # A transport retry must not tear down a healthy/associating
+                # WLAN link. Reboot-aware campaign guards explicitly request
+                # host reconnection after they have observed the AP outage.
+                time.sleep(0.4)
         raise last
 
     def _get(self, path):
@@ -75,7 +90,9 @@ class DUT:
                 with self._open_retry(req) as r:
                     body = r.read().decode("utf-8")
                 return json.loads(body)
-            except (http.client.IncompleteRead, json.JSONDecodeError) as e:
+            except (http.client.IncompleteRead, json.JSONDecodeError,
+                    socket.timeout, TimeoutError, urllib.error.URLError,
+                    ConnectionError) as e:
                 last = e
                 time.sleep(0.3)
         raise last
@@ -103,7 +120,9 @@ class DUT:
                     parsed = {"ok": True, "transport_warning": "non-JSON success body"}
                 return r.status, parsed
         except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")
+            body = getattr(e, "otbench_body", None)
+            if body is None:
+                body = e.read().decode("utf-8", errors="replace")
             try:
                 parsed = json.loads(body)
             except json.JSONDecodeError:
@@ -111,17 +130,44 @@ class DUT:
             return e.code, parsed
 
     def _post(self, path, obj=None):
-        return self._body(path, obj, "POST")
+        result = self._body(path, obj, "POST")
+        if 200 <= result[0] < 300 and path in self._configuration_paths():
+            self._data_base = None
+        return result
 
     def patch(self, path, obj):
-        return self._body(path, obj, "PATCH")
+        result = self._body(path, obj, "PATCH")
+        if 200 <= result[0] < 300 and path in self._configuration_paths():
+            self._data_base = None
+        return result
+
+    @staticmethod
+    def _configuration_paths():
+        return {"/api/config", "/api/hardware", "/api/ecu_config"}
 
     # ── endpoints ────────────────────────────────────────────
     def data(self):
-        return self._get("/api/data")
+        if self._data_base is None:
+            self._data_base = self._get("/api/data")
+            return dict(self._data_base)
+
+        telemetry = self._get("/api/telemetry")
+        old_boot = self._data_base.get("boot_count")
+        new_boot = telemetry.get("boot_count")
+        if old_boot is not None and new_boot is not None and old_boot != new_boot:
+            self._data_base = self._get("/api/data")
+            return dict(self._data_base)
+
+        merged = dict(self._data_base)
+        merged.update(telemetry)
+        return merged
 
     def status(self):
         return self._get("/api/status")
+
+    def device_info(self):
+        """Return the small, allocation-light device identity document."""
+        return self._get("/api/device_info")
 
     def hardware(self):
         return self._get("/api/hardware")
@@ -151,7 +197,7 @@ class DUT:
             return False, str(e)
 
     def poll_until(self, predicate, timeout=5.0, interval=0.15):
-        """Poll /api/data until predicate(data) is truthy or timeout.
+        """Poll compact live telemetry until predicate(data) is truthy or timeout.
         Transient transport or JSON failures are treated as a missed sample;
         the caller's full timeout remains authoritative. Returns
         (ok, last_successful_data)."""

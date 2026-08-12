@@ -346,7 +346,7 @@ function enumNames(source, marker) {
       /else if \(!EngineData::instance\(\)\.configLocked\) \{[\s\S]*Settings missing from ecu_config\.json - adding defaults/,
       'a missing required PCB assignment must not block creation of default settings');
     assert.match(configSourceCpp, /return fmaxf\(relightMinRpm, minRpm\)/);
-    assert.match(mainSource, /Relight timeout is 0 - igniter can stay active indefinitely during a failed relight attempt", false/);
+    assert.match(mainSource, /Relight timeout is 0 - the ECU will use its hardcoded 30 second maximum", false/);
     assert.match(mainSource, /START blocked: actuator tool active/);
     assert.match(mainSource, /Cannot start: an actuator test or prime tool is still active/);
     assert.match(mainSource, /auto checkAbActuatorBlockHardware = \[\&\]\(const char\* nm\)/);
@@ -424,12 +424,12 @@ function enumNames(source, marker) {
     assert.doesNotMatch(indexHtml, /20260612b|20260617b|20260619a|20260625a|20260705a|Primary thermal limit/);
     assert.doesNotMatch(indexHtml, />Not saved<|No calibration saved|No successful test recorded/);
     assert.match(indexHtml, /Run a safe actuator or dry-sequence test/);
-    assert.match(indexHtml, /20260731a/);
+    assert.match(indexHtml, /20260811f/);
     for (const pageName of ['index.html', 'hardware.html', 'config.html', 'calibration.html', 'sequence.html', 'log.html', 'tools.html']) {
       const pageSource = fs.readFileSync(path.join('data_src', pageName), 'utf8');
       const sharedRefs = [...pageSource.matchAll(/\/(?:style\.css|app\.js|theme\.js|ui_dialog\.js)\?v=([^"'&]+)/g)];
       assert.ok(sharedRefs.length > 0, `${pageName} must version its shared assets`);
-      assert.ok(sharedRefs.every(match => match[1] === '20260731a'), `${pageName} has a stale shared-asset cache key`);
+      assert.ok(sharedRefs.every(match => match[1] === '20260811f'), `${pageName} has a stale shared-asset cache key`);
     }
     assert.match(indexHtml, /<body data-page="dashboard">/);
     assert.match(indexHtml, /id="profile-mismatch-banner" style="display:none"/);

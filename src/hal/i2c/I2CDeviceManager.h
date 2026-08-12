@@ -1,4 +1,6 @@
 #pragma once
+#include "LossRecheck.h"
+#include "../AdcThreshold.h"
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -16,7 +18,9 @@ public:
         uint8_t address;
         Type type;
         bool present;
+        bool lossActive;
         uint32_t lastSeenMs;
+        uint32_t lossSinceMs;
         uint16_t errors;
     };
     static constexpr uint8_t MAX_DEVICES = 17;
@@ -26,6 +30,11 @@ public:
                       const ChannelRegistry& registry) {
         _enabled = enabled && sda >= 0 && scl >= 0 && sda != scl;
         _registry = &registry;
+        for (uint8_t i = 0; i < registry.inputCount; ++i) {
+            _adcDigitalState[i] = !registry.inputs[i].activeHigh;
+            _adcConfig[i] = _adcConfigKey(registry.inputs[i]);
+            _adcDigitalChannel[i] = ChannelRegistry::isSwitchCondition(registry.inputs[i]);
+        }
         if (!_enabled) return;
         Wire.begin(sda, scl, constrain(frequency, 10000U, 400000U));
         // The I2C manager runs from the control loop. The framework default is
@@ -106,6 +115,11 @@ public:
         if (ok) {
             latch = nextLatch;
             _tcaVerifiedTick[deviceIndex] = nowTick;
+            // A successful heartbeat inside the 500 ms grace period fully
+            // recovers the device. Leaving lossSinceMs armed here would make a
+            // later, unrelated bus glitch fail immediately instead of receiving
+            // its own recheck window.
+            _record(c.i2cAddress, Tca9554, true);
         }
         if (!ok) _markMissing(c.i2cAddress, Tca9554);
         return ok;
@@ -113,6 +127,11 @@ public:
 
     static bool channelAvailable(const ChannelRegistry::Channel& c) {
         return _enabled && _present(c.i2cAddress, _typeForDriver(c.driver));
+    }
+
+    static bool channelRechecking(const ChannelRegistry::Channel& c) {
+        const Device* d = _find(c.i2cAddress, _typeForDriver(c.driver));
+        return d && d->present && d->lossActive;
     }
 
     static bool assignmentAvailable(uint8_t driver, uint8_t address) {
@@ -147,6 +166,8 @@ private:
     inline static uint32_t _sampleMs[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
     inline static bool _valid[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
     inline static bool _adcDigitalState[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
+    inline static uint16_t _adcConfig[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
+    inline static bool _adcDigitalChannel[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
     inline static uint8_t _tcaLatch[8] = {};
     inline static uint8_t _tcaDirection[8] = {255,255,255,255,255,255,255,255};
     inline static uint16_t _tcaVerifiedTick[8] = {};
@@ -155,6 +176,7 @@ private:
     inline static uint8_t _nauSelectedChannel = 255;
     inline static uint8_t _nauPendingRegistryIndex = 255;
     inline static uint32_t _nauInitMs = 0;
+    inline static uint32_t _nauFailureLogMs = 0;
     inline static bool _needsConfigure = false;
     // 16 ms ticks keep eight device timestamps in 16 bytes on the
     // static-DRAM-constrained Classic ESP32. Unsigned subtraction remains
@@ -168,27 +190,15 @@ private:
         return Unknown;
     }
 
-    static bool _isAdcDigital(const ChannelRegistry::Channel& c) {
-        if (c.driver != ChannelRegistry::I2cAnalog) return false;
-        const char* purpose = c.purpose;
-        return !strcmp(c.role, "digital_switch") ||
-               !strcmp(c.role, "fault") || !strcmp(c.role, "estop") ||
-               !strcmp(c.role, "inhibit_start") ||
-               !strcmp(c.role, "low_oil_switch") ||
-               !strcmp(c.role, "oil_zero_switch") ||
-               !strcmp(c.role, "sequence_gate") ||
-               !strcmp(c.role, "ab_arm") || !strcmp(c.role, "ab_fire") ||
-               !strcmp(c.role, "limp_mode") ||
-               !strcmp(purpose, "start_switch") ||
-               !strcmp(purpose, "stop_switch") ||
-               !strcmp(purpose, "digital_switch") ||
-               !strcmp(purpose, "inhibit_start") ||
-               !strcmp(purpose, "estop") || !strcmp(purpose, "fault") ||
-               !strcmp(purpose, "low_oil_switch") ||
-               !strcmp(purpose, "oil_zero_switch") ||
-               !strcmp(purpose, "sequence_gate") ||
-               !strcmp(purpose, "ab_arm") || !strcmp(purpose, "ab_fire") ||
-               !strcmp(purpose, "limp_mode");
+    static void _logNauFailure(const char* message) {
+        const uint32_t now = millis();
+        if (_nauFailureLogMs && now - _nauFailureLogMs < 1000UL) return;
+        _nauFailureLogMs = now;
+        Serial.println(message);
+    }
+
+    static uint16_t _adcConfigKey(const ChannelRegistry::Channel& c) {
+        return (uint16_t)(c.digitalThresholdRaw | (c.activeHigh ? 0x8000U : 0U));
     }
 
     static uint32_t _staleMs(const ChannelRegistry::Channel& c) {
@@ -261,20 +271,38 @@ private:
         }
         if (!d) return;
         const bool wasPresent = d->present;
-        d->present = present;
         if (present) {
+            if (d->lossActive)
+                Serial.printf("[I2C] 0x%02X recovered inside 500 ms recheck window\n", address);
+            d->present = true;
             d->lastSeenMs = millis();
+            d->lossSinceMs = 0;
+            d->lossActive = false;
             if (!wasPresent) _needsConfigure = true;
         } else if (wasPresent) {
-            d->errors++;
-            if (type == Nau7802) _nauConfigured = false;
+            if (!d->lossActive) {
+                d->lossSinceMs = millis();
+                d->lossActive = true;
+                ++d->errors;
+            }
+            if (LossRecheck::expired(millis(), d->lossSinceMs, d->lossActive)) {
+                d->present = false;
+                if (type == Nau7802) _nauConfigured = false;
+            }
         }
     }
 
     static void _markMissing(uint8_t address, Type type) {
         Device* d = _findMutable(address, type);
         if (!d) return;
-        if (d->present) ++d->errors;
+        if (d->present) {
+            if (!d->lossActive) {
+                d->lossSinceMs = millis();
+                d->lossActive = true;
+                ++d->errors;
+            }
+            if (!LossRecheck::expired(millis(), d->lossSinceMs, d->lossActive)) return;
+        }
         d->present = false;
         if (type == Nau7802) {
             _nauConfigured = false;
@@ -494,18 +522,23 @@ private:
                 raw = (((uint16_t)Wire.read() << 8) | Wire.read()) >> 4;
                 const float mv = raw * c.i2cReferenceMv / 4095.0f;
                 float physical = 0.0f;
-                if (_isAdcDigital(c)) {
-                    const int halfBand = c.digitalHysteresisRaw / 2;
-                    const int switchOn = min(4095, (int)c.digitalThresholdRaw + halfBand);
-                    const int switchOff = max(0, (int)c.digitalThresholdRaw - halfBand);
-                    if (_adcDigitalState[i]) {
-                        if (raw <= switchOff) _adcDigitalState[i] = false;
-                    } else if (raw >= switchOn) {
-                        _adcDigitalState[i] = true;
+                if (_adcDigitalChannel[i]) {
+                    const uint16_t configKey = _adcConfigKey(c);
+                    if (_adcConfig[i] != configKey) {
+                        _adcDigitalState[i] = !c.activeHigh;
+                        _adcConfig[i] = configKey;
                     }
-                    const bool logical = c.activeHigh ? _adcDigitalState[i]
-                                                      : !_adcDigitalState[i];
-                    physical = logical ? 1.0f : 0.0f;
+                    _adcDigitalState[i] = AdcThreshold::update(
+                        raw, c.digitalThresholdRaw, c.digitalHysteresisRaw,
+                        _adcDigitalState[i]);
+                    physical = AdcThreshold::logicalValue(_adcDigitalState[i], c.activeHigh);
+                } else if (c.calibrationPointCount >= 2) {
+                    physical = PiecewiseCalibration::apply((float)raw, c.calibrationPointCount,
+                                                            c.calibrationRaw, c.calibrationValue);
+                    if (!strcmp(c.role, "generic") || !strcmp(c.role, "operator") || !strcmp(c.role, "flame")) {
+                        physical = constrain(physical, 0.0f, 1.0f);
+                        if (c.inverted) physical = 1.0f - physical;
+                    }
                 } else if (!strcmp(c.role, "generic") || !strcmp(c.role, "operator") || !strcmp(c.role, "flame")) {
                     const float span = c.maxValue - c.minValue;
                     float n = span > 0 ? constrain((raw - c.minValue) / span, 0.0f, 1.0f) : 0.0f;
@@ -516,7 +549,7 @@ private:
                     physical = (mv - c.analogZeroMv) / max(c.analogMvPerUnit, 0.001f);
                 }
                 const float alpha = constrain(c.filterAlpha, 0.01f, 1.0f);
-                _values[i] = _isAdcDigital(c) ? physical : (_sequence[i]
+                _values[i] = _adcDigitalChannel[i] ? physical : (_sequence[i]
                     ? _values[i] + alpha * (physical - _values[i])
                     : physical);
                 valid = isfinite(_values[i]) &&
@@ -529,7 +562,7 @@ private:
                 if (!_readReg(0x2A, 0x02, ctrl2) ||
                     !_writeReg(0x2A, 0x02, (uint8_t)((ctrl2 & 0x7FU) |
                                                      (c.deviceChannel ? 0x80U : 0)))) {
-                    Serial.println("[I2C] NAU7802 channel-select transaction failed");
+                    _logNauFailure("[I2C] NAU7802 channel-select transaction failed");
                     _markMissing(0x2A, Nau7802);
                 } else {
                     _nauSelectedChannel = c.deviceChannel;
@@ -541,7 +574,7 @@ private:
             }
             uint8_t pu = 0;
             if (!_readReg(0x2A, 0x00, pu)) {
-                Serial.println("[I2C] NAU7802 conversion-ready read failed");
+                _logNauFailure("[I2C] NAU7802 conversion-ready read failed");
                 _markMissing(0x2A, Nau7802);
                 return;
             }
@@ -565,7 +598,7 @@ private:
                     valid = isfinite(_values[i]) &&
                             raw > -8388352L && raw < 8388351L;
                 } else {
-                    Serial.println("[I2C] NAU7802 24-bit sample read failed");
+                    _logNauFailure("[I2C] NAU7802 24-bit sample read failed");
                 }
             }
         }
@@ -574,12 +607,15 @@ private:
             _sampleMs[i] = millis(); ++_sequence[i];
             if (c.driver == ChannelRegistry::I2cLoadCell)
                 _nauPendingRegistryIndex = 255;
-            Device* d = _findMutable(c.i2cAddress, _typeForDriver(c.driver));
-            if (d) { d->present = true; d->lastSeenMs = _sampleMs[i]; }
+            // Use the common recovery path so a good sample also clears a
+            // pending loss timer. Directly setting present/lastSeen left the
+            // old timer armed and shortened every subsequent recheck.
+            _record(c.i2cAddress, _typeForDriver(c.driver), true);
         } else if ((c.driver == ChannelRegistry::I2cDigital ||
                     c.driver == ChannelRegistry::I2cAnalog ||
                     (c.driver == ChannelRegistry::I2cLoadCell && _nauConfigured)) &&
                    _present(c.i2cAddress, _typeForDriver(c.driver))) {
+            if (_adcDigitalChannel[i]) _adcDigitalState[i] = !c.activeHigh;
             _markMissing(c.i2cAddress, _typeForDriver(c.driver));
         }
     }

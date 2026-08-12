@@ -10,6 +10,30 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-08-12
+
+### Added
+- Added registry-native calibration and health handling for analog threshold inputs, piecewise nonlinear sensors, shared-I²C devices, load cells, temperature interfaces, current feedback, and the wider range of experimental turbine hardware exposed by the Hardware page.
+- Added causal turbine-plant HIL, reboot recovery, native command/controller behavior tests, cross-browser UI coverage, mixed-hardware configuration fuzzing, and representative setup matrices for turbojet, turboshaft, turboprop, APU, afterburner, air-start, dry-sump, and instrumented development installations.
+- Added complete engine-file backup/restore, profile-aware setup packaging, exact firmware build IDs, and stronger release-package bounds, hash, partition, and helper-tool validation.
+
+### Changed
+- Unified Classic ESP32 and ESP32-S3 behavior around channel capabilities, controller ownership, sequencer outcomes, reduced-power operation, STOP handling, hardware-save transactions, I²C loss rechecks, and safe output states.
+- Simplified Hardware, Config, Calibration, Sequence, Log, and Tools workflows while retaining expert freedom. Unsupported electrical modes are blocked; unusual but physically possible settings remain available with focused warnings instead of arbitrary limits.
+- Reworked afterburner gates and sequencing, starter-enable ownership, oil-pump control, N1/N2 governor behavior, ADC switch/flame thresholds and hysteresis, developer-mode edits, and fault explanations for hobby and experimental turbine use.
+- The web interface is qualified for one active operator tab. Documentation now states this explicitly.
+
+### Fixed
+- Prevented completed web responses from exhausting the ESP32 connection table during repeated page navigation, while preserving clean browser closes and bounded stalled-client recovery.
+- Hardened immediate fuel/ignition cuts, reboot output parking, FinalStop and shutdown ownership, sequence fault/timeout handling, sensor-loss reduced-power behavior, and critical STOP-path failures.
+- Fixed live configuration saves, warned edits, profile-backed restore, large configuration transfers, deferred restart responses, session logging, atomic web-asset replacement, and Wi-Fi recovery across both chips.
+- Removed stale legacy dependencies and inconsistent hardware assumptions that could expose unusable controls, hide valid shared-I²C channels, or apply different behavior on Classic and S3.
+
+### Validation
+- Passed the canonical release gate: 10 UI audit programs, 197 safety regression checks, 16 turbine setup matrices, native command/controller tests, release-tool tests, HIL harness tests, both firmware/filesystem builds, and enforced image/linker budgets.
+- Passed physical dry-bench qualification on Classic ESP32 and ESP32-S3 using simulated sensors and actuator capture, including start/run/shutdown dynamics, safety trips, afterburner/reduced-power interactions, I²C loss, reboots, browser navigation, live edits, backup/restore, and full-size OTA.
+- This qualification does not replace installation-specific wiring inspection, dry commissioning, or controlled first-engine testing. No fuel-burning turbine was run as part of this release qualification.
+
 ## [2.0.1] — 2026-07-30
 
 ### Changed
@@ -28,6 +52,8 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 - Config's `Open (Dev Mode)` badge is now reserved for genuinely active engine modes; FAULT correctly appears as the normal open repair state.
 - Generated Config controls and the remaining static commissioning selectors/sliders now expose their visible technical labels to assistive and keyboard-driven tooling.
 - Manual afterburner fire now requires an explicit confirmation showing the configured action and available live N1/EGT snapshot; AB STOP remains immediate.
+- A required afterburner arm input is now continuous permission for every trigger source, including manual fire; losing it enters the normal AB shutdown path.
+- Registry/native afterburner command inputs now behave identically in rules, custom sequence conditions, RC signal-loss settings, telemetry, validation, and UI availability.
 - The Setup Tool clean-install safety gate now leads truthfully to board selection; its later board-specific confirmation remains the actual erase gate.
 - Setup Tool failures now display the exact support-log path actually used, including the normal `%LOCALAPPDATA%` location or the backup folder for an update.
 - Windows Setup Tool 0.6.2 carries these workflow, recovery-download, board-detection, driver-repair, and support-log fixes while retaining package compatibility with the 0.6.0 stable-client baseline.
@@ -93,7 +119,7 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 - Config, Calibration, Sequence, and Control Rules now recognize valid shared-I²C channels as fitted hardware instead of incorrectly requiring a native GPIO. This restores NAU7802/TLA2528 configuration and calibration surfaces and allows I²C drain valves and other expansion outputs in sequences.
 - Tools now bench-tests non-core TCA9554 outputs as well as native outputs. Binary expansion outputs use an explicit ON test; proportional registry outputs default to 50% and expose an editable 0–100% commissioning demand.
 - Shared sensor buses now use a compact Enabled/Disabled summary. **Edit buses** opens wiring, discovery, and a current supported-device list without leaving permanent setup text walls on the normal Hardware page.
-- PCB-profile outputs are parked from the immutable catalog before filesystem/config loading; a damaged or wrong-target profile leaves generic pins untouched and locks START. Profile-backed wet-glow pilot fuel and physical/analog afterburner command inputs now drive the real runtime paths instead of retaining legacy raw-GPIO assumptions.
+- PCB-profile outputs are parked from the immutable catalog before filesystem/config loading; a damaged or wrong-target profile leaves generic pins untouched and locks START. Profile-backed wet-glow start fuel and physical/analog afterburner command inputs now drive the real runtime paths instead of retaining legacy raw-GPIO assumptions.
 - Missing I²C inputs become unhealthy instead of retaining believable stale data. Missing engine-affecting TCA9554 outputs block START and fault an operating engine because their physical latch state cannot be guaranteed.
 - P1-only and P2-only installations can configure Automatic Idle without an unrelated RPM sensor.
 - Search can find unavailable features by their purpose and descriptive terms, including Bendix starter assistance.
@@ -172,7 +198,7 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 - All LittleFS and NVS persistence is now deferred until STANDBY or FAULT. Active runs retain the newest session rows and flight-recorder events in bounded RAM queues, so ESP32 flash-cache suspension cannot stall engine control; any overwritten evidence is counted explicitly.
 - AsyncTCP's priority-10 worker is pinned to Core 0 instead of pre-empting the Core-1 engine loop. The web-polling session HIL reduced the observed active-loop maximum from intermittent 44–98 ms stalls to 3.154 ms.
 - Session CSVs are exposed for download only after the run has ended and the queued file has been completely written and closed.
-- A dedicated pilot-fuel output is no longer overwritten by wet-glow handling unless wet-glow pilot fuel is actually selected; standalone pilot-fuel and dedicated wet-glow-fuel ownership are independently regression-checked.
+- A dedicated start-fuel output is no longer overwritten by wet-glow handling unless wet-glow start fuel is actually selected; standalone start-fuel and dedicated wet-glow-fuel ownership are independently regression-checked.
 - Full engine-file restore now parses and stages hardware/settings independently and validates the registry in bounded STANDBY scratch space, allowing large unified configurations to restore even after a long Classic ESP32 browser session without requiring another large contiguous heap allocation.
 - P1/P2 pullback and hard-trip fields now follow the selected pressure unit and are locked when their sensor is not fitted; factory-reset confirmation input stays inside its dialog on narrow screens.
 - Rapid page navigation now finishes load-blocking assets, drains or aborts page-owned API reads, closes page-local WebSockets, briefly reuses unchanged configuration reads, and promptly reaps stale clients; legitimate Wi-Fi ACK stalls get a 10-second window without allowing abandoned transfers to exhaust the Classic ESP32 TCP pool.
@@ -252,7 +278,7 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ### Fixed
 - Made START feedback requirements follow the sensors actually consumed by enabled safety features, controllers, and sequence blocks, including FlameConfirm and registry oil loops.
-- Hardened shutdown of registry-defined pilot/start, auxiliary, main, and afterburner fuel/ignition outputs while preserving intentional cooldown actions.
+- Hardened shutdown of registry-defined start, auxiliary, main, and afterburner fuel/ignition outputs while preserving intentional cooldown actions.
 - Reset delayed safety confirmations across inactive and bypassed states, corrected zero-RPM FinalStop completion, aligned the cooldown timeout, and prevented legacy oil-loop migration from binding a non-oil pressure channel.
 
 ## [1.9.4] — 2026-07-18

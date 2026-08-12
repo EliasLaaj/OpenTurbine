@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine</title>
-<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260731a" data-ot-version="20260731a" data-ot-app="true"></script>
+<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body data-page="dashboard">
 <nav>
@@ -70,6 +70,9 @@
   </div>
   <div id="event-log-drop-banner" style="display:none;background:color-mix(in srgb, var(--yellow) 7%, transparent);border:1px solid color-mix(in srgb, var(--yellow) 40%, transparent);border-radius:7px;padding:.55rem 1rem;margin-bottom:.6rem;font-size:.82rem;color:var(--yellow);text-align:center">
     Event recorder dropped events. Event log may be incomplete.
+  </div>
+  <div id="logging-health-banner" style="display:none;background:color-mix(in srgb, var(--yellow) 7%, transparent);border:1px solid color-mix(in srgb, var(--yellow) 40%, transparent);border-radius:7px;padding:.55rem 1rem;margin-bottom:.6rem;font-size:.82rem;color:var(--yellow);text-align:center">
+    Run logging is degraded. Engine control is unaffected. See Log for details.
   </div>
   <div id="config-storage-banner" style="display:none;background:color-mix(in srgb, var(--red) 10%, transparent);border:1px solid color-mix(in srgb, var(--red) 55%, transparent);border-radius:7px;padding:.65rem 1rem;margin-bottom:.7rem;font-size:.82rem;color:var(--red);line-height:1.5">
     <strong>Storage fault - engine operations locked.</strong>
@@ -293,7 +296,7 @@
       <div class="peak-val">A</div>
     </div>
     <div class="card" id="igniter2-current-card" style="display:none">
-      <div class="label">AB / Pilot Igniter Current</div>
+      <div class="label">Secondary Igniter Current</div>
       <div class="value small" id="igniter2-current-val">—</div>
       <div class="peak-val">A</div>
     </div>
@@ -342,7 +345,7 @@
   <section id="governor-section" style="display:none;margin-bottom:.5rem">
     <div class="card small">
       <div class="label">Automatic N2 Speed Control <span id="gov-mode" style="display:none;font-size:.6rem;padding:.05rem .4rem;border-radius:999px;border:1px solid var(--border);color:var(--dim);vertical-align:middle;letter-spacing:.03em"></span></div>
-      <div class="oil-sub">N2 target: <span id="gov-target-rpm">—</span> RPM &nbsp;|&nbsp; N2 actual: <span id="gov-n2-actual">—</span> RPM</div>
+      <div class="oil-sub">N2 target: <span id="gov-target-rpm">—</span> RPM &nbsp;|&nbsp; N2 actual: <span id="gov-n2-actual">—</span> RPM &nbsp;|&nbsp; <span id="gov-state">Off</span></div>
     </div>
   </section>
 
@@ -367,7 +370,7 @@
           Igniter 1 <span id="igniter-state" style="font-weight:600">OFF</span>
         </div>
         <div id="adv-igniter2" style="display:none">
-          AB / Pilot Igniter <span id="igniter2-state" style="font-weight:600">OFF</span>
+          Secondary Igniter <span id="igniter2-state" style="font-weight:600">OFF</span>
         </div>
         <div id="adv-glow" style="display:none">
           Glow plug <span id="glow-pct" style="color:var(--text);font-weight:600">0</span><span id="glow-unit">%</span>
@@ -386,7 +389,7 @@
           </div>
         </div>
         <div id="adv-fp2" style="display:none">
-          Pilot / auxiliary fuel pump <span id="fp2-pct" style="color:var(--text);font-weight:600">0</span><span id="fp2-unit">%</span>
+          Secondary / auxiliary fuel pump <span id="fp2-pct" style="color:var(--text);font-weight:600">0</span><span id="fp2-unit">%</span>
           <div class="gauge-bar-wrap" style="width:80px;display:inline-block;vertical-align:middle;margin-left:.3rem">
             <div class="gauge-bar" id="fp2-gauge-bar" style="width:0%"></div>
           </div>
@@ -422,6 +425,7 @@
     <div class="card small" style="display:flex;flex-direction:column">
       <div class="label">Afterburner <span id="ab-sol-dot" class="dot" title="AB Solenoid"></span></div>
       <div class="ab-mode-val ab-mode-Off" id="ab-mode-val">OFF</div>
+      <div class="oil-sub" id="ab-state-reason" style="display:none;color:var(--yellow)"></div>
       <div class="ab-indicators">
         <div class="ab-ind"><span id="ab-arm-dot" class="dot" title="Arm switch"></span> ARM</div>
         <div class="ab-ind"><span id="ab-flame-dot" class="dot" title="AB flame sensor"></span> FLAME</div>
@@ -445,7 +449,7 @@
       <div class="oil-sub" id="throttle-input-row" style="display:none">throttle input: <span id="throttle-input-pct">—</span>%</div>
       <div class="oil-sub" id="throttle-feedback-inhibit-note" style="display:none;color:var(--yellow)">Throttle increase limited: fitted RPM/EGT feedback is unhealthy. Fix the sensor/calibration before live running; Bench Mode is only for dry actuator tests.</div>
       <div class="oil-sub" id="throttle-floor-row" title="Minimum reliable fuel-pump output. Outside standby calibration/tools, nonzero commands below this value are forced to zero. 0 = no minimum configured.">minimum pump output: <span id="throttle-idle-floor">—</span>%
-        <span id="throttle-di-wrap" style="display:none"> · automatic idle target <span id="throttle-di-rpm">—</span> rpm</span>
+        <span id="throttle-di-wrap" style="display:none"> · automatic idle <span id="throttle-di-state">Off</span>, target <span id="throttle-di-rpm">—</span> <span id="throttle-di-unit">rpm</span></span>
       </div>
       <div class="oil-sub" id="throttle-startup-range-row" style="display:none">startup idle-input command range: <span id="throttle-startup-range">—</span>%</div>
       <div class="oil-sub" id="throttle-effective-note" style="display:none">base demand: <span id="throttle-base-demand">—</span>% + AB offset</div>
@@ -755,8 +759,9 @@ document.getElementById('start-confirm-overlay').addEventListener('click', funct
   if (e.target === this) cancelStart();
 });
 
-// Getting Started banner — show on first visit, hide once dismissed
-(function() {
+// Getting Started banner — show on first visit, hide once dismissed. Shared
+// app helpers are installed after the complete HTML document is received.
+document.addEventListener('DOMContentLoaded', function() {
   try {
     const banner = document.getElementById('getting-started-banner');
     if (banner) banner.style.display = 'none';
@@ -777,7 +782,7 @@ document.getElementById('start-confirm-overlay').addEventListener('click', funct
       ? 'All setup activities recorded in this browser. Physical verification is still required.'
       : complete + ' of ' + rows.length + ' setup activities recorded in this browser.';
   } catch(e) {}
-})();
+}, { once:true });
 
 function updateGettingStartedVisibility(mode) {
   const banner = document.getElementById('getting-started-banner');

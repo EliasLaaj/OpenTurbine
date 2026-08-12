@@ -1,4 +1,6 @@
 #include "../src/hal/sensors/SensorProtocolDecode.h"
+#include "../src/hal/AdcThreshold.h"
+#include "../src/hal/sensors/PiecewiseCalibration.h"
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -26,5 +28,40 @@ int main() {
     assert(SensorProtocolDecode::ds18b20(scratch, 12, t) && near(t, 85));
     scratch[8] ^= 1;
     assert(!SensorProtocolDecode::ds18b20(scratch, 12, t));
-    std::cout << "sensor protocol vectors passed (14 checks)\n";
+    bool state = false;
+    state = AdcThreshold::update(2080, 2048, 128, state);
+    assert(!state); // below 2112 ON edge
+    state = AdcThreshold::update(2112, 2048, 128, state);
+    assert(state);
+    state = AdcThreshold::update(2000, 2048, 128, state);
+    assert(state); // above 1984 OFF edge
+    state = AdcThreshold::update(1984, 2048, 128, state);
+    assert(!state);
+    assert(AdcThreshold::logicalValue(false, false) == 1.0f);
+    state = AdcThreshold::update(101, 100, 3, false);
+    assert(!state); // odd 3-count band keeps a 2-count rising half
+    state = AdcThreshold::update(102, 100, 3, state);
+    assert(state);
+    state = AdcThreshold::update(100, 100, 3, state);
+    assert(state); // and a 1-count falling half
+    state = AdcThreshold::update(99, 100, 3, state);
+    assert(!state);
+    const uint16_t rawUp[] = {200, 1000, 2600, 3800};
+    const float valueUp[] = {0.0f, 1.0f, 5.0f, 10.0f};
+    assert(PiecewiseCalibration::valid(4, rawUp, valueUp));
+    assert(near(PiecewiseCalibration::apply(1800, 4, rawUp, valueUp), 3.0f));
+    assert(near(PiecewiseCalibration::apply(0, 4, rawUp, valueUp), 0.0f));
+    assert(near(PiecewiseCalibration::apply(4095, 4, rawUp, valueUp), 10.0f));
+    const uint16_t rawDown[] = {100, 2000, 4000};
+    const float valueDown[] = {100.0f, 50.0f, 0.0f};
+    assert(PiecewiseCalibration::valid(3, rawDown, valueDown));
+    assert(near(PiecewiseCalibration::apply(3000, 3, rawDown, valueDown), 25.0f));
+    const uint16_t rawBad[] = {100, 100, 3000};
+    const float valueBad[] = {0.0f, 1.0f, 0.5f};
+    assert(!PiecewiseCalibration::valid(3, rawBad, valueBad));
+    const uint16_t rawHuge[] = {0, 4095};
+    const float valueHuge[] = {-3.0e38f, 3.0e38f};
+    assert(!PiecewiseCalibration::valid(2, rawHuge, valueHuge));
+    assert(PiecewiseCalibration::valid(0, nullptr, nullptr));
+    std::cout << "sensor protocol, ADC threshold and calibration vectors passed (32 checks)\n";
 }

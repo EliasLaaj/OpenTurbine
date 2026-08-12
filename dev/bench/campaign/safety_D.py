@@ -50,3 +50,4 @@ dc.multi(lambda hw: (hw["sensors"]["batt_voltage"].update(enabled=False),
                      hw["sensors"]["throttle_input"].update(enabled=True, pin=4)))
 rig.summary("Run D (pin-reuse: oil_temp_high, batt_low)")
 rig.close()
+raise SystemExit(0 if rig.rows and all(row[1] for row in rig.rows) else 1)

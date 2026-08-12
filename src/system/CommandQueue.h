@@ -1,6 +1,7 @@
 #pragma once
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <stddef.h>
 
 // ============================================================
 //  CommandQueue — thread-safe one-way pipe: Web (Core 0) → ECU (Core 1)
@@ -18,7 +19,7 @@ enum class OTCommand : uint8_t {
     FUEL_PRIME,
     OIL_PRIME,
     IGN_TEST,
-    IGN2_TEST,      // fire AB / pilot igniter briefly (STANDBY only)
+    IGN2_TEST,      // fire secondary igniter briefly (STANDBY only)
     START_TEST,
     FUEL_SOL_TEST,
     IDLE_TEST,
@@ -55,6 +56,7 @@ struct OTPacket {
     OTCommand cmd;
     float     fParam = 0.0f;
     int       iParam = 0;
+    uint32_t  requestId = 0;
 };
 
 using CommandHandler = void(*)(const OTPacket&);
@@ -67,6 +69,14 @@ public:
         _queue = xQueueCreate(QUEUE_DEPTH, sizeof(OTPacket));
         return _queue != nullptr;
     }
+
+    static uint32_t nextRequestId();
+    static void beginResult(uint32_t requestId);
+    static bool claimPendingResult(uint32_t requestId);
+    static bool cancelPendingResult(uint32_t requestId);
+    static void completeResult(uint32_t requestId, bool accepted, const char* reason);
+    static bool waitResult(uint32_t requestId, uint32_t timeoutMs, bool& accepted,
+                           char* reason, size_t reasonLen);
 
     // Called from Core 0 (web handler) — non-blocking
     static bool push(const OTPacket& pkt) {
@@ -82,7 +92,9 @@ public:
     // Safety-priority commands supersede pending web/cluster commands.
     static bool pushEmergencyFront(const OTPacket& pkt) {
         if (!_queue) return false;
-        if (pushFront(pkt)) return true;
+        // A cancellation command supersedes everything already pending. This
+        // prevents an older AB_FIRE or other energizing request from running
+        // immediately after its matching stop command.
         xQueueReset(_queue);
         return pushFront(pkt);
     }
@@ -97,6 +109,12 @@ public:
         OTPacket pkt;
         while (xQueueReceive(_queue, &pkt, 0) == pdTRUE) {
             handler(pkt);
+            if (pkt.cmd == OTCommand::STOP) {
+                // Close the race with producers that queued work after STOP
+                // was inserted but before it reached the ECU-core boundary.
+                xQueueReset(_queue);
+                break;
+            }
         }
     }
 

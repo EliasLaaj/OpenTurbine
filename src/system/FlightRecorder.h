@@ -53,6 +53,10 @@ public:
     // Current number of records in the log (0 before first write).
     static int recordCount();
     static uint32_t droppedEvents();
+    static uint8_t pendingCount();
+    static bool healthy();
+    static uint8_t errorCode();
+    static uint32_t lastDurableAppendMs();
 
     // For web download — writes full log JSON to buf, returns bytes written
     static size_t toJson(char* buf, size_t len);
@@ -86,4 +90,5 @@ private:
     static float    _runMaxTit;
     static float    _runMinOil;
     static uint32_t _runStartSec;
+    static bool _runActive;
 };

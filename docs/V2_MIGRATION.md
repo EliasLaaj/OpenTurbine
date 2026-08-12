@@ -26,6 +26,9 @@ assume an older setup remains valid.
 
 - Hardware is the single source of truth. Config can preserve inactive future
   tuning values, but missing hardware cannot be enabled from Config.
+- Main and afterburner flame detectors are canonical Hardware input cards.
+  Standalone pre-v2 flame pin/threshold mirrors are not imported; recreate the
+  detector card and recalibrate its threshold, hysteresis, and active state.
 - Development boards configure shared I²C/SPI buses once. Supported I²C devices
   are TCA9554, TLA2528, and NAU7802; shared SPI supports MAX6675, MAX31855, and
   MAX31856. DS18B20 uses a separate OneWire GPIO.
@@ -42,6 +45,10 @@ assume an older setup remains valid.
 - Electric drain valves are normal fitted outputs available to Sequence,
   Control Rules, and standby Tools testing.
 - Logging setup lives on Log. Binary rule values are shown as On/Off.
+- The v2.0.1-and-later Classic ESP32 clean-install layout uses 1.625 MiB OTA slots and
+  576 KiB LittleFS. A Wi-Fi update cannot replace a partition table; use a USB
+  **Clean install / reinstall** to gain the larger OTA reserve. Back up the
+  engine file and logs first because clean install erases them.
 
 ## Before fuel
 

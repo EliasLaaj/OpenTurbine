@@ -6,6 +6,7 @@ patterns: safe baseline, verified start into an active mode, negative
 tester glitches the DUT into STARTUP, so __init__ settles it to STANDBY.
 """
 
+import os
 import time
 
 from .dut import DUT
@@ -18,10 +19,10 @@ def hz(rpm):
 
 
 class BenchRig:
-    def __init__(self, port="COM3"):
+    def __init__(self, port=None):
         self.dut = DUT()
         self.dcfg = DutConfig(self.dut)
-        self.t = Tester(port).open()
+        self.t = Tester(port or os.environ.get("OTBENCH_PORT", "COM3")).open()
         self.dut.ensure_mode_standby()   # settle the open-glitch before any config
         self.rows = []
 

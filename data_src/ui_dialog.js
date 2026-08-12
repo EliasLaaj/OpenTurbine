@@ -102,7 +102,10 @@
     if (!anchor || event.defaultPrevented || event.button !== 0 || event.metaKey
         || event.ctrlKey || event.shiftKey || event.altKey || anchor.target === '_blank') return;
     const target = new URL(anchor.href, location.href);
-    if (target.origin !== location.origin || target.href === location.href) return;
+    if (target.origin !== location.origin) return;
+    const release = document.querySelector('script[data-ot-version]')?.dataset.otVersion;
+    if (release) target.searchParams.set('v', release);
+    if (target.href === location.href) return;
     event.preventDefault();
     if (navigationStarting) return;
     navigationStarting = true;

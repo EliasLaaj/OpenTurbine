@@ -36,7 +36,7 @@ enum class ABMode : uint8_t {
 
 struct EngineData {
     static EngineData& instance();
-    void publishSnapshot();
+    void publishSnapshot(uint32_t nowMs, bool force = false);
     static uint32_t readPublishedSnapshot(void* destination, size_t destinationSize);
 
     // ── Sensor values ─────────────────────────────────────────
@@ -53,8 +53,12 @@ struct EngineData {
     volatile int      fuelPressRaw   = 0;      // raw ADC counts for calibration
     volatile float    p1              = 0;      // bar  inlet pressure (optional)
     volatile float    p2              = 0;      // bar  exhaust pressure (optional)
+    volatile int      p1Raw           = 0;
+    volatile int      p2Raw           = 0;
     volatile float    fuelFlow        = 0;      // (optional, unit per cal)
+    volatile int      fuelFlowRaw     = 0;
     volatile float    battVoltage     = 0;      // V    battery / bus voltage (optional)
+    volatile int      battVoltageRaw  = 0;
     volatile float    torque          = 0;      // Nm   output shaft torque (turboshaft, optional)
     volatile float    thrust          = 0;      // N    measured engine thrust (optional)
     volatile float    turboPower      = 0;      // W    shaft power = torque × n2AngularVel (turboshaft)
@@ -107,12 +111,20 @@ struct EngineData {
     volatile uint32_t flameSampleMs   = 0;
     volatile float    registryInputValue[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
     volatile bool     registryInputHealthy[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
+    // Canonical sample metadata for registry-backed safety/sequence inputs.
+    // `sampleSeq` advances only when a new hardware sample is acquired.
+    volatile int32_t  registryInputRaw[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
+    volatile uint32_t registryInputSampleSeq[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
+    volatile uint32_t registryInputSampleMs[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
 
     // ── Actuator demands (written by controllers/sequencer) ───
     volatile float    throttleDemand  = 0;      // 0.0–1.0  main fuel/throttle ESC
+    volatile float    finalCoreFuelDemand = 0; // previous tick after rules/protection; excludes AB
+    volatile float    mainFuelAppliedDemand = 0; // command last written to the physical main-fuel output
     volatile float    fuelPump2Demand = 0;      // 0.0–1.0  independent variable fuel pump
     volatile float    oilTargetBar     = 0;      // bar target → P-controller
     volatile float    starterDemand   = 0;      // 0.0–1.0
+    volatile float    effectiveStarterDemand = 0; // delay/interlock-qualified physical demand
     volatile float    abPumpDemand    = 0;      // 0.0–1.0  afterburner pump
     volatile float    propPitchDemand = 0;      // 0.0–1.0  propeller pitch servo (turboprop)
     // Semantic roles never quantise a command.  Relay drivers do that at their
@@ -142,7 +154,7 @@ struct EngineData {
     volatile bool     glowPlugHot        = false;   // true when current dropped below ready threshold
     volatile float    igniterCurrentAmps  = 0.0f;   // igniter 1 coil current (A), 0 if no sensor
     volatile bool     igniterCurrentHealthy = false;
-    volatile float    igniter2CurrentAmps = 0.0f;   // AB / pilot igniter coil current (A), 0 if no sensor
+    volatile float    igniter2CurrentAmps = 0.0f;   // secondary igniter coil current (A), 0 if no sensor
     volatile bool     igniter2CurrentHealthy = false;
     volatile float    oilPumpCurrentAmps = 0.0f;   // oil pump current (A), 0 if no sensor
     volatile bool     oilPumpCurrentHealthy = false;
@@ -151,9 +163,29 @@ struct EngineData {
     // ── Afterburner state ─────────────────────────────────────
     volatile ABMode   abMode          = ABMode::Off;
     volatile bool     abTriggerActive = false;  // trigger input (throttle/switch/input) is asserted
+    volatile bool     abPermitted = false;
+    volatile bool     abExecutionActive = false;
+    char              abInhibitReason[80] = {};
     volatile bool     abArmSwitchOn   = false;  // arm switch currently asserted
     volatile bool     abFlameOn       = false;  // AB flame sensor detected
     volatile bool     abFlameHealthy  = false;  // configured channel is available
+    volatile float    abFlameValue    = 0.0f;
+    volatile int32_t  abFlameRaw      = 0;
+    volatile uint32_t abFlameSampleSeq = 0;
+    volatile uint32_t abFlameSampleMs = 0;
+    volatile uint8_t  abFlameAdapter  = 255;
+    volatile bool     abEvidenceValid = false;
+    volatile uint32_t abFirstFuelMs = 0;
+    volatile uint32_t abFirstIgnitionMs = 0;
+    volatile uint32_t abConfirmedMs = 0;
+    volatile bool     abFlameOffObserved = false;
+    volatile uint32_t abFlameOffSampleSeq = 0;
+    volatile bool     abEgtBaselineValid = false;
+    volatile float    abEgtBaseline = 0.0f;
+    volatile uint32_t abEgtBaselineSampleSeq = 0;
+    volatile bool     mainFuelProtectionActive = false;
+    volatile float    protectedThrottleDemand = 0.0f;
+    char              abFaultReason[96] = {};
     volatile bool     abSolOpen       = false;  // AB fuel solenoid (g_actAbSol)
     volatile int      abInputRaw      = 0;      // raw ADC/RC counts for analog/RC AB trigger
     volatile float    abInputNorm     = 0.0f;   // normalized 0.0-1.0 AB command input
@@ -174,6 +206,7 @@ struct EngineData {
     volatile bool     hardwareReady      = true;
     volatile bool     watchdogReady      = false;
     volatile bool     recoveryLockout    = false;
+    volatile bool     recoveryStopAcknowledged = false;
     volatile bool     startReleasedSinceBoot = false;
     char              hardwareFault[128] = {};
 
@@ -182,10 +215,20 @@ struct EngineData {
     volatile bool     standbyOilFeedActive = false; // windmill protection: oil pump running in STANDBY
     volatile bool     benchMode          = false;  // bench/debug: blocks complete on timer, safety bypassed
     volatile uint32_t limpOverrideSensor = 0;      // one failed feedback sensor explicitly overridden for restart
+    volatile uint32_t limpFailureMask    = 0;      // all ordinary feedback failures observed during this run
+    volatile bool     manualLimpRequested = false; // operator/input request; cannot clear automatic limp
+    volatile bool     automaticLimpLatched = false;// ECU latch; cleared only at the STANDBY boundary
     volatile bool     dynamicIdleEnabled = true;
-    volatile bool     limpMode           = false;
+    volatile bool     limpMode           = false;  // effective manual request || automatic latch
     volatile bool     stopSwitchActive   = false;
+    volatile bool     stopSwitchConfigured = false;
+    volatile bool     stopSwitchHealthy  = false;
     volatile bool     startSwitchActive  = false;  // hardware start button currently pressed
+    volatile bool     startSwitchRawLevel = false; // electrical/logical level before debounce
+    volatile bool     startSwitchConfigured = false;
+    volatile bool     startSwitchHealthy = false;
+    volatile bool     startSwitchActiveHigh = false;
+    volatile bool     startSwitchReady   = true;   // healthy release observed; next press may request START
     volatile bool     manualRelightActive = false; // operator holding START while running
 
     // ── Last mode-change reason (best-effort display, no mutex) ──
@@ -216,6 +259,24 @@ struct EngineData {
     volatile uint8_t  seqBlockIdx        = 0;      // 0-based index of current block
     volatile uint8_t  seqBlockTotal      = 0;      // total blocks in running sequence
     char              seqWaitReason[80]  = {};     // set by active block: "waiting for N1 > 42000 (currently 38500)"
+    char              seqLastResult[16]  = {};
+    char              seqFaultBlock[32]  = {};
+    volatile uint32_t seqStartedMs       = 0;
+    volatile uint32_t seqEndedMs         = 0;
+    char              abCurrentBlock[32] = {};
+    volatile uint8_t  abSeqBlockIdx      = 0;
+    volatile uint8_t  abSeqBlockTotal    = 0;
+    char              abSeqWaitReason[80] = {};
+    char              abSeqLastResult[16] = {};
+    char              abSeqFaultBlock[32] = {};
+    volatile uint32_t abSeqStartedMs      = 0;
+    volatile uint32_t abSeqEndedMs        = 0;
+    volatile bool     governorHandoffActive = false;
+    char              governorControllerState[64] = "Off";
+    char              idleControllerState[40] = "Off";
+    char              throttleCommandOwner[32] = "Sequencer / operator";
+    char              propPitchCommandOwner[32] = "Sequencer / parked";
+    char              oilCommandOwner[32] = "Sequencer / fixed";
 
     // ── Oil controller state (for web display) ────────────────
     volatile float    oilPumpPct         = 0;   // % duty currently driven
@@ -230,7 +291,10 @@ struct EngineData {
     // ── Startup tracking ──────────────────────────────────────
     // True once FuelOpen fires this run.  CooldownSpin skips if never set
     // (aborted before ignition = no hot EGT to cool).  Cleared at STANDBY.
-    volatile bool     fuelEverOpened     = false;
+    volatile bool     fuelAdmitted       = false;
+    volatile bool     combustionAttempted = false;
+    volatile bool     thermallyLoaded    = false;
+    volatile float    startupEgtBaseline = 0.0f;
 
     // ── Relight tracking ──────────────────────────────────────
     // Counts relight attempts this run.  Reset on entering RUNNING or STANDBY.
@@ -285,7 +349,7 @@ struct EngineData {
     // ── Stats ─────────────────────────────────────────────────
     volatile uint32_t bootCount          = 0;
     volatile uint32_t runCount           = 0;   // entries into RUNNING
-    volatile uint32_t runStartMs         = 0;   // millis() at RUNNING entry (0 = not running); mirrors main.cpp _runStartMs so telemetry can show a LIVE hour meter
+    volatile uint32_t runStartMs         = 0;   // millis() at RUNNING entry; mode identifies whether active, so 0 remains valid at rollover
     volatile uint32_t uptimeMs           = 0;
     volatile uint32_t loopCounter        = 0;   // main control-loop iterations since boot
     volatile float    loopHz             = 0.0f; // measured loop start-to-start rate

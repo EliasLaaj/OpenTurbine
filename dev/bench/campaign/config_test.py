@@ -76,3 +76,4 @@ npass = sum(1 for _,ok in results if ok)
 print("\n=== Config: %d/%d passed ===" % (npass, len(results)))
 for n,ok in results:
     if not ok: print("  FAIL:", n)
+raise SystemExit(0 if npass == len(results) else 1)

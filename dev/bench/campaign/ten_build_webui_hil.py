@@ -15,7 +15,6 @@ from __future__ import annotations
 import copy
 import json
 import os
-import subprocess
 import sys
 import time
 import traceback
@@ -30,31 +29,33 @@ from otbench.benchrig import BenchRig, hz  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 RESULT_DIR = os.path.join(ROOT, "dev", "bench", "results")
-BASE = "http://192.168.4.1"
+BASE = os.environ.get("OTBENCH_DUT", "http://192.168.4.1").rstrip("/")
 
 
 TOOLS_FAST = {
-    "fuel_prime_ms": 250,
-    "oil_prime_ms": 300,
+    "fuel_prime_ms": 600,
+    "oil_prime_ms": 600,
     "ign_test_ms": 1500,
-    "ign2_test_ms": 250,
+    "ign2_test_ms": 600,
     "glow_test_ms": 900,
     "glow_test_pct": 100,
-    "start_test_ms": 500,
+    "start_test_ms": 600,
     "start_test_pct": 45,
-    "fuel_sol_test_ms": 180,
-    "idle_test_ms": 300,
-    "oil_scav_test_ms": 250,
-    "cool_fan_test_ms": 250,
-    "airstarter_test_ms": 180,
-    "bleed_valve_test_ms": 180,
-    "fuel_pump2_test_ms": 250,
+    # Keep physical-output pulses long enough to span an HTTP round trip plus a
+    # tester capture. These are campaign-only values, not product defaults.
+    "fuel_sol_test_ms": 600,
+    "idle_test_ms": 600,
+    "oil_scav_test_ms": 600,
+    "cool_fan_test_ms": 600,
+    "airstarter_test_ms": 600,
+    "bleed_valve_test_ms": 600,
+    "fuel_pump2_test_ms": 600,
     "fuel_pump2_test_pct": 60,
-    "ab_sol_test_ms": 180,
-    "ab_pump_test_ms": 250,
+    "ab_sol_test_ms": 600,
+    "ab_pump_test_ms": 600,
     "ab_pump_test_pct": 60,
-    "starter_en_test_ms": 180,
-    "prop_pitch_test_ms": 300,
+    "starter_en_test_ms": 600,
+    "prop_pitch_test_ms": 600,
     "prop_pitch_test_pct": 55,
 }
 
@@ -144,11 +145,21 @@ class TenBuildRunner:
         self.dut = self.rig.dut
         self.dc = self.rig.dcfg
         self.t = self.rig.t
+        # Windows may drop a manually connected open-network association while
+        # the previous campaign is quiet. Recover that client-side condition
+        # before taking the authoritative snapshot; ordinary API retries must
+        # not spend minutes probing an interface with no 192.168.4.x address.
+        try:
+            self.dut.status()
+        except Exception:
+            self.dut._reconnect_wifi()
+            time.sleep(4.0)
         self.firmware_before = self.dut.data().get("fw_version", "unknown")
         self.firmware_after = None
         self.restored = False
         self.original_hw = self.dut.hardware()
         self.original_cfg = self.dut.config()
+        self._restore_config_patch = {}
         self.base_profile_id = self.original_hw.get("profile_id", "OpenTurbine")
         self.base_profile_desc = self.original_hw.get("profile_desc", "")
         self.base_wifi_password = self.original_hw.get("wifi_password", "")
@@ -158,6 +169,29 @@ class TenBuildRunner:
         self.result_path = os.path.join(RESULT_DIR, f"ten_build_webui_hil_{self.run_id}.json")
         self.results = []
         write_json(self.backup_path, {"hardware": self.original_hw, "config": self.original_cfg})
+
+    def note_config_patch(self, changes) -> None:
+        """Remember only original leaves a campaign is about to modify.
+
+        Replaying an entire settings document is both unnecessary and costly on
+        Classic ESP32. A narrow restore also avoids reintroducing fields that a
+        temporary hardware topology correctly sanitized while it was active.
+        """
+        def capture(original, changed, destination):
+            if not isinstance(changed, dict) or not isinstance(original, dict):
+                return
+            for key, value in changed.items():
+                if key not in original:
+                    continue
+                if isinstance(value, dict) and isinstance(original[key], dict):
+                    child = destination.setdefault(key, {})
+                    capture(original[key], value, child)
+                    if not child:
+                        destination.pop(key, None)
+                else:
+                    destination[key] = copy.deepcopy(original[key])
+
+        capture(self.original_cfg, changes, self._restore_config_patch)
 
     def log(self, msg: str) -> None:
         print(msg, flush=True)
@@ -182,33 +216,30 @@ class TenBuildRunner:
             return False
 
     def reconnect_wifi(self) -> None:
-        # Hardware saves reboot the S3 AP. Windows often stays disconnected
-        # even after the AP is back, so API polling can falsely look like a
-        # stuck board. Keep this fixed to preserve the user's SSID.
-        if os.name != "nt":
-            return
+        # Never issue netsh while the ECU is already reachable: Windows treats
+        # that as a user-requested disconnect and tears down a healthy link.
         try:
-            subprocess.run(
-                'netsh wlan connect name="OpenTurbine" ssid="OpenTurbine" interface="Wi-Fi"',
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=8,
-                check=False,
-            )
+            with urllib.request.urlopen(BASE + "/api/status", timeout=0.75) as response:
+                if response.status == 200:
+                    return
         except Exception:
             pass
+        # Use the client's throttled recovery only after a real failure.
+        self.dut._reconnect_wifi()
 
     def safe_standby(self) -> None:
+        reversed_fixture = os.environ.get("OTBENCH_TARGET", "s3").strip().lower() == "classic"
         self.t.set("START", 0)
         self.t.set("STOP", 0)
         self.t.set("N1", 0)
         self.t.set("N2", 0)
-        self.t.set("THROTTLE_IN", 0.0)
-        self.t.set("OILP", 2.5)
+        if not reversed_fixture:
+            self.t.set("THROTTLE_IN", 0.0)
+            self.t.set("OILP", 2.5)
         self.t.set("FLAME", 1)
         self.t.set("IDLE_IN", 1000)
-        self.t.set_tot(120)
+        if not reversed_fixture:
+            self.t.set_tot(120)
         self.dut.stop()
         self.dut.ensure_mode_standby(timeout=25)
         d = self.dut.data()
@@ -239,7 +270,9 @@ class TenBuildRunner:
         # Bench profiles can leave a synthetic RPM source above the windmill
         # threshold. Disable standby oil feed and explicitly zero manual output
         # demands so the firmware's hardware-save interlock can clear.
-        self.dc.patch_cfg({"standby_oil": {"rpm_limit": 500000, "feed_pct": 0, "feed_bar": 0}}, verify=False)
+        standby_patch = {"standby_oil": {"rpm_limit": 500000, "feed_pct": 0, "feed_bar": 0}}
+        self.note_config_patch(standby_patch)
+        self.dc.patch_cfg(standby_patch)
         for cmd in ("SET_THROTTLE_PCT", "SET_OIL_PCT"):
             try:
                 self.dut.command(cmd, fParam=0, iParam=0)
@@ -250,12 +283,37 @@ class TenBuildRunner:
         except Exception:
             pass
         deadline = time.time() + 20
+        last = {}
+        reconnect_attempted = False
         while time.time() < deadline:
-            d = self.dut.data()
-            if self.outputs_idle(d):
-                return
+            try:
+                last = self.dut.data()
+                if self.outputs_idle(last):
+                    return
+            except Exception as exc:
+                # A profile save immediately before this guard may have reset
+                # the AP while Windows still shows the old association. Make
+                # one bounded client-side reconnect, then keep polling the
+                # authoritative ECU state. Do not misreport a transport-only
+                # timeout as an unexplained active output set.
+                last = {"transport_error": str(exc)}
+                if not reconnect_attempted:
+                    reconnect_attempted = True
+                    try:
+                        self.dut._reconnect_wifi()
+                    except Exception:
+                        pass
             time.sleep(0.5)
-        raise RuntimeError("outputs did not become idle before hardware save")
+        active = {key: last.get(key) for key in (
+            "mode", "extra_cooldown_active", "standby_oil_feed_active",
+            "throttle_demand", "fuel_pump2_demand", "oil_pct", "starter_demand",
+            "ab_pump_demand", "prop_pitch_demand", "glow_plug_pct", "fuel_sol_open",
+            "igniter_on", "igniter2_on", "starter_enabled", "cool_fan_on",
+            "airstarter_open", "oil_scavenge_on", "bleed_valve_open", "ab_sol_open",
+        ) if last.get(key)}
+        if last.get("transport_error"):
+            active["transport_error"] = last["transport_error"]
+        raise RuntimeError(f"outputs did not become idle before hardware save: {active}")
 
     def patch_fast_config(self) -> None:
         patch = {
@@ -279,6 +337,7 @@ class TenBuildRunner:
             "safety": {"tot_limit": 750, "tit_limit": 750, "fuel_press_min": 0, "batt_volt_min": 9.5},
             "governor": {"target_rpm": 24000, "kp": 0.00003, "pitch_kp": 0.00003},
         }
+        self.note_config_patch(patch)
         last = None
         for _ in range(5):
             ok, last = self.dc.patch_cfg(patch, verify=False)
@@ -390,7 +449,8 @@ class TenBuildRunner:
         if with_throttle_input:
             hw["sensors"]["throttle_input"].update(enabled=True, pin=4, rc_pwm=False)
         if with_idle_input:
-            hw["sensors"]["idle_input"].update(enabled=True, pin=5, rc_pwm=False)
+            profile_backed = hw.get("_pcb_profile", {}).get("id") == "otbench-s3-harness"
+            hw["sensors"]["idle_input"].update(enabled=True, pin=5, rc_pwm=profile_backed)
         if with_throttle_output:
             hw["actuators"]["throttle"].update(enabled=True, pin=40, type=0, min_us=1000, max_us=2000, inverted=False)
         if with_oil:
@@ -406,15 +466,78 @@ class TenBuildRunner:
         input_ids = {c.get("id") for c in reg["inputs"]}
         output_ids = {c.get("id") for c in reg["outputs"]}
 
+        # The physical OTBench profile deliberately reserves every cross-link.
+        # Registry channels must therefore retain the profile's stable port and
+        # mode IDs; raw GPIO alone is rejected (correctly) by the firmware. Keep
+        # this translation in one place so every campaign exercises the same
+        # profile-backed path as the Hardware page.
+        profile_ports = {}
+        if hw.get("_pcb_profile", {}).get("id") == "otbench-s3-harness":
+            profile_ports = {
+                ("input", 13, 0): ("start_switch", "switch"),
+                ("input", 15, 0): ("stop_switch", "switch"),
+                ("input", 14, 2): ("n1_pulse", "frequency"),
+                ("input", 8, 2): ("n2_pulse", "frequency"),
+                ("input", 4, 1): ("throttle_input", "analog"),
+                ("input", 1, 1): ("oil_pressure_input", "analog"),
+                ("input", 2, 1): ("flame_input", "analog"),
+                ("input", 2, 0): ("flame_input", "switch"),
+                ("input", 5, 3): ("idle_input", "servo_pwm"),
+                ("input", 5, 0): ("idle_input", "switch"),
+                ("output", 40, 6): ("main_fuel_output", "servo"),
+                ("output", 17, 6): ("starter_output", "servo"),
+                ("output", 11, 5): ("oil_pump_output", "pwm"),
+                ("output", 11, 4): ("oil_pump_output", "relay"),
+                ("output", 12, 4): ("fuel_shutoff_output", "relay"),
+                ("output", 21, 4): ("igniter_output", "relay"),
+                ("output", 21, 5): ("igniter_output", "pwm"),
+                ("output", 39, 4): ("starter_enable_output", "relay"),
+            }
+
+        def attach_profile_port(direction, channel):
+            if (profile_ports and direction == "input" and
+                    channel.get("purpose") == "tot"):
+                channel["physical_port"] = "tot_input"
+                channel["physical_mode"] = "temperature"
+                channel["pin"] = -1
+                return channel
+            physical = profile_ports.get((direction, channel.get("pin"), channel.get("driver")))
+            if physical:
+                channel["physical_port"], channel["physical_mode"] = physical
+                channel["pin"] = -1  # derived from the immutable PCB profile
+            return channel
+
+        # Profiles may add generic/alternate-purpose channels directly before
+        # this synchronization pass. Resolve those too; otherwise only legacy
+        # channels created below receive their immutable connector identity.
+        for channel in reg.get("inputs", []):
+            attach_profile_port("input", channel)
+        for channel in reg.get("outputs", []):
+            attach_profile_port("output", channel)
+
         def add_input(channel):
             if channel["id"] not in input_ids:
-                reg["inputs"].append(channel)
+                reg["inputs"].append(attach_profile_port("input", channel))
                 input_ids.add(channel["id"])
 
         def add_output(channel):
             if channel["id"] not in output_ids:
-                reg["outputs"].append(channel)
+                reg["outputs"].append(attach_profile_port("output", channel))
                 output_ids.add(channel["id"])
+
+        controls = hw.get("controls", {})
+        if controls.get("start_pin", -1) >= 0:
+            add_input(chan_input("start_switch", "Start Switch", "digital_switch", "start_switch", 0,
+                                 controls["start_pin"], invert=not controls.get("start_active_h", False),
+                                 active_high=controls.get("start_active_h", False),
+                                 pullup=controls.get("start_pullup", False),
+                                 pulldown=controls.get("start_pulldown", False)))
+        if controls.get("stop_pin", -1) >= 0:
+            add_input(chan_input("stop_switch", "Stop Switch", "digital_switch", "stop_switch", 0,
+                                 controls["stop_pin"], invert=not controls.get("stop_active_h", False),
+                                 active_high=controls.get("stop_active_h", False),
+                                 pullup=controls.get("stop_pullup", False),
+                                 pulldown=controls.get("stop_pulldown", False)))
 
         sensors = hw["sensors"]
         if sensors["n1_rpm"].get("enabled"):
@@ -431,6 +554,9 @@ class TenBuildRunner:
         if sensors["oil_press"].get("enabled"):
             add_input(chan_input("oil_pressure_main", "Oil Pressure", "pressure", "oil_pressure", 1,
                                  sensors["oil_press"]["pin"]))
+        if sensors["flame"].get("enabled"):
+            add_input(chan_input("flame_main", "Flame", "flame", "flame", 1,
+                                 sensors["flame"]["pin"]))
         for key, channel_id, name, purpose in (
             ("throttle_input", "operator_throttle", "Throttle Input", "throttle"),
             ("idle_input", "operator_idle", "Idle Input", "idle"),
@@ -505,13 +631,23 @@ class TenBuildRunner:
         deadline = time.time() + timeout
         down_seen = False
         stable = 0
-        reconnect_at = 0
+        # The AP is deliberately taken down during a clean restart. One WLAN
+        # connect after it has had time to return is enough; repeated requests
+        # make Windows disconnect an association that is already succeeding.
+        reconnect_at = time.time() + 7.0
+        reconnect_attempts = 0
         # Hardware POST schedules reboot after its HTTP response. Prefer the
         # monotonic boot_count so a very short AP outage cannot race the next
         # save; fall back to outage/stability if telemetry is unavailable.
         while time.time() < deadline:
             try:
-                self.dut.status()
+                # Use a single short readiness probe here. The ordinary DUT
+                # client retries are appropriate for isolated API glitches,
+                # but nesting them inside this reboot loop can overrun the
+                # deadline by minutes while Windows recovers its Wi-Fi adapter.
+                with urllib.request.urlopen(BASE + "/api/status", timeout=1.5) as response:
+                    if response.status != 200:
+                        raise RuntimeError("status probe did not return HTTP 200")
                 data = self.dut.data()
                 boot_count = data.get("boot_count")
                 if previous_boot_count is not None and boot_count is not None:
@@ -539,9 +675,10 @@ class TenBuildRunner:
                 down_seen = True
                 stable = 0
                 now = time.time()
-                if now >= reconnect_at:
+                if now >= reconnect_at and reconnect_attempts < 2:
                     self.reconnect_wifi()
-                    reconnect_at = now + 6
+                    reconnect_attempts += 1
+                    reconnect_at = now + 45
                 time.sleep(1.0)
         self.reconnect_wifi()
         return False
@@ -549,7 +686,9 @@ class TenBuildRunner:
     def verify_profile_shape(self, expected, current):
         if current.get("profile_id") != self.base_profile_id:
             return False
-        if current.get("platform") != "esp32s3":
+        expected_platform = "esp32" if os.environ.get(
+            "OTBENCH_TARGET", "s3").strip().lower() == "classic" else "esp32s3"
+        if current.get("platform") != expected_platform:
             return False
         def registry_has(direction, purpose):
             reg = expected.get("channel_registry", {})
@@ -594,6 +733,9 @@ class TenBuildRunner:
         for group in ("sensors", "actuators"):
             for key, exp in expected.get(group, {}).items():
                 cur = current.get(group, {}).get(key, {})
+                fixed = current.get("_pcb_profile", {}).get("fixed_functions", {})
+                if group == "actuators" and key == "status_led" and "status_led" in fixed:
+                    continue
                 alias = registry_sensor_alias.get(key) if group == "sensors" else registry_actuator_alias.get(key)
                 if alias and not exp.get("enabled") and registry_has(*alias):
                     continue
@@ -612,6 +754,12 @@ class TenBuildRunner:
 
     def apply_profile(self, spec):
         expected = self.dut.hardware()
+        # Classic streams this large document from its fixed receive workspace.
+        # Let the GET response drain before reusing the same content in a POST;
+        # real Hardware-page editing always provides a much longer interval.
+        classic_target = os.environ.get("OTBENCH_TARGET", "s3").strip().lower() == "classic"
+        if classic_target:
+            time.sleep(3.0)
         self.clear_hw(expected)
         spec["build"](expected)
         self.sync_core_registry(expected)
@@ -621,11 +769,21 @@ class TenBuildRunner:
         except Exception:
             previous_boot_count = None
         code, resp = self.dut._post("/api/hardware", expected)
+        retryable_memory = (
+            code == 400 and isinstance(resp, dict) and
+            resp.get("detail") == "insufficient memory to parse hardware configuration"
+        )
+        if code != 200 and isinstance(resp, dict) and (resp.get("rebooting") or retryable_memory):
+            if resp.get("rebooting"):
+                self.wait_dut_ready_after_hardware_save(previous_boot_count=previous_boot_count)
+            if classic_target:
+                time.sleep(5.0)
+            previous_boot_count = self.dut.data().get("boot_count")
+            code, resp = self.dut._post("/api/hardware", expected)
         if code != 200:
             raise RuntimeError(f"/api/hardware save failed for {spec['id']}: HTTP {code} {resp}")
         if not self.wait_dut_ready_after_hardware_save(previous_boot_count=previous_boot_count):
             raise RuntimeError(f"DUT did not return after hardware save for {spec['id']}")
-        self.reconnect_wifi()
         # Read/verify with a few retries because the API may come back just
         # before the hardware apply task has completely settled.
         verified = False
@@ -981,17 +1139,45 @@ class TenBuildRunner:
             previous_boot_count = self.dut.data().get("boot_count")
         except Exception:
             previous_boot_count = None
+        classic_target = os.environ.get("OTBENCH_TARGET", "s3").strip().lower() == "classic"
         code, resp = self.dut._post("/api/hardware", self.original_hw)
         if code != 200:
             self.log(f"WARNING: original hardware restore failed: HTTP {code} {resp}")
             return False
-        self.wait_dut_ready_after_hardware_save(previous_boot_count=previous_boot_count)
-        code, resp = self.dut._post("/api/config", self.original_cfg)
-        if code != 200:
-            self.log(f"WARNING: original config restore failed: HTTP {code} {resp}")
+        if not self.wait_dut_ready_after_hardware_save(previous_boot_count=previous_boot_count):
+            self.log("WARNING: DUT did not return after original hardware restore")
             return False
-        self.safe_standby()
-        self.firmware_after = self.dut.data().get("fw_version", "unknown")
+        restore_patch = self._restore_config_patch or self.original_cfg
+        ok, resp = self.dc.patch_cfg(restore_patch)
+        if not ok:
+            self.log(f"WARNING: original config restore failed: {resp}")
+            return False
+        try:
+            self.safe_standby()
+        except Exception as exc:
+            # A settings apply briefly occupies the smallest internal-heap
+            # window of the run.  Do not turn one missed TCP response into an
+            # uncaught campaign exception; allow the AP/client association to
+            # settle and then verify the device through its compact endpoint.
+            self.log(f"Restore standby verification retrying after transport error: {exc}")
+
+        identity = None
+        deadline = time.time() + 75.0
+        reconnect_at = time.time() + 7.0
+        while time.time() < deadline:
+            try:
+                identity = self.dut.device_info()
+                if identity.get("state") in ("STANDBY", "FAULT"):
+                    break
+            except Exception:
+                if time.time() >= reconnect_at:
+                    self.reconnect_wifi()
+                    reconnect_at = time.time() + 45.0
+            time.sleep(1.0)
+        if not identity:
+            self.log("WARNING: restored ECU identity could not be verified")
+            return False
+        self.firmware_after = identity.get("firmware_version", "unknown")
         self.restored = True
         return self.firmware_after == self.firmware_before
 
@@ -1041,13 +1227,13 @@ def build_profiles(r: TenBuildRunner):
         hw["sensors"]["throttle_input"].update(enabled=False, pin=-1)
 
     def p6(hw):
-        r.common_turbine(hw, with_fuel_sol=False)
+        r.common_turbine(hw, with_fuel_sol=False, with_igniter=False)
         r.enable_n1(hw)
         r.enable_tot(hw)
         hw["has_afterburner"] = True
         hw["actuators"]["ab_sol"].update(enabled=True, pin=12, active_h=True)
         hw["actuators"]["ab_pump"].update(enabled=True, pin=39, type=2, active_h=True)
-        hw["actuators"]["igniter2"].update(enabled=True, pin=17, active_h=True, pwm=False)
+        hw["actuators"]["igniter2"].update(enabled=True, pin=21, active_h=True, pwm=False)
 
     def p7(hw):
         r.common_turbine(hw, with_fuel_sol=False, with_igniter=False)
@@ -1124,6 +1310,7 @@ def main():
     runner = TenBuildRunner(port=os.environ.get("OTBENCH_PORT", "COM3"))
     requested_profile = os.environ.get("OTBENCH_PROFILE", "").strip()
     restored = False
+    fatal_error = None
     try:
         runner.log(f"Backup saved: {runner.backup_path}")
         runner.log("Checking live UI pages used by this run...")
@@ -1144,9 +1331,19 @@ def main():
             if last["status"] == "error" and "timed out" in (last.get("error") or "").lower():
                 if not runner.api_alive():
                     raise RuntimeError("DUT API unreachable after timeout; stopping campaign to avoid cascading stale failures")
-        restored = runner.restore_original()
-        runner.log(f"Original profile restored: {restored}")
+    except Exception as exc:  # noqa: BLE001 - preserve evidence, then restore
+        fatal_error = exc
+        traceback.print_exc()
     finally:
+        # A failed profile is still destructive: always put the user's engine
+        # file back before closing the tester. DUT transport retries cover the
+        # Windows Wi-Fi adapter's limited-connectivity recovery interval.
+        try:
+            restored = runner.restore_original()
+        except Exception:  # noqa: BLE001 - record failure without hiding root cause
+            traceback.print_exc()
+            restored = False
+        runner.log(f"Original profile restored: {restored}")
         runner.save_progress()
         runner.close()
     passes = sum(1 for r in runner.results if r["status"] == "pass")
@@ -1158,7 +1355,10 @@ def main():
             if not c.get("ok"):
                 runner.log(f"    FAIL {c['name']}: {c.get('detail', '')}")
     runner.log(f"Results saved: {runner.result_path}")
-    return 0 if not fails and restored else 1
+    if fatal_error is not None:
+        runner.log(f"Fatal campaign error: {type(fatal_error).__name__}: {fatal_error}")
+    expected_profiles = 1 if requested_profile else 10
+    return 0 if len(runner.results) == expected_profiles and not fails and restored else 1
 
 
 if __name__ == "__main__":

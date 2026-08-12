@@ -76,7 +76,7 @@ def main() -> int:
         })
         ok, resp = runner.dc.patch_cfg({
             "sequence": {"shutdown": {
-                "final_stop_timeout_ms": 700,
+                "final_stop_timeout_ms": 1000,
                 "oil_scavenge_ms": 1100,
             }},
             "rules": [],
@@ -142,7 +142,7 @@ def main() -> int:
         ok, resp = runner.dc.patch_cfg({
             "misc": {"cooldown_skip_hold_ms": 500},
             "sequence": {"shutdown": {
-                "final_stop_timeout_ms": 700,
+                "final_stop_timeout_ms": 1000,
                 "oil_scavenge_ms": 0,
             }},
             # Shared TimedDelay is per-card in hardware; the third entry above
@@ -157,7 +157,6 @@ def main() -> int:
         code, resp = dut._post("/api/hardware", hw)
         if code != 200 or not runner.wait_dut_ready_after_hardware_save(previous_boot_count=previous_boot):
             raise RuntimeError(f"override delay hardware save failed: HTTP {code} {resp}")
-        runner.reconnect_wifi()
 
         start_running()
         dut.stop()
@@ -220,7 +219,8 @@ def main() -> int:
     passed = sum(1 for row in rows if row["ok"])
     print(f"RESULT: {passed}/{len(rows)} checks passed; restored={restored}", flush=True)
     print("Results:", os.path.abspath(path), flush=True)
-    return 0 if error is None and restored and result["firmware_match"] and passed == 4 else 1
+    return 0 if (error is None and restored and result["firmware_match"] and
+                 len(rows) == 4 and passed == len(rows)) else 1
 
 
 if __name__ == "__main__":

@@ -36,10 +36,7 @@ public:
         // Use a local flag — do NOT mutate useTorch, which is a config member
         // set by applyConfig(). Mutating it would permanently disable torch
         // for all subsequent AB ignition attempts in this run.
-        _doTorch = useTorch && (torchTotLimit > 0.0f);
-        if (useTorch && torchTotLimit == 0.0f) {
-            Serial.println("[AB] Ignite: torch skipped - torchTotLimit is 0 (no EGT safety cap configured)");
-        }
+        _doTorch = useTorch;
         _useIgniterEff = useIgniter;
         _hasIgnitionAction = _doTorch || _useIgniterEff;
         if (!_hasIgnitionAction) {
@@ -54,12 +51,14 @@ public:
         // the AB sequencer), making the spike completely ineffective on
         // physical-throttle setups.
         if (_doTorch) {
+            if (!ed.abFirstFuelMs) ed.abFirstFuelMs = millis();
             ed.abFuelOffset = torchSpikePct / 100.0f;
             Serial.printf("[AB] Ignite: torch spike +%.0f%% for %d ms\n",
                           (double)torchSpikePct, torchDurationMs);
         }
         // Igniter: fire AB igniter (igniter2)
         if (_useIgniterEff) {
+            if (!ed.abFirstIgnitionMs) ed.abFirstIgnitionMs = millis();
             ed.igniter2On = true;
             Serial.println("[AB] Ignite: AB igniter ON");
         }
@@ -75,7 +74,7 @@ public:
         auto& ed = EngineData::instance();
         unsigned long elapsed = millis() - _startMs;
 
-        if (_doTorch && !Config::primaryEgtHealthy(ed)) {
+        if (_doTorch && torchTotLimit > 0.0f && !Config::primaryEgtHealthy(ed)) {
             Serial.println("[AB] Ignite fault: EGT sensor unavailable during torch");
             _cutTorch(ed);
             _done = true;

@@ -6,6 +6,7 @@ change is VERIFIED by re-reading it back and retried if it didn't stick — a
 config that silently fails to apply otherwise produces false test results.
 """
 
+import os
 import time
 
 
@@ -89,6 +90,13 @@ class DutConfig:
         resp = None
         for _ in range(tries):
             hw = self.dut.hardware()
+            # GET /api/hardware is a large streamed response on Classic.  A
+            # browser user naturally spends time editing before Save; give
+            # AsyncTCP one bounded quiet window to release that response too,
+            # instead of making the HIL client manufacture peak fragmentation
+            # by POSTing the document in the next scheduler tick.
+            if os.environ.get("OTBENCH_TARGET", "s3").strip().lower() == "classic":
+                time.sleep(3.0)
             try:
                 previous_boot_count = self.dut.data().get("boot_count")
             except Exception:
@@ -96,7 +104,14 @@ class DutConfig:
             mutate(hw)
             code, resp = self.dut._post("/api/hardware", hw)
             if code != 200:
-                time.sleep(2); continue
+                # If validation rollback itself could not be staged, firmware
+                # fails safe and schedules a reboot.  Do not race that reboot
+                # with another large request; confirm recovery before retrying.
+                if isinstance(resp, dict) and resp.get("rebooting"):
+                    self._wait_reboot(previous_boot_count)
+                else:
+                    time.sleep(2)
+                continue
             self._wait_reboot(previous_boot_count)
             if check is None or check(self.dut.hardware()):
                 return True, resp
@@ -109,10 +124,47 @@ class DutConfig:
             code, resp = self.dut.patch("/api/config", partial)
             if code != 200:
                 time.sleep(1); continue
-            if not verify or _nested_matches(self.dut.config(), partial):
+            if not verify:
+                # The API has persisted the generation but deliberately frees
+                # its HTTP buffers before ECU-core apply. Give that bounded
+                # transaction a quiet window before issuing dependent calls.
+                self._wait_config_apply()
                 return True, resp
-            time.sleep(1)
+            # Firmware releases the HTTP buffers before copying the complete
+            # settings generation on the ECU core. Verify that short bounded
+            # transaction instead of racing it with an immediate duplicate.
+            time.sleep(0.6)
+            deadline = time.time() + 4.0
+            while time.time() < deadline:
+                try:
+                    if _nested_matches(self.dut.config(), partial):
+                        if self._wait_config_apply():
+                            return True, resp
+                except Exception:
+                    pass
+                time.sleep(0.2)
         return False, resp
+
+    def _wait_config_apply(self, timeout=8.0):
+        """Wait until the persisted generation has left the cross-core gate."""
+        if os.environ.get("OTBENCH_TARGET", "s3").strip().lower() == "classic":
+            # Do not keep allocating HTTP request headers while the Classic is
+            # deliberately trying to recover one large contiguous heap block.
+            time.sleep(3.0)
+            try:
+                return not self.dut.status().get("config_apply_busy", False)
+            except Exception:
+                return False
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                status = self.dut.status()
+                if not status.get("config_apply_busy", False):
+                    return True
+            except Exception:
+                pass
+            time.sleep(0.15)
+        return False
 
     # ── verified hardware helpers ────────────────────────────
     def sensor(self, name, **fields):
@@ -158,12 +210,23 @@ class DutConfig:
     def snapshot(self):
         return self.dut.hardware()
 
-    def restore(self, snap):
-        try:
-            previous_boot_count = self.dut.data().get("boot_count")
-        except Exception:
-            previous_boot_count = None
-        code, resp = self.dut._post("/api/hardware", snap)
-        if code == 200:
-            self._wait_reboot(previous_boot_count)
-        return code == 200, resp
+    def restore(self, snap, tries=3):
+        resp = None
+        for _ in range(tries):
+            try:
+                previous_boot_count = self.dut.data().get("boot_count")
+            except Exception:
+                previous_boot_count = None
+            if os.environ.get("OTBENCH_TARGET", "s3").strip().lower() == "classic":
+                time.sleep(3.0)
+            code, resp = self.dut._post("/api/hardware", snap)
+            if code == 200:
+                if self._wait_reboot(previous_boot_count):
+                    return True, resp
+                resp = {"ok": False, "error": "hardware restore reboot was not verified"}
+                continue
+            if isinstance(resp, dict) and resp.get("rebooting"):
+                self._wait_reboot(previous_boot_count)
+            else:
+                time.sleep(2.0)
+        return False, resp

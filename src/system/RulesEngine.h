@@ -6,9 +6,10 @@
 //  Rules are edited in the Sequence page Control Rules tab and
 //  stored in the settings section of ecu_config.json under "rules".
 //
-//  Rules run after sequencer/controller writes in the explicitly selected
-//  engine states. Outside those states, on invalid input, or after deletion,
-//  their output is driven off instead of retaining a stale demand.
+//  Rules run after sequencer/controller writes in explicitly selected engine
+//  states. Outside those states they release ownership so the last non-rule
+//  command resumes. In a selected state, false or invalid input applies the
+//  configured OFF demand. Deletion also releases ownership.
 // ============================================================
 #include "Config.h"
 #include "HardwareConfig.h"
@@ -61,40 +62,45 @@ public:
         for (int i = 0; i < Config::MAX_RULES; i++) _ruleLatched[i] = false;
     }
 
+    // Called before sequencers/controllers calculate this tick's ordinary
+    // demands. It removes last tick's rule overlay so those owners always
+    // start from the last non-rule command rather than their own stale value.
+    static void releaseOwnedTargets() {
+        auto& ed = EngineData::instance();
+        for (uint8_t i = 0; i < _ownedTargetCount; ++i)
+            if (_actuatorUsable(_ownedTargets[i]))
+                _applyActuator(_ownedTargets[i], _ownedBaseDemands[i], ed, nullptr);
+        _ownedTargetCount = 0;
+    }
+
     // Called once per control tick (Core 1, ~10 ms cycle).
     static void evaluate() {
         auto& ed = EngineData::instance();
         const SysMode modeAtStart = ed.mode;
-        uint8_t currentTargets[Config::MAX_RULES] = {};
-        uint8_t currentTargetCount = 0;
-
-        // FAULT is never an automation state. Force both current and recently
-        // removed targets physically off, regardless of a configured off value.
+        // FAULT is never an automation state. The caller has already released
+        // the previous overlay; do not claim or alter any target here.
         if (ed.mode == SysMode::FAULT) {
-            for (int i = 0; i < Config::ruleCount; ++i)
-                if (_actuatorUsable(Config::rules[i].actuator))
-                    _applyActuator(Config::rules[i].actuator, 0.0f, ed, nullptr);
-            for (uint8_t i = 0; i < _ownedTargetCount; ++i)
-                if (_actuatorUsable(_ownedTargets[i]))
-                    _applyActuator(_ownedTargets[i], 0.0f, ed, nullptr);
-            _ownedTargetCount = 0;
             return;
         }
 
         for (int i = 0; i < Config::ruleCount; i++) {
             const Config::Rule& r = Config::rules[i];
-            if (!_targetPresent(currentTargets, currentTargetCount, r.actuator) &&
-                currentTargetCount < Config::MAX_RULES)
-                currentTargets[currentTargetCount++] = r.actuator;
-
             const uint8_t modeBit = (uint8_t)(1u << (int)ed.mode);
             const bool activeState = r.enabled && (r.modeMask & modeBit) != 0 &&
                                      _actuatorUsable(r.actuator);
+            if (!activeState) {
+                _ruleLatched[i] = false;
+                continue;
+            }
+            if (!_targetPresent(_ownedTargets, _ownedTargetCount, r.actuator) &&
+                _ownedTargetCount < Config::MAX_RULES) {
+                _ownedTargets[_ownedTargetCount] = r.actuator;
+                _ownedBaseDemands[_ownedTargetCount] = _readActuatorDemand(r.actuator, ed);
+                ++_ownedTargetCount;
+            }
             const bool inputHealthy = _sensorUsable(r.sensor, ed);
-            const bool applies = activeState && inputHealthy;
+            const bool applies = inputHealthy;
             float demand = r.offValue;
-            if (activeState && !inputHealthy && _warningIndicator(r.actuator))
-                demand = r.onValue;
 
             if (applies) {
                 const float value = _readSensor(r.sensor, ed);
@@ -119,14 +125,6 @@ public:
             if (modeAtStart != SysMode::SHUTDOWN && ed.mode == SysMode::SHUTDOWN) return;
         }
 
-        // A deleted rule no longer appears above, so explicitly release any
-        // target it owned on the previous tick.
-        for (uint8_t i = 0; i < _ownedTargetCount; ++i)
-            if (!_targetPresent(currentTargets, currentTargetCount, _ownedTargets[i]) &&
-                _actuatorUsable(_ownedTargets[i]))
-                _applyActuator(_ownedTargets[i], 0.0f, ed, nullptr);
-        _ownedTargetCount = currentTargetCount;
-        for (uint8_t i = 0; i < currentTargetCount; ++i) _ownedTargets[i] = currentTargets[i];
     }
 
     static bool sensorReading(uint8_t sensor, float& value) {
@@ -149,16 +147,46 @@ private:
         for (uint8_t i = 0; i < count; ++i) if (targets[i] == target) return true;
         return false;
     }
+    static float _readActuatorDemand(uint8_t act, const EngineData& ed) {
+        if (ChannelRegistry::isOutputActuator(act)) {
+            const uint8_t idx = ChannelRegistry::outputIndexFromActuator(act);
+            return idx < ChannelRegistry::MAX_OUTPUT_CHANNELS
+                ? ed.registryOutputDemand[idx] : 0.0f;
+        }
+        switch (act) {
+            case COOL_FAN: return ed.coolFanDemand;
+            case BLEED_VALVE: return ed.bleedValveDemand;
+            case FUEL_PUMP2: return ed.fuelPump2Demand;
+            case OIL_SCAVENGE: return ed.oilScavengeDemand;
+            case THROTTLE: return ed.throttleDemand;
+            case STARTER: return ed.starterDemand;
+            case STARTER_ENABLE: return ed.starterEnabled ? 1.0f : 0.0f;
+            case OIL_PUMP: return ed.oilPumpPct / 100.0f;
+            case FUEL_SOL: return ed.fuelSolOpen ? 1.0f : 0.0f;
+            case IGNITER: return ed.igniterOn ? 1.0f : 0.0f;
+            case IGNITER2: return ed.igniter2On ? 1.0f : 0.0f;
+            case AB_SOL: return ed.abSolOpen ? 1.0f : 0.0f;
+            case AB_PUMP: return ed.abPumpDemand;
+            case AIRSTARTER: return ed.airstarterOpen ? 1.0f : 0.0f;
+            case GLOW_PLUG: return ed.glowPlugDemand;
+            case PROP_PITCH: return ed.propPitchDemand;
+            default: return 0.0f;
+        }
+    }
+    static bool _registryInputPurposePresent(const char* purpose) {
+        for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i) {
+            const auto& channel = HardwareConfig::channelRegistry.inputs[i];
+            if (!strcmp(channel.purpose, purpose) &&
+                ChannelRegistry::channelAddressable(channel)) return true;
+        }
+        return false;
+    }
     static bool _sensorUsable(uint8_t s, const EngineData& ed) {
         if (ChannelRegistry::isInputSensor(s)) {
             uint8_t idx = ChannelRegistry::inputIndexFromSensor(s);
             if (idx >= HardwareConfig::channelRegistry.inputCount) return false;
             const auto& channel = HardwareConfig::channelRegistry.inputs[idx];
-            const bool addressable = channel.pin >= 0 ||
-                channel.driver == ChannelRegistry::I2cDigital ||
-                channel.driver == ChannelRegistry::I2cAnalog ||
-                channel.driver == ChannelRegistry::I2cLoadCell;
-            return channel.installed && addressable && ed.registryInputHealthy[idx];
+            return ChannelRegistry::channelAddressable(channel) && ed.registryInputHealthy[idx];
         }
         switch (s) {
             case OIL_TEMP:        return HardwareConfig::hasOilTemp && ed.oilTempHealthy;
@@ -186,9 +214,11 @@ private:
             case IGNITER2_CURRENT:return HardwareConfig::hasIgniter2 && HardwareConfig::hasIgniter2CurrentSensor && ed.igniter2CurrentHealthy;
             case OIL_PUMP_CURRENT:return HardwareConfig::hasOilPump && HardwareConfig::hasOilPumpCurrentSensor && ed.oilPumpCurrentHealthy;
             case AB_INPUT:        return HardwareConfig::hasAfterburner &&
-                                         HardwareConfig::abInputPin >= 0 && ed.abInputValid;
-            case START_SWITCH:    return HardwareConfig::startPin >= 0;
-            case STOP_SWITCH:     return HardwareConfig::stopPin >= 0;
+                                         (HardwareConfig::abInputPin >= 0 ||
+                                          _registryInputPurposePresent("ab_command")) &&
+                                         ed.abInputValid;
+            case START_SWITCH:    return ed.startSwitchConfigured && ed.startSwitchHealthy;
+            case STOP_SWITCH:     return ed.stopSwitchConfigured && ed.stopSwitchHealthy;
             case THRUST:          return HardwareConfig::hasThrust && ed.thrustHealthy;
             default:              return false;
         }
@@ -249,8 +279,7 @@ private:
             uint8_t idx = ChannelRegistry::outputIndexFromActuator(act);
             if (idx >= HardwareConfig::channelRegistry.outputCount) return false;
             const auto& out = HardwareConfig::channelRegistry.outputs[idx];
-            return out.installed &&
-                   (out.pin >= 0 || out.driver == ChannelRegistry::I2cRelay) &&
+            return ChannelRegistry::channelAddressable(out) &&
                    !HardwareConfig::channelRegistry.ownsCoreOutput(out) &&
                    !HardwareConfig::channelRegistry.boundToCoreOutput(out);
         }
@@ -342,7 +371,17 @@ private:
     static void _applyActuator(uint8_t act, float dem, EngineData& ed, const char* ruleName) {
         if (ChannelRegistry::isOutputActuator(act)) {
             uint8_t idx = ChannelRegistry::outputIndexFromActuator(act);
-            if (idx < ChannelRegistry::MAX_OUTPUT_CHANNELS) ed.registryOutputDemand[idx] = dem;
+            if (idx < ChannelRegistry::MAX_OUTPUT_CHANNELS) {
+                ed.registryOutputDemand[idx] = dem;
+                if (ruleName && idx < HardwareConfig::channelRegistry.outputCount) {
+                    const char* purpose = HardwareConfig::channelRegistry.outputs[idx].purpose;
+                    if (!strcmp(purpose, "main_fuel")) strlcpy(ed.throttleCommandOwner, ruleName, sizeof(ed.throttleCommandOwner));
+                    else if (!strcmp(purpose, "prop_pitch")) strlcpy(ed.propPitchCommandOwner, ruleName, sizeof(ed.propPitchCommandOwner));
+                    else if (!strcmp(purpose, "oil_pump") ||
+                             !strcmp(HardwareConfig::channelRegistry.outputs[idx].role, "oil_pump"))
+                        strlcpy(ed.oilCommandOwner, ruleName, sizeof(ed.oilCommandOwner));
+                }
+            }
             return;
         }
         switch (act) {
@@ -350,7 +389,10 @@ private:
             case BLEED_VALVE: ed.bleedValveDemand = dem; ed.bleedValveOpen = dem >= 0.5f; break;
             case FUEL_PUMP2:  ed.fuelPump2Demand = constrain(dem, 0.0f, 1.0f); break;
             case OIL_SCAVENGE:ed.oilScavengeDemand = dem; ed.oilScavengeOn = dem >= 0.5f; break;
-            case THROTTLE:    ed.throttleDemand = constrain(dem, 0.0f, 1.0f); break;
+            case THROTTLE:
+                ed.throttleDemand = constrain(dem, 0.0f, 1.0f);
+                if (ruleName) strlcpy(ed.throttleCommandOwner, ruleName, sizeof(ed.throttleCommandOwner));
+                break;
             case STARTER:
                 ed.starterDemand = constrain(dem, 0.0f, 1.0f);
                 // A starter automation owns the complete starter action. This
@@ -359,7 +401,10 @@ private:
                 ed.starterEnabled = dem > 0.001f;
                 break;
             case STARTER_ENABLE: ed.starterEnabled = (dem >= 0.5f); break;
-            case OIL_PUMP:    ed.oilPumpPct     = constrain(dem, 0.0f, 1.0f) * 100.0f; break;
+            case OIL_PUMP:
+                ed.oilPumpPct = constrain(dem, 0.0f, 1.0f) * 100.0f;
+                if (ruleName) strlcpy(ed.oilCommandOwner, ruleName, sizeof(ed.oilCommandOwner));
+                break;
             case FUEL_SOL:    ed.fuelSolOpen    = (dem >= 0.5f); break;
             case IGNITER:     ed.igniterOn      = (dem >= 0.5f); break;
             case IGNITER2:    ed.igniter2On     = (dem >= 0.5f); break;
@@ -382,7 +427,10 @@ private:
                 break;
             case AIRSTARTER: ed.airstarterOpen = (dem >= 0.5f); break;
             case GLOW_PLUG:  ed.glowPlugDemand = constrain(dem, 0.0f, 1.0f); break;
-            case PROP_PITCH: ed.propPitchDemand = constrain(dem, 0.0f, 1.0f); break;
+            case PROP_PITCH:
+                ed.propPitchDemand = constrain(dem, 0.0f, 1.0f);
+                if (ruleName) strlcpy(ed.propPitchCommandOwner, ruleName, sizeof(ed.propPitchCommandOwner));
+                break;
             default: break;
         }
     }
@@ -391,5 +439,6 @@ private:
     static inline FaultCallback _faultCb = nullptr;
     static inline bool _ruleLatched[Config::MAX_RULES] = {};
     static inline uint8_t _ownedTargets[Config::MAX_RULES] = {};
+    static inline float _ownedBaseDemands[Config::MAX_RULES] = {};
     static inline uint8_t _ownedTargetCount = 0;
 };

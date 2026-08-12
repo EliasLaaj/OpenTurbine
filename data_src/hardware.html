@@ -6,8 +6,8 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Hardware</title>
-<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260731a" data-ot-version="20260731a"></script>
+<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body>
 <nav>
@@ -83,16 +83,16 @@
     <div class="hw-item-card">
       <div class="hw-grid profile-grid">
         <div class="hw-field">
-          <span class="hw-label">Engine name / Wi-Fi network name</span>
+          <label class="hw-label" for="f-profile-id">Engine name / Wi-Fi network name</label>
           <span class="hw-desc">Identifies this engine and its saved setup. It is also used as the ECU Wi-Fi network name. Default: OpenTurbine.</span>
           <input type="text" id="f-profile-id" maxlength="63" placeholder="OpenTurbine" oninput="setProfileId(this.value)">
           <span id="profile-id-warn" style="display:none;font-size:.68rem;color:var(--yellow)">⚠ Longer than 32 bytes — Wi-Fi limits SSIDs to 32 bytes, so the broadcast AP name will be truncated (the full ID is still used everywhere else).</span>
         </div>
         <div class="hw-field">
-          <span class="hw-label">Wi-Fi AP Password</span>
+          <label class="hw-label" for="f-wifi-password">Wi-Fi AP Password</label>
           <span class="hw-desc">Optional password for the Wi-Fi access point. A saved password is retained unless you enter a replacement; blank selects an open network. ⚠ On an open network, anyone who joins the AP can send engine commands — set a password for anything beyond bench use.</span>
           <div style="display:flex;gap:.35rem;align-items:center">
-            <input type="password" id="f-wifi-password" maxlength="63" placeholder="(open network)"
+            <input type="password" id="f-wifi-password" maxlength="63" placeholder="(open network)" autocomplete="new-password"
               oninput="set('wifi_password',this.value)" style="flex:1">
             <button type="button" id="btn-wifi-pw-toggle" onclick="toggleWifiPassword()"
               title="Show/hide password"
@@ -207,7 +207,7 @@
         </div>
         <div class="control-setup-card">
           <strong>Turboprop with automatic pitch</strong>
-          <span>Fit Main Fuel, N2 Speed, and a proportional Prop Pitch output, then enable <b>Automatic N2 speed control</b>. A nonzero pitch response makes pitch primary; fuel is the fallback at pitch limits.</span>
+          <span>Fit Main Fuel, N2 Speed, and a proportional Prop Pitch output, then enable <b>Automatic N2 speed control</b>. A nonzero pitch response makes pitch primary. At a pitch endpoint, main fuel remains operator-controlled; the separate N2 pullback may still reduce it.</span>
           <a href="/config.html#governor-cfg-section">Open turboprop governor settings →</a>
         </div>
         <div class="control-setup-card">
@@ -557,7 +557,7 @@ function collectPinUsage() {
     add(ch.pin, label);
     const actuatorKey = registryCoreActuatorKey(ch);
     const dedicated = actuatorKey ? cfg.actuators?.[actuatorKey] : null;
-    if (actuatorKey === 'glow_plug' && Number(dedicated?.type || 0) === 2) add(dedicated?.fuel_pin, 'Wet glow pilot fuel');
+    if (actuatorKey === 'glow_plug' && Number(dedicated?.type || 0) === 2) add(dedicated?.fuel_pin, 'Wet glow start fuel');
     const currentEnabled = dedicated ? !!dedicated.has_current : !!ch.has_current;
     const currentPin = dedicated ? dedicated.current_pin : ch.current_pin;
     if (currentEnabled) add(currentPin, `${label} current`);
@@ -639,7 +639,6 @@ function refreshAllPins() {
   const c = cfg.controls  || {};
   const cl = cfg.cluster_serial || {};
   const abt = cfg.ab_trigger || {};
-  const abfl = cfg.ab_flame || {};
 
   refreshPinSel('f-stop-pin',       'in',  c.stop_pin);
   refreshPinSel('f-start-pin',      'in',  c.start_pin);
@@ -689,7 +688,6 @@ function refreshAllPins() {
   refreshPinSel('f-ab-sw-pin',      'in',  abt.switch_pin);
   refreshPinSel('f-ab-inp-pin',     abt.input_rc_pwm ? 'in' : 'adc', abt.input_pin);
   refreshPinSel('f-ab-arm-pin',     'in',  abt.arm_pin);
-  refreshPinSel('f-ab-fl-pin',      'adc', abfl.pin);
 
   // New sensors
   const ot = s.oil_temp || {};
@@ -800,7 +798,7 @@ function escapeHtmlText(value) {
     .replace(/'/g, '&#39;');
 }
 
-// Wet-glow pilot-fuel subfields are mode-specific, like the other actuator
+// Wet-glow start-fuel subfields are mode-specific, like the other actuator
 // cards: relay mode shows polarity; PWM shows freq/bits + duty range;
 // servo/ESC shows pulse endpoints; demand applies to PWM and servo.
 function updateWetGlowModeUI() {
@@ -939,10 +937,104 @@ let settingsCfg = {};
 let pcbProfile = {state:'absent', ports:[]};
 let engineMode = 'STANDBY';
 let _loadedProfileId = 'OpenTurbine';
+let _loadedHardwareCfg = {};
+let _loadedSettingsCfg = {};
+
+function cloneHardwareJson(value) {
+  return JSON.parse(JSON.stringify(value ?? {}));
+}
+
+function hardwarePlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Registry rows have stable IDs, so merge them as records rather than treating
+// the entire array as one stale replacement. This preserves a newer
+// Calibration-page edit to an untouched field/card while Hardware is open.
+function mergeHardwareRegistryRows(baseline, edited, fresh) {
+  const baseRows = Array.isArray(baseline) ? baseline : [];
+  const editRows = Array.isArray(edited) ? edited : [];
+  const freshRows = Array.isArray(fresh) ? fresh : [];
+  const baseById = new Map(baseRows.filter(row => row?.id).map(row => [String(row.id), row]));
+  const editById = new Map(editRows.filter(row => row?.id).map(row => [String(row.id), row]));
+  const freshById = new Map(freshRows.filter(row => row?.id).map(row => [String(row.id), row]));
+
+  // A row deliberately removed in Hardware stays removed even if another page
+  // changed one of its fields meanwhile.
+  for (const id of baseById.keys()) if (!editById.has(id)) freshById.delete(id);
+
+  for (const [id, editRow] of editById) {
+    const baseRow = baseById.get(id);
+    if (!baseRow) freshById.set(id, cloneHardwareJson(editRow));
+    else freshById.set(id, mergeHardwareEdits(baseRow, editRow, freshById.get(id) || baseRow));
+  }
+
+  // Retain the Hardware ordering, then append any card added concurrently.
+  const merged = [];
+  const used = new Set();
+  for (const row of editRows) {
+    const id = String(row?.id || '');
+    if (!id || used.has(id) || !freshById.has(id)) continue;
+    merged.push(freshById.get(id)); used.add(id);
+  }
+  for (const row of freshRows) {
+    const id = String(row?.id || '');
+    if (!id || used.has(id) || !freshById.has(id)) continue;
+    merged.push(freshById.get(id)); used.add(id);
+  }
+  return merged;
+}
+
+// Apply only Hardware-page edits to the latest committed hardware document.
+// Most arrays are intentional replacement units. Registry input/output arrays
+// are ID-keyed records and merge per field so concurrent calibration survives.
+function mergeHardwareEdits(baseline, edited, fresh) {
+  const base = hardwarePlainObject(baseline) ? baseline : {};
+  const edit = hardwarePlainObject(edited) ? edited : {};
+  const out = hardwarePlainObject(fresh) ? cloneHardwareJson(fresh) : {};
+  const keys = new Set([...Object.keys(base), ...Object.keys(edit)]);
+  for (const key of keys) {
+    const hasEdit = Object.prototype.hasOwnProperty.call(edit, key);
+    const before = base[key];
+    const after = edit[key];
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    if (!hasEdit) delete out[key];
+    else if ((key === 'inputs' || key === 'outputs') &&
+             Array.isArray(before) && Array.isArray(after) && Array.isArray(out[key]))
+      out[key] = mergeHardwareRegistryRows(before, after, out[key]);
+    else if (hardwarePlainObject(before) && hardwarePlainObject(after))
+      out[key] = mergeHardwareEdits(before, after, out[key]);
+    else out[key] = cloneHardwareJson(after);
+  }
+  return out;
+}
+
+function mergeHardwareSettingsCleanup(baseline, edited, fresh) {
+  const out = cloneHardwareJson(fresh);
+  const beforeUnderflow = baseline?.oil_advanced?.shutdown_on_underflow;
+  const afterUnderflow = edited?.oil_advanced?.shutdown_on_underflow;
+  if (beforeUnderflow !== afterUnderflow) {
+    out.oil_advanced ||= {};
+    out.oil_advanced.shutdown_on_underflow = !!afterUnderflow;
+  }
+  // Hardware only removes rules that reference a removed channel. Apply those
+  // exact removals to the fresh array so concurrent rule additions/edits are
+  // preserved rather than replacing the entire array from a stale tab.
+  const editedRuleKeys = new Set((edited?.rules || []).map(rule => JSON.stringify(rule)));
+  const removedRuleKeys = new Set((baseline?.rules || [])
+    .map(rule => JSON.stringify(rule)).filter(key => !editedRuleKeys.has(key)));
+  if (removedRuleKeys.size && Array.isArray(out.rules))
+    out.rules = out.rules.filter(rule => !removedRuleKeys.has(JSON.stringify(rule)));
+  return out;
+}
+
+function outputDriverIsOnOff(driver) { return [4,11].includes(Number(driver)); }
+function outputDriverIsProportional(driver) { return [5,6].includes(Number(driver)); }
 
 let ws;
 let wsPullTimer = null;
 let statusPollTimer = null;
+let hardwareStatusInFlight = false;
 let wsClosingForNavigation = false;
 function requestHardwareTelemetry() {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send('p');
@@ -983,22 +1075,21 @@ function connectWs() {
   };
   ws.onerror = () => { try { ws.close(); } catch(_) {} };
   ws.onmessage = (e) => {
-    try {
-      const d = JSON.parse(e.data);
-      engineMode = d.mode || 'STANDBY';
-      updateSaveButton();
-      // Update DI live state dots
-      if (d.di_channels) {
-        d.di_channels.forEach((ch, i) => {
-          const dot = document.getElementById('di-live-' + i);
-          if (dot) {
-            dot.className = 'dot ' + (ch.state ? 'green' : '');
-            dot.title = ch.state ? 'ACTIVE' : 'inactive';
-          }
-        });
-      }
-    } catch(_) {}
+    try { applyHardwareTelemetry(JSON.parse(e.data)); } catch(_) {}
   };
+}
+function applyHardwareTelemetry(d) {
+  engineMode = d.mode || 'STANDBY';
+  updateSaveButton();
+  if (d.di_channels) {
+    d.di_channels.forEach((ch, i) => {
+      const dot = document.getElementById('di-live-' + i);
+      if (dot) {
+        dot.className = 'dot ' + (ch.state ? 'green' : '');
+        dot.title = ch.state ? 'ACTIVE' : 'inactive';
+      }
+    });
+  }
 }
 window.addEventListener('pagehide', stopHardwareTelemetry);
 window.addEventListener('beforeunload', stopHardwareTelemetry);
@@ -1006,8 +1097,8 @@ window.addEventListener('ot:navigation-start', stopHardwareTelemetry);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
   wsClosingForNavigation = false;
-  startStatusPoll();
-  connectWs();
+  if (cfg?.platform === 'esp32') startStatusPoll();
+  else connectWs();
 });
 function setConn(ok, text) {
   const dot = document.getElementById('conn');
@@ -1016,17 +1107,25 @@ function setConn(ok, text) {
   if (lbl) lbl.textContent = text || (ok ? 'Connected' : 'Disconnected');
 }
 async function refreshHardwareStatus() {
+  if (hardwareStatusInFlight) return;
+  hardwareStatusInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1800);
   try {
-    const r = await fetch('/api/status', { cache:'no-store' });
+    const r = await fetch('/api/telemetry', { cache:'no-store', signal:controller.signal });
     setConn(r.ok, r.ok ? 'Connected' : 'Disconnected');
+    if (r.ok) applyHardwareTelemetry(await r.json());
   } catch (_) {
     setConn(false, 'Disconnected');
+  } finally {
+    clearTimeout(timeout);
+    hardwareStatusInFlight = false;
   }
 }
 function startStatusPoll() {
   if (statusPollTimer) return;
   refreshHardwareStatus();
-  statusPollTimer = setInterval(refreshHardwareStatus, 3000);
+  statusPollTimer = setInterval(refreshHardwareStatus, 1000);
 }
 function stopStatusPoll() {
   if (!statusPollTimer) return;
@@ -1056,6 +1155,11 @@ async function loadHardware() {
   document.getElementById('save-msg').textContent = 'Loading…';
   try {
     cfg = await fetchHardwareJson('/api/hardware');
+    // Live bus state has its own small endpoint; keep it out of the large,
+    // mostly-static editor document and fetch it only after that response has
+    // completed.
+    try { cfg._i2c_discovery = await fetchHardwareJson('/api/i2c_discovery', 2); }
+    catch (_) { cfg._i2c_discovery = {}; }
     pcbProfile = cfg._pcb_profile || {state:'absent', ports:[]};
     if (pcbProfile.state === 'valid') {
       const ports = [];
@@ -1067,8 +1171,10 @@ async function loadHardware() {
       pcbProfile.ports = ports;
     }
     try {
-      const full = await (await fetch('/api/ecu_config', {cache:'no-store'})).json();
-      settingsCfg = full.settings || {};
+      // Hardware only needs the settings section for dependency cleanup. Do
+      // not fetch the much larger combined ECU document while the hardware
+      // response and PCB catalog pages may still be leaving the TCP stack.
+      settingsCfg = await fetchHardwareJson('/api/config');
     } catch (_) {
       settingsCfg = {};
     }
@@ -1080,6 +1186,9 @@ async function loadHardware() {
     // Render them once more against the completed snapshot so unchanged
     // Start/Stop cards do not retain a stale yellow "changed" border.
     renderHardwareWorkflowSummaries();
+    _loadedHardwareCfg = cloneHardwareJson(cfg);
+    delete _loadedHardwareCfg._i2c_discovery;
+    _loadedSettingsCfg = cloneHardwareJson(settingsCfg);
     _hwDirty = false;
     document.querySelector('.save-bar')?.classList.remove('is-dirty');
     document.getElementById('save-msg').textContent = 'Loaded — no unsaved changes';
@@ -1087,8 +1196,10 @@ async function loadHardware() {
     document.getElementById('hw-profile-badge').textContent = cfg.profile_id || 'OpenTurbine';
     updateSaveButton();
     startI2cDiscoveryPoll();
+    return true;
   } catch(e) {
     document.getElementById('save-msg').textContent = 'Load failed: ' + e;
+    return false;
   }
 }
 
@@ -1097,8 +1208,8 @@ function startI2cDiscoveryPoll() {
   if (i2cDiscoveryTimer) return;
   i2cDiscoveryTimer = setInterval(async () => {
     try {
-      const latest = await (await fetch('/api/hardware', {cache:'no-store'})).json();
-      cfg._i2c_discovery = latest._i2c_discovery || {};
+      const latest = await fetchHardwareJson('/api/i2c_discovery', 2);
+      cfg._i2c_discovery = latest || {};
       renderI2cDiscovery();
     } catch (_) {}
   }, 5000);
@@ -1274,9 +1385,8 @@ function pcbModeCompatible(direction, purpose, role, mode) {
         ![...analog,...digital].includes(adapter)) return false;
     if (['tot','tit','oil_temperature','coolant_temp','intake_temperature'].includes(purpose) &&
         ![...analog,'spi_thermocouple','onewire_temperature'].includes(adapter)) return false;
-    if (purpose === 'generic' && digital.includes(adapter)) return false;
   }
-  if (adapter === 'spi_thermocouple' && !['tot','tit','oil_temperature','coolant_temp','intake_temperature'].includes(purpose)) return false;
+  if (adapter === 'spi_thermocouple' && !['tot','tit','oil_temperature'].includes(purpose)) return false;
   if (adapter === 'onewire_temperature' && !['oil_temperature','coolant_temp','intake_temperature'].includes(purpose)) return false;
   if (adapter === 'i2c_load_cell' && !['torque','thrust'].includes(purpose)) return false;
   return true;
@@ -1366,7 +1476,11 @@ function renderI2cDiscovery() {
       : d.type === 'NAU7802' ? '2-channel bridge/load-cell ADC for thrust or torque' : 'recognized response';
     const remove = !d.present && assigned
       ? `<button type="button" class="danger" onclick="removeDisconnectedI2cDevice(${Number(d.address)},'${escapeHtmlText(d.type)}')">Remove device and assignments</button>` : '';
-    return `<div class="hw-item-card" style="margin-top:.55rem"><div class="registry-card-summary"><div><strong>${escapeHtmlText(d.type)} at ${address}</strong><div class="hw-desc">${help} · ${assigned} assigned channel${assigned===1?'':'s'}</div></div><div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap"><span class="registry-status registry-status-${d.present?'ok':'error'}">${d.present?'Connected':'Disconnected'}</span>${remove}</div></div></div>`;
+    const state = d.present ? 'Connected'
+      : d.rechecking || d.state === 'rechecking' ? 'Unavailable — rechecking'
+      : 'Faulted';
+    const stateClass = d.present ? 'ok' : (state === 'Faulted' ? 'error' : 'warning');
+    return `<div class="hw-item-card" style="margin-top:.55rem"><div class="registry-card-summary"><div><strong>${escapeHtmlText(d.type)} at ${address}</strong><div class="hw-desc">${help} · ${assigned} assigned channel${assigned===1?'':'s'}</div></div><div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap"><span class="registry-status registry-status-${stateClass}">${state}</span>${remove}</div></div></div>`;
   }).join('');
 }
 
@@ -1542,15 +1656,15 @@ const ACT_DEPENDENCIES = {
   starter: { name:'Starter', rules:[5], blocks:['StarterSpin','StarterOff'], functions:['Starter sequence blocks','starter side-actions','rules driving starter'] },
   throttle: { name:'Main fuel pump / metering ESC', controllers:['dynamic_idle','governor'], logs:['throttle'], rules:[4],
               blocks:['FuelPumpIdle','ModifiedIdle','Spool','ThrottleSet'], functions:['Fuel sequence blocks','automatic idle/N2 speed-control output','fuel/throttle logging','rules driving throttle'] },
-  fuel_pump2: { name:'Pilot / auxiliary fuel pump', logs:['fp2'], rules:[2], blocks:['FuelPumpRamp','FuelPump2Set','FuelPump2On','FuelPump2Off'],
-                functions:['Pilot / auxiliary fuel pump sequence blocks','pilot / auxiliary fuel logging','rules driving pilot / auxiliary fuel'] },
+  fuel_pump2: { name:'Secondary / auxiliary fuel pump', logs:['fp2'], rules:[2], blocks:['FuelPumpRamp','FuelPump2Set','FuelPump2On','FuelPump2Off'],
+                functions:['Secondary / auxiliary fuel pump sequence blocks','secondary / auxiliary fuel logging','rules driving secondary / auxiliary fuel'] },
   glow_plug: { name:'Glow plug', logs:['glow'], rules:[16], blocks:['GlowPreheat'], functions:['GlowPreheat block','glow logging','rules driving glow plug'] },
   prop_pitch: { name:'Prop pitch', controllers:['governor'], logs:['prop'], rules:[17], functions:['Governor prop-pitch output','prop pitch logging','rules driving prop pitch'] },
   cool_fan: { name:'Cooling fan', rules:[0], blocks:['CoolFanOn','CoolFanOff'], functions:['Cooling fan sequence blocks','rules driving cooling fan'] },
   bleed_valve: { name:'Bleed valve', rules:[1], blocks:['BleedOpen','BleedClose'], functions:['Bleed valve sequence blocks','rules driving bleed valve'] },
   fuel_sol: { name:'Main fuel shutoff', rules:[8], blocks:['FuelOpen','FuelSolClose','FuelPulse'], functions:['Main fuel shutoff sequence blocks','rules driving the main fuel shutoff'] },
   igniter: { name:'Igniter 1', rules:[9], blocks:['IgniterOn','IgniterOff','PreIgnSpark','PreHeat'], functions:['Ignition sequence blocks','rules driving igniter'] },
-  igniter2: { name:'AB / pilot igniter', rules:[10], blocks:['ABIgnOn','ABIgnOff'], functions:['AB / pilot ignition blocks','rules driving AB / pilot igniter'] },
+  igniter2: { name:'secondary igniter', rules:[10], blocks:['ABIgnOn','ABIgnOff'], functions:['secondary ignition blocks','rules driving secondary igniter'] },
   ab_sol: { name:'Afterburner fuel valve', rules:[11], blocks:['ABSolOpen','ABSolClose'], functions:['afterburner fuel-valve sequence blocks','rules driving the afterburner fuel valve'] },
   ab_pump: { name:'Afterburner fuel pump', logs:['ab'], rules:[12], blocks:['ABPumpOn','ABPumpOff'], functions:['afterburner fuel-pump sequence blocks','afterburner logging','rules driving the afterburner fuel pump'] },
   airstarter_sol: { name:'Air starter valve', rules:[15], blocks:['AirstarterOn','AirstarterOff'], functions:['Air starter valve sequence blocks','rules driving the air starter valve'] },
@@ -1602,7 +1716,6 @@ const HW_ENABLE_DEP_KEYS = {
   'en-statusled': ['actuator', 'status_led'],
   'en-oilpumpcurrent': ['special', 'oil_pump_current'],
   'en-glowcurrent': ['special', 'glow_current'],
-  'en-ab-flame': ['special', 'ab_flame'],
   'en-buzzer': ['special', 'buzzer'],
   'en-cluster': ['special', 'cluster'],
   'en-mavlink': ['special', 'mavlink']
@@ -1876,7 +1989,7 @@ const REGISTRY_OUTPUT_ROLES=[
   ['generic','Generic output'],['fuel','Fuel metering'],['fuel_shutoff','Fuel shutoff'],['starter','Starter'],
   ['starter_en','Starter enable'],['oil_pump','Oil pump'],['coolant_pump','Coolant pump'],['scavenge_pump','Scavenge pump'],['cooling_fan','Cooling fan'],
   ['valve','Valve / solenoid'],['igniter','Igniter'],['ab_igniter','AB igniter'],['glow_plug','Glow plug'],
-  ['fuel_pump','Pilot / auxiliary fuel pump'],['ab_pump','Afterburner fuel pump'],['prop_pitch','Prop pitch'],
+  ['fuel_pump','Secondary / auxiliary fuel pump'],['ab_pump','Afterburner fuel pump'],['prop_pitch','Prop pitch'],
   ['indicator','Warning / indicator light']
 ];
 const REGISTRY_INPUT_PURPOSES=[
@@ -1889,7 +2002,7 @@ const REGISTRY_INPUT_PURPOSES=[
   {value:'fuel_pressure',label:'Fuel pressure',role:'pressure',drivers:[1,9],group:'Engine sensors'},
   {value:'p1_pressure',label:'Pressure 1',role:'pressure',drivers:[1,9],group:'Engine sensors'},
   {value:'p2_pressure',label:'Pressure 2',role:'pressure',drivers:[1,9],group:'Engine sensors'},
-  {value:'coolant_pressure',label:'Coolant pressure',role:'pressure',drivers:[1],group:'Engine sensors'},
+  {value:'coolant_pressure',label:'Coolant pressure',role:'pressure',drivers:[1,9],group:'Engine sensors'},
   {value:'oil_temperature',label:'Oil / gearbox temperature',role:'temperature',drivers:[1,9],group:'Engine sensors'},
   {value:'coolant_temp',label:'Coolant temperature',role:'temperature',drivers:[1,9],group:'Engine sensors'},
   {value:'intake_temperature',label:'Intake / ambient temperature',role:'temperature',drivers:[1,9],group:'Engine sensors'},
@@ -1898,24 +2011,24 @@ const REGISTRY_INPUT_PURPOSES=[
   {value:'scavenge_flow',label:'Scavenge-pump flow',role:'flow',drivers:[2,1,9],group:'Engine sensors'},
   {value:'flame',label:'Flame sensor',role:'flame',drivers:[0,1,8,9],group:'Engine sensors'},
   {value:'ab_flame',label:'Afterburner flame sensor',role:'flame',drivers:[0,1,8,9],group:'Engine sensors'},
-  {value:'torque',label:'Torque',role:'torque',drivers:[1,10],group:'Engine sensors'},
-  {value:'thrust',label:'Thrust',role:'thrust',drivers:[10],group:'Engine sensors'},
+  {value:'torque',label:'Torque',role:'torque',drivers:[1,9,10],group:'Engine sensors'},
+  {value:'thrust',label:'Thrust',role:'thrust',drivers:[10,1,9],group:'Engine sensors'},
   {value:'battery_voltage',label:'Battery / bus voltage',role:'voltage',drivers:[1,9],group:'Engine sensors'},
   {value:'throttle',label:'Throttle input',role:'operator',drivers:[1,3,2,7,9],group:'Operator inputs'},
   {value:'idle',label:'Idle input',role:'operator',drivers:[0,1,3,2,7,8,9],group:'Operator inputs'},
   {value:'ab_command',label:'Afterburner analog / RC command',role:'operator',drivers:[1,3,7,9],group:'Operator inputs'},
-  {value:'start_switch',label:'Start switch',role:'digital_switch',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'stop_switch',label:'Stop switch',role:'digital_switch',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'digital_switch',label:'Digital interlock',role:'digital_switch',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'inhibit_start',label:'Inhibit-start switch',role:'inhibit_start',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'estop',label:'Emergency-stop switch',role:'estop',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'fault',label:'Fault switch',role:'fault',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'low_oil_switch',label:'Low oil pressure safety switch',role:'low_oil_switch',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'oil_zero_switch',label:'Zero oil pressure safety switch',role:'oil_zero_switch',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'sequence_gate',label:'Sequence gate switch',role:'sequence_gate',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'ab_arm',label:'Afterburner arm switch',role:'ab_arm',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'ab_fire',label:'Afterburner command switch',role:'ab_fire',drivers:[0,8,9],group:'Switches and interlocks'},
-  {value:'limp_mode',label:'Reduced-power mode switch',role:'limp_mode',drivers:[0,8,9],group:'Switches and interlocks'},
+  {value:'start_switch',label:'Start switch',role:'digital_switch',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'stop_switch',label:'Stop switch',role:'digital_switch',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'digital_switch',label:'Digital interlock',role:'digital_switch',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'inhibit_start',label:'Inhibit-start switch',role:'inhibit_start',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'estop',label:'Emergency-stop switch',role:'estop',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'fault',label:'Fault switch',role:'fault',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'low_oil_switch',label:'Low oil pressure safety switch',role:'low_oil_switch',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'oil_zero_switch',label:'Zero oil pressure safety switch',role:'oil_zero_switch',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'sequence_gate',label:'Sequence gate switch',role:'sequence_gate',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'ab_arm',label:'Afterburner arm switch',role:'ab_arm',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'ab_fire',label:'Afterburner command switch',role:'ab_fire',drivers:[0,1,8,9],group:'Switches and interlocks'},
+  {value:'limp_mode',label:'Reduced-power mode switch',role:'limp_mode',drivers:[0,1,8,9],group:'Switches and interlocks'},
   {value:'generic',label:'Generic automation input',role:'generic',drivers:[0,1,2,3,7,8,9],group:'Generic automation I/O'}
 ];
 const REGISTRY_OUTPUT_PURPOSES=[
@@ -1927,19 +2040,19 @@ const REGISTRY_OUTPUT_PURPOSES=[
   {value:'coolant_pump',label:'Coolant pump',role:'coolant_pump',drivers:[4,5,6,11],group:'Pumps and cooling'},
   {value:'scavenge_pump',label:'Oil scavenge pump',role:'scavenge_pump',drivers:[4,5,6,11],group:'Pumps and cooling'},
   {value:'cooling_fan',label:'Cooling fan',role:'cooling_fan',drivers:[4,5,6,11],group:'Pumps and cooling'},
-  {value:'fuel_pump',label:'Pilot / auxiliary fuel pump',role:'fuel_pump',drivers:[4,5,6,11],group:'Pumps and cooling'},
+  {value:'fuel_pump',label:'Secondary / auxiliary fuel pump',role:'fuel_pump',drivers:[4,5,6,11],group:'Pumps and cooling'},
   {value:'igniter',label:'Igniter',role:'igniter',drivers:[4,5,11],group:'Ignition'},
   {value:'ab_igniter',label:'Afterburner igniter',role:'ab_igniter',drivers:[4,5,11],group:'Ignition'},
   {value:'glow_plug',label:'Glow plug',role:'glow_plug',drivers:[4,5,11],group:'Ignition'},
   {value:'valve',label:'Valve / actuator',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
   {value:'ab_valve',label:'Afterburner fuel shutoff valve',role:'valve',drivers:[4,11],group:'Valves and auxiliaries'},
   {value:'air_starter',label:'Air-starter valve / actuator',role:'starter',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
-  {value:'pilot_fuel',label:'Pilot gas / start-fuel valve',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
+  {value:'pilot_fuel',label:'Start-fuel valve',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
   {value:'purge_valve',label:'Air / fuel purge valve',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
   {value:'drain_valve',label:'Electric drain valve',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
   {value:'nozzle_actuator',label:'Variable nozzle actuator',role:'prop_pitch',drivers:[5,6],group:'Valves and auxiliaries'},
   {value:'ab_pump',label:'Afterburner fuel pump',role:'ab_pump',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
-  {value:'prop_pitch',label:'Propeller pitch',role:'prop_pitch',drivers:[5,6],group:'Valves and auxiliaries'},
+  {value:'prop_pitch',label:'Propeller pitch',role:'prop_pitch',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
   {value:'warning_indicator',label:'Warning / indicator light',role:'indicator',drivers:[4,5,11],group:'Warnings and indicators'},
   {value:'generic',label:'Generic automation output',role:'generic',drivers:[4,5,6,11],group:'Generic automation I/O'}
 ];
@@ -1957,6 +2070,8 @@ function registryDerivedPurpose(direction, c) {
   if (registryPurposeDefinitions(direction).some(p => p.value === role)) return role;
   if (direction === 'input' && role === 'speed') return 'shaft_speed';
   if (direction === 'output' && role === 'fuel') return 'main_fuel';
+  if (direction === 'output' && role === 'starter_en') return 'starter_enable';
+  if (direction === 'output' && role === 'indicator') return 'warning_indicator';
   return 'generic';
 }
 function registryPurposeOptions(direction, selected, channel = null) {
@@ -2033,12 +2148,12 @@ const REGISTRY_OUTPUT_PRESETS=[
   {group:'Engine actuators',role:'ab_igniter',label:'AB igniter',id:'ab_igniter',name:'AB Igniter',driver:4},
   {group:'Engine actuators',role:'glow_plug',label:'Glow plug',id:'glow_plug',name:'Glow Plug',driver:5},
   {group:'Engine actuators',purpose:'air_starter',role:'starter',label:'Air starter',id:'air_starter',name:'Air Starter',driver:4},
-  {group:'Engine actuators',purpose:'pilot_fuel',role:'valve',label:'Pilot gas / start-fuel solenoid',id:'pilot_fuel',name:'Pilot Fuel',driver:4},
+  {group:'Engine actuators',purpose:'pilot_fuel',role:'valve',label:'Start-fuel solenoid',id:'pilot_fuel',name:'Start Fuel',driver:4},
   {group:'Engine actuators',purpose:'purge_valve',role:'valve',label:'Air / fuel purge valve',id:'purge_valve',name:'Purge Valve',driver:4},
   {group:'Engine actuators',purpose:'drain_valve',role:'valve',label:'Electric drain valve',id:'drain_valve',name:'Drain Valve',driver:4},
   {group:'Engine actuators',purpose:'nozzle_actuator',role:'prop_pitch',label:'Variable nozzle actuator',id:'nozzle_actuator',name:'Nozzle Actuator',driver:6},
   {group:'Engine actuators',role:'cooling_fan',label:'Cooling fan',id:'cooling_fan',name:'Cooling Fan',driver:5},
-  {group:'Engine actuators',role:'fuel_pump',label:'Pilot / auxiliary fuel pump',id:'fuel_pump',name:'Pilot / Aux Fuel',driver:5},
+  {group:'Engine actuators',role:'fuel_pump',label:'Secondary / auxiliary fuel pump',id:'fuel_pump',name:'Secondary / Aux Fuel',driver:5},
   {group:'Engine actuators',role:'valve',label:'Bleed valve',id:'bleed_valve',name:'Bleed Valve',driver:4},
   {group:'Engine actuators',role:'prop_pitch',label:'Prop pitch',id:'prop_pitch',name:'Prop Pitch',driver:6},
   {group:'Engine actuators',purpose:'ab_valve',role:'valve',label:'Afterburner fuel shutoff valve',id:'ab_solenoid',name:'AB Fuel Valve',driver:4},
@@ -2071,7 +2186,7 @@ const REGISTRY_PRESET_HELP = {
     torque:'Shaft torque sensor, including analog transmitters, HX711 modules, and fitted NAU7802 load-cell channels.',
     thrust:'Load-cell thrust measurement for test stands, performance logging, and custom protection rules.',
     battery_voltage:'ECU supply or battery voltage for undervoltage protection.',
-    throttle:'Pilot throttle demand from an analog, RC PWM, pulse-duty or generic input.',
+    throttle:'Operator throttle demand from an analog, RC PWM, pulse-duty or generic input.',
     idle:'Separate idle-demand input used by idle and startup sequencing.',
     ab_command:'Dedicated normalized analog, RC pulse, or PWM-duty command used to request afterburner and optionally schedule its pump.',
     start_switch:'Physical start command. The ECU starts only on a debounced press after the switch has been released once after boot.',
@@ -2097,19 +2212,19 @@ const REGISTRY_PRESET_HELP = {
     coolant_pump:'Liquid-cooling circulation pump for sequence actions or temperature rules.',
     scavenge_pump:'Oil scavenge/return pump that clears oil from the bearing or gearbox sump.',
     cooling_fan:'Cooling fan output controlled by sequence actions or temperature rules.',
-    fuel_pump:'Pilot, auxiliary or start-fuel pump; separate from the primary engine fuel command.',
+    fuel_pump:'Secondary, auxiliary or start-fuel pump; separate from the primary engine fuel command.',
     igniter:'Main combustor ignition exciter or coil command used during light-off.',
     ab_igniter:'Dedicated afterburner ignition exciter used during afterburner light-up.',
     glow_plug:'Glow element output for engines that use hot-surface ignition.',
     valve:'General on/off valve or solenoid for custom sequence actions and rules.',
     ab_valve:'Normally closed valve that admits fuel to the afterburner manifold during light-up and closes on stop or fault.',
     air_starter:'Solenoid that admits compressed air to an air starter.',
-    pilot_fuel:'Pilot-gas or start-fuel solenoid used only during ignition/startup.',
+    pilot_fuel:'Start-fuel solenoid used only during ignition/startup.',
     purge_valve:'Air or fuel purge valve used to clear the manifold during startup or shutdown.',
     drain_valve:'Electric drain valve that can be opened or closed by sequence blocks and control rules.',
     nozzle_actuator:'Proportional variable exhaust-nozzle actuator.',
     ab_pump:'Dedicated pump or ESC that meters fuel to the afterburner manifold.',
-    prop_pitch:'Proportional propeller-pitch actuator used by the N2/power-turbine governor.',
+    prop_pitch:'Propeller-pitch actuator used by the N2/power-turbine governor. Relay outputs provide deliberate fine/coarse two-position control.',
     warning_indicator:'Warning lamp or indicator commanded by rules and sequence actions.',
     generic:'Unassigned output for custom rules or sequence actions.'
   }
@@ -2146,12 +2261,12 @@ function registryHumanizeIdentifier(raw, direction) {
   const direct = {
     user_throttle:'Throttle Input', operator_throttle:'Throttle Input', operator_thrott:'Throttle Input', throttle_input:'Throttle Input',
     user_idle:'Idle Input', operator_idle:'Idle Input', idle_input:'Idle Input',
-    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Pilot / Auxiliary Fuel Pump', main_fuel:'Main Fuel Pump',
+    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Secondary / Auxiliary Fuel Pump', main_fuel:'Main Fuel Pump',
     fuel_shutoff:'Fuel Shutoff', fuel_sol:'Fuel Shutoff',
     flame:'Flame Sensor', flame_main:'Flame Sensor',
     low_oil_switch:'Low Oil Switch', oil_zero_switch:'Zero Oil Pressure Switch',
     coolant_pump:'Coolant Pump', coolant_temperature:'Coolant Temperature',
-    pilot_fuel:'Pilot Gas', purge_valve:'Purge Valve', air_starter:'Air Starter',
+    pilot_fuel:'Start Fuel', purge_valve:'Purge Valve', air_starter:'Air Starter',
     ab_pump:'Afterburner Fuel Pump', ab_solenoid:'Afterburner Fuel Valve', ab_igniter:'Afterburner Igniter',
     prop_pitch:'Prop Pitch', nozzle_actuator:'Nozzle Actuator'
   };
@@ -2238,52 +2353,54 @@ function registryTorqueInterfaceEditor(direction, c, index) {
 }
 function registryInvertEditor(direction, c, index) {
   if (direction === 'input') {
+    if (['flame','ab_flame'].includes(registryDerivedPurpose(direction,c))) return '';
     const normalized = ['generic','throttle','idle','flame'].includes(registryDerivedPurpose(direction,c));
-    if (!normalized || Number(c.driver) === 0) return '';
+    if (!normalized || [0,8].includes(Number(c.driver))) return '';
     return `<div class="hw-field"><span class="hw-label">Input direction</span><span class="hw-desc">Reverse the normalized value after reading the electrical signal. A high input becomes 0.00 and a low input becomes 1.00.</span><label class="hw-toggle"><input type="checkbox" ${c.invert ? 'checked' : ''} onchange="updateRegistryChannel('input',${index},'invert',this.checked)"><span></span> Invert input</label></div>`;
   }
-  if (Number(c.driver) === 4) {
-    return `<div class="hw-field"><span class="hw-label">Output polarity</span><span class="hw-desc">When enabled, GPIO HIGH means On. Disable for active-low relay boards where GPIO LOW turns the output on.</span><label class="hw-toggle"><input type="checkbox" ${c.invert ? '' : 'checked'} onchange="updateRegistryChannel('${direction}',${index},'invert',!this.checked)"><span></span> Active high</label></div>`;
+  if (outputDriverIsOnOff(c.driver)) {
+    return `<div class="hw-field"><span class="hw-label">Output polarity</span><span class="hw-desc">Active high means GPIO HIGH energizes the output. Active low means GPIO LOW energizes it.</span><select onchange="updateRegistryChannel('${direction}',${index},'invert',this.value==='1')"><option value="0"${c.invert?'':' selected'}>Active high</option><option value="1"${c.invert?' selected':''}>Active low</option></select></div>`;
   }
-  const coreActuator = registryCoreActuatorKey(c);
-  if (coreActuator && !(Number(c.driver) === 5 && (coreActuator === 'throttle' || coreActuator === 'starter'))) {
-    return '';
-  }
-  const label = 'Invert output demand';
-  const desc = Number(c.driver) === 4
-    ? 'Normal relay drives GPIO HIGH when on. Inverted relay drives GPIO LOW when on.'
-    : 'Reverses the written duty/demand: 0% becomes 100%, 100% becomes 0%.';
-  return `<div class="hw-field"><span class="hw-label">Output polarity</span><span class="hw-desc">${escapeHtmlText(desc)}</span><label class="hw-toggle"><input type="checkbox" ${c.invert ? 'checked' : ''} onchange="updateRegistryChannel('${direction}',${index},'invert',this.checked)"><span></span> ${escapeHtmlText(label)}</label></div>`;
+  return `<div class="hw-field"><span class="hw-label">Output direction</span><span class="hw-desc">Reversed maps semantic 0% to the configured 100% electrical endpoint and semantic 100% to the 0% endpoint.</span><select onchange="updateRegistryChannel('${direction}',${index},'invert',this.value==='1')"><option value="0"${c.invert?'':' selected'}>Normal</option><option value="1"${c.invert?' selected':''}>Reversed</option></select></div>`;
 }
 function registryDemandEditor(c, index) {
   const safeChanged = registryFieldChangedClass('output', index, 'safe_demand');
   const safeInvalid = registryDemandProblem(c.safe_demand) ? ' field-error' : '';
-  if (registryCoreActuatorKey(c)) {
-    return `<div class="hw-field"><span class="hw-label">Power-on state</span><span class="hw-desc">Engine actuators always initialise Off before any controller or sequence can run. Fuel, ignition and motors must never energise just because the ECU booted.</span><output>Off (fixed)</output></div>`;
+  if (registryDerivedPurpose('output', c) === 'prop_pitch') {
+    return `<div class="hw-field"><span class="hw-label">Power-up / standby pitch (%)</span><span class="hw-desc">Semantic 0% is fine/minimum load; 100% is coarse/maximum load. Inversion maps these meanings to physical travel. Running N2-feedback loss, Reduced-Power mode and fault always command 100% coarse.</span><input class="${safeChanged}${safeInvalid}" type="number" min="0" max="100" step="1" value="${Math.round(Number(c.safe_demand ?? 1)*100)}" oninput="updateRegistryChannel('output',${index},'safe_demand',(+this.value)/100)"></div>`;
   }
-  if (Number(c.driver) === 4) {
-    return `<div class="hw-field"><span class="hw-label">Power-on state</span><span class="hw-desc">State written while this general-purpose output is initialised. Keep Off unless the attached hardware explicitly requires another boot position.</span><select class="${safeChanged}${safeInvalid}" onchange="updateRegistryChannel('output',${index},'safe_demand',+this.value)"><option value="0"${Number(c.safe_demand||0)<0.5?' selected':''}>Off</option><option value="1"${Number(c.safe_demand||0)>=0.5?' selected':''}>On</option></select></div>`;
+  if (registryCoreActuatorPurposeKey(c)) {
+    return `<div class="hw-field"><span class="hw-label">Post-boot initialization demand</span><span class="hw-desc">Demand written after firmware gains control. Electrical reset and bootloader behavior still depends on external wiring and driver bias.</span><output>Off (fixed)</output></div>`;
+  }
+  if (outputDriverIsOnOff(c.driver)) {
+    return `<div class="hw-field"><span class="hw-label">Post-boot initialization demand</span><span class="hw-desc">Written only after firmware gains control; it cannot guarantee the output during reset or bootloader time. Keep Off unless the attached hardware requires another initialized position.</span><select class="${safeChanged}${safeInvalid}" onchange="updateRegistryChannel('output',${index},'safe_demand',+this.value)"><option value="0"${Number(c.safe_demand||0)<0.5?' selected':''}>Off</option><option value="1"${Number(c.safe_demand||0)>=0.5?' selected':''}>On</option></select></div>`;
   }
   return `<div class="hw-field"><span class="hw-label">Power-on demand (%)</span><span class="hw-desc">Demand written while this general-purpose output is initialised. Keep 0% unless the attached hardware explicitly requires another boot position.</span><input class="${safeChanged}${safeInvalid}" type="number" min="0" max="100" step="1" value="${Math.round((c.safe_demand||0)*100)}" oninput="updateRegistryChannel('output',${index},'safe_demand',(+this.value)/100)"></div>`;
 }
 function registryFaultSafeEditor(c, index) {
+  const purpose = registryDerivedPurpose('output', c);
+  if (['main_fuel','fuel_shutoff','igniter','ab_igniter','ab_valve','ab_pump'].includes(purpose))
+    return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Running fault state</span><output>Combustion fuel and ignition are cut and held Off</output></div>`;
+  if (purpose === 'prop_pitch')
+    return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Running fault state</span><output>100% coarse / maximum load (fixed)</output></div>`;
   const demand = Number(c.safe_demand || 0);
-  const state = registryCoreActuatorKey(c) ? 'Off' : (Number(c.driver) === 4 ? (demand >= .5 ? 'On' : 'Off') : `${Math.round(demand * 100)}%`);
-  return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Fault override</span><span class="hw-desc">Normally the shutdown sequence stays in control. Enable this only when this output must be held at its power-on state (${escapeHtmlText(state)}) for the entire fault shutdown, regardless of sequence actions.</span><label class="hw-toggle"><input class="${registryFieldChangedClass('output',index,'force_safe_on_fault')}" type="checkbox" ${c.force_safe_on_fault ? 'checked' : ''} onchange="updateRegistryChannel('output',${index},'force_safe_on_fault',this.checked)"><span></span> Force power-on safe state during fault shutdown</label></div>`;
+  const state = registryCoreActuatorKey(c) ? 'Off' : (outputDriverIsOnOff(c.driver) ? (demand >= .5 ? 'On' : 'Off') : `${Math.round(demand * 100)}%`);
+  return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Fault override</span><span class="hw-desc">Normally the shutdown sequence stays in control. Enable this only when this output must be held at its initialized demand (${escapeHtmlText(state)}) for the entire fault shutdown, regardless of sequence actions.</span><label class="hw-toggle"><input class="${registryFieldChangedClass('output',index,'force_safe_on_fault')}" type="checkbox" ${c.force_safe_on_fault ? 'checked' : ''} onchange="updateRegistryChannel('output',${index},'force_safe_on_fault',this.checked)"><span></span> Force initialized safe demand during fault shutdown</label></div>`;
 }
 function registryPwmTimingEditor(c, index) {
   if (Number(c.driver) !== 5) return '';
   const freq = Number(c.pwm_freq_hz ?? 5000);
   const bits = Number(c.pwm_res_bits ?? 10);
-  const invalid = freq < 1 || freq > 100000 || bits < 8 || bits > 14;
+  const maxFreq = Math.min(100000, Math.floor(80000000 / (2 ** Math.max(8, Math.min(14, bits)))));
+  const invalid = freq < 1 || freq > maxFreq || bits < 8 || bits > 14;
   const cls = invalid ? ' field-error' : '';
-  return `<div class="hw-field"><span class="hw-label">PWM carrier frequency (Hz)</span><span class="hw-desc">Switching frequency for a MOSFET, motor driver or PWM-capable ESC. Check the driver datasheet.</span><input class="${registryFieldChangedClass('output',index,'pwm_freq_hz')}${cls}" type="number" min="1" max="100000" step="1" value="${freq}" oninput="updateRegistryChannel('output',${index},'pwm_freq_hz',+this.value)"></div>
-          <div class="hw-field"><span class="hw-label">PWM resolution (bits)</span><span class="hw-desc">Duty-cycle resolution. 8–14 bits; higher resolution may limit the available carrier frequency.</span><input class="${registryFieldChangedClass('output',index,'pwm_res_bits')}${cls}" type="number" min="8" max="14" step="1" value="${bits}" oninput="updateRegistryChannel('output',${index},'pwm_res_bits',+this.value)"></div>`;
+  return `<div class="hw-field"><span class="hw-label">PWM carrier frequency (Hz)</span><span class="hw-desc">Switching frequency for a MOSFET, motor driver or PWM-capable ESC. At ${bits} bits this ESP32 timer supports up to ${maxFreq} Hz.</span><input class="${registryFieldChangedClass('output',index,'pwm_freq_hz')}${cls}" type="number" min="1" max="${maxFreq}" step="1" value="${freq}" oninput="updateRegistryChannel('output',${index},'pwm_freq_hz',+this.value)"></div>
+          <div class="hw-field"><span class="hw-label">PWM resolution (bits)</span><span class="hw-desc">Duty-cycle resolution from 8–14 bits. The editor shows the real frequency limit for the selected resolution.</span><input class="${registryFieldChangedClass('output',index,'pwm_res_bits')}${cls}" type="number" min="8" max="14" step="1" value="${bits}" oninput="updateRegistryChannel('output',${index},'pwm_res_bits',+this.value);renderRegistryInventory()"></div>`;
 }
 function registryRangeMeta(direction, driver, role, referenceMv = 3300) {
   const d = Number(driver);
   if (direction === 'input') {
-    if (d === 0) return {hide:true, note:'Digital input reads inactive as 0.00 and active as 1.00. Use Active LOW for switches wired to ground.'};
+    if (d === 0 || d === 8) return {hide:true, note:'Digital input reads inactive as 0.00 and active as 1.00. Choose the active electrical state below.'};
     if (d === 1 || d === 9) {
       const ref = d === 9 ? Math.max(1000,Math.min(5500,Number(referenceMv)||3300)) : 3300;
       const mv = {min:'Minimum valid signal (mV)', max:'Maximum valid signal (mV)', step:'0.1', scale:ref/4095, limitMin:0, limitMax:ref};
@@ -2316,6 +2433,38 @@ function registryRangeMeta(direction, driver, role, referenceMv = 3300) {
 function registryRangeEditor(direction, c, index) {
   if (registryFixedProfileFunction(direction,c)) return '';
   if (direction === 'input' && registryTorqueIsHx711(c)) return '';
+  const purpose = registryDerivedPurpose(direction,c);
+  const isSwitch = registryIsSwitchRole(c.role) || ['start_switch','stop_switch'].includes(purpose);
+  if (direction === 'input' && Number(c.driver) === 1 && isSwitch) {
+    const threshold = Math.max(0, Math.min(4095, Math.round(Number(c.digital_threshold_raw ?? 2048))));
+    const maxHysteresis = Math.max(0, Math.min(2047, 2 * Math.min(threshold, 4095-threshold)));
+    const hysteresis = Math.max(0, Math.min(maxHysteresis, Math.round(Number(c.digital_hysteresis_raw ?? 64))));
+    return `<div class="hw-field"><span class="hw-label">Switch threshold (raw ADC)</span><span class="hw-desc">Use the guided inactive/active capture on <a href="/calibration.html#adc-switch-cal-row">Calibration</a>, or enter the raw threshold here.</span><input type="number" min="0" max="4095" step="1" value="${threshold}" oninput="updateRegistryChannel('input',${index},'digital_threshold_raw',+this.value)"></div>
+      <div class="hw-field"><span class="hw-label">Switch hysteresis (raw ADC)</span><span class="hw-desc">Total deadband around the threshold; limited by the nearest ADC rail.</span><input type="number" min="0" max="${maxHysteresis}" step="1" value="${hysteresis}" oninput="updateRegistryChannel('input',${index},'digital_hysteresis_raw',+this.value)"></div>`;
+  }
+  if (direction === 'input' && Number(c.driver) === 3 && ['throttle','idle'].includes(purpose)) {
+    const prefix = purpose === 'throttle' ? 'throttle' : 'idle';
+    const fallbackMin = Number(c.min ?? 1000);
+    const fallbackMax = Number(c.max ?? 2000);
+    let min = Number(settingsCfg?.calibration?.[`${prefix}_min_raw`] ?? fallbackMin);
+    let max = Number(settingsCfg?.calibration?.[`${prefix}_max_raw`] ?? fallbackMax);
+    const standardFallback = min === 0 && max === 4095;
+    if (standardFallback) { min = 1000; max = 2000; }
+    return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">RC pulse calibration</span><span class="hw-desc">${standardFallback?'Uncalibrated ECU default':'Current ECU endpoints'}: ${registryFormatValue(min)}–${registryFormatValue(max)} µs. Calibrate this operator input on the <a href="/calibration.html#${prefix}-cal-row">Calibration page</a>; those endpoints are authoritative while running.</span></div>`;
+  }
+  if (direction === 'input' && Number(c.driver) === 2 && purpose === 'fuel_flow')
+    return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Flow conversion</span><span class="hw-desc">The dedicated pulse counter measures frequency and the pulses-per-litre value below converts it to L/min. No separate hidden flow range is applied.</span></div>`;
+  if (direction === 'input' && [1,9].includes(Number(c.driver)) && ['flame','ab_flame'].includes(purpose)) {
+    const threshold = Math.max(0, Math.min(4095, Math.round(Number(c.digital_threshold_raw ?? 2048))));
+    const maxHysteresis = Math.max(0, Math.min(2047, 2 * Math.min(threshold, 4095 - threshold)));
+    const hysteresis = Math.max(0, Math.min(maxHysteresis, Math.round(Number(c.digital_hysteresis_raw ?? 64))));
+    const polarityClass = registryFieldChangedClass(direction, index, 'active_high');
+    const hysteresisClass = registryFieldChangedClass(direction, index, 'digital_hysteresis_raw');
+    const calAnchor = purpose === 'flame' ? 'flame-cal-row' : 'ab-flame-cal-row';
+    const ariaPrefix = purpose === 'flame' ? 'Main' : 'AB';
+    return `<div class="hw-field"><span class="hw-label">Flame active state</span><span class="hw-desc">Choose whether flame is reported above or below the calibrated threshold.</span><select class="${polarityClass}" onchange="updateRegistryChannel('input',${index},'active_high',this.value==='1')"><option value="1"${c.active_high !== false?' selected':''}>Above threshold</option><option value="0"${c.active_high === false?' selected':''}>Below threshold</option></select></div>
+      <div class="hw-field"><span class="hw-label">Threshold and hysteresis</span><span class="hw-desc">Threshold: ${threshold} raw ADC, set on <a href="/calibration.html#${calAnchor}">Calibration</a>. Hysteresis is total deadband around it.</span><input class="${hysteresisClass}" aria-label="${ariaPrefix} flame hysteresis" type="number" min="0" max="${maxHysteresis}" step="1" value="${hysteresis}" oninput="updateRegistryChannel('input',${index},'digital_hysteresis_raw',+this.value)"></div>`;
+  }
   if (direction === 'input' && Number(c.driver) === 2 && String(c.role) === 'speed')
     return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Speed plausibility range</span><span class="hw-desc">Automatic: up to twice the applicable N1 or N2 hard shutdown speed set in Config. This avoids a second conflicting RPM limit here.</span></div>`;
   if (direction === 'input' && Number(c.driver) === 9 &&
@@ -2350,9 +2499,11 @@ function registryAnalogScaleEditor(direction, c, index) {
   if (registryFixedProfileFunction(direction,c)) return '';
   if (direction !== 'input' || ![1,9].includes(Number(c.driver))) return '';
   if (registryTorqueIsHx711(c)) return '';
-  if (Number(c.driver) === 9 &&
-      (registryIsSwitchRole(c.role) || ['start_switch','stop_switch'].includes(registryDerivedPurpose(direction,c)))) return '';
+  if (registryIsSwitchRole(c.role) ||
+      ['start_switch','stop_switch'].includes(registryDerivedPurpose(direction,c))) return '';
   if (String(c.role||'') === 'temperature' && Number(c.temp_interface||0) !== 0) return '';
+  if (Array.isArray(c.calibration_points) && c.calibration_points.length >= 2)
+    return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Analog conversion</span><span class="hw-desc">The multi-point sensor curve below is authoritative. Choose Use linear calibration there to edit the normal offset/scale fields again.</span></div>`;
   const role = String(c.role || '');
   if (role === 'generic' || role === 'operator' || role === 'flame') return '';
   const cal = registryDefaultAnalogCalibration(role);
@@ -2416,13 +2567,18 @@ function registryInputOptionsEditor(direction, c, index) {
   if (direction !== 'input') return '';
   if (registryTorqueIsHx711(c)) return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">HX711 wiring</span><span class="hw-desc">DOUT is an input and SCK is an output. No internal pull-up or pull-down is applied.</span></div>`;
   const d = Number(c.driver);
+  const purpose = registryDerivedPurpose(direction,c);
+  const activeStateEditor = (d === 8 || ([1,9].includes(d) &&
+      (registryIsSwitchRole(c.role) || ['start_switch','stop_switch'].includes(purpose))))
+    ? `<div class="hw-field"><span class="hw-label">Active state</span><span class="hw-desc">Choose which electrical level means On, active, or flame present.</span><select class="${registryFieldChangedClass('input', index, 'active_high')}" onchange="updateRegistryChannel('input',${index},'active_high',this.value==='1')"><option value="1"${c.active_high !== false ? ' selected' : ''}>High / above threshold is On</option><option value="0"${c.active_high === false ? ' selected' : ''}>Low / below threshold is On</option></select></div>`
+    : '';
   if (d === 1) {
     if (registryTemperatureIsSpi(c)) return '';
     if (String(c.role||'') === 'temperature' && Number(c.temp_interface||0) === 5)
       return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">OneWire wiring</span><span class="hw-desc">Use an external 4.7 kΩ pull-up to 3.3 V. Internal pull-up/down is not used for a DS18B20 bus.</span></div>`;
-    return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Input bias</span><span class="hw-desc">ADC inputs leave internal pull-up and pull-down resistors disabled so the analog reading is not biased.</span></div>`;
+    return `${activeStateEditor}<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Input bias</span><span class="hw-desc">ADC inputs leave internal pull-up and pull-down resistors disabled so the analog reading is not biased.</span></div>`;
   }
-  if (d !== 0 && d !== 2) return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Input bias</span><span class="hw-desc">This driven signal does not use the ESP32 internal pull-up or pull-down.</span></div>`;
+  if (d !== 0 && d !== 2) return `${activeStateEditor}<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Input bias</span><span class="hw-desc">This driven signal does not use the ESP32 internal pull-up or pull-down.</span></div>`;
   const polarityClass = registryFieldChangedClass(direction, index, 'active_high');
   const pullupClass = registryFieldChangedClass(direction, index, 'pullup');
   const pulldownClass = registryFieldChangedClass(direction, index, 'pulldown');
@@ -2437,9 +2593,8 @@ function registryInputOptionsEditor(direction, c, index) {
 function updateRegistryRangeField(direction, index, key, value, scale) {
   updateRegistryChannel(direction, index, key, Number(value) / Number(scale || 1));
 }
-function registryCoreActuatorKey(c) {
+function registryCoreActuatorPurposeKey(c) {
   const id = String(c?.id || '');
-  const role = String(c?.role || '');
   const purpose = registryDerivedPurpose('output',c);
   const purposeMap = {
     main_fuel:'throttle', starter:'starter', starter_enable:'starter_en', fuel_shutoff:'fuel_sol',
@@ -2463,11 +2618,23 @@ function registryCoreActuatorKey(c) {
     ab_solenoid:'ab_sol', air_starter:'airstarter_sol'
   };
   if (map[id]) return map[id];
-  if (id.startsWith('generic_')) return '';
-  if (role === 'glow_plug') return 'glow_plug';
-  if (role === 'igniter') return 'igniter';
-  if (role === 'ab_igniter') return 'igniter2';
   return '';
+}
+function registryOutputOwnsCorePurpose(c) {
+  if (!c) return false;
+  const purpose = registryDerivedPurpose('output', c);
+  if (!registryCoreActuatorPurposeKey(c)) return false;
+  const rows = registryRoot().outputs || [];
+  const bindingKey = ({main_fuel:'main_fuel_output',fuel_shutoff:'main_fuel_shutoff',starter:'main_starter'})[purpose];
+  const bound = bindingKey && (registryRoot().bindings || []).find(b => String(b?.key || '') === bindingKey);
+  if (bound) return String(bound.channel || '') === String(c.id || '');
+  if (REGISTRY_CORE_OUTPUT_IDS.has(String(c.id || ''))) return true;
+  const peers = rows.filter(row => registryDerivedPurpose('output', row) === purpose);
+  const canonical = peers.find(row => REGISTRY_CORE_OUTPUT_IDS.has(String(row?.id || '')));
+  return (canonical || peers[0]) === c;
+}
+function registryCoreActuatorKey(c) {
+  return registryOutputOwnsCorePurpose(c) ? registryCoreActuatorPurposeKey(c) : '';
 }
 function registryPinIsAdc(pin) {
   const p = Number(pin);
@@ -2479,20 +2646,16 @@ const REGISTRY_CORE_INPUT_IDS = new Set([
   'battery_voltage','batt_voltage_main','ab_flame_main'
 ]);
 const REGISTRY_CORE_OUTPUT_IDS = new Set([
-  'main_fuel_output','main_fuel','throttle',
+  'main_fuel_output','main_fuel',
   'main_starter','starter','starter_main',
-  'starter_enable','starter_enable_main',
+  'starter_enable',
   'oil_pump','oil_pump_main',
-  'cooling_fan','cooling_fan_main','cool_fan',
-  'oil_scavenge_main','oil_scavenge_pump','scavenge_pump',
+  'cooling_fan','cooling_fan_main',
+  'oil_scavenge_main','scavenge_pump',
   'bleed_valve','bleed_valve_main',
-  'igniter','igniter_main','ab_igniter','igniter2','igniter2_main',
-  'main_fuel_shutoff','fuel_shutoff','fuel_sol','fuel_solenoid_main',
-  'ab_solenoid','ab_solenoid_main','ab_sol',
-  'air_starter','airstarter_main','airstarter_sol',
-  'fuel_pump','fuel_pump2','fuel_pump2_main',
-  'ab_pump','ab_pump_main','prop_pitch','prop_pitch_main',
-  'glow_plug','glow_plug_main'
+  'igniter','ab_igniter','igniter2_main',
+  'main_fuel_shutoff','fuel_shutoff',
+  'ab_solenoid','air_starter','fuel_pump','ab_pump','prop_pitch','glow_plug'
 ]);
 const REGISTRY_CORE_OUTPUT_BINDING_KEYS = new Set(['main_fuel_output','main_fuel_shutoff','main_starter']);
 function registryIsCoreManagedInput(c) {
@@ -2503,9 +2666,6 @@ function registryIsCoreManagedInput(c) {
     flame:'flame', fuel_flow:'fuel_flow', torque:'torque', battery_voltage:'batt_voltage',
     throttle:'throttle_input', idle:'idle_input'
   };
-  if (purpose === 'ab_flame') {
-    return !!(cfg.ab_flame?.enabled && Number(cfg.ab_flame.pin) === Number(c?.pin));
-  }
   const runtimeSensor = cfg.sensors?.[keyMap[purpose]];
   if (!runtimeSensor?.enabled) return false;
   if (purpose === 'torque' && registryTorqueIsHx711(c)) {
@@ -2594,14 +2754,15 @@ function registryCurrentEditor(direction, c, index) {
 }
 function registryIgniterSubcards(c, index, actKey) {
   const act = ensureActuatorObject(actKey);
-  const mode = act.coil ? 'coil' : (act.pwm ? 'pwm' : 'relay');
+  const simpleOnly = [4,11].includes(Number(c.driver));
+  const mode = simpleOnly ? 'relay' : (act.coil ? 'coil' : (act.pwm ? 'pwm' : 'relay'));
   return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0">
-    <div class="registry-card-summary"><div><strong>Igniter behavior</strong><div class="hw-desc">Simple on/off, dwell PWM, or current-limited coil dwell.</div></div></div>
+    <div class="registry-card-summary"><div><strong>Igniter behavior</strong><div class="hw-desc">${simpleOnly ? 'Relay-style outputs use Simple on/off. Use a PWM-capable local output for ECU-timed dwell, or let an external ignition module enforce its own coil dwell.' : 'Simple on/off, dwell PWM, or current-limited coil dwell.'}</div></div></div>
     <div class="registry-card-editor" style="display:block"><div class="hw-grid">
       <div class="hw-field"><span class="hw-label">Igniter mode</span><select onchange="setCoreIgniterMode('${actKey}',this.value)">
         <option value="relay"${mode==='relay'?' selected':''}>Simple on/off</option>
-        <option value="pwm"${mode==='pwm'?' selected':''}>Dwell / rest PWM cycle</option>
-        <option value="coil"${mode==='coil'?' selected':''}>Current-limited coil dwell</option>
+        ${simpleOnly ? '' : `<option value="pwm"${mode==='pwm'?' selected':''}>Dwell / rest PWM cycle</option>
+        <option value="coil"${mode==='coil'?' selected':''}>Current-limited coil dwell</option>`}
       </select></div>
       ${mode !== 'relay' ? `<div class="hw-field"><span class="hw-label">Dwell time (ms)</span><input type="number" min="1" max="200" value="${Number(act.dwell_ms ?? 6)}" oninput="setAct('${actKey}','dwell_ms',+this.value)"></div>
       <div class="hw-field"><span class="hw-label">Rest time (ms)</span><input type="number" min="1" max="200" value="${Number(act.rest_ms ?? 3)}" oninput="setAct('${actKey}','rest_ms',+this.value)"></div>` : ''}
@@ -2613,20 +2774,38 @@ function registryGlowSubcards(c, index) {
   const act = ensureActuatorObject('glow_plug');
   const wet = Number(act.type || 0) === 2;
   const fuelType = Number(act.fuel_type || 0);
+  const fuelBits = Math.max(8, Math.min(14, Number(act.fuel_res_bits ?? 10)));
+  const fuelMaxFreq = Math.min(100000, Math.floor(80000000 / (2 ** fuelBits)));
+  const registryFuel = (registryRoot().outputs || []).find(row =>
+    registryDerivedPurpose('output', row) === 'pilot_fuel');
+  const fuelConnection = registryFuel
+    ? `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Start fuel output</span><span class="hw-desc">Controlled by ${escapeHtmlText(registryDisplayName('output', registryFuel, 'Start Fuel'))}. Its driver, connection, polarity, and electrical endpoints are configured on that output card.</span></div>`
+    : `<div class="hw-field"><span class="hw-label">Start fuel GPIO</span><select onchange="setAct('glow_plug','fuel_pin',+this.value)">${buildPinOptions(act.fuel_pin, 'out')}</select></div>
+      <div class="hw-field"><span class="hw-label">Start fuel driver</span><select onchange="setAct('glow_plug','fuel_type',+this.value);renderRegistryInventory()"><option value="0"${fuelType===0?' selected':''}>Relay / on-off</option><option value="1"${fuelType===1?' selected':''}>PWM</option><option value="2"${fuelType===2?' selected':''}>Servo/ESC</option></select></div>
+      <div class="hw-field"><span class="hw-label">Fuel active polarity</span><label class="hw-toggle"><input type="checkbox" ${act.fuel_active_h !== false ? 'checked' : ''} onchange="setAct('glow_plug','fuel_active_h',this.checked)"><span></span> Active high</label></div>`;
+  const fuelElectrical = registryFuel ? '' :
+    `${fuelType === 2 ? `<div class="hw-field"><span class="hw-label">Fuel servo pulse (us)</span><div style="display:flex;gap:.35rem"><input type="number" min="500" max="2500" value="${Number(act.fuel_min_us ?? 1000)}" oninput="setAct('glow_plug','fuel_min_us',+this.value)"><input type="number" min="500" max="2500" value="${Number(act.fuel_max_us ?? 2000)}" oninput="setAct('glow_plug','fuel_max_us',+this.value)"></div></div>` : ''}
+      ${fuelType === 1 ? `<div class="hw-field"><span class="hw-label">Fuel PWM freq / bits</span><span class="hw-desc">At ${fuelBits} bits the timer supports up to ${fuelMaxFreq} Hz.</span><div style="display:flex;gap:.35rem"><input type="number" min="1" max="${fuelMaxFreq}" value="${Number(act.fuel_freq_hz ?? 1000)}" oninput="setAct('glow_plug','fuel_freq_hz',+this.value)"><input type="number" min="8" max="14" value="${fuelBits}" oninput="setAct('glow_plug','fuel_res_bits',+this.value);renderRegistryInventory()"></div></div>
+      <div class="hw-field"><span class="hw-label">Fuel PWM min / max (%)</span><div style="display:flex;gap:.35rem"><input type="number" min="0" max="100" value="${Number(act.fuel_pwm_min_pct ?? 0)}" oninput="setAct('glow_plug','fuel_pwm_min_pct',+this.value)"><input type="number" min="0" max="100" value="${Number(act.fuel_pwm_max_pct ?? 100)}" oninput="setAct('glow_plug','fuel_pwm_max_pct',+this.value)"></div></div>` : ''}`;
   return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0">
-    <div class="registry-card-summary"><div><strong>Glow plug options</strong><div class="hw-desc">Plain glow element or wet glow with pilot-fuel output.</div></div></div>
+    <div class="registry-card-summary"><div><strong>Glow plug options</strong><div class="hw-desc">Plain glow element or wet glow with start-fuel output.</div></div></div>
     <div class="registry-card-editor" style="display:block"><div class="hw-grid">
       <div class="hw-field"><span class="hw-label">Glow mode</span><select onchange="setGlowType(+this.value);renderRegistryInventory()"><option value="0"${!wet?' selected':''}>Plain glow plug</option><option value="2"${wet?' selected':''}>Wet glow with fuel output</option></select></div>
-      <div class="hw-field"><span class="hw-label">Glow PWM frequency (Hz)</span><input type="number" min="1" max="100000" value="${Number(act.freq_hz ?? 1000)}" oninput="setAct('glow_plug','freq_hz',+this.value)"></div>
-      <div class="hw-field"><span class="hw-label">PWM resolution (bits)</span><input type="number" min="8" max="14" value="${Number(act.res_bits ?? 8)}" oninput="setAct('glow_plug','res_bits',+this.value)"></div>
-      ${wet ? `<div class="hw-field"><span class="hw-label">Pilot fuel GPIO</span><select onchange="setAct('glow_plug','fuel_pin',+this.value)">${buildPinOptions(act.fuel_pin, 'out')}</select></div>
-      <div class="hw-field"><span class="hw-label">Pilot fuel driver</span><select onchange="setAct('glow_plug','fuel_type',+this.value);renderRegistryInventory()"><option value="0"${fuelType===0?' selected':''}>Relay / on-off</option><option value="1"${fuelType===1?' selected':''}>PWM</option><option value="2"${fuelType===2?' selected':''}>Servo/ESC</option></select></div>
-      <div class="hw-field"><span class="hw-label">Fuel active polarity</span><label class="hw-toggle"><input type="checkbox" ${act.fuel_active_h !== false ? 'checked' : ''} onchange="setAct('glow_plug','fuel_active_h',this.checked)"><span></span> Active high</label></div>
+      ${Number(c.driver) === 5 ? '<div class="hw-field" style="grid-column:1/-1"><span class="hw-desc">Glow PWM carrier and resolution are configured once under Advanced output settings below.</span></div>' : ''}
+      ${wet ? `${fuelConnection}
       <div class="hw-field"><span class="hw-label">Fuel delay (ms)</span><input type="number" min="0" max="3600000" value="${Number(act.fuel_delay_ms ?? 8000)}" oninput="setAct('glow_plug','fuel_delay_ms',+this.value)"></div>
       <div class="hw-field"><span class="hw-label">Fuel demand (%)</span><input type="number" min="0" max="100" value="${Number(act.fuel_demand_pct ?? 100)}" oninput="setAct('glow_plug','fuel_demand_pct',+this.value)"></div>
-      ${fuelType === 2 ? `<div class="hw-field"><span class="hw-label">Fuel servo pulse (us)</span><div style="display:flex;gap:.35rem"><input type="number" min="500" max="2500" value="${Number(act.fuel_min_us ?? 1000)}" oninput="setAct('glow_plug','fuel_min_us',+this.value)"><input type="number" min="500" max="2500" value="${Number(act.fuel_max_us ?? 2000)}" oninput="setAct('glow_plug','fuel_max_us',+this.value)"></div></div>` : ''}
-      ${fuelType === 1 ? `<div class="hw-field"><span class="hw-label">Fuel PWM freq / bits</span><div style="display:flex;gap:.35rem"><input type="number" min="1" max="100000" value="${Number(act.fuel_freq_hz ?? 1000)}" oninput="setAct('glow_plug','fuel_freq_hz',+this.value)"><input type="number" min="8" max="14" value="${Number(act.fuel_res_bits ?? 10)}" oninput="setAct('glow_plug','fuel_res_bits',+this.value)"></div></div>
-      <div class="hw-field"><span class="hw-label">Fuel PWM min / max (%)</span><div style="display:flex;gap:.35rem"><input type="number" min="0" max="100" value="${Number(act.fuel_pwm_min_pct ?? 0)}" oninput="setAct('glow_plug','fuel_pwm_min_pct',+this.value)"><input type="number" min="0" max="100" value="${Number(act.fuel_pwm_max_pct ?? 100)}" oninput="setAct('glow_plug','fuel_pwm_max_pct',+this.value)"></div></div>` : ''}` : ''}
+      ${fuelElectrical}` : ''}
+    </div></div>
+  </div>`;
+}
+function registryStarterEnableSubcard(c) {
+  if (registryCoreActuatorKey(c) !== 'starter_en') return '';
+  const act = ensureActuatorObject('starter_en');
+  return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0">
+    <div class="registry-card-summary"><div><strong>Starter enable timing</strong><div class="hw-desc">Optional settling time after the separate enable/contactor turns on and before starter demand begins.</div></div></div>
+    <div class="registry-card-editor" style="display:block"><div class="hw-grid">
+      <div class="hw-field"><span class="hw-label">Enable delay (ms)</span><span class="hw-desc">Use 0 when no delay is needed. Maximum 30000 ms.</span><input type="number" min="0" max="30000" step="10" value="${Number(act.delay_ms ?? 1000)}" oninput="setAct('starter_en','delay_ms',+this.value)"></div>
     </div></div>
   </div>`;
 }
@@ -2634,7 +2813,7 @@ function registryMinimumRunEditor(c, index) {
   const purpose = registryDerivedPurpose('output',c);
   if (purpose === 'main_fuel') return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0"><div class="registry-card-summary"><div><strong>Minimum reliable fuel-pump command</strong><div class="hw-desc">Calibrated on the <a href="/calibration.html">Calibration page</a>. It is applied inside the electrical endpoints above and does not rewrite them.</div></div></div></div>`;
   if (purpose === 'oil_pump') return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0"><div class="registry-card-summary"><div><strong>Oil-pump minimum</strong><div class="hw-desc">The closed-loop controller minimum is configured separately in Config. It is a controller floor; the electrical endpoints above remain hardware limits.</div></div></div></div>`;
-  if (!['fuel_pump','coolant_pump','scavenge_pump','cooling_fan'].includes(purpose) || Number(c.driver) === 4) return '';
+  if (!['fuel_pump','coolant_pump','scavenge_pump','cooling_fan'].includes(purpose) || outputDriverIsOnOff(c.driver)) return '';
   const pct = Math.max(0,Math.min(100,Number(c.min_run_demand||0)*100));
   const electricalDemand = c.invert ? 1 - pct/100 : pct/100;
   let physical = '';
@@ -2653,14 +2832,123 @@ function registryMinimumRunEditor(c, index) {
     </div></div>
   </div>`;
 }
+function registryCurveSupported(direction, c) {
+  if (direction !== 'input' || ![1,9].includes(Number(c?.driver))) return false;
+  if (registryTorqueIsHx711(c)) return false;
+  if (String(c?.role||'') === 'flame') return false;
+  if (registryIsSwitchRole(c.role) ||
+      ['start_switch','stop_switch'].includes(registryDerivedPurpose(direction,c))) return false;
+  return !(String(c.role||'') === 'temperature' && ![0,4].includes(Number(c.temp_interface||0)));
+}
+function registryCurveUnit(c) {
+  const role = String(c?.role || '');
+  if (['generic','operator','flame'].includes(role)) return 'normalized 0.00–1.00';
+  return role === 'speed' ? 'RPM' : role === 'pressure' ? 'bar' :
+    role === 'temperature' ? '°C' : role === 'flow' ? 'L/min' :
+    role === 'torque' ? 'Nm' : role === 'voltage' ? 'V' : 'physical value';
+}
+function registryLinearValueAtRaw(c, raw) {
+  const role = String(c?.role || '');
+  if (role === 'temperature' && Number(c.temp_interface||0) === 4) {
+    const x = Math.max(1,Math.min(4094,Number(raw)));
+    const fixed = Math.max(0.001,Number(c.ntc_r_fixed ?? 10000));
+    const r0 = Math.max(0.001,Number(c.ntc_r0 ?? 10000));
+    const beta = Math.max(0.001,Number(c.ntc_beta ?? 3950));
+    const resistance = c.ntc_pullup === false ? fixed*(4095-x)/x : fixed*x/(4095-x);
+    return 1/(1/298.15+Math.log(resistance/r0)/beta)-273.15;
+  }
+  if (['generic','operator','flame'].includes(role)) {
+    const lo = Number(c.min ?? 0), hi = Number(c.max ?? 4095);
+    return hi > lo ? Math.max(0,Math.min(1,(raw-lo)/(hi-lo))) : 0;
+  }
+  const referenceMv = Number(c.driver) === 9 ? Number(c.i2c_reference_mv ?? 3300) : 3300;
+  const mv = raw * referenceMv / 4095;
+  if (role === 'voltage') return mv / 1000 * Math.max(1,Number(c.analog_divider ?? 1));
+  return (mv - Number(c.analog_zero_mv ?? 0)) /
+    Math.max(0.000001,Number(c.analog_mv_per_unit ?? 1000));
+}
+function registryCurveProblem(c) {
+  const points = Array.isArray(c?.calibration_points) ? c.calibration_points : [];
+  if (!points.length) return '';
+  if (points.length < 2 || points.length > 6) return 'Sensor curve needs 2–6 points';
+  const ntc = String(c?.role||'') === 'temperature' && Number(c?.temp_interface||0) === 4;
+  let direction = 0;
+  for (let i=0;i<points.length;i++) {
+    const raw = Number(points[i]?.raw), value = Number(points[i]?.value);
+    if (!Number.isFinite(raw) || raw < 0 || raw > 4095 || !Number.isFinite(value)) return 'Sensor curve contains an invalid point';
+    if (ntc && (raw <= 0 || raw >= 4095)) return 'NTC curve points must stay between ADC 1 and 4094 so open/short rails remain faults';
+    if (i && raw <= Number(points[i-1]?.raw)) return 'Sensor curve ADC values must increase';
+    if (i) {
+      const delta = value - Number(points[i-1]?.value);
+      if (!delta) return 'Sensor curve physical values must change at every point';
+      const step = delta > 0 ? 1 : -1;
+      if (!direction) direction = step;
+      else if (direction !== step) return 'Sensor curve physical values must move in one direction';
+    }
+  }
+  return '';
+}
+function setRegistryCurveEnabled(index, enabled) {
+  const c = registryRoot().inputs[index];
+  if (!c) return;
+  if (!enabled) c.calibration_points = [];
+  else {
+    let lo = Math.max(0,Math.min(4095,Math.round(Number(c.min ?? 0))));
+    let hi = Math.max(0,Math.min(4095,Math.round(Number(c.max ?? 4095))));
+    if (hi <= lo) { lo = 0; hi = 4095; }
+    if (String(c.role||'') === 'temperature' && Number(c.temp_interface||0) === 4) {
+      lo = Math.max(1,lo); hi = Math.min(4094,hi);
+    }
+    c.calibration_points = [
+      {raw:lo,value:registryLinearValueAtRaw(c,lo)},
+      {raw:hi,value:registryLinearValueAtRaw(c,hi)}
+    ];
+  }
+  dirty(); updateSaveButton(); renderRegistryInventory();
+}
+function updateRegistryCurvePoint(index, pointIndex, field, value) {
+  const c = registryRoot().inputs[index], points = c?.calibration_points;
+  if (!Array.isArray(points) || !points[pointIndex]) return;
+  points[pointIndex][field] = field === 'raw' ? Math.round(Number(value)) : Number(value);
+  dirty(); updateSaveButton(); renderRegistryInventory();
+}
+function addRegistryCurvePoint(index) {
+  const c = registryRoot().inputs[index], points = c?.calibration_points;
+  if (!Array.isArray(points) || points.length < 2 || points.length >= 6) return;
+  let insert = points.length - 1;
+  let left = points[insert-1], right = points[insert];
+  if (Number(right.raw)-Number(left.raw) <= 1) {
+    insert = 1; left = points[0]; right = points[1];
+  }
+  const raw = Math.round((Number(left.raw)+Number(right.raw))/2);
+  if (raw <= Number(left.raw) || raw >= Number(right.raw)) return;
+  points.splice(insert,0,{raw,value:(Number(left.value)+Number(right.value))/2});
+  dirty(); updateSaveButton(); renderRegistryInventory();
+}
+function removeRegistryCurvePoint(index, pointIndex) {
+  const c = registryRoot().inputs[index], points = c?.calibration_points;
+  if (!Array.isArray(points) || points.length <= 2) return;
+  points.splice(pointIndex,1);
+  dirty(); updateSaveButton(); renderRegistryInventory();
+}
+function registryAnalogCurveEditor(direction, c, index) {
+  if (!registryCurveSupported(direction,c)) return '';
+  const points = Array.isArray(c.calibration_points) ? c.calibration_points : [];
+  if (!points.length) return `<details style="grid-column:1/-1"><summary>Advanced sensor curve</summary><div class="hw-grid" style="margin-top:.65rem"><div class="hw-field" style="grid-column:1/-1"><span class="hw-desc">Most voltage and current-output sensors are linear and need no curve. Enable this for a resistive sender, an NTC with a manufacturer temperature table, or another sensor whose datasheet provides several calibration points.</span><button type="button" onclick="setRegistryCurveEnabled(${index},true)">Use multi-point curve</button></div></div></details>`;
+  const problem = registryCurveProblem(c);
+  const ntc = String(c?.role||'') === 'temperature' && Number(c?.temp_interface||0) === 4;
+  const rows = points.map((p,n)=>`<div class="hw-field"><span class="hw-label">Point ${n+1} ADC</span><input class="${problem?'field-error':''}" type="number" min="${ntc?1:0}" max="${ntc?4094:4095}" step="1" value="${Math.round(Number(p.raw))}" onchange="updateRegistryCurvePoint(${index},${n},'raw',this.value)"></div><div class="hw-field"><span class="hw-label">Point ${n+1} (${escapeHtmlText(registryCurveUnit(c))})</span><input class="${problem?'field-error':''}" type="number" step="any" value="${registryFormatValue(p.value,4)}" onchange="updateRegistryCurvePoint(${index},${n},'value',this.value)">${points.length>2?`<button type="button" class="danger" onclick="removeRegistryCurvePoint(${index},${n})">Remove</button>`:''}</div>`).join('');
+  return `<details open style="grid-column:1/-1"><summary>Advanced sensor curve (${points.length} points)</summary><div class="hw-grid" style="margin-top:.65rem"><div class="hw-field" style="grid-column:1/-1"><span class="hw-desc">Enter 2–6 datasheet or measured points. ADC values must increase; physical values may consistently increase or decrease. Values outside the endpoints are safely clamped.</span>${problem?`<span class="field-error-text">${escapeHtmlText(problem)}</span>`:''}</div>${rows}<div class="hw-field" style="grid-column:1/-1;display:flex;gap:.5rem"><button type="button" ${points.length>=6?'disabled':''} onclick="addRegistryCurvePoint(${index})">Add point</button><button type="button" onclick="setRegistryCurveEnabled(${index},false)">Use linear calibration</button></div></div></details>`;
+}
 function registryOilFlowMonitorEditor(c, index) {
   const purpose = registryDerivedPurpose('output', c);
-  if (!['oil_pump','scavenge_pump'].includes(purpose)) return '';
+  if (!['oil_pump','scavenge_pump'].includes(purpose) && c.role !== 'oil_pump') return '';
   const sensorName = purpose === 'oil_pump' ? 'Main oil-pump flow sensor' : 'Scavenge-pump flow sensor';
   const owned = pumpFlowInput(c);
   const sensor = owned.channel;
   const sensorIndex = owned.index;
   const fitted = !!sensor;
+  const compatible = (registryRoot().inputs || []).filter(row => registryDerivedPurpose('input', row) === pumpFlowPurpose(c));
   const driver = Number(sensor?.driver ?? 2);
   const pinEditor = sensor && driver < 8
     ? `<div class="hw-field"><span class="hw-label">${driver === 2 ? 'Pulse GPIO' : 'Analog ADC GPIO'}</span><select onchange="updateRegistryChannel('input',${sensorIndex},'pin',+this.value)">${buildPinOptions(sensor.pin, driver === 1 ? 'adc' : 'in')}</select></div>`
@@ -2675,6 +2963,7 @@ function registryOilFlowMonitorEditor(c, index) {
     </div>
     ${fitted ? `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
       <div class="hw-field" style="grid-column:1/-1"><span class="hw-label">${sensorName}</span><span class="hw-desc">This internal input belongs to this pump and is not added separately under Inputs. Its calibration is stored with the sensor.</span></div>
+      ${compatible.length > 1 ? `<div class="hw-field"><span class="hw-label">Flow input for this pump</span><select onchange="updateRegistryChannel('output',${index},'flow_input',this.value);renderRegistryInventory()">${compatible.map(row=>`<option value="${escapeHtmlText(row.id)}"${row.id===(c.flow_input||sensor.id)?' selected':''}>${escapeHtmlText(row.name||row.id)}</option>`).join('')}</select></div>` : ''}
       ${pcbProfileActive() ? '' : registrySignalTypeEditor('input',sensor,sensorIndex,registryFieldChangedClass('input',sensorIndex,'driver'))}
       ${pinEditor}${deviceEditor}${calibration}
       <div class="hw-field"><span class="hw-label">Low-flow monitoring</span><span class="hw-desc">Check this sensor whenever the pump is commanded on.</span><label class="hw-toggle"><input type="checkbox" ${c.has_flow_monitor?'checked':''} onchange="updateRegistryChannel('output',${index},'has_flow_monitor',this.checked)"><span></span> Monitor low flow</label></div>
@@ -2688,6 +2977,7 @@ function registryOutputSubcards(direction, c, index) {
   const actKey = registryCoreActuatorKey(c);
   return `${actKey === 'igniter' || actKey === 'igniter2' ? registryIgniterSubcards(c, index, actKey) : ''}
           ${actKey === 'glow_plug' ? registryGlowSubcards(c, index) : ''}
+          ${registryStarterEnableSubcard(c)}
           ${registryMinimumRunEditor(c, index)}
           ${registryOilFlowMonitorEditor(c, index)}
           ${pcbProfileActive() ? '' : registryCurrentEditor(direction, c, index)}`;
@@ -2718,11 +3008,15 @@ function registryI2cEditor(direction, c, index) {
   if (driver === 9) {
     const referenceMv = Number(c.i2c_reference_mv ?? 3300);
     const isDigital = registryIsSwitchRole(c.role) || ['start_switch','stop_switch'].includes(registryDerivedPurpose(direction,c));
-    const thresholdV = Number(c.digital_threshold_raw ?? 2048) * referenceMv / 4095 / 1000;
-    const hysteresisV = Number(c.digital_hysteresis_raw ?? 64) * referenceMv / 4095 / 1000;
+    const thresholdRaw = Math.max(0,Math.min(4095,Math.round(Number(c.digital_threshold_raw ?? 2048))));
+    const maxHysteresisRaw = Math.max(0,Math.min(2047,2*Math.min(thresholdRaw,4095-thresholdRaw)));
+    const hysteresisRaw = Math.max(0,Math.min(maxHysteresisRaw,Math.round(Number(c.digital_hysteresis_raw ?? 64))));
+    const thresholdV = thresholdRaw * referenceMv / 4095 / 1000;
+    const hysteresisV = hysteresisRaw * referenceMv / 4095 / 1000;
+    const maxHysteresisV = maxHysteresisRaw * referenceMv / 4095 / 1000;
     calibration = `<div class="hw-field"><span class="hw-label">ADC reference / supply (mV)</span><input type="number" min="1000" max="5500" step="1" value="${referenceMv}" onchange="updateRegistryChannel('${direction}',${index},'i2c_reference_mv',+this.value)"></div>
       ${isDigital ? `<div class="hw-field"><span class="hw-label">Switch threshold (V)</span><span class="hw-desc">The analog connector is treated as On above this voltage. Input polarity can reverse the logical state.</span><input type="number" min="0" max="${referenceMv/1000}" step="0.01" value="${registryFormatValue(thresholdV,2)}" onchange="updateRegistryChannel('input',${index},'digital_threshold_raw',Math.round(Math.max(0,Math.min(${referenceMv/1000},+this.value))*1000/${referenceMv}*4095))"></div>
-      <div class="hw-field"><span class="hw-label">Switch hysteresis (V)</span><span class="hw-desc">Required voltage movement around the threshold before the state changes; prevents chatter from electrical noise.</span><input type="number" min="0" max="${referenceMv/2000}" step="0.01" value="${registryFormatValue(hysteresisV,2)}" onchange="updateRegistryChannel('input',${index},'digital_hysteresis_raw',Math.round(Math.max(0,Math.min(${referenceMv/2000},+this.value))*1000/${referenceMv}*4095))"></div>`
+      <div class="hw-field"><span class="hw-label">Switch hysteresis (V)</span><span class="hw-desc">Required voltage movement around the threshold before the state changes; limited by the distance to the nearest ADC rail.</span><input type="number" min="0" max="${maxHysteresisV}" step="0.01" value="${registryFormatValue(hysteresisV,2)}" onchange="updateRegistryChannel('input',${index},'digital_hysteresis_raw',Math.round(Math.max(0,Math.min(${maxHysteresisV},+this.value))*1000/${referenceMv}*4095))"></div>`
       : `<div class="hw-field"><span class="hw-label">Input filter response</span><span class="hw-desc">1.0 follows every new ADC sample; lower values smooth electrical noise.</span><input type="number" min="0.01" max="1" step="0.01" value="${Number(c.filter_alpha??1)}" onchange="updateRegistryChannel('input',${index},'filter_alpha',+this.value)"></div>`}`;
   }
   if (driver === 10) calibration = `
@@ -2800,8 +3094,8 @@ function registryPurposeLabel(direction, c) {
   return registryPurposeDefinition(direction, registryDerivedPurpose(direction,c))?.label || 'Generic channel';
 }
 const REGISTRY_SINGLETON_PURPOSES = {
-  input: new Set(['n1_speed','n2_speed','tot','tit','oil_pressure','oil_temperature','fuel_pressure','p1_pressure','p2_pressure','fuel_flow','oil_flow','scavenge_flow','flame','ab_flame','torque','thrust','battery_voltage','throttle','idle','ab_command','start_switch','stop_switch','low_oil_switch','oil_zero_switch']),
-  output: new Set(['main_fuel','fuel_shutoff','starter','starter_enable','oil_pump','scavenge_pump','cooling_fan','fuel_pump','igniter','ab_igniter','ab_valve','glow_plug','ab_pump','prop_pitch','air_starter','drain_valve'])
+  input: new Set(['n1_speed','n2_speed','tot','tit','oil_temperature','fuel_pressure','p1_pressure','p2_pressure','fuel_flow','flame','ab_flame','torque','thrust','battery_voltage','throttle','idle','ab_command','start_switch','stop_switch','low_oil_switch','oil_zero_switch']),
+  output: new Set()
 };
 function registryPurposeIsSingleton(direction, purpose) {
   return REGISTRY_SINGLETON_PURPOSES[direction]?.has(String(purpose || '')) || false;
@@ -2837,7 +3131,11 @@ function registryStatus(c) {
   const thermocouple = registryTemperatureIsSpi(c);
   if (remote && !profileBacked) {
     if (cfg.i2c?.enabled === false) return {kind:'error', text:'Enable the shared I2C bus or remove this assignment'};
-    if (!(Number(c.i2c_address) >= 0x08 && Number(c.i2c_address) <= 0x77)) return {kind:'error', text:'Choose a detected I2C device'};
+    const address = Number(c.i2c_address);
+    const validAddress = Number(c.driver) === 10 ? address === 0x2A
+      : [8,11].includes(Number(c.driver)) ? address >= 0x20 && address <= 0x27
+      : Number(c.driver) === 9 && address >= 0x10 && address <= 0x17;
+    if (!validAddress) return {kind:'error', text:'Choose a compatible detected I2C device'};
     const maxChannel = Number(c.driver) === 10 ? 2 : 8;
     if (Number(c.device_channel) < 0 || Number(c.device_channel) >= maxChannel) return {kind:'error', text:'I2C channel is invalid'};
     const device = (cfg._i2c_discovery?.devices || []).find(d=>Number(d.address)===Number(c.i2c_address));
@@ -2870,11 +3168,18 @@ function registryStatus(c) {
   }
   if (Number(c.temp_interface||0) === 4 && (!(Number(c.ntc_beta) > 0) || !(Number(c.ntc_r0) > 0) || !(Number(c.ntc_r_fixed) > 0))) return {kind:'error', text:'NTC calibration invalid'};
   if (Number(c.temp_interface||0) === 5 && (Number(c.temp_resolution) < 9 || Number(c.temp_resolution) > 12)) return {kind:'error', text:'DS18B20 resolution invalid'};
+  const curveProblem = registryCurveProblem(c);
+  if (curveProblem) return {kind:'error', text:curveProblem};
   const rangeProblem = registryRangeProblem(c);
   if (rangeProblem) return {kind:'error', text:rangeProblem};
   if (Number(c.min_run_demand ?? 0) < 0 || Number(c.min_run_demand ?? 0) > 1) return {kind:'error', text:'Minimum reliable command must be 0-100%'};
   if (c.pullup && c.pulldown) return {kind:'error', text:'Pull-up/down conflict'};
   const actKey = registryCoreActuatorKey(c);
+  const engineActuatorPurpose = registryCoreActuatorPurposeKey(c);
+  if (direction === 'output' && purpose !== 'prop_pitch' &&
+      (engineActuatorPurpose || ['ab_valve','pilot_fuel'].includes(purpose)) &&
+      Number(c.safe_demand || 0) !== 0)
+    return {kind:'error', text:'Core engine outputs must initialize Off'};
   const dedicatedCurrent = ['oil_pump','glow_plug','igniter','igniter2'].includes(actKey) ? ensureActuatorObject(actKey) : null;
   const currentEnabled = dedicatedCurrent ? !!dedicatedCurrent.has_current : !!c.has_current;
   const currentPin = dedicatedCurrent ? dedicatedCurrent.current_pin : c.current_pin;
@@ -2893,8 +3198,11 @@ function registryStatus(c) {
     if (!(registryRoot().inputs || []).some(row => registryDerivedPurpose('input', row) === inputPurpose))
       return {kind:'error', text:'Matching flow meter missing'};
   }
-  if (Number(c.driver) === 5 && (Number(c.pwm_freq_hz ?? 5000) < 1 || Number(c.pwm_freq_hz ?? 5000) > 100000 || Number(c.pwm_res_bits ?? 10) < 8 || Number(c.pwm_res_bits ?? 10) > 14)) {
-    return {kind:'error', text:'PWM timing invalid'};
+  if (Number(c.driver) === 5) {
+    const frequency = Number(c.pwm_freq_hz ?? 5000), resolution = Number(c.pwm_res_bits ?? 10);
+    const maxFrequency = Math.min(100000, Math.floor(80000000 / (2 ** resolution)));
+    if (frequency < 1 || frequency > maxFrequency || resolution < 8 || resolution > 14)
+      return {kind:'error', text:`PWM timing is not achievable: ${resolution} bits supports at most ${maxFrequency} Hz`};
   }
   if ((actKey === 'igniter' || actKey === 'igniter2') && ensureActuatorObject(actKey).coil && !ensureActuatorObject(actKey).has_current) {
     return {kind:'error', text:'Current sensing required'};
@@ -2913,7 +3221,7 @@ function registryRangeProblem(c) {
   const min = Number(c?.min ?? 0);
   const max = Number(c?.max ?? 1);
   if (!Number.isFinite(min) || !Number.isFinite(max)) return 'Invalid range';
-  if (driver === 0 || driver === 4) return '';
+  if (driver === 0 || outputDriverIsOnOff(driver)) return '';
   if (max <= min) return 'Invalid range';
   if (driver === 1 && (min < 0 || max > 4095)) return 'ADC range 0-4095';
   if (driver === 1) {
@@ -3055,7 +3363,7 @@ function focusRegistryInvalid(details) {
 function registryReferenceSummary(direction, id) {
   const users = registryCurrentUsers(direction, id);
   if (users.length) return `Used by: ${users.join(', ')}`;
-  return 'Not used yet';
+  return direction === 'input' ? 'Monitoring only' : 'Available to rules and sequences';
 }
 function registryImpactDisplay(text) {
   const s = String(text || '');
@@ -3083,8 +3391,8 @@ function registryBlockLabel(block) {
     OilScavengeOn:'Scavenge On', OilScavengeOff:'Scavenge Off', StarterOff:'Starter Off',
     ImmediateCut:'Immediate Fuel and Ignition Cut', RPMDrop:'Wait for Rotor to Slow',
     CooldownSpin:'Cooldown', FinalStop:'Wait for Complete Stop', ThrottleSet:'Set Main Fuel Demand',
-    GlowPreheat:'Glow Preheat', FuelPumpRamp:'Pilot / Auxiliary Fuel Pump Ramp', FuelPump2Set:'Pilot / Auxiliary Fuel Pump Set',
-    FuelPump2On:'Pilot / Auxiliary Fuel Pump On', FuelPump2Off:'Pilot / Auxiliary Fuel Pump Off',
+    GlowPreheat:'Glow Preheat', FuelPumpRamp:'Secondary / Auxiliary Fuel Pump Ramp', FuelPump2Set:'Secondary / Auxiliary Fuel Pump Set',
+    FuelPump2On:'Secondary / Auxiliary Fuel Pump On', FuelPump2Off:'Secondary / Auxiliary Fuel Pump Off',
     CoolFanOn:'Cooling Fan On', CoolFanOff:'Cooling Fan Off',
     BleedOpen:'Bleed Valve Open', BleedClose:'Bleed Valve Close',
     AirstarterOn:'Air Starter Valve Open', AirstarterOff:'Air Starter Valve Close',
@@ -3391,14 +3699,16 @@ function abTriggerWorkflowCard() {
   const abt = cfg.ab_trigger || {};
   const source = Number(abt.source || 0);
   const sourceLabel = ['Manual / browser command','Throttle threshold','Physical trigger switch','Analog or RC command input'][source] || 'Unknown source';
-  const usesDiArm = hardwareHasDiRole('ab_arm');
-  const profileFireInput = pcbProfileActive() && registryHasPurpose('input','ab_fire');
-  const profileCommandInput = pcbProfileActive() && registryHasPurpose('input','ab_command');
+  const registryArmInput = registryHasPurpose('input','ab_arm');
+  const usesDiArm = hardwareHasDiRole('ab_arm') || registryArmInput;
+  const profileFireInput = registryHasPurpose('input','ab_fire');
+  const profileCommandInput = registryHasPurpose('input','ab_command');
   const armDetail = source !== 0 && abt.requires_arm
     ? (usesDiArm ? ' · armed by an AB Arm inventory switch' : ` · arm GPIO ${Number(abt.arm_pin ?? -1) >= 0 ? abt.arm_pin : 'not set'}`)
     : '';
   const sourcePin = source === 2 ? Number(abt.switch_pin ?? -1) : source === 3 ? Number(abt.input_pin ?? -1) : 0;
-  const pinRequired = !pcbProfileActive() && (source === 2 || source === 3);
+  const pinRequired = (source === 2 && !profileFireInput) ||
+                      (source === 3 && !profileCommandInput);
   const profileInputMissing = (source === 2 && pcbProfileActive() && !profileFireInput) ||
                               (source === 3 && pcbProfileActive() && !profileCommandInput);
   const armMissing = source !== 0 && abt.requires_arm && !usesDiArm &&
@@ -3414,8 +3724,8 @@ function abTriggerWorkflowCard() {
     : (rawThreshold * 3.3 / 4095).toFixed(2);
   const editor = editing ? `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
     <div class="hw-field"><span class="hw-label">Trigger source</span><span class="hw-desc">Choose what physically requests afterburner. For throttle mode, set Throttle Trigger % in Config - Afterburner.</span><select class="${fieldClass('source')}" data-ab-trigger-field="source" onchange="setAbTrigSrc(+this.value);renderHardwareWorkflowSummaries()"><option value="0"${source===0?' selected':''}>Manual / browser command</option><option value="1"${source===1?' selected':''}>Throttle threshold</option><option value="2"${source===2?' selected':''}>Physical switch</option><option value="3"${source===3?' selected':''}>Analog or RC command input</option></select></div>
-    ${source===2 ? (pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical command input</span><span class="hw-desc">${profileFireInput?'Uses the fitted Afterburner command switch from Inputs.':'Add an Afterburner command switch under Inputs and choose its named PCB connection.'}</span></div>` : `<div class="hw-field"><span class="hw-label">Trigger-switch GPIO</span><select class="${fieldClass('switch_pin')}" data-ab-trigger-field="switch_pin" onchange="setAbTrig('switch_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.switch_pin,'in')}</select></div><div class="hw-field"><span class="hw-label">Switch polarity</span><label class="hw-toggle"><input class="${fieldClass('switch_active_h')}" data-ab-trigger-field="switch_active_h" type="checkbox" ${abt.switch_active_h?'checked':''} onchange="setAbTrigBool('switch_active_h',this.checked);renderHardwareWorkflowSummaries()"><span></span> Active high</label></div>`) : ''}
-    ${source===3 ? (pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Command input</span><span class="hw-desc">${profileCommandInput?'Uses the fitted Afterburner analog / RC command from Inputs. Its signal type and calibration live on that input card.':'Add an Afterburner analog / RC command under Inputs and choose its named PCB connection.'}</span></div><div class="hw-field"><span class="hw-label">Trigger threshold (%)</span><span class="hw-desc">Afterburner is requested when the normalized command rises above this percentage.</span><input class="${fieldClass('input_threshold')}" type="number" min="0" max="100" step="1" value="${Math.round(rawThreshold*100/4095)}" onchange="setAbProfileThreshold(this.value)"></div>` : `<div class="hw-field"><span class="hw-label">Command signal</span><select class="${fieldClass('input_rc_pwm')}" data-ab-trigger-field="input_rc_pwm" onchange="setAbInputType(this.value==='rc');renderHardwareWorkflowSummaries()"><option value="analog"${!abt.input_rc_pwm?' selected':''}>Analog 0-3.3 V</option><option value="rc"${abt.input_rc_pwm?' selected':''}>RC servo pulse</option></select></div><div class="hw-field"><span class="hw-label">Command-input GPIO</span><select class="${fieldClass('input_pin')}" data-ab-trigger-field="input_pin" onchange="setAbTrig('input_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.input_pin,pinMode)}</select></div><div class="hw-field"><span class="hw-label">Trigger threshold (${abt.input_rc_pwm?'%':'V'})</span><span class="hw-desc">Afterburner is requested when this command input rises above the threshold.</span><input class="${fieldClass('input_threshold')}" data-ab-trigger-field="input_threshold" type="number" min="0" max="${abt.input_rc_pwm?'100':'3.3'}" step="${abt.input_rc_pwm?'1':'0.01'}" value="${thresholdValue}" onchange="setAbWorkflowThreshold(this.value)"></div>${abt.input_rc_pwm?`<div class="hw-field"><span class="hw-label">RC pulse range (us)</span><span class="hw-desc">Pulse widths representing 0% and 100% command.</span><div style="display:flex;gap:.35rem"><input class="${fieldClass('input_min_us')}" data-ab-trigger-field="input_min_us" aria-label="RC pulse minimum" type="number" min="500" max="2500" value="${Number(abt.input_min_us ?? 1000)}" onchange="setAbTrigBool('input_min_us',+this.value)"><input class="${fieldClass('input_max_us')}" data-ab-trigger-field="input_max_us" aria-label="RC pulse maximum" type="number" min="500" max="2500" value="${Number(abt.input_max_us ?? 2000)}" onchange="setAbTrigBool('input_max_us',+this.value)"></div></div>`:''}`) : ''}
+    ${source===2 ? ((pcbProfileActive() || profileFireInput) ? `<div class="hw-field"><span class="hw-label">Physical command input</span><span class="hw-desc">${profileFireInput?'Uses the fitted Afterburner command switch from Inputs.':'Add an Afterburner command switch under Inputs and choose its named PCB connection.'}</span></div>` : `<div class="hw-field"><span class="hw-label">Trigger-switch GPIO</span><select class="${fieldClass('switch_pin')}" data-ab-trigger-field="switch_pin" onchange="setAbTrig('switch_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.switch_pin,'in')}</select></div><div class="hw-field"><span class="hw-label">Switch polarity</span><label class="hw-toggle"><input class="${fieldClass('switch_active_h')}" data-ab-trigger-field="switch_active_h" type="checkbox" ${abt.switch_active_h?'checked':''} onchange="setAbTrigBool('switch_active_h',this.checked);renderHardwareWorkflowSummaries()"><span></span> Active high</label></div>`) : ''}
+    ${source===3 ? ((pcbProfileActive() || profileCommandInput) ? `<div class="hw-field"><span class="hw-label">Command input</span><span class="hw-desc">${profileCommandInput?'Uses the fitted Afterburner analog / RC command from Inputs. Its signal type and calibration live on that input card.':'Add an Afterburner analog / RC command under Inputs and choose its named PCB connection.'}</span></div><div class="hw-field"><span class="hw-label">Trigger threshold (%)</span><span class="hw-desc">Afterburner is requested when the normalized command rises above this percentage.</span><input class="${fieldClass('input_threshold')}" type="number" min="0" max="100" step="1" value="${Math.round(rawThreshold*100/4095)}" onchange="setAbProfileThreshold(this.value)"></div>` : `<div class="hw-field"><span class="hw-label">Command signal</span><select class="${fieldClass('input_rc_pwm')}" data-ab-trigger-field="input_rc_pwm" onchange="setAbInputType(this.value==='rc');renderHardwareWorkflowSummaries()"><option value="analog"${!abt.input_rc_pwm?' selected':''}>Analog 0-3.3 V</option><option value="rc"${abt.input_rc_pwm?' selected':''}>RC servo pulse</option></select></div><div class="hw-field"><span class="hw-label">Command-input GPIO</span><select class="${fieldClass('input_pin')}" data-ab-trigger-field="input_pin" onchange="setAbTrig('input_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.input_pin,pinMode)}</select></div><div class="hw-field"><span class="hw-label">Trigger threshold (${abt.input_rc_pwm?'%':'V'})</span><span class="hw-desc">Afterburner is requested when this command input rises above the threshold.</span><input class="${fieldClass('input_threshold')}" data-ab-trigger-field="input_threshold" type="number" min="0" max="${abt.input_rc_pwm?'100':'3.3'}" step="${abt.input_rc_pwm?'1':'0.01'}" value="${thresholdValue}" onchange="setAbWorkflowThreshold(this.value)"></div>${abt.input_rc_pwm?`<div class="hw-field"><span class="hw-label">RC pulse range (us)</span><span class="hw-desc">Pulse widths representing 0% and 100% command.</span><div style="display:flex;gap:.35rem"><input class="${fieldClass('input_min_us')}" data-ab-trigger-field="input_min_us" aria-label="RC pulse minimum" type="number" min="500" max="2500" value="${Number(abt.input_min_us ?? 1000)}" onchange="setAbTrigBool('input_min_us',+this.value)"><input class="${fieldClass('input_max_us')}" data-ab-trigger-field="input_max_us" aria-label="RC pulse maximum" type="number" min="500" max="2500" value="${Number(abt.input_max_us ?? 2000)}" onchange="setAbTrigBool('input_max_us',+this.value)"></div></div>`:''}`) : ''}
     ${source!==0 ? `<div class="hw-field"><span class="hw-label">Arming interlock</span><label class="hw-toggle"><input class="${fieldClass('requires_arm')}" data-ab-trigger-field="requires_arm" type="checkbox" ${abt.requires_arm?'checked':''} onchange="setAbTrigBool('requires_arm',this.checked);renderHardwareWorkflowSummaries()"><span></span> Require a separate arm switch</label></div>${abt.requires_arm&&!usesDiArm?(pcbProfileActive()?`<div class="hw-field"><span class="hw-label">Arm switch</span><span class="hw-desc">Add an Afterburner arm switch under Inputs and choose its named PCB connection.</span></div>`:`<div class="hw-field"><span class="hw-label">Arm-switch GPIO</span><select class="${fieldClass('arm_pin')}" data-ab-trigger-field="arm_pin" onchange="setAbTrig('arm_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.arm_pin,'in')}</select></div><div class="hw-field"><span class="hw-label">Arm polarity</span><label class="hw-toggle"><input class="${fieldClass('arm_active_h')}" data-ab-trigger-field="arm_active_h" type="checkbox" ${abt.arm_active_h?'checked':''} onchange="setAbTrigBool('arm_active_h',this.checked);renderHardwareWorkflowSummaries()"><span></span> Active high</label></div>`):''}` : ''}
   </div></div>` : '';
   return `<div class="hw-item-card ${editing?'registry-card-open':''} ${triggerChanged?'field-change-parent field-changed':''}" data-workflow-key="ab_trigger"><div class="registry-card-summary"><div><strong>Afterburner trigger and arm</strong><div class="hw-desc">${escapeHtmlText(sourceLabel + armDetail)}</div></div><div class="registry-card-actions"><span class="registry-status ${status==='Ready'?'registry-status-ok':'registry-status-error'}">${status}</span><button type="button" onclick="toggleWorkflowEditor('ab_trigger')">${editing?'Done':'Edit'}</button></div></div>${editor}</div>`;
@@ -3534,25 +3844,103 @@ function controllerLabel(key) {
     governor: 'automatic N2 speed control'
   })[key] || key;
 }
+function oilLoopChannels(direction, purpose) {
+  return (registryRoot()[direction + 's'] || []).filter(c => c && c.installed !== false &&
+    (registryDerivedPurpose(direction, c) === purpose ||
+     (direction === 'output' && purpose === 'oil_pump' && c.role === 'oil_pump')));
+}
+function ensureOilLoops() {
+  if (!Array.isArray(cfg.oil_loops)) cfg.oil_loops = [];
+  if (!cfg.oil_loops.length) {
+    const pressure = oilLoopChannels('input', 'oil_pressure')[0];
+    const pump = oilLoopChannels('output', 'oil_pump')[0];
+    if (pressure && pump) cfg.oil_loops.push({enabled:true,id:'main',pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,min_pct:18,max_pct:100});
+  }
+  return cfg.oil_loops;
+}
+function updateOilLoop(index, key, value) {
+  const loop = ensureOilLoops()[index];
+  if (!loop) return;
+  loop[key] = value;
+  dirty();
+  renderHardwareWorkflowSummaries();
+}
+function addOilLoop() {
+  const loops = ensureOilLoops();
+  if (loops.length >= 2) return;
+  const used = new Set(loops.map(l => l.pump_output));
+  const pressure = oilLoopChannels('input', 'oil_pressure')[0];
+  const pump = oilLoopChannels('output', 'oil_pump').find(c => !used.has(c.id));
+  if (!pressure || !pump) return;
+  loops.push({enabled:true,id:`oil${loops.length+1}`,pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,min_pct:18,max_pct:100});
+  dirty();
+  renderHardwareWorkflowSummaries();
+}
+function removeOilLoop(index) {
+  ensureOilLoops().splice(index, 1);
+  dirty();
+  renderHardwareWorkflowSummaries();
+}
+function oilLoopInlineEditor() {
+  const loops = ensureOilLoops();
+  const pressures = oilLoopChannels('input', 'oil_pressure');
+  const pumps = oilLoopChannels('output', 'oil_pump');
+  const hasN1 = registryHasPurpose('input','n1_speed');
+  const hasN2 = registryHasPurpose('input','n2_speed');
+  const options = (rows, selected) => rows.map(c => `<option value="${escapeHtmlText(c.id)}"${c.id===selected?' selected':''}>${escapeHtmlText(c.name||c.id)}</option>`).join('');
+  const num = (i,key,label,value,step,min=0,max='') => `<label class="hw-field"><span class="hw-label">${label}</span><input type="number" min="${min}" ${max!==''?`max="${max}"`:''} step="${step}" value="${Number(value)}" onchange="updateOilLoop(${i},'${key}',+this.value)"></label>`;
+  const cards = loops.map((loop,i) => {
+    const source = Number(loop.target_source || 0);
+    const pump = pumps.find(c => c.id === loop.pump_output);
+    const binary = pump && outputDriverIsOnOff(pump.driver);
+    const loopWarnings = [];
+    const lowTarget = Number(loop.target_bar ?? 2.5);
+    const highTarget = Number(loop.target_high_bar ?? lowTarget);
+    const runningMinimum = Number(settingsCfg?.oil?.running_min || 0);
+    if (source !== 0 && highTarget < lowTarget) loopWarnings.push('Pressure decreases as fuel/speed increases. Keep this only if intentional.');
+    if (runningMinimum > 0 && Math.min(lowTarget, source === 0 ? lowTarget : highTarget) < runningMinimum)
+      loopWarnings.push(`A target is below the running low-oil fault threshold (${runningMinimum} bar).`);
+    return `<div class="hw-item-card" style="grid-column:1/-1"><div class="registry-card-summary"><div><strong>Oil pressure loop ${i+1}</strong><div class="hw-desc">${binary?'On/off oil-pressure control. Requires a suitable accumulator or relief arrangement.':'Proportional oil-pump pressure control.'}</div></div>${loops.length>1?`<button class="btn-sm danger" onclick="removeOilLoop(${i})">Remove</button>`:''}</div><div class="registry-card-editor" style="display:grid">
+      ${pressures.length>1?`<label class="hw-field"><span class="hw-label">Pressure input</span><select onchange="updateOilLoop(${i},'pressure_input',this.value)">${options(pressures,loop.pressure_input)}</select></label>`:''}
+      ${pumps.length>1?`<label class="hw-field"><span class="hw-label">Pump output</span><select onchange="updateOilLoop(${i},'pump_output',this.value)">${options(pumps,loop.pump_output)}</select></label>`:''}
+      <label class="hw-field"><span class="hw-label">Pressure target source</span><select onchange="updateOilLoop(${i},'target_source',+this.value)"><option value="0"${source===0?' selected':''}>Fixed pressure</option><option value="1"${source===1?' selected':''}>Effective core-fuel demand</option>${hasN1?`<option value="2"${source===2?' selected':''}>N1 shaft speed</option>`:''}${hasN2?`<option value="3"${source===3?' selected':''}>N2 shaft speed</option>`:''}</select></label>
+      ${num(i,'target_bar',source===0?'Pressure target (bar)':'Low pressure target (bar)',loop.target_bar??2.5,.01)}
+      ${source!==0?num(i,'target_high_bar','High pressure target (bar)',loop.target_high_bar??loop.target_bar??2.5,.01):''}
+      ${source>=2?num(i,'speed_min_rpm','Low shaft speed (RPM)',loop.speed_min_rpm??0,100):''}
+      ${source>=2?num(i,'speed_max_rpm','High shaft speed (RPM)',loop.speed_max_rpm??20000,100):''}
+      ${num(i,'deadband_bar','Pressure deadband (bar)',loop.deadband_bar??.2,.01)}
+      ${binary?'':`<label class="hw-field"><span class="hw-label">Minimum pump output (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.min_demand??.18)*100)}" onchange="updateOilLoop(${i},'min_demand',+this.value/100)"></label>`}
+      ${binary?'':`<label class="hw-field"><span class="hw-label">Maximum pump output (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.max_demand??1)*100)}" onchange="updateOilLoop(${i},'max_demand',+this.value/100)"></label>`}
+      ${loopWarnings.length?`<div class="workflow-prerequisite" style="grid-column:1/-1">Warning: ${escapeHtmlText(loopWarnings.join(' '))}</div>`:''}
+    </div></div>`;
+  }).join('');
+  const canAdd = loops.length < 2 && pumps.some(p => !loops.some(l => l.pump_output === p.id));
+  return `<div class="registry-card-editor" style="display:grid">${cards}${canAdd?'<button class="btn-sm" onclick="addOilLoop()">Add another oil system</button>':''}</div>`;
+}
 function controllerAvailability(key) {
   const hasN1 = registryHasPurpose('input','n1_speed');
   const hasN2 = registryHasPurpose('input','n2_speed');
   const hasIdleFeedback = hasN1 || hasN2 || registryHasPurpose('input','p1_pressure') || registryHasPurpose('input','p2_pressure');
-  const hasThrottle = registryHasPurpose('output','main_fuel');
+  const throttle = oilLoopChannels('output','main_fuel')[0];
+  const hasThrottle = !!throttle;
+  const hasMeteringThrottle = !!throttle && outputDriverIsProportional(throttle.driver);
   const hasOilPressure = registryHasPurpose('input','oil_pressure');
   const hasOilPump = registryHasPurpose('output','oil_pump');
-  const hasPropPitch = registryHasPurpose('output','prop_pitch');
+  const propPitch = oilLoopChannels('output','prop_pitch')[0];
+  const hasPropPitch = !!propPitch && (outputDriverIsOnOff(propPitch.driver) || outputDriverIsProportional(propPitch.driver));
   const map = {
     oil_loop: [hasOilPressure && hasOilPump, 'Requires oil-pressure input and oil-pump output.'],
-    dynamic_idle: [hasThrottle && hasIdleFeedback, 'Requires main fuel output and N1, N2, P1, or P2 feedback input.'],
-    governor: [hasN2 && (hasThrottle || hasPropPitch), 'Requires N2 speed input plus throttle or proportional prop-pitch output.']
+    dynamic_idle: [hasMeteringThrottle && hasIdleFeedback, 'Requires proportional main-fuel output and N1, N2, P1, or P2 feedback input.'],
+    governor: [hasN2 && (hasMeteringThrottle || hasPropPitch), 'Requires N2 speed input plus proportional main fuel or a supported proportional/relay prop-pitch output.']
   };
   const [ok, reason] = map[key] || [true, ''];
   return {ok, reason};
 }
 function controllerInlineEditor() {
   const c = cfg.controllers || {};
-  const hasThrottle = registryHasPurpose('output','main_fuel');
+  const throttle = oilLoopChannels('output','main_fuel')[0];
+  const hasThrottle = !!throttle;
+  const hasMeteringThrottle = !!throttle && outputDriverIsProportional(throttle.driver);
   const cb = (key, label, desc, checked, handler) => {
     const availability = controllerAvailability(key);
     const enabled = availability.ok;
@@ -3568,9 +3956,10 @@ function controllerInlineEditor() {
   };
   return `<div class="registry-card-editor" style="display:block">
     ${cb('oil_loop', 'Oil pressure loop', 'Closed-loop oil pressure control. Requires oil pressure input and oil pump output.', !!c.oil_loop, "setController('oil_loop',this.checked)")}
+    ${c.oil_loop ? oilLoopInlineEditor() : ''}
     ${hasThrottle ? `<div class="hw-item-card" style="grid-column:1/-1"><div class="registry-card-summary"><div><strong>Fuel response &amp; limit protection</strong><div class="hw-desc">Automatic with Main Fuel. Configure normal opening/closing response and N1, N2, temperature, P1, P2 or torque protection in <a href="/config.html#engine-limits">Config → Engine Limits &amp; Protection</a>.</div></div><span class="registry-status registry-status-ok">Ready</span></div></div>` : ''}
     ${cb('dynamic_idle', 'Automatic idle control', 'Commands the main fuel output to hold N1 or N2 speed (normal proven methods), or experimental P1/P2 pressure. Choose the feedback source and tune it in Config > Start, Run & Recovery.', !!c.dynamic_idle, "setController('dynamic_idle',this.checked)")}
-    ${cb('governor', 'Automatic N2 speed control', 'Generator/turboshaft: with main fuel only, N2 commands fuel. Turboprop: a proportional Prop Pitch output makes pitch primary and fuel the fallback. Set N2 target and response in Config > Power System.', !!c.governor, "setController('governor',this.checked)")}
+    ${cb('governor', 'Automatic N2 speed control', 'Generator/turboshaft: proportional main fuel controls N2. Prop Pitch uses proportional control or deliberate relay fine/coarse control. Set N2 target and response in Config > Power System.', !!c.governor, "setController('governor',this.checked)")}
   </div>`;
 }
 function renderControllerSummary() {
@@ -3914,6 +4303,7 @@ function renderRegistryInventory() {
            ${pcbProfileActive() ? '' : registryInvertEditor(direction, c, i)}
           ${registryPulseScaleEditor(direction, c, i)}
           ${registryAnalogScaleEditor(direction, c, i)}
+          ${registryAnalogCurveEditor(direction, c, i)}
            ${!(direction==='input' && registryTemperatureIsSpi(c)) ? registryRangeEditor(direction, c, i) : ''}
            ${registryOutputSubcards(direction, c, i)}
            ${direction==='output' ? `<details style="grid-column:1/-1"><summary>Advanced output settings</summary><div class="hw-grid" style="margin-top:.65rem">${registryPwmTimingEditor(c, i)}${pcbProfileActive()?'':registryDemandEditor(c, i)}${registryFaultSafeEditor(c, i)}</div></details>` : ''}
@@ -3934,14 +4324,27 @@ function clearUnusedTcaInterrupt() {
 
 function pumpFlowPurpose(output) {
   const purpose = registryDerivedPurpose('output', output);
-  return purpose === 'oil_pump' ? 'oil_flow' : purpose === 'scavenge_pump' ? 'scavenge_flow' : '';
+  return purpose === 'oil_pump' || output?.role === 'oil_pump' ? 'oil_flow' : purpose === 'scavenge_pump' ? 'scavenge_flow' : '';
 }
 
 function pumpFlowInput(output) {
   const purpose = pumpFlowPurpose(output);
   if (!purpose) return {channel:null, index:-1};
-  const inputs = registryRoot().inputs || [];
-  const index = inputs.findIndex(row => registryDerivedPurpose('input', row) === purpose);
+  const r = registryRoot();
+  const inputs = r.inputs || [];
+  let index = output?.flow_input
+    ? inputs.findIndex(row => row.id === output.flow_input && registryDerivedPurpose('input', row) === purpose)
+    : -1;
+  if (index < 0 && !output?.flow_input) {
+    // Old single-pump configs had no explicit link. Keep that sensor attached
+    // to the first matching pump only; auxiliary pumps must never silently
+    // share its monitor and will receive their own linked input when enabled.
+    const pumps = (r.outputs || []).filter(row => pumpFlowPurpose(row) === purpose);
+    if (pumps[0] === output) {
+      const claimed = new Set(pumps.map(row => row.flow_input).filter(Boolean));
+      index = inputs.findIndex(row => registryDerivedPurpose('input', row) === purpose && !claimed.has(row.id));
+    }
+  }
   return {channel:index >= 0 ? inputs[index] : null, index};
 }
 
@@ -3949,6 +4352,7 @@ function removePumpFlowInput(output) {
   const {channel, index} = pumpFlowInput(output);
   if (!channel || index < 0) return;
   cleanupRegistryReferences('input', channel.id);
+  shiftRegistryNumericHandlesAfterRemoval('input', index, registryRoot().inputs.length);
   registryRoot().inputs.splice(index, 1);
   _registryEditOpen.clear();
 }
@@ -3970,8 +4374,13 @@ function setPumpFlowSensorEnabled(outputIndex, enabled) {
       return;
     }
     const main = purpose === 'oil_flow';
+    const baseId = registryUniqueId(`${purpose}_${String(output.id || 'pump').replace(/[^a-zA-Z0-9_-]/g,'_')}`);
+    if (!baseId) {
+      alert('Could not create a unique flow-sensor reference. Rename the pump card and try again.');
+      return;
+    }
     channel = {
-      id:purpose, name:main ? 'Oil Flow' : 'Scavenge Flow', purpose, role:'flow',
+      id:baseId, name:main ? 'Oil Flow' : 'Scavenge Flow', purpose, role:'flow',
       driver:2, pin:-1, min:0, max:1, invert:false, active_high:true,
       pullup:false, pulldown:false, pulses_per_unit:1000
     };
@@ -3979,7 +4388,9 @@ function setPumpFlowSensorEnabled(outputIndex, enabled) {
   } else if (!enabled && channel) {
     removePumpFlowInput(output);
   }
+  if (enabled && channel) output.flow_input = channel.id;
   output.has_flow_monitor = !!enabled;
+  if (!enabled) delete output.flow_input;
   if (enabled && !(Number(output.minimum_flow_l_min) > 0)) output.minimum_flow_l_min = 0.1;
   cleanupOilFlowShutdownDependency();
   refreshAllPins(); dirty(); updateSaveButton(); renderRegistryInventory();
@@ -4010,6 +4421,7 @@ function updateRegistryChannel(direction, index, key, value) {
     const range = registryDefaultRange(direction, value, c.role);
     c.min = range.min;
     c.max = range.max;
+    if (direction === 'input' && ![1,9].includes(Number(value))) c.calibration_points = [];
      c[key] = value;
      if (direction === 'input') clearUnusedTcaInterrupt();
      if (value >= 8) {
@@ -4052,6 +4464,7 @@ function updateRegistryChannel(direction, index, key, value) {
     const oldPurpose = registryDerivedPurpose(direction,c);
     c.purpose = def.value;
     c.role = def.role;
+    c.calibration_points = [];
     if (direction === 'output' && ['oil_pump','scavenge_pump'].includes(oldPurpose) && oldPurpose !== def.value) {
       removePumpFlowInput({...c, purpose:oldPurpose});
       c.has_flow_monitor = false;
@@ -4076,7 +4489,7 @@ function updateRegistryChannel(direction, index, key, value) {
       if (direction === 'output' && value === 4) c.min_run_demand = 0;
     }
     const bindingForPurpose = {
-      n1_speed:'primary_n1', n2_speed:'primary_n2', tot:'primary_egt', throttle:'operator_throttle',
+      n1_speed:'primary_n1', n2_speed:'primary_n2', tot:'primary_egt', throttle:'operator_throttle', idle:'operator_idle',
       main_fuel:'main_fuel_output', fuel_shutoff:'main_fuel_shutoff', starter:'main_starter'
     };
     const managedKeys = new Set(Object.values(bindingForPurpose));
@@ -4084,8 +4497,16 @@ function updateRegistryChannel(direction, index, key, value) {
     const bindingKey = bindingForPurpose[def.value];
     if (bindingKey) {
       const existing = registryRoot().bindings.find(b => String(b.key||'') === bindingKey);
-      if (existing) existing.channel = c.id;
-      else if (registryRoot().bindings.length < 8) registryRoot().bindings.push({key:bindingKey,channel:c.id});
+      const otherOwner = (registryRoot()[direction + 's'] || []).some(row =>
+        row !== c && registryDerivedPurpose(direction, row) === def.value);
+      // Re-purposing a spare output must not silently steal a running
+      // controller from an established card. Existing ownership changes only
+      // through the explicit Advanced binding control. For the first card,
+      // create the convenience binding as before.
+      if (!otherOwner) {
+        if (existing) existing.channel = c.id;
+        else if (registryRoot().bindings.length < 8) registryRoot().bindings.push({key:bindingKey,channel:c.id});
+      }
     }
     if ((!c.name || !String(c.name).trim()) && oldPurpose !== def.value) c.name = def.label.slice(0,15);
     dirty(); updateSaveButton(); renderRegistryInventory(); return;
@@ -4094,6 +4515,7 @@ function updateRegistryChannel(direction, index, key, value) {
     const allowed = (direction === 'input' ? REGISTRY_INPUT_ROLES : REGISTRY_OUTPUT_ROLES).some(([r]) => r === value);
     if (!allowed) return;
     c.role = value;
+    c.calibration_points = [];
     if (!registryAllowedDrivers(direction, value, registryDerivedPurpose(direction,c)).includes(Number(c.driver))) {
       c.driver = registryAllowedDrivers(direction, value, registryDerivedPurpose(direction,c))[0];
       const range = registryDefaultRange(direction, c.driver, value);
@@ -4133,6 +4555,7 @@ function updateRegistryChannel(direction, index, key, value) {
   if (key === 'torque_interface') {
     value = Number(value) === 1 ? 1 : 0;
     c.driver = 1; c.min = 0; c.max = 4095; c.torque_interface = value;
+    if (value === 1) c.calibration_points = [];
     if (value === 1) {
       c.hx711_clk ??= -1; c.hx711_scale ??= 1; c.hx711_zero ??= 0;
     } else if ((c.pin ?? -1) >= 0 && !GPIO_DB?.[c.pin]?.adc1) {
@@ -4150,6 +4573,7 @@ function updateRegistryChannel(direction, index, key, value) {
       return;
     }
     c[key] = value;
+    if (![0,4].includes(value)) c.calibration_points = [];
     if (value >= 1 && value <= 3) {
       c.pin = -1; c.spi_cs ??= -1; c.tc_type ??= 'K';
       syncSharedSpiChannels();
@@ -4204,7 +4628,7 @@ function registryBindingAccepts(key, direction, c) {
   const purpose = registryDerivedPurpose(direction,c);
   const requirements = {
     primary_n1:['input',['n1_speed']], primary_n2:['input',['n2_speed']], primary_egt:['input',['tot','tit']],
-    operator_throttle:['input',['throttle']], main_fuel_output:['output',['main_fuel']],
+    operator_throttle:['input',['throttle']], operator_idle:['input',['idle']], main_fuel_output:['output',['main_fuel']],
     main_fuel_shutoff:['output',['fuel_shutoff']], main_starter:['output',['starter']]
   };
   const req = requirements[String(key||'')];
@@ -4225,7 +4649,8 @@ const REGISTRY_BINDING_LABELS = {
   main_fuel_output:'Main fuel pump output',
   main_fuel_shutoff:'Fuel shutoff output',
   main_starter:'Starter output',
-  operator_throttle:'Throttle input'
+  operator_throttle:'Throttle input',
+  operator_idle:'Idle input'
 };
 const REGISTRY_BINDING_KEYS = Object.keys(REGISTRY_BINDING_LABELS);
 function registryBindingLabel(key) {
@@ -4423,7 +4848,8 @@ function createRegistryChannelFromPreset(index, pcbChoice) {
   const range = registryDefaultRange(_registryAddDirection, selectedDriver, preset.role);
   const id = registryUniqueId(preset.role === 'generic' ? registrySlug(name) : preset.id);
   if (!id) return registryAddError('Could not create an internal device reference. Close this window and try again.');
-  const safe = _registryAddDirection === 'output' ? 0 : undefined;
+  const safe = _registryAddDirection === 'output'
+    ? (purpose === 'prop_pitch' ? 1 : 0) : undefined;
   const channel = {id, name:name.slice(0, 15), purpose, role:preset.role, driver:selectedDriver, pin:-1, min:range.min, max:range.max, invert:false};
   if (pcbChoice) {
     channel.physical_port = pcbChoice.port.id;
@@ -4456,7 +4882,7 @@ function createRegistryChannelFromPreset(index, pcbChoice) {
     channel.pullup = registryIsSwitchRole(preset.role);
     channel.pulldown = false;
   }
-  resetRegistryPurposeDefaults(_registryAddDirection, purpose);
+  if (existing === 0) resetRegistryPurposeDefaults(_registryAddDirection, purpose);
   rows.push(channel);
   closeRegistryAddDialog();
   _registryEditOpen.add(registryEditKey(_registryAddDirection, rows.length - 1));
@@ -4524,6 +4950,9 @@ function registryRemovalImpact(direction, id) {
     const pumpPurpose = purpose === 'oil_flow' ? 'oil_pump' : purpose === 'scavenge_flow' ? 'scavenge_pump' : '';
     if (pumpPurpose && (r.outputs || []).some(out => registryDerivedPurpose('output',out) === pumpPurpose && out.has_flow_monitor))
       impact.push('the matching pump flow monitor');
+    const shaftSource = purpose === 'n1_speed' ? 2 : purpose === 'n2_speed' ? 3 : 0;
+    if (shaftSource && (cfg.oil_loops || []).some(loop => Number(loop?.target_source) === shaftSource))
+      impact.push('the matching oil loop will change to fixed high pressure');
   }
   const handle = idx >= 0 ? (direction === 'input' ? 80 + idx : 64 + idx) : -999;
   const bindCount = r.bindings.filter(b => b.channel === id).length;
@@ -4587,17 +5016,55 @@ function cleanupRegistryReferences(direction, id) {
   const channel = idx >= 0 ? rows[idx] : null;
   if (direction === 'input' && channel) {
     const purpose = registryDerivedPurpose('input', channel);
+    const shaftSource = purpose === 'n1_speed' ? 2 : purpose === 'n2_speed' ? 3 : 0;
+    if (shaftSource) (cfg.oil_loops || []).forEach(loop => {
+      if (Number(loop?.target_source) !== shaftSource) return;
+      loop.target_source = 0;
+      loop.target_bar = Number(loop.target_high_bar ?? loop.target_bar ?? 2.5);
+    });
     const pumpPurpose = purpose === 'oil_flow' ? 'oil_pump' : purpose === 'scavenge_flow' ? 'scavenge_pump' : '';
-    if (pumpPurpose) (r.outputs || []).forEach(out => {
-      if (registryDerivedPurpose('output',out) === pumpPurpose) {
+    if (pumpPurpose) {
+      const compatible = (r.inputs || []).filter(input =>
+        input !== channel && registryDerivedPurpose('input', input) === purpose);
+      (r.outputs || []).forEach(out => {
+        if (registryDerivedPurpose('output',out) === pumpPurpose && out.has_flow_monitor &&
+            (refMatches(out.flow_input) || (!out.flow_input && compatible.length === 0))) {
         out.has_flow_monitor = false;
         out.minimum_flow_l_min = 0;
+        out.flow_input = '';
       }
-    });
+      });
+    }
   }
   if (settingsCfg.rules && channel) settingsCfg.rules = settingsCfg.rules.filter(rule => !registryRuleReferencesChannel(rule, direction, channel));
   else if (settingsCfg.rules && direction === 'input') settingsCfg.rules = settingsCfg.rules.filter(rule => !refMatches(rule?.source) && !refMatches(rule?.sensor_id) && Number(rule?.sensor) !== handle);
   else if (settingsCfg.rules && direction === 'output') settingsCfg.rules = settingsCfg.rules.filter(rule => !refMatches(rule?.target) && !refMatches(rule?.actuator_id) && Number(rule?.actuator) !== handle);
+}
+function shiftRegistryNumericHandlesAfterRemoval(direction, removedIndex, oldCount) {
+  const base = direction === 'input' ? 80 : 64;
+  const removed = base + removedIndex;
+  const upper = base + oldCount;
+  const shift = value => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > removed && numeric < upper ? numeric - 1 : value;
+  };
+  if (direction === 'output') {
+    const seqKeys = ['startup_enter_actions','startup_exit_actions','shutdown_enter_actions','shutdown_exit_actions','ab_enter_actions','ab_exit_actions','ab_shut_enter_actions','ab_shut_exit_actions'];
+    seqKeys.forEach(key => (cfg[key] || []).forEach(slot => (slot || []).forEach(action => {
+      if (action && action.act !== undefined) action.act = shift(action.act);
+    })));
+    Object.values(cfg.custom_blocks || {}).forEach(block => (block?.steps || []).forEach(step => {
+      if (step.target !== undefined && Number.isFinite(Number(step.target))) step.target = shift(step.target);
+      if (step.actuator !== undefined) step.actuator = shift(step.actuator);
+      if (step.act !== undefined) step.act = shift(step.act);
+    }));
+    (settingsCfg.rules || []).forEach(rule => { if (rule?.actuator !== undefined) rule.actuator = shift(rule.actuator); });
+  } else {
+    Object.values(cfg.custom_blocks || {}).forEach(block => {
+      if (block?.condition?.sensor !== undefined) block.condition.sensor = shift(block.condition.sensor);
+    });
+    (settingsCfg.rules || []).forEach(rule => { if (rule?.sensor !== undefined) rule.sensor = shift(rule.sensor); });
+  }
 }
 function cleanupOilFlowShutdownDependency() {
   const r = registryRoot();
@@ -4680,12 +5147,16 @@ function confirmRegistryRemoveChannel() {
   if (_pendingRegistryRemove.channels) {
     const channels = _pendingRegistryRemove.channels;
     const r = registryRoot();
-    // Clean references before changing indices so legacy numeric handles still
-    // point at the same registry rows during dependency removal.
-    channels.forEach(item => cleanupRegistryReferences(item.direction, item.id));
-    channels.forEach(item => {
-      const row = (r[item.direction + 's'] || []).find(c => c.id === item.id);
+    // Remove from the highest index down. After each removal, shift surviving
+    // legacy numeric handles so they continue to address the same stable card.
+    const ordered = channels.map(item => ({...item, index:(r[item.direction + 's'] || []).findIndex(c => c.id === item.id)}))
+      .filter(item => item.index >= 0)
+      .sort((a,b) => a.direction === b.direction ? b.index - a.index : a.direction.localeCompare(b.direction));
+    ordered.forEach(item => {
+      const rows = r[item.direction + 's'] || [];
+      const row = rows[item.index];
       if (!row) return;
+      cleanupRegistryReferences(item.direction, item.id);
       if (item.direction === 'input') {
         const key = registryCoreSensorKey(row);
         if (key && cfg.sensors?.[key]) cfg.sensors[key].enabled = false;
@@ -4694,11 +5165,9 @@ function confirmRegistryRemoveChannel() {
         const key = registryCoreActuatorKey(row);
         if (key && cfg.actuators?.[key]) cfg.actuators[key].enabled = false;
       }
+      shiftRegistryNumericHandlesAfterRemoval(item.direction, item.index, rows.length);
+      rows.splice(item.index, 1);
     });
-    for (const direction of ['input','output']) {
-      const ids = new Set(channels.filter(item=>item.direction===direction).map(item=>item.id));
-      r[direction + 's'] = (r[direction + 's'] || []).filter(row=>!ids.has(row.id));
-    }
     clearUnusedTcaInterrupt();
     cleanupOilFlowShutdownDependency();
     closeRegistryRemoveDialog();
@@ -4720,6 +5189,7 @@ function confirmRegistryRemoveChannel() {
     const key = registryCoreActuatorKey(removed);
     if (key && cfg.actuators?.[key]) cfg.actuators[key].enabled = false;
   }
+  shiftRegistryNumericHandlesAfterRemoval(direction, index, r[direction + 's'].length);
   r[direction + 's'].splice(index, 1);
   clearUnusedTcaInterrupt();
   cleanupOilFlowShutdownDependency();
@@ -4841,6 +5311,7 @@ async function setController(key, val) {
     }
   }
   setNested('controllers', key, val);
+  if (key === 'oil_loop' && val && typeof ensureOilLoops === 'function') ensureOilLoops();
   updateHardwarePrerequisites(true);
 }
 
@@ -4938,9 +5409,9 @@ function updatePropPitchTypeUI(t) {
 }
 function setBleedType(t) { setAct('bleed_valve','type',t); updateBleedTypeUI(t); }
 function updateBleedTypeUI(t) {
-  document.getElementById('grp-bleed-onoff').style.display  = t === 0 ? '' : 'none';
-  document.getElementById('grp-bleed-servo').style.display  = t === 1 ? '' : 'none';
-  document.getElementById('grp-bleed-pwm').style.display    = t === 2 ? '' : 'none';
+  document.getElementById('grp-bleed-servo').style.display  = t === 0 ? '' : 'none';
+  document.getElementById('grp-bleed-pwm').style.display    = t === 1 ? '' : 'none';
+  document.getElementById('grp-bleed-onoff').style.display  = t === 2 ? '' : 'none';
 }
 function setFp2Type(t) { setAct('fuel_pump2','type',t); updateFp2TypeUI(t); }
 function updateFp2TypeUI(t) {
@@ -5038,7 +5509,7 @@ function updateIgniterModeUI(mode) {
 function setIgniter2Mode(mode) {
   setAct('igniter2','pwm',  mode === 'pwm');
   setAct('igniter2','coil', mode === 'coil');
-  // Auto-enable/disable the AB / pilot igniter current sensor (stored under actuators.igniter2)
+  // Auto-enable/disable the secondary igniter current sensor (stored under actuators.igniter2)
   if (!cfg.actuators) cfg.actuators = {};
   if (!cfg.actuators.igniter2) cfg.actuators.igniter2 = {};
   cfg.actuators.igniter2.has_current = (mode === 'coil');
@@ -5106,7 +5577,7 @@ const PIN_SELECT_LABELS = {
   'f-fuelpress-pin':  'Fuel Pressure',
   'f-glowcur-pin':      'Glow Current',
   'f-igncur-pin':       'Igniter 1 Current',
-  'f-ign2cur-pin':      'AB / Pilot Igniter Current',
+  'f-ign2cur-pin':      'Secondary Igniter Current',
   'f-oilpumpcur-pin':   'Oil Pump Current',
   'f-thr-pin':        'Main Fuel Pump / Metering Output',
   'f-str-pin':        'Starter ESC',
@@ -5114,13 +5585,13 @@ const PIN_SELECT_LABELS = {
   'f-oscav-pin':      'Oil Scavenge Pump',
   'f-fsol-pin':       'Main Fuel Shutoff',
   'f-ign-pin':        'Igniter',
-  'f-ign2-pin':       'AB / Pilot Igniter',
+  'f-ign2-pin':       'Secondary Igniter',
   'f-sen-pin':        'Starter Enable Output',
   'f-abs-pin':        'Afterburner Fuel Valve',
   'f-abp-pin':        'AB Fuel Pump',
   'f-airs-pin':       'Air Starter Valve',
   'f-fan-pin':        'Cooling Fan',
-  'f-fp2-pin':        'Pilot / Auxiliary Fuel Pump',
+  'f-fp2-pin':        'Secondary / Auxiliary Fuel Pump',
   'f-bleed-pin':      'Bleed Valve',
   'f-pp-pin':         'Prop Pitch',
   'f-glow-pin':       'Glow Plug',
@@ -5133,7 +5604,6 @@ const PIN_SELECT_LABELS = {
   'f-ab-sw-pin':      'AB Switch',
   'f-ab-inp-pin':     'AB Input',
   'f-ab-arm-pin':     'AB Arm Switch',
-  'f-ab-fl-pin':      'AB Flame Sensor',
 };
 
 let _pinConflictBlocking = false;
@@ -5298,17 +5768,11 @@ function updateSaveButton() {
 }
 
 function ensureAbTrig() { if (!cfg.ab_trigger) cfg.ab_trigger = {}; return cfg.ab_trigger; }
-function ensureAbFlame() { if (!cfg.ab_flame) cfg.ab_flame = {}; return cfg.ab_flame; }
 async function setAbTrig(key, val)     {
   if (isPinField(key) && !await acceptPinChange(val)) { refreshAllPins(); return; }
   ensureAbTrig()[key] = val; refreshAllPins(); dirty();
 }
 function setAbTrigBool(key, val) { ensureAbTrig()[key] = val; dirty(); }
-async function setAbFlame(key, val)    {
-  if (isPinField(key) && !await acceptPinChange(val)) { refreshAllPins(); return; }
-  ensureAbFlame()[key] = val; refreshAllPins(); dirty();
-}
-function setAbFlameBool(key, val){ ensureAbFlame()[key] = val; dirty(); }
 
 function updateFuelFlowTypeUI() {
   const type = +(document.getElementById('f-fuelflow-type')?.value || 0);
@@ -5408,12 +5872,6 @@ function updateAbArmUI(checked) {
   const pins = document.getElementById('grp-ab-arm-pins');
   if (pins) pins.style.display = checked ? '' : 'none';
 }
-function updateAbFlameUI(checked) {
-  const grp = document.getElementById('grp-ab-flame');
-  if (grp) grp.style.display = checked ? '' : 'none';
-}
-
-
 function updateFeaturesUI() {
   const hasAB  = hardwareHasAfterburner();
   const has2sh = registryHasPurpose('input','n2_speed');
@@ -5423,12 +5881,12 @@ function updateFeaturesUI() {
   // AB actuator block
   const abActSec = document.getElementById('section-ab-actuators');
   if (abActSec) abActSec.style.display = hasAB ? '' : 'none';
-  // Labels: AB / pilot igniter
+  // Labels: secondary igniter
   const lblIgn2 = document.getElementById('lbl-igniter2');
-  if (lblIgn2) lblIgn2.textContent = hasAB ? 'Afterburner Igniter' : 'AB / Pilot Igniter';
+  if (lblIgn2) lblIgn2.textContent = hasAB ? 'Afterburner Igniter' : 'Secondary Igniter';
   // Labels: AB Fuel Pump / auxiliary fuel pump output
   const lblAbp = document.getElementById('lbl-abpump');
-  if (lblAbp) lblAbp.textContent = hasAB ? 'Afterburner Fuel Pump Motor / ESC' : 'Pilot / Auxiliary Fuel Pump Motor / ESC';
+  if (lblAbp) lblAbp.textContent = hasAB ? 'Afterburner Fuel Pump Motor / ESC' : 'Secondary / Auxiliary Fuel Pump Motor / ESC';
 }
 
 // Source: data_src/pages/hardware-save.js
@@ -5469,11 +5927,21 @@ function _registryFieldLabel(key) {
     id:'Stable ID', name:'Display name', purpose:'Purpose', role:'Purpose family', driver:'Signal type', pin:'GPIO pin',
     min:'Minimum mapped value', max:'Maximum mapped value', pulses_per_unit:'Pulse scale',
     analog_zero_mv:'Analog zero offset', analog_mv_per_unit:'Analog mV per unit', analog_divider:'Voltage divider ratio',
+    calibration_points:'Multi-point calibration curve', i2c_address:'I2C address', device_channel:'Device channel',
+    i2c_reference_mv:'ADC reference voltage', filter_alpha:'Input filter',
+    loadcell_gain:'Load-cell gain', loadcell_rate_sps:'Load-cell sample rate', loadcell_zero:'Load-cell zero',
+    loadcell_n_per_count:'Load-cell scale', lever_arm_m:'Torque lever arm',
+    digital_threshold_raw:'Switch threshold', digital_hysteresis_raw:'Switch hysteresis',
+    torque_interface:'Torque sensor interface', hx711_clk:'HX711 clock GPIO', hx711_scale:'HX711 scale', hx711_zero:'HX711 zero',
+    temp_interface:'Temperature sensor interface', spi_clk:'SPI clock GPIO', spi_cs:'SPI chip-select GPIO',
+    spi_miso:'SPI MISO GPIO', spi_mosi:'SPI MOSI GPIO', tc_type:'Thermocouple type',
+    temp_resolution:'Temperature resolution', ntc_beta:'NTC beta coefficient', ntc_r0:'NTC resistance at 25 C',
+    ntc_r_fixed:'NTC fixed resistor', ntc_pullup:'NTC divider orientation',
     safe_demand:'Power-on demand', force_safe_on_fault:'Force safe state on fault', min_run_demand:'Minimum reliable command', pwm_freq_hz:'PWM carrier frequency', pwm_res_bits:'PWM resolution', invert:'Signal inversion',
     active_high:'Active polarity', pullup:'Internal pull-up', pulldown:'Internal pull-down',
     has_current:'Current sensing', current_pin:'Current sensor pin', current_mv_a:'Current sensor mV/A',
     current_zero_v:'Current zero voltage', current_max_a:'Current limit',
-    has_flow_monitor:'Flow monitoring', minimum_flow_l_min:'Minimum oil flow'
+    has_flow_monitor:'Flow monitoring', minimum_flow_l_min:'Minimum oil flow', flow_input:'Flow sensor'
   })[key] || key.replace(/_/g, ' ');
 }
 function _registryFieldValue(key, value, direction) {
@@ -5481,7 +5949,11 @@ function _registryFieldValue(key, value, direction) {
   if (value === undefined || value === null || value === '') return '(empty)';
   if (key === 'driver') return driverName(value);
   if (key === 'role') return registryRoleLabel(direction, value);
-  if (key === 'pin' || key === 'current_pin') return Number(value) >= 0 ? `GPIO${value}` : '? Not assigned ?';
+  if (['pin','current_pin','hx711_clk','spi_clk','spi_cs','spi_miso','spi_mosi'].includes(key)) return Number(value) >= 0 ? `GPIO${value}` : 'Not assigned';
+  if (key === 'i2c_address') return Number(value) > 0 ? `0x${Number(value).toString(16).toUpperCase().padStart(2,'0')}` : 'Not assigned';
+  if (key === 'calibration_points') return Array.isArray(value)
+    ? (value.length ? value.map(p => `${Number(p.raw)} -> ${Number(p.value)}`).join(', ') : 'Linear calibration')
+    : 'Linear calibration';
   if (key === 'safe_demand') return (Number(value) * 100).toFixed(0) + '%';
   if (typeof value === 'number') return Number.isFinite(value) ? value.toFixed(2) : String(value);
   return String(value);
@@ -5495,19 +5967,30 @@ function _registryAddedSummary(direction, channel) {
   return `Added ${registryRoleLabel(direction, channel.role)} / ${registrySignalSummary(channel)} / ${registryPinSummary(channel)}`;
 }
 function _registryFieldRelevant(direction, channel, key) {
-  const common = new Set(['id','name','purpose','role','driver','pin','min','max','invert']);
+  const common = new Set(['id','name','purpose','role','driver','pin','min','max']);
   if (common.has(key)) return true;
   const driver = Number(channel?.driver ?? (direction === 'input' ? 0 : 4));
+  if (['i2c_address','device_channel'].includes(key)) return driver >= 8;
   if (direction === 'input') {
+    if (key === 'invert') return !['flame','ab_flame'].includes(registryDerivedPurpose(direction, channel)) &&
+      [1,2,3,7,9].includes(driver) &&
+      ['generic','throttle','idle','flame'].includes(registryDerivedPurpose(direction, channel));
     if (key === 'active_high') return driver === 0 || driver === 8 ||
-      (driver === 9 && (registryIsSwitchRole(channel?.role) || ['start_switch','stop_switch'].includes(channel?.purpose)));
+      ([1,9].includes(driver) && ['flame','ab_flame'].includes(registryDerivedPurpose(direction, channel))) ||
+      ([1,9].includes(driver) && (registryIsSwitchRole(channel?.role) || ['start_switch','stop_switch'].includes(channel?.purpose)));
     if (['pullup','pulldown'].includes(key)) return driver === 0;
     if (key === 'pulses_per_unit') return driver === 2;
-    if (['analog_zero_mv','analog_mv_per_unit','analog_divider'].includes(key)) return driver === 1;
+    const role = String(channel?.role || '');
+    if (key === 'analog_divider') return [1,9].includes(driver) && role === 'voltage';
+    if (['analog_zero_mv','analog_mv_per_unit'].includes(key))
+      return [1,9].includes(driver) && !['generic','operator','flame','voltage'].includes(role);
+    if (key === 'calibration_points') return [1,9].includes(driver) && String(channel?.role || '') !== 'flame';
     if (key === 'i2c_reference_mv') return driver === 9;
     if (['digital_threshold_raw','digital_hysteresis_raw'].includes(key))
-      return driver === 9 && (registryIsSwitchRole(channel?.role) || ['start_switch','stop_switch'].includes(channel?.purpose));
+      return ([1,9].includes(driver) && ['flame','ab_flame'].includes(registryDerivedPurpose(direction, channel))) ||
+        ([1,9].includes(driver) && (registryIsSwitchRole(channel?.role) || ['start_switch','stop_switch'].includes(channel?.purpose)));
     if (key === 'filter_alpha') return [9,10].includes(driver);
+    if (['loadcell_gain','loadcell_rate_sps','loadcell_zero','loadcell_n_per_count','lever_arm_m'].includes(key)) return driver === 10;
     const tempInterface = Number(channel?.temp_interface || 0);
     if (key === 'temp_interface') return channel?.role === 'temperature';
     if (['spi_clk','spi_cs','spi_miso','spi_mosi','tc_type'].includes(key)) return tempInterface >= 1 && tempInterface <= 3;
@@ -5518,18 +6001,23 @@ function _registryFieldRelevant(direction, channel, key) {
     if (['hx711_clk','hx711_scale','hx711_zero'].includes(key)) return torqueInterface === 1;
     return false;
   }
+  if (key === 'invert') return true;
   if (['safe_demand','force_safe_on_fault','min_run_demand'].includes(key)) return true;
   if (['pwm_freq_hz','pwm_res_bits'].includes(key)) return driver === 5;
-  if (key === 'has_current') return ['oil_pump','igniter','ab_igniter','glow_plug'].includes(String(channel?.purpose || ''));
+  if (key === 'has_current') return true;
   if (['current_pin','current_mv_a','current_zero_v','current_max_a'].includes(key)) return !!channel?.has_current;
   if (key === 'has_flow_monitor') return ['oil_pump','scavenge_pump'].includes(String(channel?.purpose || ''));
-  if (key === 'minimum_flow_l_min') return !!channel?.has_flow_monitor;
+  if (['minimum_flow_l_min','flow_input'].includes(key)) return !!channel?.has_flow_monitor;
   return false;
 }
 function _registryEffectiveValue(key, value) {
   if (value !== undefined && value !== null && value !== '') return value;
   const defaults = {
     pulses_per_unit:1, analog_zero_mv:0, analog_mv_per_unit:1000, analog_divider:1,
+    calibration_points:[], i2c_address:0, device_channel:0, i2c_reference_mv:3300,
+    loadcell_gain:128, loadcell_rate_sps:80, loadcell_zero:0,
+    loadcell_n_per_count:1, lever_arm_m:1, filter_alpha:1,
+    digital_threshold_raw:2048, digital_hysteresis_raw:64,
     torque_interface:0, hx711_clk:-1, hx711_scale:1, hx711_zero:0,
     temp_interface:0, spi_clk:-1, spi_cs:-1, spi_miso:-1, spi_mosi:-1,
     tc_type:'K', temp_resolution:10, ntc_beta:3950, ntc_r0:10000,
@@ -5538,7 +6026,7 @@ function _registryEffectiveValue(key, value) {
     pwm_res_bits:10, invert:false, active_high:true, pullup:false,
     pulldown:false, has_current:false, current_pin:-1, current_mv_a:100,
     current_zero_v:1.65, current_max_a:0, has_flow_monitor:false,
-    minimum_flow_l_min:0
+    minimum_flow_l_min:0, flow_input:''
   };
   return Object.prototype.hasOwnProperty.call(defaults, key) ? defaults[key] : value;
 }
@@ -5764,7 +6252,6 @@ function _releaseInactivePinConflicts() {
   if (abt.source !== 2) release(abt, ['switch_pin']);
   if (abt.source !== 3) release(abt, ['input_pin']);
   if (abt.source === 0 || !abt.requires_arm) release(abt, ['arm_pin']);
-  if (!cfg.ab_flame?.enabled) release(cfg.ab_flame, ['pin']);
   if (changed) {
     refreshAllPins();
     _refreshChangedBorders();
@@ -5775,6 +6262,41 @@ function _releaseInactivePinConflicts() {
 async function saveHardware() {
   _releaseInactivePinConflicts();
   syncSharedSpiChannels();
+  // Firmware string capacities are byte based. HTML maxlength counts UTF-16
+  // characters, so accented text and symbols can otherwise pass the browser
+  // check and be rejected only after the user reviews the save.
+  const utf8Bytes = value => new TextEncoder().encode(String(value || '')).length;
+  const profileId = String(cfg.profile_id || '').trim();
+  const profileDesc = String(cfg.profile_desc || '');
+  const wifiPassword = String(cfg.wifi_password || '');
+  if (!profileId || utf8Bytes(profileId) > 63) {
+    alert('Engine profile name must be 1–63 bytes. Shorten it and try again.');
+    document.getElementById('f-profile-id')?.focus();
+    return;
+  }
+  if (utf8Bytes(profileDesc) > 63) {
+    alert('Engine description must be at most 63 bytes. Symbols and accented characters can use more than one byte. Shorten it and try again.');
+    document.getElementById('f-profile-desc')?.focus();
+    return;
+  }
+  if (wifiPassword !== '__KEEP_PASSWORD__' && wifiPassword &&
+      (utf8Bytes(wifiPassword) < 8 || utf8Bytes(wifiPassword) > 63)) {
+    alert('Wi-Fi password must be empty for an open hotspot or 8–63 bytes long.');
+    document.getElementById('f-wifi-password')?.focus();
+    return;
+  }
+  const igniterModeConversions = [];
+  for (const [purpose, key, label] of [
+    ['igniter','igniter','Igniter'], ['ab_igniter','igniter2','Afterburner / Secondary Igniter']
+  ]) {
+    const channel = (registryRoot().outputs || []).find(c => registryDerivedPurpose('output', c) === purpose);
+    const actuator = cfg.actuators?.[key];
+    if (channel && [4,11].includes(Number(channel.driver)) && actuator && (actuator.pwm || actuator.coil)) {
+      igniterModeConversions.push({label:label + ' / Igniter mode', was:actuator.coil ? 'Current-limited coil dwell' : 'Dwell / rest PWM cycle', now:'Simple on/off (relay capability)'});
+      actuator.pwm = false;
+      actuator.coil = false;
+    }
+  }
   const hasDiRoleInMode = (role, modeBit) =>
     (cfg.di_channels || []).some(ch =>
       (ch?.pin ?? -1) >= 0 &&
@@ -5804,6 +6326,10 @@ async function saveHardware() {
   if (cfg.actuators.status_led.blink_color === undefined) cfg.actuators.status_led.blink_color = 0x0000FF;
   }
   const missing = [];
+  const hasRegistryInput = purpose => (registryRoot().inputs || []).some(c =>
+    registryDerivedPurpose('input', c) === purpose);
+  const hasRegistryOutput = (purpose, id = '') => (registryRoot().outputs || []).some(c =>
+    registryDerivedPurpose('output', c) === purpose || (id && c.id === id));
   const requirePin = (obj, key, label) => {
     if (!obj || obj[key] === undefined || obj[key] === null || obj[key] < 0) missing.push(label);
   };
@@ -5823,49 +6349,65 @@ async function saveHardware() {
         registryTemperatureIsSpi(channel) && Number(channel.temp_interface) === 3))
       requirePin(cfg.spi, 'mosi_pin', 'Shared SPI MOSI (MAX31856)');
   }
-  if (pcbProfileActive()) {
-    if (!(registryRoot().inputs || []).some(channel => registryDerivedPurpose('input', channel) === 'stop_switch'))
-      missing.push('Stop switch PCB connection');
-  } else {
-    requirePin(cfg.controls, 'stop_pin', 'Stop button');
-    for (const [key, label] of [['stop_pin','Stop button'],['start_pin','Start button']]) {
-      const pin = Number(cfg.controls?.[key] ?? -1);
-      if (pin >= 0 && (!GPIO_DB?.[pin] || GPIO_DB[pin].r))
-        missing.push(`${label} uses GPIO ${pin}, which is unavailable on this target`);
-    }
+  if (!registryHasPurpose('input', 'stop_switch')) {
+    if (pcbProfileActive()) missing.push('Stop switch PCB connection');
+    else requirePin(cfg.controls, 'stop_pin', 'Stop button');
   }
+  for (const [key, purpose, label] of [['stop_pin','stop_switch','Stop button'],['start_pin','start_switch','Start button']]) {
+    if (registryHasPurpose('input', purpose)) continue;
+    const pin = Number(cfg.controls?.[key] ?? -1);
+    if (pin >= 0 && (!GPIO_DB?.[pin] || GPIO_DB[pin].r))
+      missing.push(`${label} uses GPIO ${pin}, which is unavailable on this target`);
+  }
+  const sensorPurposes = {
+    n1_rpm:'n1_speed', n2_rpm:'n2_speed', oil_press:'oil_pressure', flame:'flame',
+    fuel_flow:'fuel_flow', fuel_press:'fuel_pressure', p1:'p1_pressure', p2:'p2_pressure',
+    throttle_input:'throttle', idle_input:'idle', batt_voltage:'battery_voltage'
+  };
   for (const [key, label] of Object.entries({
     n1_rpm:'N1 RPM', n2_rpm:'N2 RPM', oil_press:'Oil Pressure', flame:'Flame Detector',
     fuel_flow:'Fuel Flow', fuel_press:'Fuel Pressure', p1:'Pressure 1', p2:'Pressure 2',
     throttle_input:'Throttle Input', idle_input:'Idle Input', batt_voltage:'Battery Voltage'
   })) {
     const item = cfg.sensors?.[key];
-    if (item?.enabled) requirePin(item, 'pin', label);
+    if (item?.enabled && !hasRegistryInput(sensorPurposes[key])) requirePin(item, 'pin', label);
   }
+  const actuatorPurposes = {
+    throttle:'main_fuel', starter:'starter', oil_pump:'oil_pump', oil_scavenge_pump:'scavenge_pump',
+    fuel_sol:'fuel_shutoff', igniter:'igniter', igniter2:'ab_igniter', starter_en:'starter_enable',
+    ab_sol:'ab_valve', ab_pump:'ab_pump', airstarter_sol:'air_starter', cool_fan:'cooling_fan',
+    fuel_pump2:'fuel_pump', bleed_valve:'valve', prop_pitch:'prop_pitch', glow_plug:'glow_plug',
+    status_led:'warning_indicator'
+  };
   for (const [key, label] of Object.entries({
     throttle:'Main Fuel Pump / Metering ESC', starter:'Starter', oil_pump:'Oil Pump',
     oil_scavenge_pump:'Oil Scavenge Pump', fuel_sol:'Main Fuel Shutoff', igniter:'Igniter',
-    igniter2:'Afterburner / Pilot Igniter', starter_en:'Starter Enable', ab_sol:'Afterburner Fuel Valve',
-    ab_pump:'Afterburner Fuel Pump', airstarter_sol:'Air Starter Valve', cool_fan:'Cooling Fan', fuel_pump2:'Pilot / Auxiliary Fuel Pump',
+    igniter2:'Afterburner / Secondary Igniter', starter_en:'Starter Enable', ab_sol:'Afterburner Fuel Valve',
+    ab_pump:'Afterburner Fuel Pump', airstarter_sol:'Air Starter Valve', cool_fan:'Cooling Fan', fuel_pump2:'Secondary / Auxiliary Fuel Pump',
     bleed_valve:'Bleed Valve', prop_pitch:'Prop Pitch', glow_plug:'Glow Plug',
     status_led:'Status LED'
   })) {
     const item = cfg.actuators?.[key];
-    if (item?.enabled) requirePin(item, 'pin', label);
+    const registryOwned = key === 'bleed_valve'
+      ? (registryRoot().outputs || []).some(c => c.id === 'bleed_valve')
+      : hasRegistryOutput(actuatorPurposes[key]);
+    if (item?.enabled && !registryOwned) requirePin(item, 'pin', label);
   }
   if (cfg.actuators?.glow_plug?.enabled && Number(cfg.actuators.glow_plug.type || 0) === 2) {
-    requirePin(cfg.actuators.glow_plug, 'fuel_pin', 'Wet Glow Fuel');
+    const registryFuel = (registryRoot().outputs || []).some(c =>
+      registryDerivedPurpose('output', c) === 'pilot_fuel');
+    if (!registryFuel) requirePin(cfg.actuators.glow_plug, 'fuel_pin', 'Wet Glow Fuel');
   }
   for (const [key, label] of [['tot','TOT'], ['tit','TIT']]) {
     const item = cfg.sensors?.[key];
-    if (item?.enabled) {
+    if (item?.enabled && !hasRegistryInput(key)) {
       requirePin(item, 'clk', label + ' CLK');
       requirePin(item, 'cs', label + ' CS');
       requirePin(item, 'miso', label + ' MISO');
     }
   }
   const ot = cfg.sensors?.oil_temp;
-  if (ot?.enabled) {
+  if (ot?.enabled && !hasRegistryInput('oil_temperature')) {
     if (ot.chip === 'ntc' || ot.chip === 'ds18b20') requirePin(ot, 'pin', 'Oil Temperature');
     else {
       requirePin(ot, 'clk', 'Oil Temperature CLK');
@@ -5874,7 +6416,7 @@ async function saveHardware() {
     }
   }
   const tq = cfg.sensors?.torque;
-  if (tq?.enabled) {
+  if (tq?.enabled && !hasRegistryInput('torque')) {
     if (tq.hx711) {
       requirePin(tq, 'dt_pin', 'Torque HX711 DT');
       requirePin(tq, 'clk_pin', 'Torque HX711 CLK');
@@ -5884,17 +6426,19 @@ async function saveHardware() {
   if (cfg.buzzer?.enabled) requirePin(cfg.buzzer, 'pin', 'Buzzer');
   if (hardwareHasAfterburner()) {
     const abt = cfg.ab_trigger || {};
-    if ((abt.source ?? 0) === 2) requirePin(abt, 'switch_pin', 'AB trigger switch');
-    if ((abt.source ?? 0) === 3) requirePin(abt, 'input_pin', 'AB analog / servo input');
-    if ((abt.source ?? 0) !== 0 && abt.requires_arm && !hasDiRoleInMode('ab_arm', 4)) requirePin(abt, 'arm_pin', 'AB arm switch');
-    // Dedicated AB flame sensor pin is backend-required when enabled
-    if (cfg.ab_flame?.enabled) requirePin(cfg.ab_flame, 'pin', 'AB Flame Sensor');
+    if ((abt.source ?? 0) === 2 && !registryHasPurpose('input','ab_fire'))
+      requirePin(abt, 'switch_pin', 'AB trigger switch');
+    if ((abt.source ?? 0) === 3 && !registryHasPurpose('input','ab_command'))
+      requirePin(abt, 'input_pin', 'AB analog / servo input');
+    if ((abt.source ?? 0) !== 0 && abt.requires_arm &&
+        !registryHasPurpose('input','ab_arm') && !hasDiRoleInMode('ab_arm', 4))
+      requirePin(abt, 'arm_pin', 'AB arm switch');
   }
   // Backend-required pins the validation used to miss — the save looked
   // complete, then the backend rejected it.
   if (cfg.mavlink?.enabled) requirePin(cfg.mavlink, 'tx_pin', 'MAVLink TX');
   for (const [key, label] of [['glow_plug','Glow Current'], ['igniter','Igniter 1 Current'],
-                              ['igniter2','AB / Pilot Igniter Current'], ['oil_pump','Oil Pump Current']]) {
+                              ['igniter2','Secondary Igniter Current'], ['oil_pump','Oil Pump Current']]) {
     const item = cfg.actuators?.[key];
     if (item?.enabled && item.has_current) requirePin(item, 'current_pin', label);
   }
@@ -5961,6 +6505,7 @@ async function saveHardware() {
   const idleSourceWillChange = !!cfg.controllers?.dynamic_idle &&
     !idleSources[idleSource]?.[1] && idleFallback >= 0;
   const changes = _buildChanges();
+  changes.push(...igniterModeConversions);
   if (idleSourceWillChange) {
     changes.push({
       label:'Automatic Idle / Feedback source',
@@ -6011,15 +6556,43 @@ async function _doSave() {
   const nextProfileId = (cfg.profile_id || 'OpenTurbine').trim() || 'OpenTurbine';
   const profileChanged = nextProfileId !== (_loadedProfileId || 'OpenTurbine');
   const controller = new AbortController();
-  const started = Date.now();
-  const timeout = setTimeout(() => controller.abort(), 8000);
+  let started = 0;
+  let timeout = null;
+  let savePosted = false;
   try {
+    // Full engine-file validation briefly needs the largest contiguous heap
+    // block used by the web UI. Release Hardware live telemetry before the
+    // file GET/POST instead of making the ECU evict it mid-restore.
+    stopHardwareTelemetry();
+    await new Promise(resolve => setTimeout(resolve, 250));
     const saveCfg = {...cfg};
     delete saveCfg._i2c_discovery;
-    const r = await fetch('/api/hardware', {
+    // Save the complete engine file through the flash-backed restore path.
+    // Hardware may legitimately exceed the ECU's small RAM request buffer
+    // when sequences contain many side actions or sensors use calibration
+    // curves. Refresh settings here so a long-open Hardware tab cannot restore
+    // stale controller tuning from its load-time snapshot.
+    const latestResponse = await fetch('/api/ecu_config', {cache:'no-store'});
+    if (!latestResponse.ok) throw new Error('could not refresh the current engine file');
+    const latestEngine = await latestResponse.json();
+    if (!latestEngine.hardware || typeof latestEngine.hardware !== 'object')
+      throw new Error('current engine file has no hardware section');
+    if (!latestEngine.settings || typeof latestEngine.settings !== 'object')
+      throw new Error('current engine file has no settings section');
+    const mergedHardware = mergeHardwareEdits(_loadedHardwareCfg, saveCfg, latestEngine.hardware);
+    const mergedSettings = mergeHardwareSettingsCleanup(_loadedSettingsCfg, settingsCfg, latestEngine.settings);
+    mergedSettings.profile_id = mergedHardware.profile_id;
+    // This immutable identity is injected by GET /api/hardware and is required
+    // when validating files for an official/custom PCB, even if an older
+    // committed file predates persistence of the identity object.
+    if (saveCfg._pcb_profile) mergedHardware._pcb_profile = cloneHardwareJson(saveCfg._pcb_profile);
+    started = Date.now();
+    timeout = setTimeout(() => controller.abort(), 8000);
+    savePosted = true;
+    const r = await fetch('/api/ecu_config?source=hardware', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(saveCfg),
+      body: JSON.stringify({hardware:mergedHardware, settings:mergedSettings}),
       signal: controller.signal
     });
     clearTimeout(timeout);
@@ -6046,7 +6619,7 @@ async function _doSave() {
     // Hardware saves intentionally reboot the ESP32. Chrome can keep the POST
     // pending if Wi-Fi drops before the JSON response is fully consumed. Do not
     // leave the page stuck at "Saving..." in that normal reboot window.
-    if (e.name === 'AbortError' || Date.now() - started > 1000) {
+    if (savePosted && (e.name === 'AbortError' || Date.now() - started > 1000)) {
       document.getElementById('save-msg').textContent = 'Save response lost — reconnecting…';
       showRebootOverlay(profileChanged ? nextProfileId : '');
     } else {
@@ -6066,6 +6639,7 @@ function friendlyHardwareSaveError(response) {
     ['sequence references', 'A sequence or custom action still refers to a removed device. Open Sequence, fix the unavailable block or action, and save it before retrying Hardware.'],
     ['platform pins', 'A GPIO, electrical range, or sensor interface is not valid for this ESP32 board. Check the red device card and Requirements section.'],
     ['oil loops', 'An automatic oil loop refers to a missing pressure input or oil-pump output. Restore those devices or remove the unused oil loop.'],
+    ['profile_desc', 'The engine description is too long. Keep it within 63 UTF-8 bytes and try again.'],
     ['profile_id', 'The engine profile name is missing or too long. Use a short profile name and try again.'],
     ['wifi_password', 'The Wi-Fi password must be empty for an open hotspot or 8–63 characters long.'],
     ['display labels', 'A display label is too long or contains invalid data. Shorten the edited label and try again.'],
@@ -6171,7 +6745,7 @@ function applyContextTooltips(root) {
     'Duty at 100% command': 'Physical PWM duty produced by a normalized 1.00 command.',
     'Pulse at 0% command (us)': 'Physical servo/ESC pulse produced by a normalized 0.00 command.',
     'Pulse at 100% command (us)': 'Physical servo/ESC pulse produced by a normalized 1.00 command.',
-    'Power-on state': 'Output state written while hardware is initialized, before controllers or sequences can run.',
+    'Post-boot initialization demand': 'Output demand written after firmware gains control; reset and bootloader state depend on external wiring.',
     'Boot safe demand (%)': 'Proportional demand written when outputs initialize or a registry output test ends.',
     'Minimum reliable command (%)': 'Lowest nonzero normalized command that reliably keeps this motor or fan running. It is applied inside the electrical PWM/servo range.',
     'Current sensor ADC': 'ADC-capable pin connected to the current sensor output.',
@@ -6186,16 +6760,16 @@ function applyContextTooltips(root) {
     'Dwell time (ms)': 'Maximum coil charge time before spark. Keep within the coil/driver safe operating range.',
     'Rest time (ms)': 'Off time between spark pulses so the coil and driver can recover.',
     'Coil saturation current (A)': 'Current threshold that ends coil dwell early in current-limited mode.',
-    'Glow mode': 'Plain glow drives only the glow plug. Wet glow also drives a delayed pilot-fuel output.',
+    'Glow mode': 'Plain glow drives only the glow plug. Wet glow also drives a delayed start-fuel output.',
     'Glow PWM frequency (Hz)': 'PWM carrier for glow MOSFET control. Resistive glow elements usually tolerate low PWM frequencies.',
     'PWM resolution (bits)': 'PWM duty resolution. Higher resolution can limit maximum PWM frequency.',
-    'Pilot fuel GPIO': 'Output pin for the wet-glow pilot fuel solenoid or small pump.',
-    'Pilot fuel driver': 'Electrical driver for the wet-glow fuel output: relay/on-off, PWM, or servo/ESC.',
-    'Fuel output mode': 'Electrical driver for the wet-glow pilot fuel output.',
+    'Start fuel GPIO': 'Output pin for the wet-glow start fuel solenoid or small pump.',
+    'Start fuel driver': 'Electrical driver for the wet-glow fuel output: relay/on-off, PWM, or servo/ESC.',
+    'Fuel output mode': 'Electrical driver for the wet-glow start fuel output.',
     'Fuel active polarity': 'Choose whether the wet-glow fuel output is active when the GPIO is high or low.',
     'Fuel active high': 'When enabled, GPIO HIGH turns the wet-glow fuel output on.',
-    'Fuel delay (ms)': 'Delay after glow starts before wet-glow pilot fuel is enabled.',
-    'Fuel delay after glow ON (ms)': 'Delay after the glow plug is commanded on before wet-glow pilot fuel starts.',
+    'Fuel delay (ms)': 'Delay after glow starts before wet-glow start fuel is enabled.',
+    'Fuel delay after glow ON (ms)': 'Delay after the glow plug is commanded on before wet-glow start fuel starts.',
     'Fuel demand (%)': 'Demand sent to the wet-glow fuel output while it is active.',
     'Fuel servo pulse (us)': 'Servo/ESC pulse range used by the wet-glow fuel output.',
     'Fuel PWM freq / bits': 'PWM carrier frequency and resolution for the wet-glow fuel output.',
@@ -6266,12 +6840,15 @@ function collapseLegacyPwmTiming() {
   });
 }
 
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
   updateHardwareUnitButtons();
   collapseLegacyPwmTiming();
+  // Keep initial network use sequential. The complete hardware document is
+  // the largest read-only response and must finish before live telemetry
+  // starts allocating WebSocket frames on the ECU.
   startStatusPoll();
-  connectWs();
-  loadHardware();
+  const loaded = await loadHardware();
+  if (loaded && cfg?.platform !== 'esp32') connectWs();
   applyContextTooltips();
 });
 </script>

@@ -80,7 +80,8 @@ public:
             snprintf(_reason, sizeof(_reason), "Final checks stable: %lu ms remaining", holdMs - stable);
             setWaitReason(_reason);
         }
-        if (timeoutMs > 0 && elapsed >= timeoutMs) return BlockResult::Fault;
+        const unsigned long finiteTimeout = timeoutMs ? timeoutMs : 15000UL;
+        if (elapsed >= finiteTimeout) return BlockResult::Fault;
         return BlockResult::Running;
     }
 

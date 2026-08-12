@@ -23,25 +23,45 @@ from otbench.tester import Tester
 from reversed_digital_sensor_hil import ReversedDigitalSensorHil
 from ten_build_webui_hil import chan_input, chan_output
 
-dut = DUT(); dc = DutConfig(dut); t = Tester("COM4").open()
+dut = DUT(); dc = DutConfig(dut); t = Tester(os.environ.get("OTBENCH_PORT", "COM4")).open()
 original_hw = dut.hardware()
 cleaned = False
+restore_verified = False
 results = []
 def rec(n, ok, d=""):
     results.append({"name": n, "passed": bool(ok), "detail": d})
     print("[%s] %-32s %s" % ("PASS" if ok else "FAIL", n, d))
 
 def cleanup():
-    global cleaned
-    if cleaned: return
+    global cleaned, restore_verified
+    if cleaned: return restore_verified
     cleaned = True
     try:
-        dut.command("SET_OIL_PCT", iParam=0)
-        dut.command("SET_THROTTLE_PCT", iParam=0)
-        dut.ensure_mode_standby()
+        for command in ("SET_OIL_PCT", "SET_THROTTLE_PCT"):
+            try:
+                dut.command(command, iParam=0)
+            except Exception:
+                pass
+        standby = False
+        for _ in range(4):
+            try:
+                standby = dut.ensure_mode_standby()
+                if standby:
+                    break
+            except Exception as exc:
+                print("[RESTORE] standby verification retry:", exc)
+            time.sleep(1.0)
+        if not standby:
+            print("[RESTORE] DUT did not reach verified STANDBY")
+            return False
         ok, detail = dc.restore(original_hw)
+        restore_verified = bool(ok)
         print("[RESTORE] hardware profile:", "OK" if ok else detail)
-        dut.ensure_dev_mode(False)
+        try:
+            dut.ensure_dev_mode(False)
+        except Exception:
+            pass
+        return restore_verified
     finally:
         t.close()
 
@@ -101,7 +121,7 @@ def cfg_servo(hw):
         {"key": "main_fuel_output", "channel": "main_fuel"},
     ]
 apply_profile(cfg_servo, check=lambda hw: hw["actuators"]["throttle"].get("pin") == 17)
-dut.command("SET_THROTTLE_PCT", iParam=60); a, p = watch("THROTTLE_OUT", "us"); rec("SERVO output (LEDC servo)", a, "pulse=%dus @60%%" % p); dut.command("SET_THROTTLE_PCT", iParam=0)
+dut.command("SET_THROTTLE_PCT", iParam=60); a, p = watch("THROTTLE_OUT", "us"); rec("SERVO output (LEDC servo)", a and 1500 <= p <= 1700, "pulse=%dus @60%%" % p); dut.command("SET_THROTTLE_PCT", iParam=0)
 
 # 3. INPUTS: frequency + ADC + digital
 def cfg_in(hw):
@@ -197,7 +217,7 @@ print("\n=== Classic ESP32 pin functions: %d/%d passed ===" % (npass, len(result
 for result in results:
     if not result["passed"]:
         print("  FAIL:", result["name"])
-cleanup()
+cleanup_ok = cleanup()
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 result_path = os.path.abspath(os.path.join(
@@ -210,9 +230,10 @@ with open(result_path, "w", encoding="utf-8") as result_file:
         "tester": "ESP32-S3 OTBench 0.9",
         "passed": npass,
         "total": len(results),
+        "restored": cleanup_ok,
         "results": results,
     }, result_file, indent=2)
     result_file.write("\n")
 print("Result: %d/%d -> %s" % (npass, len(results), result_path))
-if npass != len(results):
+if npass != len(results) or not cleanup_ok:
     raise SystemExit(1)

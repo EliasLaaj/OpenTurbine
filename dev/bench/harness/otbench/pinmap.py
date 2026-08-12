@@ -10,9 +10,9 @@ DEFAULT_PINMAP_PATH = os.path.join(_BENCH_DIR, "pinmap.json")
 
 
 class PinMap:
-    def __init__(self, path=DEFAULT_PINMAP_PATH):
-        self.path = path
-        with open(path, "r", encoding="utf-8") as f:
+    def __init__(self, path=None):
+        self.path = path or os.environ.get("OTBENCH_PINMAP", DEFAULT_PINMAP_PATH)
+        with open(self.path, "r", encoding="utf-8") as f:
             self.raw = json.load(f)
         self.meta = self.raw["meta"]
         self.signals = self.raw["signals"]

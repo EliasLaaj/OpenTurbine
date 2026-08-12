@@ -118,8 +118,6 @@ public:
                     sizeof(ed.faultDescription) - 1);
             Serial.println("[OT] Recovery lockout armed: abnormal reset while active");
         }
-        ResetRecovery::markSafe();
-
         // Generic dev-board switch defaults. Profile-backed Start/Stop ports
         // are initialized from the resolved runtime hardware configuration.
         if (genericDevBoardMode) {

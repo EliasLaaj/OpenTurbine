@@ -66,19 +66,33 @@ namespace FeedbackRequirements {
     }
 
     inline bool n1ForProtectionOrControl() {
+        bool oilTargetUsesN1 = false;
+        if (HardwareConfig::hasOilLoop) {
+            for (uint8_t i = 0; i < HardwareConfig::oilLoopCount; ++i)
+                if (HardwareConfig::oilLoops[i].enabled && HardwareConfig::oilLoops[i].targetSource == 2) {
+                    oilTargetUsesN1 = true; break;
+                }
+        }
         return HardwareConfig::safetyOverspeed || HardwareConfig::safetySurge ||
                (HardwareConfig::hasN1Rpm && Config::minRpm > 0.0f) ||
                (HardwareConfig::safetyFlameout && effectiveFlameoutSource() == 2) ||
                (HardwareConfig::hasDynamicIdle && HardwareConfig::hasN1Rpm && Config::idleSource == 0) ||
                (HardwareConfig::hasThrottle && HardwareConfig::hasN1Rpm && Config::pullbackN1Enabled &&
-                Config::pullbackN1HardRpm > Config::pullbackN1SoftRpm);
+                Config::pullbackN1HardRpm > Config::pullbackN1SoftRpm) || oilTargetUsesN1;
     }
 
     inline bool n2ForProtectionOrControl() {
+        bool oilTargetUsesN2 = false;
+        if (HardwareConfig::hasOilLoop) {
+            for (uint8_t i = 0; i < HardwareConfig::oilLoopCount; ++i)
+                if (HardwareConfig::oilLoops[i].enabled && HardwareConfig::oilLoops[i].targetSource == 3) {
+                    oilTargetUsesN2 = true; break;
+                }
+        }
         return HardwareConfig::safetyN2Overspeed || HardwareConfig::hasGovernor ||
                (HardwareConfig::hasDynamicIdle && HardwareConfig::hasN2Rpm && Config::idleSource == 1) ||
                (HardwareConfig::hasThrottle && HardwareConfig::hasN2Rpm && Config::pullbackN2Enabled &&
-                Config::pullbackN2HardRpm > Config::pullbackN2SoftRpm);
+                Config::pullbackN2HardRpm > Config::pullbackN2SoftRpm) || oilTargetUsesN2;
     }
 
     inline bool egtForProtectionOrControl() {

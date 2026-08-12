@@ -28,6 +28,25 @@ public:
     BlockResult tick() override {
         auto& ed = EngineData::instance();
 
+        if (!ed.abEvidenceValid) {
+            snprintf(ed.abFaultReason, sizeof(ed.abFaultReason),
+                     "%s", "AB FLAME EVIDENCE LOST - RELEASE CONTROL TO RETRY");
+            return BlockResult::Fault;
+        }
+        if ((Config::abFlameMode == 0 || Config::abFlameMode == 3) &&
+            (!ed.abFlameHealthy || !ed.abFlameOn)) {
+            ed.abEvidenceValid = false;
+            snprintf(ed.abFaultReason, sizeof(ed.abFaultReason),
+                     "%s", "AB FLAME LOST DURING STABILIZATION - RELEASE CONTROL TO RETRY");
+            return BlockResult::Fault;
+        }
+        if (Config::abFlameMode == 1 && !Config::primaryEgtHealthy(ed)) {
+            ed.abEvidenceValid = false;
+            snprintf(ed.abFaultReason, sizeof(ed.abFaultReason),
+                     "%s", "EGT INPUT LOST DURING AB STABILIZATION - RELEASE CONTROL TO RETRY");
+            return BlockResult::Fault;
+        }
+
         // EGT guard.
         if (stabilizeMaxTot > 0 && !Config::primaryEgtHealthy(ed)) {
             Serial.println("[AB] Stabilize fault: EGT sensor unavailable");

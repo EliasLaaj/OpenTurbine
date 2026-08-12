@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 // ============================================================
 //  SessionLogger — per-run CSV sensor log
@@ -30,6 +31,10 @@ public:
     static void tick();          // Core 1: snapshot → queue push (no file I/O)
     static void drainQueue();    // Core 0: persist only in STANDBY/FAULT
     static uint32_t droppedRows();
+    static uint32_t evictionCount();
+    static uint32_t lastEvictedSession();
+    static size_t freeBytes();
+    static size_t reserveBytes();
     static bool healthy();
-    static uint8_t errorCode();  // 0=ok, 1=queue, 2=open, 3=header, 4=backlog, 5=space, 6=write
+    static uint8_t errorCode();  // 0=ok, 1=queue, 2=open, 3=header, 4=backlog, 5=space, 6=write, 7=identity
 };

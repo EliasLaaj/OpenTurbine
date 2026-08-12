@@ -54,7 +54,10 @@ class SafetyQualification:
             "OilPrime", "IgniterOn", "FuelOpen", "FuelPumpIdle",
             "TimedDelay", "IgniterOff", "TimedDelay",
         ]
-        hw["startup_delay_ms"] = [0, 0, 0, 0, 350, 0, 350]
+        # Hold STARTUP long enough for the external thermocouple simulator and
+        # its conversion interval to publish the dedicated startup-limit
+        # stimulus before the sequence declares RUNNING.
+        hw["startup_delay_ms"] = [0, 0, 0, 0, 5000, 0, 350]
         hw["startup_ignition_target"] = [0] * len(hw["startup_seq"])
         hw["startup_enter_actions"] = [[] for _ in hw["startup_seq"]]
         hw["startup_exit_actions"] = [[] for _ in hw["startup_seq"]]
@@ -74,7 +77,6 @@ class SafetyQualification:
             "engine": {"rpm_limit": 50000, "n2_rpm_limit": 30000, "min_rpm": 10000, "tot_limit": 700},
             "oil": {"startup_min_bar": 1.5, "running_min": 1.5},
             "calibration": {
-                "flame_threshold": 500,
                 "oil_poly": {"a": 0, "b": 0, "c": OIL_C, "d": 0, "x_min": 0, "x_max": 4095},
             },
             "sequence": {"startup": {"pre_start_egt_limit_c": 200, "startup_egt_limit_c": 700}},
@@ -134,7 +136,6 @@ class SafetyQualification:
             raise RuntimeError(f"safety hardware save failed: HTTP {code} {resp}")
         if not self.runner.wait_dut_ready_after_hardware_save(previous_boot_count=previous_boot):
             raise RuntimeError("DUT did not return after changing safety enables")
-        self.runner.reconnect_wifi()
         self.verify_profile(set(names))
 
     def baseline(self, rpm=40000, n2_rpm=24000, egt=120, oil_v=2.5, flame=1):
@@ -143,7 +144,22 @@ class SafetyQualification:
         self.t.set_tot(egt)
         self.t.set("OILP", oil_v)
         self.t.set("FLAME", flame)
-        time.sleep(1.4)
+        ok, data = self.dut.poll_until(
+            lambda d: (
+                abs(float(d.get("n1") or 0) - rpm) <= max(2500, rpm * 0.2)
+                and abs(float(d.get("n2") or 0) - n2_rpm) <= max(2500, n2_rpm * 0.2)
+                and abs(float(d.get("tot") or 0) - egt) <= 30
+                and float(d.get("oil") or 0) >= 1.5
+                and bool(d.get("flame")) == bool(flame)
+            ),
+            timeout=5, interval=0.15,
+        )
+        if not ok:
+            raise RuntimeError(
+                "safety stimulus did not settle: "
+                f"n1={data.get('n1')} n2={data.get('n2')} tot={data.get('tot')} "
+                f"oil={data.get('oil')} flame={data.get('flame')}"
+            )
 
     def start_running(self):
         self.baseline()
@@ -248,7 +264,12 @@ class SafetyQualification:
             detail = str(data.get("fault_description") or data.get("last_event") or "")
             matched = "hot" in detail.lower()
         else:
-            tripped = matched = "hot" in detail.lower()
+            # Blocking START before fuel is the preferred hot-start response
+            # when EGT is already above the pre-start limit. A later rise after
+            # START remains covered by STARTUP_OVERTEMP below.
+            reason = detail.lower()
+            matched = "hot" in reason or "pre-start" in reason
+            tripped = matched
         cut_ok, cut_detail = self.safe_cut()
         self.record("HOT_START", True, tripped, matched, round(time.time() - t0, 3), detail.splitlines()[0], cut_ok, cut_detail)
         self.recover()
@@ -271,22 +292,32 @@ class SafetyQualification:
         self.dut.ensure_dev_mode(True)
         code, resp = self.dut.start()
         t0 = time.time()
+        entered = False
         if code == 200:
-            # 600 C is deliberately below the normal 700 C continuous limit.
-            # A trip therefore proves the separate STARTUP threshold was used.
-            self.t.set_tot(600)
-            tripped, data = self.dut.poll_until(
-                lambda d: d.get("mode") not in ("STARTUP", "RUNNING"),
-                timeout=5, interval=0.08,
+            entered, data = self.dut.poll_until(
+                lambda d: d.get("mode") in ("STARTUP", "RUNNING"),
+                timeout=3, interval=0.08,
             )
-            detail = str(data.get("fault_description") or data.get("last_event") or "")
-            matched = "over-temperature" in detail.lower()
+            if not entered:
+                tripped = False
+                matched = False
+                detail = "START accepted but no fresh STARTUP transition was observed"
+            else:
+                # 600 C is deliberately below the normal 700 C continuous limit.
+                # A trip therefore proves the separate STARTUP threshold was used.
+                self.t.set_tot(600)
+                tripped, data = self.dut.poll_until(
+                    lambda d: d.get("mode") not in ("STARTUP", "RUNNING"),
+                    timeout=5, interval=0.08,
+                )
+                detail = str(data.get("fault_description") or data.get("last_event") or "")
+                matched = "over-temperature" in detail.lower()
         else:
             tripped = False
             matched = False
             detail = str(resp)
         cut_ok, cut_detail = self.safe_cut() if tripped else (False, {})
-        self.record("STARTUP_OVERTEMP", code == 200, tripped, matched,
+        self.record("STARTUP_OVERTEMP", code == 200 and entered, tripped, matched,
                     round(time.time() - t0, 3), detail.splitlines()[0],
                     cut_ok, cut_detail)
         self.recover()
@@ -378,11 +409,11 @@ class SafetyQualification:
         # near-zero-oil protection. With both armed, a stimulus below both
         # thresholds must correctly report OIL_ZERO first.
         self.set_safeties("low_oil")
-        self.trip_test("LOW_OIL", lambda: self.t.set("OILP", 0.7),
+        self.trip_test("LOW_OIL", lambda: self.t.set("OILP", 2.5),
                        lambda: self.t.set("OILP", 0.12), "low oil", timeout=4)
 
         self.set_safeties("oil_zero", "flameout")
-        self.trip_test("OIL_ZERO", lambda: self.t.set("OILP", 0.25),
+        self.trip_test("OIL_ZERO", lambda: self.t.set("OILP", 2.5),
                        lambda: self.t.set("OILP", 0.0), "near zero", timeout=4)
         self.trip_test("FLAMEOUT", lambda: self.t.set("FLAME", 1),
                        lambda: self.t.set("FLAME", 0), "flameout", timeout=4)

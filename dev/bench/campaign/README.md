@@ -4,6 +4,13 @@ Hardware-in-the-loop test scripts run against the DUT during the validation
 campaign (see `../VALIDATION.md` for results). Each opens the tester once,
 reconfigures the DUT as needed (verified), drives stimulus, and asserts.
 
+For release qualification, do not run an arbitrary collection of scripts and
+infer a pass from their console summaries. Use `../harness/qualification.py`.
+It selects the required gating campaigns, enforces their process status and
+repetitions, requires zero core-suite skips, and records the exact artifacts.
+Older one-off and diagnostic scripts remain useful for fault isolation but are
+not release evidence unless the strict runner includes them.
+
 Run any of them from this folder (they add `../harness` to the path):
 
 ```
@@ -19,6 +26,7 @@ python afterburner_limp_hil.py # AB fuel coordination versus Reduced-Power and S
 python shutdown_output_ownership_hil.py # main-oil/scavenge ownership and cooldown override
 python finalstop_live_config_hil.py # live config gate and deferred sequence-block apply
 python session_logger_hil.py  # disabled/enabled session logging under live web polling
+python plant_hil.py           # physical-output-driven causal turbine lifecycle
 ```
 
 Set `OTBENCH_PROFILE` to one profile ID from `ten_build_webui_hil.py` to rerun

@@ -86,7 +86,7 @@ def run_tests(tests, ctx, only=None):
 _ICON = {"pass": "PASS", "fail": "FAIL", "skip": "SKIP", "error": "ERR "}
 
 
-def print_report(results, verbose=False):
+def print_report(results, verbose=False, require_all=False):
     print()
     for r in results:
         print("[%s] %s  (%.2fs)" % (_ICON.get(r.status, "?"), r.name, r.duration))
@@ -113,4 +113,4 @@ def print_report(results, verbose=False):
         # loudly so a green exit code isn't read as "everything was exercised".
         print("WARNING: %d test(s) SKIPPED (prerequisite/hardware not fitted) — "
               "those paths were NOT exercised; review before trusting a pass." % s)
-    return f == 0 and e == 0
+    return f == 0 and e == 0 and (not require_all or s == 0)

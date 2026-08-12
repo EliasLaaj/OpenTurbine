@@ -48,13 +48,21 @@ function updateLiveBadges(d) {
 }
 
 // ── WS integration — track locked state ──────────────────────
+function installConfigTelemetryExtension() {
 const _base = window.applyData;
+if (typeof _base !== 'function' || _base._configExtended) return;
 window.applyData = function(d) {
   const merged = _base(d);
   if (!merged) return;
   d = merged;
   updateLiveBadges(d);
-  const locked = !!d.config_locked;
+  runtimeMode = d.mode || 'STANDBY';
+  runtimeDevMode = !!d.dev_mode;
+  const liveRun = runtimeMode === 'RUNNING' && runtimeDevMode;
+  const activeMode = ['STARTUP','RUNNING','SHUTDOWN'].includes(runtimeMode);
+  // The complete config remains locked in every active mode. On this page,
+  // RUNNING Developer Mode exposes only the marked live-tuning fields.
+  const locked = activeMode ? !liveRun : !!d.config_locked;
   if (locked !== isLocked && cfg.profile_id) {
     isLocked = locked;
     renderForm();
@@ -65,7 +73,7 @@ window.applyData = function(d) {
     runValidation();
   }
 
-  // RC PWM active flag from compile-time telemetry
+  // RC/PWM input capability from the current hardware topology.
   if (d.rc_pwm_active !== undefined && d.rc_pwm_active !== rcPwmActive) {
     rcPwmActive = !!d.rc_pwm_active;
     applyRcPwmVisibility();
@@ -92,16 +100,20 @@ window.applyData = function(d) {
     if (titField) setCfgFieldVisibleByElement(titField, !!d.has_tit);
   }
   if (extChanged) { applyExtSectionVisibility(); applyHwConditions(); }
+  applyDeveloperLiveFields();
 
   // Lock badge
   const badge = document.getElementById('cfg-lock-badge');
   if (badge) {
-    if (locked) {
+    if (runtimeMode === 'STARTUP' || runtimeMode === 'SHUTDOWN') {
+      badge.textContent  = 'Read-only (engine active)';
+      badge.style.color  = 'var(--red)';
+    } else if (liveRun) {
+      badge.textContent  = 'Limited live tuning';
+      badge.style.color  = 'var(--yellow)';
+    } else if (locked) {
       badge.textContent  = 'Locked';
       badge.style.color  = 'var(--red)';
-    } else if (d.dev_mode && ['STARTUP','RUNNING','SHUTDOWN'].includes(d.mode)) {
-      badge.textContent  = 'Open (Dev Mode)';
-      badge.style.color  = 'var(--yellow)';
     } else {
       badge.textContent  = 'Open';
       badge.style.color  = 'var(--green)';
@@ -110,6 +122,44 @@ window.applyData = function(d) {
 
   // Dev Mode button label
 };
+window.applyData._configExtended = true;
+}
+document.addEventListener('DOMContentLoaded', installConfigTelemetryExtension, { once:true });
+
+function applyDeveloperLiveFields() {
+  const liveRun = runtimeMode === 'RUNNING' && runtimeDevMode;
+  const activeMode = ['STARTUP','RUNNING','SHUTDOWN'].includes(runtimeMode);
+  const preset = document.getElementById('preset-sel');
+  if (preset) {
+    preset.disabled = activeMode;
+    preset.title = activeMode ? 'Stop the engine to apply a multi-field example.' : '';
+  }
+  SCHEMA.forEach(section => section.fields.forEach(field => {
+    const el = document.getElementById('cf-' + field.key);
+    const wrap = el?.closest('.cfg-field');
+    if (!el || !wrap) return;
+    const fieldLocked = activeMode && !(liveRun && LIVE_CONFIG_KEYS.has(field.key));
+    if (fieldLocked) {
+      el.dataset.activeLocked = '1';
+      wrap.classList.add('feature-unavailable');
+      wrap.title = runtimeMode === 'RUNNING'
+        ? 'Stop the engine to change this setting.'
+        : 'Settings are read-only during ' + runtimeMode + '.';
+    } else if (el.dataset.activeLocked) {
+      delete el.dataset.activeLocked;
+      wrap.classList.remove('feature-unavailable');
+      if (wrap.title.startsWith('Stop the engine') || wrap.title.startsWith('Settings are read-only')) wrap.title = '';
+    }
+    if (liveRun && LIVE_CONFIG_KEYS.has(field.key)) {
+      wrap.title = 'Applies live through the existing controller limits.';
+      wrap.dataset.appliesLive = '1';
+    } else if (wrap.dataset.appliesLive) {
+      delete wrap.dataset.appliesLive;
+      if (wrap.title === 'Applies live through the existing controller limits.') wrap.title = '';
+    }
+  }));
+  _refreshDependencyEditability();
+}
 
 // ── Oil throttle-map — show map-max only when enabled ────────
 function applyOilMapVisibility() {
@@ -212,10 +262,13 @@ function refreshFeatureCachesFromHardware() {
   _hasStarterSupportCfg = !!(hasRegistryOutput('starter') && starterDriver !== 4 && hasRegistryInput('n1_speed'));
   // AB servo-PWM input uses the same shared RC failsafe timeout, so an
   // AB-only RC setup must still see the RC Input section.
-  const abRcPwm = !!(hasAfterburnerCfg && hwCfg.ab_trigger?.input_rc_pwm &&
-                     (hwCfg.ab_trigger?.input_pin ?? -1) >= 0);
+  const registrySignalInput = (hwCfg.channel_registry?.inputs || []).some(input =>
+    registryChannelInstalled(input) && [3, 7].includes(Number(input.driver)));
+  const abRcPwm = !!(hasAfterburnerCfg &&
+    (hwCfg.ab_trigger?.input_rc_pwm && (hwCfg.ab_trigger?.input_pin ?? -1) >= 0));
   rcPwmActive = !!(Number(registryInputByPurpose('throttle')?.driver) === 3 ||
-                   Number(registryInputByPurpose('idle')?.driver) === 3 || abRcPwm);
+                   Number(registryInputByPurpose('idle')?.driver) === 3 ||
+                   registrySignalInput || abRcPwm);
   _hasSafetyExtCfg = !!(
     hasRegistryInput('tit') || hasRegistryInput('oil_temperature') ||
     hasRegistryInput('fuel_pressure') || hasRegistryInput('battery_voltage') ||
@@ -247,8 +300,11 @@ function registryChannelInstalled(channel) {
   if (!channel || channel.installed === false) return false;
   const driver = Number(channel.driver);
   if (driver >= 8 && driver <= 11) {
-    return Number(channel.i2c_address) >= 0x08 && Number(channel.i2c_address) <= 0x77 &&
-      Number(channel.device_channel) >= 0;
+    const address = Number(channel.i2c_address);
+    const validAddress = driver === 10 ? address === 0x2A
+      : (driver === 8 || driver === 11) ? address >= 0x20 && address <= 0x27
+      : driver === 9 && address >= 0x10 && address <= 0x17;
+    return validAddress && Number(channel.device_channel) >= 0;
   }
   const tempInterface = Number(channel.temp_interface || 0);
   if (tempInterface >= 1 && tempInterface <= 3) {
@@ -290,7 +346,10 @@ function applyHwConditions() {
   const hasAB          = hasActualAfterburnerHardware();
   const hasAbFlame     = !!(hasAB && hasRegistryInput('ab_flame'));
   const abTriggerSource = Number(hwCfg.ab_trigger?.source ?? hwCfg.abTriggerSource ?? 0);
-  const hasAbInput     = !!(hasAB && abTriggerSource === 3 && (hwCfg.ab_trigger?.input_pin ?? -1) >= 0);
+  const savedAbPumpSource = Number(getPath(cfg, ['afterburner', 'pump_control_mode']) ?? 0);
+  const hasAbInput     = !!(hasAB && (hasRegistryInput('ab_command') ||
+    ((hwCfg.ab_trigger?.input_pin ?? -1) >= 0 &&
+     (abTriggerSource === 3 || savedAbPumpSource === 2))));
   const hasIgniter     = hasRegistryOutput('igniter');
   const hasIgniter2    = hasRegistryOutput('ab_igniter');
   const hasAbIgniter   = !!(hasAB && hasIgniter2);
@@ -318,12 +377,17 @@ function applyHwConditions() {
   const hasAbPump      = !!(hasAB && hasRegistryOutput('ab_pump'));
   const hasAbFuelHardware = hasAbSol || hasAbPump;
   const hasClusterSerial = !!hwCfg.cluster_serial?.enabled;
+  const mainFuelChannel = registryOutputByPurpose('main_fuel');
+  const driverIsOnOff = driver => [4,11].includes(Number(driver));
+  const driverIsProportional = driver => [5,6].includes(Number(driver));
+  const hasMeteringFuel = !!mainFuelChannel && driverIsProportional(mainFuelChannel.driver);
   const hasDynamicIdle = !!(hwCfg.controllers?.dynamic_idle &&
-    hasThrottleOut && (hasN1 || hasN2 || hasP1 || hasP2));
+    hasMeteringFuel && (hasN1 || hasN2 || hasP1 || hasP2));
   const hasGovernorRequested = !!hwCfg.controllers?.governor;
   const registryPropPitch = registryOutputByPurpose('prop_pitch');
-  const hasProportionalPropPitch = hasPropPitch && Number(registryPropPitch?.driver) !== 4;
-  const hasGovernorControl = hasThrottleOut || hasProportionalPropPitch;
+  const hasPitchAuthority = hasPropPitch && (driverIsOnOff(registryPropPitch?.driver) || driverIsProportional(registryPropPitch?.driver));
+  const hasProportionalPropPitch = hasPropPitch && driverIsProportional(registryPropPitch?.driver);
+  const hasGovernorControl = hasMeteringFuel || hasPitchAuthority;
   const hasGovernor = hasGovernorRequested && hasN2 && hasGovernorControl;
   const actuatorPurposes = {
     throttle: 'main_fuel', starter: 'starter', oil_pump: 'oil_pump', fuel_sol: 'fuel_shutoff',
@@ -333,7 +397,7 @@ function applyHwConditions() {
   };
   const actuatorType = key => {
     const driver = Number(registryOutputByPurpose(actuatorPurposes[key] || key)?.driver);
-    return driver === 4 ? 2 : (driver === 5 ? 1 : (driver === 6 ? 0 : NaN));
+    return driverIsOnOff(driver) ? 2 : (driver === 5 ? 1 : (driver === 6 ? 0 : NaN));
   };
   const isOnOffType = key => Number(actuatorType(key)) === 2;
 
@@ -513,16 +577,16 @@ function applyHwConditions() {
     !(hasN1Pb || hasN2) ? 'RPM limiter mode requires an N1 or N2 RPM sensor in Hardware.' : 'Main fuel output is not configured in Hardware.');
   ghostField('lm_mt', hasThrottleOut, 'Reduced-power mode requires a throttle/fuel output.');
   const hasAnyIgnitionOutput = hasIgniter || hasIgniter2 || hasGlowPlug;
-  ghostField('ms_is', hasAnyIgnitionOutput, 'Igniter-on-START requires Igniter 1, AB / Pilot Igniter, or Glow/Wet Glow to be configured in Hardware.');
-  ghostField('ms_it', hasAnyIgnitionOutput, 'START relight output requires Igniter 1, AB / Pilot Igniter, or Glow/Wet Glow to be configured in Hardware.');
+  ghostField('ms_is', hasAnyIgnitionOutput, 'Igniter-on-START requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
+  ghostField('ms_it', hasAnyIgnitionOutput, 'START relight output requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
   ghostSelectOption('ms_it', 0, hasIgniter, 'Igniter 1 is not configured in Hardware.');
-  ghostSelectOption('ms_it', 1, hasIgniter2, 'AB / Pilot Igniter is not configured in Hardware.');
+  ghostSelectOption('ms_it', 1, hasIgniter2, 'Secondary Igniter is not configured in Hardware.');
   ghostSelectOption('ms_it', 2, hasGlowPlug, 'Glow/Wet Glow is not configured in Hardware.');
   ghostField('tl_fp', hasFuelSol, 'Main Fuel Prime duration requires a main fuel shutoff output.');
   ghostField('tl_fs', hasFuelSol, 'Main Fuel Shutoff Pulse duration requires a main fuel shutoff output.');
   ghostField('tl_op', hasOilPump, 'Oil Prime duration requires an oil pump output.');
   ghostField('tl_ig', hasIgniter, 'Igniter 1 Test duration requires Igniter 1 to be configured in Hardware.');
-  ghostField('tl_i2', hasIgniter2, 'AB / Pilot Igniter Test duration requires AB / Pilot Igniter to be configured in Hardware.');
+  ghostField('tl_i2', hasIgniter2, 'Secondary Igniter Test duration requires Secondary Igniter to be configured in Hardware.');
   ghostField('tl_gl', hasGlowPlug, 'Glow Test duration requires a glow plug output.');
   ghostField('tl_gp', hasGlowPlug, 'Glow Test demand requires a glow plug output.');
   ghostField('tl_st', hasStarter, 'Starter Test duration requires a starter output.');
@@ -534,10 +598,10 @@ function applyHwConditions() {
   ghostField('tl_cf', hasCoolFan, 'Fan Test duration requires a cooling fan output.');
   ghostField('tl_as', hasAirstarter, 'Air Starter Valve Test duration requires an air starter valve output.');
   ghostField('tl_bv', hasBleedValve, 'Bleed Test duration requires a bleed valve output.');
-  ghostField('tl_f2', hasFuelPump2, 'Pilot / Auxiliary Fuel Pump Test duration requires Pilot / Auxiliary Fuel Pump in Hardware.');
+  ghostField('tl_f2', hasFuelPump2, 'Secondary / Auxiliary Fuel Pump Test duration requires Secondary / Auxiliary Fuel Pump in Hardware.');
   ghostField('tl_f2p', hasFuelPump2 && !isOnOffType('fuel_pump2'), isOnOffType('fuel_pump2')
-    ? 'Pilot / Auxiliary Fuel Pump is configured as relay/on-off. Test % is ignored; use test duration to control pulse length.'
-    : 'Pilot / Auxiliary Fuel Pump Test demand requires Pilot / Auxiliary Fuel Pump in Hardware.');
+    ? 'Secondary / Auxiliary Fuel Pump is configured as relay/on-off. Test % is ignored; use test duration to control pulse length.'
+    : 'Secondary / Auxiliary Fuel Pump Test demand requires Secondary / Auxiliary Fuel Pump in Hardware.');
   ghostField('tl_se', hasStarterEn, 'Starter Enable Test duration requires a starter enable output.');
   ghostField('tl_pp', hasPropPitch, 'Prop Pitch Test duration requires a prop-pitch actuator.');
   ghostField('tl_pq', hasPropPitch && !isOnOffType('prop_pitch'), isOnOffType('prop_pitch')
@@ -548,7 +612,7 @@ function applyHwConditions() {
   ghostField('tl_abq', hasAbPump && !isOnOffType('ab_pump'), isOnOffType('ab_pump')
     ? 'The afterburner fuel pump is configured as relay/on-off. Pump Test % is ignored; use the test duration instead.'
     : 'Pump-test demand requires an installed afterburner fuel pump.');
-  ['di_src','di_tr','di_tp','di_ru','di_rd','di_db','di_rl','di_pd','di_pl','di_mm','di_mx','di_ig','di_im','di_mode','di_de','di_dd','di_lk','di_sb','di_fr','di_tu','di_td','di_lr','di_la'].forEach(k =>
+  ['di_src','di_tr','di_tp','di_ru','di_rd','di_db','di_rl','di_pd','di_pl','di_mx','di_ig','di_im','di_mode','di_de','di_dd','di_lk','di_sb','di_fr','di_tu','di_td','di_lr','di_la','di_pde','di_psb','di_pfr','di_plr'].forEach(k =>
     ghostField(k, hasDynamicIdle, 'Automatic Idle must be enabled in Hardware > Controllers and needs a main fuel output plus N1, N2, P1, or P2 feedback.'));
   ghostSelectOption('di_src', 0, hasN1, 'N1 speed input is not configured in Hardware.');
   ghostSelectOption('di_src', 1, hasN2, 'N2 speed input is not configured in Hardware.');
@@ -569,9 +633,9 @@ function applyHwConditions() {
       ? 'Automatic N2 speed control is not enabled in Hardware > Controllers.'
       : !hasN2
       ? 'Automatic N2 speed control requires an N2 RPM sensor.'
-      : 'Automatic N2 speed control requires a throttle/fuel output or proportional propeller-pitch actuator.');
+      : 'Automatic N2 speed control requires proportional main fuel or a supported proportional/relay prop-pitch actuator.');
   ['gv_tr','gv_bd','gv_kp'].forEach(k =>
-    ghostField(k, hasGovernor, 'Automatic N2 speed control needs N2 RPM plus a throttle/fuel output or proportional propeller-pitch actuator.'));
+    ghostField(k, hasGovernor, 'Automatic N2 speed control needs N2 RPM plus proportional main fuel or a supported prop-pitch actuator.'));
   ['gv_pk','gv_pr'].forEach(k =>
     ghostField(k, hasGovernor && hasProportionalPropPitch, hasProportionalPropPitch
       ? 'Automatic N2 speed control needs N2 RPM plus a usable control output.'
@@ -616,7 +680,7 @@ function applyHwConditions() {
   ghostSelectOption('rl_cs', 2, hasN1, 'N1 RPM sensor is not configured in Hardware.');
   ghostSelectOption('rl_cs', 3, hasEgt, 'No primary EGT source is configured in Hardware.');
   ghostSelectOption('rl_it', 0, hasIgniter, 'Igniter 1 is not configured in Hardware.');
-  ghostSelectOption('rl_it', 1, hasIgniter2, 'AB / Pilot Igniter is not configured in Hardware.');
+  ghostSelectOption('rl_it', 1, hasIgniter2, 'Secondary Igniter is not configured in Hardware.');
   ghostSelectOption('rl_it', 2, hasGlowPlug, 'Glow/Wet Glow is not configured in Hardware.');
   const relightTarget = Number((document.getElementById('cf-rl_it') || {}).value || 0);
   const hasRelightIgnition = relightTarget === 1 ? hasIgniter2 : relightTarget === 2 ? hasGlowPlug : hasIgniter;
@@ -624,7 +688,7 @@ function applyHwConditions() {
   ghostField('rl_it', hasN1 && hasAnyIgnitionOutput,
     !hasN1
       ? 'Auto-relight requires N1 RPM feedback so the ECU can prove the engine is still windmilling.'
-      : 'Auto-relight requires Igniter 1, AB / Pilot Igniter, or Glow/Wet Glow to be configured in Hardware.');
+      : 'Auto-relight requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
   ['rl_en','rl_mr','rl_cs','rl_cr','rl_tr','rl_to'].forEach(k =>
     ghostField(k, hasAutoRelightHardware,
       !hasN1
@@ -738,6 +802,7 @@ function revealConfigDeepLink() {
   requestAnimationFrame(() => revealTarget.scrollIntoView({ behavior:'smooth', block:'center' }));
 }
 
+document.addEventListener('DOMContentLoaded', () => {
 (async () => {
   return Promise.all([
     fetchJsonWithRetry('/api/config'),
@@ -764,3 +829,4 @@ function revealConfigDeepLink() {
     document.getElementById('cfg-form').innerHTML =
       `<p style="color:var(--red);font-size:.85rem">Error loading config: ${_escHtml(msg || 'unknown error')}</p>`;
   });
+}, { once:true });

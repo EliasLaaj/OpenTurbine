@@ -10,7 +10,8 @@
 //  Opens the fuel solenoid for pulseMs, closes it, then waits
 //  offMs before completing.  Use before PreIgnSpark when the fuel
 //  line has a long dead-leg or atomiser that needs pre-wetting.
-//  fuelEverOpened is NOT set — this is a pre-ignition prime only.
+//  A combustion attempt is not inferred here; the actuator boundary records
+//  only real fuel-and-ignition overlap.
 // ============================================================
 class FuelPulse : public IBlock {
 public:
@@ -73,12 +74,12 @@ public:
         if (!Config::primaryEgtHealthy(ed)) {
             setWaitReason("Selected EGT feedback unavailable");
             if ((millis() - _entryMs) > timeoutMs)
-                return ed.mode == SysMode::STARTUP ? BlockResult::Abort : BlockResult::Complete;
+                return ed.mode == SysMode::STARTUP ? BlockResult::Abort : BlockResult::TimeoutContinue;
             return BlockResult::Running;
         }
         if (Config::primaryEgtC(ed) <= targetTot)   return BlockResult::Complete;
         if ((millis() - _entryMs) > timeoutMs)
-            return ed.mode == SysMode::STARTUP ? BlockResult::Abort : BlockResult::Complete;
+            return ed.mode == SysMode::STARTUP ? BlockResult::Abort : BlockResult::TimeoutContinue;
         return BlockResult::Running;
     }
 

@@ -1,0 +1,376 @@
+{
+  "timestamp": "2026-08-12T10:37:23",
+  "firmware": "2.0.1",
+  "firmware_after": "2.0.1",
+  "rows": [
+    {
+      "name": "TCA9554_DISCOVERED",
+      "ok": true,
+      "detail": {
+        "discovery": {
+          "address": 32,
+          "type": "TCA9554",
+          "present": true,
+          "rechecking": false,
+          "state": "AVAILABLE",
+          "last_seen_ms": 11822,
+          "errors": 0
+        }
+      }
+    },
+    {
+      "name": "TCA9554_ASSIGNMENT_SAVED",
+      "ok": true,
+      "detail": {
+        "code": 200,
+        "response": {
+          "ok": true,
+          "reboot": true
+        }
+      }
+    },
+    {
+      "name": "TCA9554_INPUT_HIGH",
+      "ok": true,
+      "detail": {
+        "input": {
+          "id": "i2c_switch",
+          "value": 1,
+          "raw": 1,
+          "healthy": true
+        }
+      }
+    },
+    {
+      "name": "TCA9554_OUTPUT_TEST_AND_SAFE_RETURN",
+      "ok": true,
+      "detail": {
+        "code": 200,
+        "response": {
+          "ok": true
+        },
+        "active": "OK mode=1 reg=00 phase=0 tca_in=01 tca_out=02 tla=2048 nau=0",
+        "safe": "OK mode=1 reg=00 phase=0 tca_in=01 tca_out=00 tla=2048 nau=0"
+      }
+    },
+    {
+      "name": "TCA9554_DISCONNECT_FAILS_INPUT_AND_BLOCKS_OUTPUT",
+      "ok": true,
+      "detail": {
+        "input": {
+          "id": "i2c_switch",
+          "value": 1,
+          "raw": 1,
+          "healthy": false
+        },
+        "tool_code": 409,
+        "response": {
+          "ok": false,
+          "error": "Registry output is not testable"
+        }
+      }
+    },
+    {
+      "name": "TCA9554_RECONNECT_AND_LOW_INPUT",
+      "ok": true,
+      "detail": {
+        "input": {
+          "id": "i2c_switch",
+          "value": 0,
+          "raw": 0,
+          "healthy": true
+        }
+      }
+    },
+    {
+      "name": "ABSENT_NEW_I2C_DEVICE_REJECTED",
+      "ok": true,
+      "detail": {
+        "code": 409,
+        "response": {
+          "ok": false,
+          "error": "I2C device is not connected",
+          "detail": "New I2C assignments can only use a device detected on the live bus.",
+          "channel": "torque_main"
+        }
+      }
+    },
+    {
+      "name": "TLA2528_DISCOVERED",
+      "ok": true,
+      "detail": {
+        "discovery": {
+          "address": 16,
+          "type": "TLA2528",
+          "present": true,
+          "rechecking": false,
+          "state": "AVAILABLE",
+          "last_seen_ms": 15944,
+          "errors": 0
+        }
+      }
+    },
+    {
+      "name": "TLA2528_LIVE_CALIBRATED_INPUT",
+      "ok": true,
+      "detail": {
+        "code": 200,
+        "input": {
+          "id": "p1_main",
+          "value": 1.65,
+          "raw": 2048,
+          "healthy": true
+        }
+      }
+    },
+    {
+      "name": "TLA2528_DISCONNECT_INVALIDATES_INPUT",
+      "ok": true,
+      "detail": {
+        "input": {
+          "id": "p1_main",
+          "value": 0,
+          "raw": 0,
+          "healthy": false
+        }
+      }
+    },
+    {
+      "name": "NAU7802_DISCOVERED",
+      "ok": true,
+      "detail": {
+        "emulator": "OK",
+        "discovery": {
+          "address": 42,
+          "type": "NAU7802",
+          "present": true,
+          "rechecking": false,
+          "state": "AVAILABLE",
+          "last_seen_ms": 11184,
+          "errors": 0
+        }
+      }
+    },
+    {
+      "name": "NAU7802_TORQUE_AND_THRUST_CALIBRATION",
+      "ok": true,
+      "detail": {
+        "code": 200,
+        "torque": {
+          "id": "torque_main",
+          "value": 2,
+          "raw": 102000,
+          "healthy": true
+        },
+        "thrust": {
+          "id": "thrust_main",
+          "value": 4,
+          "raw": 102000,
+          "healthy": true
+        },
+        "torque_raw": 102000,
+        "thrust_raw": 102000
+      }
+    },
+    {
+      "name": "NAU7802_DISCONNECT_INVALIDATES_BOTH_CHANNELS",
+      "ok": true,
+      "detail": {
+        "torque": {
+          "id": "torque_main",
+          "value": 2,
+          "raw": 102000,
+          "healthy": false
+        },
+        "thrust": {
+          "id": "thrust_main",
+          "value": 4,
+          "raw": 102000,
+          "healthy": false
+        }
+      }
+    }
+  ],
+  "restored": true,
+  "error": null,
+  "serial_tail": [
+    "[OT] Config candidate applied from staged stream: OK",
+    "[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.",
+    "[OT] Config block/hardware apply complete (web update)",
+    "[OT] Output command blocked: configuration is not trusted",
+    "[OT] Output command blocked: configuration is not trusted",
+    "[OT] START blocked: FAULT state - fix config/profile and reboot",
+    "[WebServer] POST /api/hardware: saved (7501 bytes) - reboot in 1s",
+    "[WebServer] Restarting: hardware config save",
+    "\ufffd\ufffd\ufffdESP-ROM:esp32s3-20210327",
+    "Build:Mar 27 2021",
+    "rst:0xc (RTC_SW_CPU_RST),boot:0xb (SPI_FAST_FLASH_BOOT)",
+    "Saved PC:0x4037dbbd",
+    "SPIWP:0xee",
+    "mode:DIO, clock div:1",
+    "load:0x3fce2820,len:0x10cc",
+    "load:0x403c8700,len:0xc2c",
+    "load:0x403cb700,len:0x30c0",
+    "entry 0x403c88b8",
+    "[OT] OpenTurbine booting - default profile: OpenTurbine",
+    "[OT] LittleFS OK",
+    "[OT] Boot #1509",
+    "[OT] Reset reason: SOFTWARE (3)",
+    "[OT] system diagnostics ready",
+    "[HWCfg] Loaded OK - profile: OpenTurbine",
+    "[Config] Loaded OK - profile: OpenTurbine",
+    "[OT] Sequences: startup=3, shutdown=3, ab_ign=0, ab_shut=0 blocks",
+    "[VALIDATE] WARN FuelOpen: No sustained fuel delivery block (FuelOpen/FuelPumpIdle or secondary/auxiliary fuel pump block) in startup - engine will spin without fuel",
+    "[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.",
+    "[VALIDATE] WARN FinalStop: No N1 RPM sensor - cannot verify complete stop; uses the configured timeout as a spool-down delay",
+    "[OT] Starting web server",
+    "[WiFi] AP: OpenTurbine  IP: 192.168.4.1  (open network)  TX=8 dBm",
+    "[WiFi] Captive portal DNS started",
+    "[WiFi] mDNS: http://ot.local",
+    "[WebServer] Started on port 80",
+    "[OT] Web server ready",
+    "[OT] Setup complete",
+    "[tick] SLOW 412ms: dns=0 evict=412 drain=0 save=0 stats=0",
+    "[OT] Config candidate applied from staged stream: OK",
+    "[VALIDATE] WARN FuelOpen: No sustained fuel delivery block (FuelOpen/FuelPumpIdle or secondary/auxiliary fuel pump block) in startup - engine will spin without fuel",
+    "[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.",
+    "[VALIDATE] WARN FinalStop: No N1 RPM sensor - cannot verify complete stop; uses the configured timeout as a spool-down delay",
+    "[OT] Config block/hardware apply complete (web update)",
+    "[WebServer] POST /api/hardware: saved (7349 bytes) - reboot in 1s",
+    "[WebServer] Restarting: hardware config save",
+    "ESP-ROM:esp32s3-20210327",
+    "Build:Mar 27 2021",
+    "rst:0xc (RTC_SW_CPU_RST),boot:0xb (SPI_FAST_FLASH_BOOT)",
+    "Saved PC:0x4037dbbd",
+    "SPIWP:0xee",
+    "mode:DIO, clock div:1",
+    "load:0x3fce2820,len:0x10cc",
+    "load:0x403c8700,len:0xc2c",
+    "load:0x403cb700,len:0x30c0",
+    "entry 0x403c88b8",
+    "[OT] OpenTurbine booting - default profile: OpenTurbine",
+    "[OT] LittleFS OK",
+    "[OT] Boot #1510",
+    "[OT] Reset reason: SOFTWARE (3)",
+    "[OT] system diagnostics ready",
+    "[HWCfg] Loaded OK - profile: OpenTurbine",
+    "[Config] Loaded OK - profile: OpenTurbine",
+    "[OT] Sequences: startup=3, shutdown=3, ab_ign=0, ab_shut=0 blocks",
+    "[VALIDATE] WARN FuelOpen: No sustained fuel delivery block (FuelOpen/FuelPumpIdle or secondary/auxiliary fuel pump block) in startup - engine will spin without fuel",
+    "[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.",
+    "[VALIDATE] WARN FinalStop: No N1 RPM sensor - cannot verify complete stop; uses the configured timeout as a spool-down delay",
+    "[OT] Starting web server",
+    "[WiFi] AP: OpenTurbine  IP: 192.168.4.1  (open network)  TX=8 dBm",
+    "[WiFi] Captive portal DNS started",
+    "[WiFi] mDNS: http://ot.local",
+    "[WebServer] Started on port 80",
+    "[OT] Web server ready",
+    "[OT] Setup complete",
+    "[tick] SLOW 504ms: dns=0 evict=504 drain=0 save=0 stats=0",
+    "[I2C] 0x20 recovered inside 500 ms recheck window",
+    "[WebServer] POST /api/hardware: saved (7043 bytes) - reboot in 1s",
+    "[WebServer] Restarting: hardware config save",
+    "\ufffd\ufffd\ufffdESP-ROM:esp32s3-20210327",
+    "Build:Mar 27 2021",
+    "rst:0xc (RTC_SW_CPU_RST),boot:0xb (SPI_FAST_FLASH_BOOT)",
+    "Saved PC:0x4037dbbd",
+    "SPIWP:0xee",
+    "mode:DIO, clock div:1",
+    "load:0x3fce2820,len:0x10cc",
+    "load:0x403c8700,len:0xc2c",
+    "load:0x403cb700,len:0x30c0",
+    "entry 0x403c88b8",
+    "[OT] OpenTurbine booting - default profile: OpenTurbine",
+    "[OT] LittleFS OK",
+    "[OT] Boot #1511",
+    "[OT] Reset reason: SOFTWARE (3)",
+    "[OT] system diagnostics ready",
+    "[HWCfg] Loaded OK - profile: OpenTurbine",
+    "[Config] Loaded OK - profile: OpenTurbine",
+    "[OT] Sequences: startup=3, shutdown=3, ab_ign=0, ab_shut=0 blocks",
+    "[VALIDATE] WARN FuelOpen: No sustained fuel delivery block (FuelOpen/FuelPumpIdle or secondary/auxiliary fuel pump block) in startup - engine will spin without fuel",
+    "[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.",
+    "[VALIDATE] WARN FinalStop: No N1 RPM sensor - cannot verify complete stop; uses the configured timeout as a spool-down delay",
+    "[OT] Starting web server",
+    "[WiFi] AP: OpenTurbine  IP: 192.168.4.1  (open network)  TX=8 dBm",
+    "[WiFi] Captive portal DNS started",
+    "[WiFi] mDNS: http://ot.local",
+    "[WebServer] Started on port 80",
+    "[OT] Web server ready",
+    "[OT] Setup complete",
+    "[tick] SLOW 524ms: dns=0 evict=524 drain=0 save=0 stats=0",
+    "[WebServer] POST /api/hardware: saved (7637 bytes) - reboot in 1s",
+    "[WebServer] Restarting: hardware config save",
+    "\u0000\ufffdESP-ROM:esp32s3-20210327",
+    "Build:Mar 27 2021",
+    "rst:0xc (RTC_SW_CPU_RST),boot:0xb (SPI_FAST_FLASH_BOOT)",
+    "Saved PC:0x4037dbbd",
+    "SPIWP:0xee",
+    "mode:DIO, clock div:1",
+    "load:0x3fce2820,len:0x10cc",
+    "load:0x403c8700,len:0xc2c",
+    "load:0x403cb700,len:0x30c0",
+    "entry 0x403c88b8",
+    "[OT] OpenTurbine booting - default profile: OpenTurbine",
+    "[OT] LittleFS OK",
+    "[OT] Boot #1512",
+    "[OT] Reset reason: SOFTWARE (3)",
+    "[OT] system diagnostics ready",
+    "[HWCfg] Loaded OK - profile: OpenTurbine",
+    "[Config] Loaded OK - profile: OpenTurbine",
+    "[OT] Sequences: startup=3, shutdown=3, ab_ign=0, ab_shut=0 blocks",
+    "[VALIDATE] WARN FuelOpen: No sustained fuel delivery block (FuelOpen/FuelPumpIdle or secondary/auxiliary fuel pump block) in startup - engine will spin without fuel",
+    "[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.",
+    "[VALIDATE] WARN FinalStop: No N1 RPM sensor - cannot verify complete stop; uses the configured timeout as a spool-down delay",
+    "[OT] Starting web server",
+    "[WiFi] AP: OpenTurbine  IP: 192.168.4.1  (open network)  TX=8 dBm",
+    "[WiFi] Captive portal DNS started",
+    "[WiFi] mDNS: http://ot.local",
+    "[WebServer] Started on port 80",
+    "[OT] Web server ready",
+    "[OT] Setup complete",
+    "[I2C] NAU7802 internal calibration error (CTRL2=0x28)",
+    "[I2C] 0x2A recovered inside 500 ms recheck window",
+    "[tick] SLOW 444ms: dns=0 evict=444 drain=0 save=0 stats=0",
+    "[I2C] NAU7802 conversion-ready read failed",
+    "[OT] Config candidate applied from staged stream: OK",
+    "[VALIDATE] WARN FuelOpen: No sustained fuel delivery block (FuelOpen/FuelPumpIdle or secondary/auxiliary fuel pump block) in startup - engine will spin without fuel",
+    "[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.",
+    "[VALIDATE] WARN FinalStop: No N1 RPM sensor - cannot verify complete stop; uses the configured timeout as a spool-down delay",
+    "[OT] Config block/hardware apply complete (web update)",
+    "[WebServer] POST /api/hardware: saved (7702 bytes) - reboot in 1s",
+    "[WebServer] Restarting: hardware config save",
+    "ESP-ROM:esp32s3-20210327",
+    "Build:Mar 27 2021",
+    "rst:0xc (RTC_SW_CPU_RST),boot:0xb (SPI_FAST_FLASH_BOOT)",
+    "Saved PC:0x4037dbbd",
+    "SPIWP:0xee",
+    "mode:DIO, clock div:1",
+    "load:0x3fce2820,len:0x10cc",
+    "load:0x403c8700,len:0xc2c",
+    "load:0x403cb700,len:0x30c0",
+    "entry 0x403c88b8",
+    "[OT] OpenTurbine booting - default profile: OpenTurbine",
+    "[OT] LittleFS OK",
+    "[OT] Boot #1513",
+    "[OT] Reset reason: SOFTWARE (3)",
+    "[OT] system diagnostics ready",
+    "[HWCfg] Loaded OK - profile: OpenTurbine",
+    "[Config] Loaded OK - profile: OpenTurbine",
+    "[OT] Sequences: startup=7, shutdown=3, ab_ign=0, ab_shut=0 blocks",
+    "[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.",
+    "[OT] Starting web server",
+    "[WiFi] AP: OpenTurbine  IP: 192.168.4.1  (open network)  TX=8 dBm",
+    "[WiFi] Captive portal DNS started",
+    "[WiFi] mDNS: http://ot.local",
+    "[WebServer] Started on port 80",
+    "[OT] Web server ready",
+    "[THROTTLE_SRV] servo attach pin=16 freq=50Hz bits=14 OK",
+    "[OIL_PUMP] LEDC attach pin=11 freq=5000Hz bits=12 OK",
+    "[OT] Setup complete",
+    "[tick] SLOW 459ms: dns=0 evict=458 drain=0 save=0 stats=1",
+    "[OT] Config candidate applied from staged stream: OK",
+    "[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.",
+    "[OT] Config block/hardware apply complete (web update)"
+  ]
+}

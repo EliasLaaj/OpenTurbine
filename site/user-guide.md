@@ -177,7 +177,7 @@ The **Purpose** field tells the firmware how an installed channel may be used. T
 <tr><td>Main / scavenge oil flow</td><td>Separate flow feedback for the corresponding pump. Calibrate in L/min, enable monitoring on that pump's Hardware card, and test its minimum-flow threshold. Confirmed underflow warns by default; shutdown is a separate Config choice.</td></tr>
 <tr><td>Main flame / afterburner flame</td><td>Dedicated combustion detectors. Main flame can confirm startup/flameout; AB flame can confirm afterburner light-off.</td></tr>
 <tr><td>Torque</td><td>Analog, HX711, or NAU7802 measurement. NAU7802 calibration captures unloaded zero plus known force and lever arm. With N2 it supports shaft-power calculation; it is also available to rules.</td></tr>
-<tr><td>Thrust</td><td>NAU7802 load-cell measurement calibrated from unloaded zero plus a known force or mass. Canonical display, telemetry, rules and logs use newtons.</td></tr>
+<tr><td>Thrust</td><td>Conditioned local/TLA2528 analog transmitter or NAU7802 load-cell measurement. Analog inputs use linear or multi-point calibration; NAU7802 uses unloaded zero plus a known force or mass. Canonical display, telemetry, rules and logs use newtons.</td></tr>
 <tr><td>Battery / bus voltage</td><td>Scaled ADC measurement for display, logs and undervoltage protection. A battery must never connect directly to an ADC pin.</td></tr>
 <tr><td>Throttle input</td><td>Operator demand from analog, RC PWM, pulse-duty or another supported input. Calibrate low/high endpoints and signal-loss behavior.</td></tr>
 <tr><td>Idle input</td><td>Separate idle/startup demand, usable as digital, analog, RC PWM, pulse or duty depending on the installation.</td></tr>
@@ -217,15 +217,15 @@ An ESP32 GPIO can provide only a logic command. Use an interface rated for the r
 <tr><td>Starter enable</td><td>Separate contactor/enable for starter electronics that require enable plus proportional demand.</td></tr>
 <tr><td>Oil pump</td><td>Fixed or pressure-controlled oil delivery, startup priming and windmilling protection.</td></tr>
 <tr><td>Coolant pump / scavenge pump / cooling fan</td><td>Auxiliary pumping and cooling outputs usable from sequences and rules. Scavenge can continue into shutdown where configured.</td></tr>
-<tr><td>Pilot / auxiliary fuel pump</td><td>Independent second fuel output for sequence/rule use. It does not automatically mirror main throttle.</td></tr>
+<tr><td>Secondary / auxiliary fuel pump</td><td>Independent second fuel output for sequence/rule use. It does not automatically mirror main throttle.</td></tr>
 <tr><td>Igniter / afterburner igniter / glow plug</td><td>Commands the appropriate external ignition or glow driver. The ESP32 never drives a coil or glow element directly.</td></tr>
 <tr><td>Valve / solenoid</td><td>Bleed or other on/off valve through a rated driver.</td></tr>
 <tr><td>Afterburner valve / pump</td><td>Dedicated afterburner fuel shutoff and delivery outputs used by AB sequences.</td></tr>
 <tr><td>Air starter</td><td>Air-start valve through an on/off driver.</td></tr>
-<tr><td>Pilot gas / start-fuel solenoid</td><td>Dedicated light-off fuel valve for an applicable combustion system.</td></tr>
+<tr><td>Start-fuel solenoid</td><td>Dedicated light-off fuel valve for an applicable combustion system.</td></tr>
 <tr><td>Air / fuel purge valve</td><td>Valve that can be placed in a custom safe sequence.</td></tr>
 <tr><td>Electric drain valve</td><td>Open/close output available to startup/shutdown sequences, Control Rules and standby Tools tests. Configure its physical polarity or endpoints in Hardware.</td></tr>
-<tr><td>Variable nozzle / propeller pitch</td><td>Proportional servo/ESC output; propeller pitch can be the N2 governor's controlled output.</td></tr>
+<tr><td>Variable nozzle / propeller pitch</td><td>Proportional servo/ESC output, or deliberate fine/coarse relay pitch; propeller pitch can be the N2 governor's controlled output.</td></tr>
 <tr><td>Generic automation output</td><td>Relay, PWM or servo output controlled by custom rules or sequence steps, with no built-in engine role.</td></tr>
 </tbody></table></div>
 
@@ -245,6 +245,8 @@ settings; recommission it instead of assuming an old file is safe.
 4. If the tool identifies a CP210x or WCH USB bridge without a COM port, accept only the matching driver it offers. If a COM port exists but the board does not respond, close serial monitors and follow the BOOT/RESET instructions.
 5. After installation, join the Wi-Fi network created by the ECU and browse to `http://192.168.4.1`.
 6. Complete the safety acknowledgement and first-run prompts.
+
+Keep exactly one OpenTurbine browser tab open at a time. This applies to both Classic ESP32 and ESP32-S3 ECUs. Close the old dashboard before opening it in another tab, window, browser, phone, or computer.
 
 If the Wi-Fi appears but the page does not, stay connected to that network and type the numeric address directly. See [Troubleshooting]({{ '/troubleshooting/' | relative_url }}) if needed.
 
@@ -300,10 +302,10 @@ A controller continuously changes an output based on a measurement. Enable it on
 <div class="table-wrap"><table>
 <thead><tr><th>Controller</th><th>How it works</th><th>When to enable it</th></tr></thead>
 <tbody>
-<tr><td>Oil pressure loop</td><td>Compares measured oil pressure with the active target and changes oil-pump demand. Gain controls reaction strength; deadband prevents constant tiny corrections; fallback handles a failed sensor.</td><td>After the oil-pressure input is calibrated and the proportional oil-pump output, plumbing and safe fallback demand are proven.</td></tr>
+<tr><td>Oil pressure loop</td><td>Compares measured oil pressure with a fixed, effective-fuel, N1, or N2 target and changes its explicitly selected pump. Proportional pumps modulate; relay pumps use full off/on hysteresis for accumulator systems. Fallback handles a failed sensor.</td><td>After the pressure input, selected pump, plumbing and safe fallback demand are proven.</td></tr>
 <tr><td>Smooth fuel/throttle movement</td><td>Limits how quickly the main fuel output opens or closes. It also supports gradual limit protection behavior.</td><td>Normally enabled for a proportional main-fuel output. Set opening/closing times from controlled tests, not examples.</td></tr>
 <tr><td>Automatic idle control</td><td>Measures one selected N1, N2, P1, or P2 source and adjusts fuel within configured bounds to hold idle. N1/N2 is the normal proven method; pressure control is experimental and has separate target, deadband, and disengagement settings.</td><td>Only after manual/fixed idle behavior is stable, the selected feedback is calibrated, and fuel limits are safe.</td></tr>
-<tr><td>Automatic N2 speed control</td><td>Compares N2 with its target and changes main fuel or proportional propeller pitch. Pitch control increases load to restrain speed.</td><td>Only on an appropriate two-shaft system with verified N2, output direction, travel limits and conservative gains.</td></tr>
+<tr><td>Automatic N2 speed control</td><td>Compares N2 with its target and changes proportional main fuel, proportional propeller pitch, or deliberate fine/coarse relay pitch. Coarser pitch increases load to restrain speed.</td><td>Only on an appropriate two-shaft system with verified N2, output direction, travel limits and conservative gains.</td></tr>
 </tbody></table></div>
 
 ### 9.2 Safety functions
@@ -351,6 +353,10 @@ The expandable sections below document every field currently rendered by `data_s
 
 Calibration makes a displayed number match reality. Do it in **STANDBY** or **FAULT**, with hazardous energy isolated.
 
+Direct digital flame detectors and switches need only the correct active electrical state. ADC-backed flame detectors and switches use one common condition model: active above/below, threshold, and hysteresis. For an ADC switch, capture its inactive and active states on Calibration; OpenTurbine calculates polarity, a midpoint threshold, and a noise-aware deadband. Hysteresis prevents vibration or electrical noise near the threshold from making the state chatter.
+
+Most analog voltage/current transmitters need only the normal two-point calibration. For a nonlinear resistive sender, open **Advanced sensor curve** on its Hardware card and enter 2–6 measured or datasheet points. Raw ADC points must increase; physical values may consistently increase or decrease. The ECU interpolates between points and clamps outside the endpoints. NTC inputs normally use their resistance/beta model, but may use this curve when the manufacturer supplies a temperature table. Thermocouple, pulse/frequency, and load-cell inputs retain their dedicated calibration methods.
+
 1. Open **Calibration** and confirm it shows only fitted hardware.
 2. Start with raw readings. A disconnected sensor should not look like a believable safe value.
 3. Apply a known low reference, capture/enter the low point, and record the physical value.
@@ -365,6 +371,7 @@ Specific checks:
 - **Pressure:** zero only while safely depressurized, then compare with a trusted gauge at multiple pressures.
 - **Voltage/current:** compare with a meter at several loads; verify the divider ratio and current-sensor zero.
 - **Throttle/idle/AB input:** capture true low and high endpoints, then test signal loss and reversed travel.
+- A native or registry/I2C AB command uses the same normalized input and disconnect guard. A required AB arm input remains continuous permission and starts normal AB shutdown when released.
 - **Main fuel/oil/starter proportional outputs:** test the command signal into a meter or disconnected driver first. Find minimum reliable behavior only in a suitably safe rig.
 
 ## Part 12: Build startup and shutdown sequences

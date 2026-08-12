@@ -36,6 +36,10 @@ class Tester:
         self.timeout = timeout
         self.boot_wait = boot_wait
         self.ser = None
+        # Classic ESP32 LEDC timer changes disable both DAC outputs. Preserve
+        # the last analog stimuli and restore them as separate serial commands
+        # after every N1/N2 update; this is the verified stable hardware order.
+        self._held_analog = {}
 
     # ── lifecycle ────────────────────────────────────────────
     def open(self):
@@ -69,6 +73,7 @@ class Tester:
         self.ser.rts = False
         time.sleep(1.1)
         self.ser.reset_input_buffer()
+        self._held_analog.clear()
 
     def close(self):
         if self.ser:
@@ -124,12 +129,24 @@ class Tester:
         line = self._wait_for(("OK", "ERR"))
         if line.startswith("ERR"):
             raise TesterError(line)
+        self._held_analog.clear()
         return line
 
     def set(self, name, value):
         line = self._cmd_retry("SET %s %s" % (name, value), ("OK", "ERR"))
         if line.startswith("ERR"):
             raise TesterError("SET %s %s -> %s" % (name, value, line))
+        upper = name.upper()
+        if upper in ("THROTTLE_IN", "OILP"):
+            self._held_analog[upper] = value
+        elif upper in ("N1", "N2"):
+            for analog_name, analog_value in self._held_analog.items():
+                restored = self._cmd_retry(
+                    "SET %s %s" % (analog_name, analog_value), ("OK", "ERR"))
+                if restored.startswith("ERR"):
+                    raise TesterError(
+                        "restore %s %s after %s -> %s" %
+                        (analog_name, analog_value, upper, restored))
         return line
 
     def get(self, name):

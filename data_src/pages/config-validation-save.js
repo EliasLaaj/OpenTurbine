@@ -17,9 +17,6 @@ function runValidation() {
   const preIgnRpmVal   = (cfg?.sequence?.startup?.pre_ign_rpm) ?? undefined;
   const spoolRpmTarget = (cfg?.sequence?.startup?.rpm_target)  ?? undefined;
 
-  // Flame sensor threshold lives in calibration settings rather than
-  // the visible config form, so validation reads it from the loaded config.
-
   const idleTargetRpm  = fv('di_tr');          // dynamic_idle.target_rpm
   const rpmLimit       = fv('rpm_limit');
   const n2RpmLimit     = fv('n2_rpm_limit');
@@ -28,8 +25,6 @@ function runValidation() {
   const startupCfg  = cfg?.sequence?.startup ?? {};
   const computedPreIgnRpm     = startupCfg.pre_ign_rpm     ?? preIgnRpmVal;
   const computedSpoolRpmTarget= startupCfg.rpm_target      ?? spoolRpmTarget;
-  const computedFlameThresh   = cfg?.calibration?.flame_threshold;
-  const hasFlameHw = hasRegistryInput('flame');
 
   // 1. preIgnRpm > spoolRpmTarget
   if (computedPreIgnRpm !== undefined && computedSpoolRpmTarget !== undefined
@@ -37,29 +32,11 @@ function runValidation() {
     warnings.push({
       section: 'Engine Protection Limits',
       key:     'warn-preignrpm',
-      msg:     '⚠ Pre-ignition RPM is above spool target — engine will never reach spool'
+      msg:     '⚠ Pre-ignition RPM is above spool target — the later spool stage may already be satisfied and skip its intended acceleration step'
     });
   }
 
-  // 2. flameThreshold > 3500
-  if (hasFlameHw && computedFlameThresh !== undefined && computedFlameThresh > 3500) {
-    warnings.push({
-      section: 'Combustion & Startup Protection',
-      key:     'warn-flamehigh',
-      msg:     '⚠ Flame threshold very high — detection may be unreliable'
-    });
-  }
-
-  // 3. flameThreshold < 100 and > 0
-  if (hasFlameHw && computedFlameThresh !== undefined && computedFlameThresh > 0 && computedFlameThresh < 100) {
-    warnings.push({
-      section: 'Combustion & Startup Protection',
-      key:     'warn-flamelow',
-      msg:     '⚠ Flame threshold very low — false detections likely'
-    });
-  }
-
-  // 4. Idle target must remain below the shaft limit it actually uses.
+  // 2. Idle target must remain below the shaft limit it actually uses.
   const idleSource = Number(document.getElementById('cf-di_src')?.value || 0);
   const idleComparisonLimit = idleSource === 1 ? n2RpmLimit : (idleSource === 0 ? rpmLimit : 0);
   if (idleTargetRpm !== undefined && idleComparisonLimit !== undefined &&
@@ -103,6 +80,14 @@ function runValidation() {
   if ((fv('so_fp') || 0) <= 0 && (fv('so_fb') || 0) <= 0) {
     warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-output',
       msg:'⚠ Pump output and pressure target are both zero; this protection would command no oil.'});
+  }
+
+  const abMainOffsetNow = fv('ab_mo') || 0;
+  const mainFuelMinimumNow = Number(cfg?.throttle?.fuel_pump_min_pct || 0);
+  if (abMainOffsetNow < 0 && mainFuelMinimumNow > 0) {
+    const floorStartsBelow = Math.min(100, mainFuelMinimumNow - abMainOffsetNow);
+    warnings.push({section:'Afterburner — Running', key:'warn-ab-main-fuel-floor',
+      msg:`⚠ Negative AB coordination reaches the reliable-fuel floor below ${floorStartsBelow.toFixed(1)}% main-fuel command. The running output will hold ${mainFuelMinimumNow.toFixed(1)}% rather than turn off.`});
   }
 
   // N2 control targets should leave operating margin below the independent trip.
@@ -239,7 +224,7 @@ async function validateBeforeSave(cfg) {
 
   const assistEnabled = !!gv(cfg, 'starter_control', 'pulsed_assist_enabled');
   const starter = registryOutputByPurpose('starter');
-  if (assistEnabled && (!starter || Number(starter.driver) === 4 || !hasN1))
+  if (assistEnabled && (!starter || ![5,6].includes(Number(starter.driver)) || !hasN1))
     errors.push('Pulsed Starter Assist requires a proportional servo/PWM starter and an N1 speed input.');
   const assistThreshold = Number(gv(cfg, 'starter_control', 'pulsed_assist_until_rpm') || 0);
   const starterTarget = Number(gv(cfg, 'sequence', 'startup', 'pre_ign_rpm') || 0);
@@ -264,8 +249,16 @@ async function validateBeforeSave(cfg) {
       warns.push('N1 recovery confirmation is below the effective speed allowed to fire relight ignition. Normally set recovery at or above that firing floor.');
   }
 
-  if (hasAnyIdleRpm && idleTarget !== undefined && minRpm !== undefined && idleTarget < minRpm)
+  if (idleSource < 2 && hasAnyIdleRpm && idleTarget !== undefined && minRpm !== undefined && idleTarget < minRpm)
     warns.push('Idle target RPM (' + idleTarget + ') is below Min RPM (' + minRpm + '). Engine may fault at idle.');
+
+  if (hwCfg.controllers?.dynamic_idle) {
+    const idleDeadband = Number(gv(cfg, 'dynamic_idle', idleSource >= 2 ? 'pressure_deadband_bar' : 'deadband_rpm') || 0);
+    const idleCutoff = Number(gv(cfg, 'dynamic_idle', idleSource >= 2 ? 'pressure_limit_bar' : 'rpm_limit') || 0);
+    const selectedTarget = Number(gv(cfg, 'dynamic_idle', idleSource >= 2 ? 'target_pressure_bar' : 'target_rpm') || 0);
+    if (idleCutoff > 0 && selectedTarget + idleDeadband >= idleCutoff)
+      warns.push('Automatic Idle target plus its no-correction band reaches Stop Controlling Above. The controller may release before settling at its target.');
+  }
 
   if (hwCfg.safety?.n2_overspeed && Number(n2RpmLimit) > 0) {
     const pbN2Enabled = !!gv(cfg, 'throttle', 'pullback_n2');
@@ -318,8 +311,8 @@ async function validateBeforeSave(cfg) {
   const oilStartup   = gv(cfg, 'oil', 'startup_min_bar');
   const oilMapMin    = gv(cfg, 'oil', 'map_min');
   const oilMapMax    = gv(cfg, 'oil', 'map_max');
-  if (oilStartup !== undefined && oilRunning !== undefined && oilStartup > oilRunning)
-    warns.push('Oil Arm Minimum (' + oilStartup + ' bar) is higher than Running Min (' + oilRunning + ' bar). The engine would fault immediately after spool.');
+  if (oilStartup !== undefined && oilRunning !== undefined && oilStartup < oilRunning)
+    warns.push('Oil Arm Minimum (' + oilStartup + ' bar) is below Running Min (' + oilRunning + ' bar). Startup may pass and then immediately fault when the stricter running limit becomes active.');
   if (oilMapMin !== undefined && oilMapMax !== undefined && oilMapMin > oilMapMax)
     errors.push('Running Oil (' + oilMapMin + ' bar) is greater than Map Max (' + oilMapMax + ' bar). Swap them.');
   if (oilMapMin !== undefined && oilRunning !== undefined && oilMapMin < oilRunning)
@@ -343,7 +336,7 @@ async function validateBeforeSave(cfg) {
   if (primaryLimit !== undefined && totMargin !== undefined && totMargin >= primaryLimit)
     errors.push('EGT Soft Margin (' + totMargin + '°) must be less than selected ' + primaryLabel + ' limit (' + primaryLimit + '°).');
   if (totCooldown !== undefined && primaryLimit !== undefined && totCooldown >= primaryLimit)
-    warns.push('Cooldown EGT target (' + totCooldown + '°) is at or above selected ' + primaryLabel + ' limit (' + primaryLimit + '°). Cooldown will never complete.');
+    warns.push('Cooldown EGT target (' + totCooldown + '°) is at or above selected ' + primaryLabel + ' limit (' + primaryLimit + '°). Cooldown may complete immediately while the turbine is still hot; use a verified bearing/storage-safe target.');
   const preStartLimit = Number(gv(cfg, 'sequence', 'startup', 'pre_start_egt_limit_c') || 0);
   const separateStartupLimit = Number(gv(cfg, 'sequence', 'startup', 'startup_egt_limit_c') || 0);
   const effectiveStartupLimit = separateStartupLimit > 0 ? separateStartupLimit : Number(primaryLimit || 0);
@@ -356,6 +349,10 @@ async function validateBeforeSave(cfg) {
   const abPmx = gv(cfg, 'afterburner', 'pump_max_pct');
   if (abPmn !== undefined && abPmx !== undefined && abPmx < abPmn)
     errors.push('Afterburner Fuel Pump Max % (' + abPmx + ') is below Min % (' + abPmn + '). Swap them.');
+  const abMainOffset = Number(gv(cfg, 'afterburner', 'main_fuel_offset_pct') || 0);
+  const mainFuelMinimum = Number(gv(cfg, 'throttle', 'fuel_pump_min_pct') || 0);
+  if (abMainOffset < 0 && mainFuelMinimum > 0)
+    warns.push('Negative AB main-fuel coordination will hold a running pump at its ' + mainFuelMinimum.toFixed(1) + '% reliable minimum rather than turn it off.');
 
   // Throttle pullback ordering — backend rejects hard limits at/below the
   // soft/start limit; catch each pair here with a named message.
@@ -467,19 +464,43 @@ function _doSave() {
   const saveMsg = document.getElementById('save-msg');
   saveMsg.textContent = 'Saving…';
   saveMsg.style.color = '';
+  // PATCH exactly the fields shown in the recap. Sending the complete Settings
+  // tree made a one-field edit a ~9 KiB upload, increased Classic ESP32 TCP/RAM
+  // pressure, and could overwrite a newer edit made from another browser.
+  const payload = {};
+  const changedKeys = new Set(_buildChanges().map(change => change.key));
+  const runningLive = runtimeMode === 'RUNNING' && runtimeDevMode;
+  SCHEMA.forEach(section => section.fields.forEach(field => {
+    if (!changedKeys.has(field.key)) return;
+    if (runningLive && !LIVE_CONFIG_KEYS.has(field.key)) return;
+    const value = field.path.reduce((obj, key) => obj?.[key], cfg);
+    if (value !== undefined) setPath(payload, field.path, value);
+  }));
   fetch('/api/config', {
     method: 'PATCH',
-    body: JSON.stringify(cfg),
+    body: JSON.stringify(payload),
     headers: { 'Content-Type': 'application/json' }
   }).then(async r => {
     const d = await r.json().catch(() => ({}));
     if (!r.ok || d.ok === false) throw new Error(d.error || d.reason || ('HTTP ' + r.status));
     return d;
-  }).then(d => {
+  }).then(async d => {
     if (d.ok) {
       if (window.OTSetup) OTSetup.mark('config');
+      // Firmware returns success only after validating and durably persisting
+      // this candidate. Keep the exact values just sent as the new baseline.
+      // A full immediate /api/config reread is both unnecessary (PATCH contains
+      // no stale sibling fields) and unreliable on Classic while the prior
+      // large response finishes releasing its bounded shared-buffer lease.
+      renderForm();
+      _applyAllVisibility();
       _clearDirty();
-      saveMsg.textContent = (d.warn ? 'Saved — ' + d.warn : '✓ Saved — ' + new Date().toLocaleTimeString());
+      applyView();
+      hookValidation();
+      applyDeveloperLiveFields();
+      runValidation();
+      saveMsg.textContent = (d.warn ? 'Saved — ' + d.warn :
+        (d.live_now ? '✓ Applied live — ' : '✓ Saved — ') + new Date().toLocaleTimeString());
       saveMsg.style.color = d.warn ? 'var(--yellow)' : 'var(--green)';
       if (cb) cb.disabled = false;
     } else {

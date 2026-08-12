@@ -205,9 +205,27 @@ class ClassicSafetyHil:
         ok, detail = self.dc.restore(self.original_hw)
         if not ok:
             raise RuntimeError(f"hardware restore failed: {detail}")
-        code, detail = self.dut._post("/api/config", self.original_cfg)
-        if code != 200:
-            raise RuntimeError(f"settings restore failed: {code} {detail}")
+        # Restore only fields this campaign changed. Replaying an entire
+        # settings snapshot after changing the hardware profile can correctly
+        # fail validation when that snapshot contains controller options tied
+        # to the temporary profile.
+        original = self.original_cfg
+        restore_patch = {
+            "engine": {
+                key: original["engine"][key]
+                for key in ("rpm_limit", "min_rpm")
+            },
+            "throttle": {
+                key: original["throttle"][key]
+                for key in ("ramp_up_ms", "ramp_down_ms", "fuel_pump_min_pct")
+            },
+            "safety": {
+                "check_interval_ms": original["safety"]["check_interval_ms"]
+            },
+        }
+        ok, detail = self.dc.patch_cfg(restore_patch)
+        if not ok:
+            raise RuntimeError(f"settings restore failed: {detail}")
         self.dut.ensure_dev_mode(False)
         self.tester.close()
 
@@ -219,7 +237,7 @@ class ClassicSafetyHil:
         finally:
             self.restore()
         payload = {
-            "firmware": "2.0.0",
+            "firmware": self.dut.data().get("fw_version", "unknown"),
             "target": "esp32dev",
             "tester": "ESP32-S3 OTBench 0.9",
             "passed": sum(row["ok"] for row in self.rows),
@@ -229,7 +247,7 @@ class ClassicSafetyHil:
         with open(self.result_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
         print(f"Result: {payload['passed']}/{payload['total']} -> {self.result_path}")
-        if payload["passed"] != payload["total"]:
+        if payload["total"] != 2 or payload["passed"] != payload["total"]:
             raise SystemExit(1)
 
 

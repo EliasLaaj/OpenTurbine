@@ -1,6 +1,8 @@
 // ------ App state ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 let hwCfg = {};    // hardware section of ecu_config.json
 let cfg   = {};    // settings section of ecu_config.json
+let loadedHwCfg = {};
+let loadedCfg = {};
 let _seqDirty = false;
 let paramVals = {}; // shared block settings plus per-slot TimedDelay edits
 let activeTab = 'startup';
@@ -30,10 +32,11 @@ function actuatorEnabled(key) {
 }
 function actuatorIsRelay(key) {
   const registry = registryOutputPurpose(SEQUENCE_OUTPUT_PURPOSE[key]);
-  return !!registry && Number(registry.driver) === 4;
+  return !!registry && [4,11].includes(Number(registry.driver));
 }
 function actuatorHasProportionalOutput(key) {
-  return actuatorEnabled(key) && !actuatorIsRelay(key);
+  const registry = registryOutputPurpose(SEQUENCE_OUTPUT_PURPOSE[key]);
+  return !!registry && [5,6].includes(Number(registry.driver));
 }
 function registryLabel(c, fallback) {
   const name = (c?.name && c.name.trim()) || c?.id || fallback;
@@ -196,6 +199,10 @@ async function loadAll() {
     const abTabBtn = document.getElementById('tab-btn-afterburner');
     if (abTabBtn) abTabBtn.style.display = sequenceHasAfterburner() ? '' : 'none';
     revealSequenceDeepLink();
+    // Keep the post-normalization baseline. Saving can then preserve unrelated
+    // settings changed by another browser while this page was open.
+    loadedHwCfg = cloneSequenceJson(hwCfg);
+    loadedCfg = cloneSequenceJson(cfg);
     clearSequenceDirty('No unsaved changes');
   } catch(e) {
     setSaveStatus('Warning: Load failed: ' + e.message);
@@ -582,7 +589,7 @@ function buildFinalStateCard(tab, seq, idleRaw) {
     hasAct('throttle') ? { label:'Main Fuel Pump / Metering Output', val: state.throttle } : null,
     hasAct('fuel_sol') ? { label:'Main Fuel Shutoff',   val: state.fuelSol } : null,
     hasAct('igniter') ? { label:'Igniter',              val: state.igniter } : null,
-    hasAct('igniter2') ? { label:'AB / Pilot Igniter', val: state.igniter2 } : null,
+    hasAct('igniter2') ? { label:'Secondary Igniter', val: state.igniter2 } : null,
     hasAct('starter') ? { label:'Starter',              val: state.starter } : null,
     hasAct('starter_en') ? { label:'Starter Enable',    val: state.starterEn } : null,
     hasAct('oil_pump') ? { label:'Oil Pump',            val: state.oilPump } : null,
@@ -592,7 +599,7 @@ function buildFinalStateCard(tab, seq, idleRaw) {
     hasAct('bleed_valve') ? { label:'Bleed Valve',      val: state.bleed } : null,
     hasAct('drain_valve') ? { label:'Drain Valve',      val: state.drainValve || 'closed' } : null,
     hasAct('glow_plug') ? { label:'Glow Plug',          val: state.glow } : null,
-    hasAct('fuel_pump2') ? { label:'Pilot / Auxiliary Fuel Pump',   val: state.fuelPump2 } : null,
+    hasAct('fuel_pump2') ? { label:'Secondary / Auxiliary Fuel Pump',   val: state.fuelPump2 } : null,
     hasAct('prop_pitch') ? { label:'Prop Pitch',         val: state.propPitch } : null,
     hasAct('ab_sol') ? { label:'Afterburner Fuel Valve', val: state.abSol } : null,
     hasAct('ab_pump') ? { label:'AB Fuel Pump', val: state.abPump } : null,
@@ -726,6 +733,37 @@ function setAbEntryPercent(key, rawVal) {
   buildParamVals();
   buildAbCriteriaHtml();
   markSequenceDirty('Afterburner entry conditions edited — save to apply');
+}
+
+function cloneSequenceJson(value) {
+  return JSON.parse(JSON.stringify(value ?? {}));
+}
+
+function sequencePlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Apply only differences made on this page to a freshly fetched document.
+// Arrays are intentional units here (sequence order, actions and rules).
+function mergeSequenceEdits(baseline, edited, fresh) {
+  const base = sequencePlainObject(baseline) ? baseline : {};
+  const edit = sequencePlainObject(edited) ? edited : {};
+  const out = sequencePlainObject(fresh) ? cloneSequenceJson(fresh) : {};
+  const keys = new Set([...Object.keys(base), ...Object.keys(edit)]);
+  for (const key of keys) {
+    const hasEdit = Object.prototype.hasOwnProperty.call(edit, key);
+    const before = base[key];
+    const after = edit[key];
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    if (!hasEdit) {
+      delete out[key];
+    } else if (sequencePlainObject(before) && sequencePlainObject(after)) {
+      out[key] = mergeSequenceEdits(before, after, out[key]);
+    } else {
+      out[key] = cloneSequenceJson(after);
+    }
+  }
+  return out;
 }
 function setAbInputEntryPercent(rawVal) {
   if (!hwCfg.ab_trigger) hwCfg.ab_trigger = {};

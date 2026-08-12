@@ -96,6 +96,7 @@ async function setController(key, val) {
     }
   }
   setNested('controllers', key, val);
+  if (key === 'oil_loop' && val && typeof ensureOilLoops === 'function') ensureOilLoops();
   updateHardwarePrerequisites(true);
 }
 
@@ -193,9 +194,9 @@ function updatePropPitchTypeUI(t) {
 }
 function setBleedType(t) { setAct('bleed_valve','type',t); updateBleedTypeUI(t); }
 function updateBleedTypeUI(t) {
-  document.getElementById('grp-bleed-onoff').style.display  = t === 0 ? '' : 'none';
-  document.getElementById('grp-bleed-servo').style.display  = t === 1 ? '' : 'none';
-  document.getElementById('grp-bleed-pwm').style.display    = t === 2 ? '' : 'none';
+  document.getElementById('grp-bleed-servo').style.display  = t === 0 ? '' : 'none';
+  document.getElementById('grp-bleed-pwm').style.display    = t === 1 ? '' : 'none';
+  document.getElementById('grp-bleed-onoff').style.display  = t === 2 ? '' : 'none';
 }
 function setFp2Type(t) { setAct('fuel_pump2','type',t); updateFp2TypeUI(t); }
 function updateFp2TypeUI(t) {
@@ -293,7 +294,7 @@ function updateIgniterModeUI(mode) {
 function setIgniter2Mode(mode) {
   setAct('igniter2','pwm',  mode === 'pwm');
   setAct('igniter2','coil', mode === 'coil');
-  // Auto-enable/disable the AB / pilot igniter current sensor (stored under actuators.igniter2)
+  // Auto-enable/disable the secondary igniter current sensor (stored under actuators.igniter2)
   if (!cfg.actuators) cfg.actuators = {};
   if (!cfg.actuators.igniter2) cfg.actuators.igniter2 = {};
   cfg.actuators.igniter2.has_current = (mode === 'coil');

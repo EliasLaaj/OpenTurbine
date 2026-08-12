@@ -47,7 +47,7 @@ public:
                 _thr.pin, Config::throttleMinRaw, Config::throttleMaxRaw);
         }
         if (hw.hasAfterburner && hw.abInputRcPwm && hw.abInputPin >= 0 &&
-            (hw.abTriggerSource == 3 || Config::abPumpControlMode == 2)) {
+            !_registryAbCommandPresent()) {
             _ab.pin = hw.abInputPin;
             pinMode(_ab.pin, INPUT);
             attachInterrupt(digitalPinToInterrupt(_ab.pin), _isrAb, CHANGE);
@@ -81,6 +81,7 @@ public:
             }
         }
         if (hw.hasAfterburner && hw.abInputRcPwm && hw.abInputPin >= 0 &&
+            !_registryAbCommandPresent() &&
             (hw.abTriggerSource == 3 || Config::abPumpControlMode == 2)) {
             _updateCh(_ab, ed.abInputValid, ed.abInputNorm);
             ed.abInputRaw = ed.abInputValid ? (int)(ed.abInputNorm * 4095.0f) : 0;
@@ -88,6 +89,15 @@ public:
     }
 
 private:
+
+    static bool _registryAbCommandPresent() {
+        for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i) {
+            const auto& input = HardwareConfig::channelRegistry.inputs[i];
+            if (!strcmp(input.purpose, "ab_command") &&
+                ChannelRegistry::channelAddressable(input)) return true;
+        }
+        return false;
+    }
 
     struct Ch {
         int               pin     = -1;

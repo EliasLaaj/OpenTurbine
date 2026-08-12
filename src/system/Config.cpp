@@ -4,6 +4,7 @@
 #include <LittleFS.h>
 #include <Preferences.h>
 #include <Arduino.h>
+#include <ctype.h>
 #include <math.h>
 #include "RulesEngine.h"     // after Arduino.h — needs constrain()
 #include "FlightRecorder.h"
@@ -28,6 +29,7 @@ int8_t ruleSourceHandle(const char* id) {
     if (!strcmp(id, "p1") || !strcmp(id, "p1_main")) return RulesEngine::P1;
     if (!strcmp(id, "p2") || !strcmp(id, "p2_main")) return RulesEngine::P2;
     if (!strcmp(id, "torque") || !strcmp(id, "torque_main")) return RulesEngine::TORQUE;
+    if (!strcmp(id, "thrust") || !strcmp(id, "thrust_main")) return RulesEngine::THRUST;
     if (!strcmp(id, "flame") || !strcmp(id, "flame_main")) return RulesEngine::FLAME;
     if (!strcmp(id, "idle_input") || !strcmp(id, "idle_in") || !strcmp(id, "idle_input_main") || !strcmp(id, "operator_idle")) return RulesEngine::IDLE_INPUT;
     if (!strcmp(id, "ab_flame") || !strcmp(id, "ab_flame_main")) return RulesEngine::AB_FLAME;
@@ -167,7 +169,6 @@ float Config::idleRampUpMs          = 10000;
 float Config::idleRampDownMs        = 20000;
 float Config::idleDeadbandRpm       = 300;
 float Config::idleRpmLimit          = 60000;
-float Config::idleMinMultiplier     = 0.75f;
 float Config::idleMaxMultiplier     = 1.50f;
 bool  Config::idleUseN2             = ConfigInternal::idleUseN2Default;
 int   Config::idleSource            = ConfigInternal::idleUseN2Default ? 1 : 0;
@@ -186,6 +187,10 @@ float Config::idleTrimUpPctPerSec       = 4.0f;
 float Config::idleTrimDownPctPerSec     = 2.0f;
 float Config::idleLearnRate             = 0.02f;
 float Config::idleLearnAccelMax         = 1200.0f;
+float Config::idlePressureDecelEnter    = 0.12f;
+float Config::idlePressureSettleBand    = 0.03f;
+float Config::idlePressureFullResponse  = 0.25f;
+float Config::idlePressureLearnRateMax  = 1.0f;
 
 int   Config::safetyCheckIntervalMs      = 100;
 float Config::flameoutShutdownMs         = 3000;
@@ -317,6 +322,7 @@ bool     Config::abUseIgniter               = false;
 float    Config::abTorchSpikePct            = 30.0f;
 int      Config::abTorchDurationMs          = 400;
 float    Config::abTorchTotLimit            = 0.0f;      // 0 = disabled
+int      Config::abTorchGuardMode           = 0;
 int      Config::abFlameMode                = 2;         // 2=timed (safest default)
 float    Config::abTotRiseDegC              = 30.0f;
 int      Config::abTotRiseWindowMs          = 2000;
@@ -370,7 +376,6 @@ int   Config::throttleMinRaw        = 0;
 int   Config::throttleMaxRaw        = 4095;
 int   Config::idleMinRaw            = 0;
 int   Config::idleMaxRaw            = 4095;
-int   Config::flameThreshold        = 500;
 float Config::oilPolyA              = 0;
 float Config::oilPolyB              = 0;
 float Config::oilPolyC              = 0;
@@ -422,12 +427,20 @@ Config::Rule Config::rules[Config::MAX_RULES] = {};
 int          Config::ruleCount                = 0;
 
 namespace {
+bool registryInputPurposeAvailable(const char* purpose) {
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i) {
+        const auto& input = HardwareConfig::channelRegistry.inputs[i];
+        if (!strcmp(input.purpose, purpose) && ChannelRegistry::channelAddressable(input))
+            return true;
+    }
+    return false;
+}
+
 bool ruleSensorAvailable(uint8_t s) {
     if (ChannelRegistry::isInputSensor(s)) {
         uint8_t idx = ChannelRegistry::inputIndexFromSensor(s);
         return idx < HardwareConfig::channelRegistry.inputCount &&
-               HardwareConfig::channelRegistry.inputs[idx].installed &&
-               HardwareConfig::channelRegistry.inputs[idx].pin >= 0;
+               ChannelRegistry::channelAddressable(HardwareConfig::channelRegistry.inputs[idx]);
     }
     switch (s) {
         case 0:  return HardwareConfig::hasOilTemp;
@@ -454,9 +467,11 @@ bool ruleSensorAvailable(uint8_t s) {
         case 21: return HardwareConfig::hasIgniter && HardwareConfig::hasIgniterCurrentSensor;
         case 22: return HardwareConfig::hasIgniter2 && HardwareConfig::hasIgniter2CurrentSensor;
         case 23: return HardwareConfig::hasOilPump && HardwareConfig::hasOilPumpCurrentSensor;
-        case 24: return HardwareConfig::hasAfterburner && HardwareConfig::abInputPin >= 0;
-        case 25: return HardwareConfig::startPin >= 0;
-        case 26: return HardwareConfig::stopPin >= 0;
+        case 24: return HardwareConfig::hasAfterburner &&
+                        (HardwareConfig::abInputPin >= 0 || registryInputPurposeAvailable("ab_command"));
+        case 25: return HardwareConfig::startPin >= 0 || registryInputPurposeAvailable("start_switch");
+        case 26: return HardwareConfig::stopPin >= 0 || registryInputPurposeAvailable("stop_switch");
+        case 27: return HardwareConfig::hasThrust;
         default: return false;
     }
 }
@@ -466,8 +481,7 @@ bool ruleActuatorAvailable(uint8_t a) {
         uint8_t idx = ChannelRegistry::outputIndexFromActuator(a);
         if (idx >= HardwareConfig::channelRegistry.outputCount) return false;
         const auto& out = HardwareConfig::channelRegistry.outputs[idx];
-        return out.installed &&
-               out.pin >= 0 &&
+        return ChannelRegistry::channelAddressable(out) &&
                !HardwareConfig::channelRegistry.ownsCoreOutput(out) &&
                !HardwareConfig::channelRegistry.boundToCoreOutput(out);
     }
@@ -633,6 +647,24 @@ bool validateSettingsDoc(const JsonDocument& doc) {
         !validBool(sd["cooldown_use_scavenge"]) ||
         !validBool(sd["cooldown_use_starter"]) ||
         !validBool(sd["cooldown_use_oil"])) return false;
+    auto sequenceContains = [](char sequence[][24], int count, const char* name) {
+        for (int i = 0; i < count; ++i) if (!strcmp(sequence[i], name)) return true;
+        return false;
+    };
+    if (sequenceContains(HardwareConfig::startupSeq, HardwareConfig::startupSeqLen, "OilPrime") &&
+        (!present(su["oil_arm_timeout_ms"]) || su["oil_arm_timeout_ms"].as<int>() < 500)) return false;
+    if ((sequenceContains(HardwareConfig::startupSeq, HardwareConfig::startupSeqLen, "WaitForInput") ||
+         sequenceContains(HardwareConfig::startupSeq, HardwareConfig::startupSeqLen, "WaitForInputOff")) &&
+        (!present(su["wait_for_input_timeout"]) || su["wait_for_input_timeout"].as<int>() < 500)) return false;
+    if (sequenceContains(HardwareConfig::startupSeq, HardwareConfig::startupSeqLen, "SafetyHold") &&
+        ((!present(su["safety_hold_ms"]) || su["safety_hold_ms"].as<int>() < 100) ||
+         (!present(su["safety_hold_timeout_ms"]) || su["safety_hold_timeout_ms"].as<int>() < 100))) return false;
+    if (sequenceContains(HardwareConfig::shutdownSeq, HardwareConfig::shutdownSeqLen, "RPMDrop") &&
+        (!present(sd["rpm_drop_timeout_ms"]) || sd["rpm_drop_timeout_ms"].as<int>() < 1000)) return false;
+    if (sequenceContains(HardwareConfig::shutdownSeq, HardwareConfig::shutdownSeqLen, "CooldownSpin") &&
+        (!present(sd["cooldown_timeout_ms"]) || sd["cooldown_timeout_ms"].as<int>() < 1000)) return false;
+    if (sequenceContains(HardwareConfig::shutdownSeq, HardwareConfig::shutdownSeqLen, "FinalStop") &&
+        (!present(sd["final_stop_timeout_ms"]) || sd["final_stop_timeout_ms"].as<int>() < 1000)) return false;
 
     JsonVariantConst th = doc["throttle"];
     if (!validNumber(th["ramp_up_ms"], 0.0f, 3600000.0f) ||
@@ -659,7 +691,12 @@ bool validateSettingsDoc(const JsonDocument& doc) {
         !validNumber(th["pullback_torque_soft_nm"], 0.0f, 1000000.0f) ||
         !validNumber(th["pullback_torque_hard_nm"], 0.0f, 1000000.0f) ||
         !validNumber(th["pullback_min_pct"], 0.0f, 100.0f) ||
-        !validNumber(th["pullback_strength"], 0.0f, 5.0f)) return false;
+        !validNumber(th["pullback_strength"], 0.0f, 5.0f) ||
+        !validInt(th["rpm_limiter_mode"], 0, 1) ||
+        !validNumber(th["pullback_lookahead_ms"], 0.0f, 5000.0f) ||
+        !validNumber(th["pullback_near_limit_rampup_ms"], 0.0f, 20000.0f) ||
+        !validNumber(th["pullback_approach_zone_rpm"], 0.0f, 1000000000.0f) ||
+        !validNumber(th["rpm_accel_filter"], 0.02f, 1.0f)) return false;
     if (present(th["pullback_n1_soft_rpm"]) && present(th["pullback_n1_hard_rpm"]) &&
         th["pullback_n1_hard_rpm"].as<float>() > 0.0f &&
         th["pullback_n1_hard_rpm"].as<float>() <= th["pullback_n1_soft_rpm"].as<float>()) return false;
@@ -740,14 +777,13 @@ bool validateSettingsDoc(const JsonDocument& doc) {
         !validNumber(rl["min_rpm"], 1.0f, 1000000000.0f) ||
         !validNumber(rl["confirm_rpm"], 1.0f, 1000000000.0f) ||
         !validNumber(rl["tot_rise_c"], 0.0f, 100000.0f) ||
-        !validInt(rl["relight_timeout_ms"], 0, 3600000))) return false;
+        !validInt(rl["relight_timeout_ms"], 0, 30000))) return false;
 
     JsonVariantConst cal = doc["calibration"];
     if (!validInt(cal["throttle_min_raw"], 0, 4095) ||
         !validInt(cal["throttle_max_raw"], 0, 4095) ||
         !validInt(cal["idle_min_raw"], 0, 4095) ||
         !validInt(cal["idle_max_raw"], 0, 4095) ||
-        !validInt(cal["flame_threshold"], 0, 4095) ||
         !validRawPair(cal, "p1_raw_min", "p1_raw_max") ||
         !validRawPair(cal, "p2_raw_min", "p2_raw_max") ||
         !validRawPair(cal, "fuel_press_raw_min", "fuel_press_raw_max") ||
@@ -774,7 +810,6 @@ bool validateSettingsDoc(const JsonDocument& doc) {
         !validNumber(di["ramp_down_ms"], 0.0f, 3600000.0f) ||
         !validNumber(di["deadband_rpm"], 0.0f, 1000000000.0f) ||
         !validNumber(di["rpm_limit"], 0.0f, 1000000000.0f) ||
-        !validNumber(di["min_multiplier"], 0.0f, 1.0f) ||
         !validNumber(di["max_multiplier"], 1.0f, 3.0f) ||
         !validBool(di["use_n2"]) ||
         !validInt(di["source"], 0, 3) ||
@@ -782,7 +817,21 @@ bool validateSettingsDoc(const JsonDocument& doc) {
         !validNumber(di["pressure_deadband_bar"], 0.0f, 1000.0f) ||
         !validNumber(di["pressure_limit_bar"], 0.0f, 1000.0f) ||
         !validNumber(di["i_gain"], 0.0f, 2.0f) ||
-        !validNumber(di["i_max"], 0.0f, 0.5f))) return false;
+        !validNumber(di["i_max"], 0.0f, 0.5f) ||
+        !validInt(di["idle_mode"], 0, 1) ||
+        !validNumber(di["decel_enter_rpm"], 0.0f, 1000000000.0f) ||
+        !validNumber(di["decel_drop_pct"], 0.0f, 50.0f) ||
+        !validNumber(di["lookahead_ms"], 0.0f, 5000.0f) ||
+        !validNumber(di["settle_band_rpm"], 0.0f, 1000000000.0f) ||
+        !validNumber(di["full_response_rpm"], 1.0f, 1000000000.0f) ||
+        !validNumber(di["trim_up_pct_s"], 0.0f, 50.0f) ||
+        !validNumber(di["trim_down_pct_s"], 0.0f, 50.0f) ||
+        !validNumber(di["learn_rate"], 0.0f, 1.0f) ||
+        !validNumber(di["learn_accel_max"], 0.0f, 1000000000.0f) ||
+        !validNumber(di["pressure_decel_enter_bar"], 0.0f, 1000.0f) ||
+        !validNumber(di["pressure_settle_band_bar"], 0.0f, 1000.0f) ||
+        !validNumber(di["pressure_full_response_bar"], 0.0001f, 1000.0f) ||
+        !validNumber(di["pressure_learn_rate_max_bar_s"], 0.0f, 1000.0f))) return false;
 
     JsonVariantConst ab = doc["afterburner"];
     if (present(ab)) {
@@ -796,7 +845,8 @@ bool validateSettingsDoc(const JsonDocument& doc) {
             !validNumber(ab["torch_spike_pct"], 0.0f, 100.0f) ||
             !validInt(ab["torch_duration_ms"], 0, 3600000) ||
             !validNumber(ab["torch_tot_limit"], 0.0f, 100000.0f) ||
-            !validInt(ab["flame_mode"], 0, 2) ||
+            !validInt(ab["torch_guard_mode"], 0, 2) ||
+            !validInt(ab["flame_mode"], 0, 3) ||
             !validNumber(ab["tot_rise_deg_c"], 0.0f, 100000.0f) ||
             !validInt(ab["tot_rise_window_ms"], 0, 3600000) ||
             !validInt(ab["assume_ignited_ms"], 0, 3600000) ||
@@ -921,7 +971,7 @@ bool validateSettingsDoc(const JsonDocument& doc) {
                 !validNumber(rule["input_max"], -1000000.0f, 1000000.0f) ||
                 !validNumber(rule["output_min"], 0.0f, 1.0f) ||
                 !validNumber(rule["output_max"], 0.0f, 1.0f) ||
-                !validInt(rule["mode_mask"], 1, 14) ||
+                !validInt(rule["mode_mask"], 1, 15) ||
                 !validRuleId(rule["source"], sizeof(Config::Rule::sourceId), ConfigInternal::ruleSourceHandle, ruleSensorAvailable) ||
                 !validRuleId(rule["target"], sizeof(Config::Rule::targetId), ConfigInternal::ruleTargetHandle, ruleActuatorAvailable)) return false;
         }
@@ -1087,6 +1137,7 @@ void Config::load() {
 
 volatile bool Config::_savePending = false;
 volatile bool Config::_runtimeStatsSavePending = false;
+volatile uint8_t Config::_runtimeStatsError = 0;
 bool Config::_missingRequiredSections = false;
 
 bool Config::acquireStorageWrite() {
@@ -1099,7 +1150,7 @@ void Config::releaseStorageWrite() {
     if (s_configWriteMutex) xSemaphoreGive(s_configWriteMutex);
 }
 
-void Config::autoFillNewlyEnabledSafety(bool prevTit, bool prevOilTemp,
+void Config::autoFillNewlyEnabledSafety(bool prevOilTemp,
                                         bool prevFuelPress, bool prevBatt,
                                         bool prevSurge, bool prevHotStart) {
     // For each threshold-based safety: if it just transitioned
@@ -1116,7 +1167,6 @@ void Config::autoFillNewlyEnabledSafety(bool prevTit, bool prevOilTemp,
             thr = def;
         }
     };
-    fill(prevTit,       HardwareConfig::safetyOvertemp && HardwareConfig::hasTit, titLimit, 900.0f, "autofill:tit_limit_c");
     fill(prevOilTemp,   HardwareConfig::safetyOilTempHigh,  oilTempLimit,           120.0f,    "autofill:oil_temp_limit_c");
     fill(prevFuelPress, HardwareConfig::safetyFuelPressLow, fuelPressMin,           0.5f,      "autofill:fuel_press_min_bar");
     fill(prevBatt,      HardwareConfig::safetyBattLow,      battVoltMin,            10.5f,     "autofill:batt_volt_min_v");
@@ -1222,7 +1272,7 @@ void Config::sanitizeForHardware() {
         r.outputMax = constrain(r.outputMax, 0.0f, 1.0f);
         if (r.kind == 1 && (!isfinite(r.inputMin) || !isfinite(r.inputMax) || r.inputMax <= r.inputMin)) continue;
         if (r.hysteresis < 0.0f) r.hysteresis = 0.0f;
-        r.modeMask &= 0x0E;
+        r.modeMask &= 0x0F;
         if (r.modeMask == 0) continue;
         if (r.actuator != 13 && r.actuator != 14)
             claimedTargets[claimedTargetCount++] = r.actuator;
@@ -1248,7 +1298,10 @@ bool Config::flushPendingSave() {
     if (!_savePending) return false;
     _savePending = false;
     bool ok = save();
-    if (!ok) Serial.println("[Config] WARNING: deferred config save failed");
+    if (!ok) {
+        _savePending = true;
+        Serial.println("[Config] WARNING: deferred config save failed; will retry in a safe window");
+    }
     return ok;
 }
 
@@ -1289,7 +1342,11 @@ void Config::loadRuntimeStats() {
 
 bool Config::flushPendingRuntimeStats() {
     if (!_runtimeStatsSavePending) return false;
-    _runtimeStatsSavePending = false;
+    static uint32_t lastAttemptMs = 0;
+    static uint32_t retryDelayMs = 1000;
+    const uint32_t now = millis();
+    if (lastAttemptMs && now - lastAttemptMs < retryDelayMs) return false;
+    lastAttemptMs = now;
     char runKey[14];
     char startKey[14];
     char rcKey[14];
@@ -1298,6 +1355,8 @@ bool Config::flushPendingRuntimeStats() {
     runtimeStatsKey(rcKey, sizeof(rcKey), "rct");
     Preferences stats;
     if (!stats.begin("ot", false)) {
+        _runtimeStatsError = 1;
+        retryDelayMs = retryDelayMs < 15000 ? retryDelayMs * 2 : 30000;
         Serial.println("[Config] WARNING: failed to open NVS for accumulated runtime");
         return false;
     }
@@ -1306,9 +1365,14 @@ bool Config::flushPendingRuntimeStats() {
     size_t writtenRuns = stats.putUInt(rcKey, runCount);
     stats.end();
     if (writtenRun == 0 || writtenStarts == 0 || writtenRuns == 0) {
+        _runtimeStatsError = 2;
+        retryDelayMs = retryDelayMs < 15000 ? retryDelayMs * 2 : 30000;
         Serial.println("[Config] WARNING: accumulated runtime NVS write failed");
         return false;
     }
+    _runtimeStatsSavePending = false;
+    _runtimeStatsError = 0;
+    retryDelayMs = 1000;
     return true;
 }
 
@@ -1359,7 +1423,7 @@ float Config::effectiveRelightMinRpm() {
     return fmaxf(relightMinRpm, minRpm);
 }
 
-void Config::clearRuntimeStats() {
+bool Config::clearRuntimeStats() {
     char runKey[14];
     char startKey[14];
     char rcKey[14];
@@ -1369,17 +1433,23 @@ void Config::clearRuntimeStats() {
     Preferences stats;
     if (!stats.begin("ot", false)) {
         Serial.println("[Config] WARNING: failed to open NVS to clear accumulated runtime");
-        return;
+        return false;
     }
     stats.remove(runKey);
     stats.remove(startKey);
     stats.remove(rcKey);
+    const bool cleared = !stats.isKey(runKey) && !stats.isKey(startKey) && !stats.isKey(rcKey);
     stats.end();
+    if (!cleared) {
+        Serial.println("[Config] WARNING: accumulated runtime keys remain after erase");
+        return false;
+    }
     portENTER_CRITICAL(&ConfigInternal::statsMux);
     totalRunSeconds = 0;
     startAttemptCount = 0;
     runCount = 0;
     portEXIT_CRITICAL(&ConfigInternal::statsMux);
+    return true;
 }
 
 void Config::addRunSeconds(uint32_t seconds) {
@@ -1401,37 +1471,191 @@ void Config::incRunCount() {
 }
 
 bool Config::save() {
+    return _saveSettingsJson(nullptr, 0);
+}
+
+// Copy one top-level object from the existing unified engine file without
+// materialising it as an ArduinoJson tree. Settings-only PATCH writes leave
+// hardware unchanged, and a fully populated registry can otherwise consume
+// the Wi-Fi driver's remaining heap while the settings candidate is resident.
+// Locate and validate the complete object first, then copy its exact bytes so
+// a malformed source can fall back without leaving a partial destination.
+static bool copyUnifiedObject(File& source, File& destination, const char* section) {
+    if (!source || !destination || !section || !section[0]) return false;
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    bool expectingKey = false;
+    bool capturingKey = false;
+    char key[24] = {};
+    size_t keyLen = 0;
+    bool found = false;
+    while (source.available()) {
+        const char ch = static_cast<char>(source.read());
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+                if (capturingKey && keyLen + 1 < sizeof(key)) key[keyLen++] = ch;
+            } else if (ch == '\\') {
+                escaped = true;
+            } else if (ch == '"') {
+                inString = false;
+                if (capturingKey) {
+                    key[keyLen] = '\0';
+                    found = strcmp(key, section) == 0;
+                    capturingKey = false;
+                    expectingKey = false;
+                    if (found) break;
+                }
+            } else if (capturingKey && keyLen + 1 < sizeof(key)) {
+                key[keyLen++] = ch;
+            }
+            continue;
+        }
+        if (ch == '"') {
+            inString = true;
+            escaped = false;
+            capturingKey = depth == 1 && expectingKey;
+            keyLen = 0;
+        } else if (ch == '{') {
+            ++depth;
+            if (depth == 1) expectingKey = true;
+        } else if (ch == '}') {
+            --depth;
+        } else if (ch == ',' && depth == 1) {
+            expectingKey = true;
+        }
+    }
+    if (!found) return false;
+
+    int next = -1;
+    do { next = source.read(); } while (next >= 0 && isspace(next));
+    if (next != ':') return false;
+    do { next = source.read(); } while (next >= 0 && isspace(next));
+    if (next != '{') return false;
+    const size_t objectStart = source.position() - 1;
+
+    int objectDepth = 1;
+    inString = false;
+    escaped = false;
+    while (objectDepth > 0 && source.available()) {
+        const char ch = static_cast<char>(source.read());
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') inString = false;
+        } else if (ch == '"') {
+            inString = true;
+        } else if (ch == '{') {
+            ++objectDepth;
+        } else if (ch == '}') {
+            --objectDepth;
+        }
+    }
+    if (objectDepth != 0 || inString) return false;
+    const size_t objectEnd = source.position();
+    if (objectEnd <= objectStart || !source.seek(objectStart)) return false;
+
+    uint8_t buffer[256];
+    size_t remaining = objectEnd - objectStart;
+    while (remaining > 0) {
+        const size_t wanted = min(remaining, sizeof(buffer));
+        const size_t got = source.read(buffer, wanted);
+        if (got != wanted || destination.write(buffer, got) != got) return false;
+        remaining -= got;
+    }
+    return true;
+}
+
+bool Config::_saveSettingsJson(const char* settingsJson, size_t settingsLen) {
     static constexpr const char* TMP_PATH = "/ecu_config.tmp";
     static constexpr const char* BAK_PATH = "/ecu_config.bak";
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+    static constexpr const char* APPLY_PATH = "/config_apply.tmp";
+    const bool hasStagedSettings = settingsLen > 0;
+#endif
     if (!acquireStorageWrite()) {
         Serial.println("[Config] Timed out waiting to write ecu_config.json");
         return false;
     }
     ConfigStorageWriteRelease release;
 
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+    // Keep an exact, bounded copy for the ECU core. Mutable-buffer parsing is
+    // normally zero-copy, but a fully configured Classic ESP32 may not have a
+    // large enough contiguous block until that transfer buffer is released.
+    // This file is transaction scratch only; boot never consumes it.
+    if (settingsJson) {
+        File apply = LittleFS.open(APPLY_PATH, "w");
+        const bool applyOk = apply && settingsLen > 0 &&
+            apply.write(reinterpret_cast<const uint8_t*>(settingsJson), settingsLen) == settingsLen;
+        if (apply) apply.close();
+        if (!applyOk) {
+            LittleFS.remove(APPLY_PATH);
+            Serial.println("[Config] Failed to stage Classic runtime candidate");
+            return false;
+        }
+    }
+#endif
+
     // Stream the two authoritative runtime sections separately. A fully fitted
     // hardware tree plus settings cannot coexist in one ArduinoJson document
     // on a fragmented Classic ESP32 heap. Both runtime sections were validated
     // before reaching save(), and the temp/backup rename below remains atomic.
     File fw = LittleFS.open(TMP_PATH, "w");
-    if (!fw) { Serial.println("[Config] Failed to open ecu_config.tmp for write"); return false; }
+    if (!fw) {
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+        if (hasStagedSettings) LittleFS.remove(APPLY_PATH);
+#endif
+        Serial.println("[Config] Failed to open ecu_config.tmp for write");
+        return false;
+    }
     bool ok = fw.print("{\"hardware\":") == strlen("{\"hardware\":");
     JsonDocument section;
-    HardwareConfig::toJson(section, false);
-    const size_t hardwareExpected = measureJson(section);
-    ok &= serializeJson(section, fw) == hardwareExpected;
+    bool copiedHardware = false;
+    if (hasStagedSettings && ok) {
+        File current = LittleFS.open(PATH, "r");
+        copiedHardware = current && copyUnifiedObject(current, fw, "hardware");
+        if (current) current.close();
+    }
+    if (!copiedHardware) {
+        HardwareConfig::toJson(section, false);
+        const size_t hardwareExpected = measureJson(section);
+        ok &= serializeJson(section, fw) == hardwareExpected;
+    }
     section.clear();
     section.shrinkToFit();
     delay(0);
 
     ok &= fw.print(",\"settings\":") == strlen(",\"settings\":");
-    _writeDoc(section.to<JsonObject>());
-    const size_t settingsExpected = measureJson(section);
-    ok &= serializeJson(section, fw) == settingsExpected;
+    if (settingsJson) {
+        ok &= settingsLen > 0 && fw.write((const uint8_t*)settingsJson, settingsLen) == settingsLen;
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+    } else if (hasStagedSettings) {
+        File staged = LittleFS.open(APPLY_PATH, "r");
+        size_t remaining = settingsLen;
+        uint8_t buffer[256];
+        while (staged && remaining > 0 && ok) {
+            const size_t wanted = min(remaining, sizeof(buffer));
+            const size_t got = staged.read(buffer, wanted);
+            ok &= got == wanted && fw.write(buffer, got) == got;
+            remaining -= got;
+        }
+        ok &= staged && remaining == 0 && staged.available() == 0;
+        if (staged) staged.close();
+#endif
+    } else {
+        _writeDoc(section.to<JsonObject>());
+        const size_t settingsExpected = measureJson(section);
+        ok &= serializeJson(section, fw) == settingsExpected;
+    }
     ok &= fw.print('}') == 1;
     fw.close();
     if (!ok) {
         LittleFS.remove(TMP_PATH);
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+        if (hasStagedSettings) LittleFS.remove(APPLY_PATH);
+#endif
         Serial.println("[Config] Incomplete write to ecu_config.tmp");
         return false;
     }
@@ -1441,6 +1665,9 @@ bool Config::save() {
     bool hadOriginal = LittleFS.exists(PATH);
     if (hadOriginal && !LittleFS.rename(PATH, BAK_PATH)) {
         LittleFS.remove(TMP_PATH);
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+        if (hasStagedSettings) LittleFS.remove(APPLY_PATH);
+#endif
         Serial.println("[Config] failed to preserve previous ecu_config.json");
         return false;
     }
@@ -1448,6 +1675,9 @@ bool Config::save() {
         Serial.println("[Config] rename ecu_config.tmp failed");
         const bool restored = !hadOriginal || LittleFS.rename(BAK_PATH, PATH);
         LittleFS.remove(TMP_PATH);
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+        if (hasStagedSettings) LittleFS.remove(APPLY_PATH);
+#endif
         if (!restored) {
             // Keep ecu_config.bak: load() can recover it on a later boot once
             // the filesystem is writable again.
@@ -1463,7 +1693,10 @@ bool Config::isLocked() {
     auto& ed = EngineData::instance();
     auto m = ed.mode;
     bool active = (m == SysMode::STARTUP || m == SysMode::RUNNING || m == SysMode::SHUTDOWN);
-    return active && !ed.devMode;
+    // This reports whether the complete configuration is locked. Developer
+    // Mode opens only the explicitly whitelisted live-tuning PATCH window in
+    // RUNNING; it never makes STARTUP/SHUTDOWN or the full config writable.
+    return active;
 }
 
 size_t Config::toJson(char* buf, size_t len) {
@@ -1489,7 +1722,7 @@ bool Config::validateJson(const char* json, size_t len) {
 }
 
 bool Config::validateJson(const JsonDocument& doc) {
-    if (!validateSettingsDoc(doc)) return false;
+    if (!validateJsonValues(doc)) return false;
     if (HardwareConfig::hasDynamicIdle) {
         const int source = doc["dynamic_idle"]["source"] | 0;
         if ((source == 0 && !HardwareConfig::hasN1Rpm) ||
@@ -1502,6 +1735,38 @@ bool Config::validateJson(const JsonDocument& doc) {
             !HardwareConfig::hasN1Rpm) return false;
     }
     return true;
+}
+
+bool Config::validateJsonValues(const JsonDocument& doc) {
+    return validateSettingsDoc(doc);
+}
+
+DeserializationError Config::loadStagedJsonCandidate(JsonDocument& doc) {
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+    static constexpr const char* APPLY_PATH = "/config_apply.tmp";
+    if (!acquireStorageWrite()) return DeserializationError::NoMemory;
+    ConfigStorageWriteRelease release;
+    File staged = LittleFS.open(APPLY_PATH, "r");
+    if (!staged) return DeserializationError::InvalidInput;
+    const DeserializationError error = deserializeJson(doc, staged);
+    staged.close();
+    if (error != DeserializationError::Ok) {
+        Serial.printf("[Config] Staged runtime candidate parse failed: %s\n", error.c_str());
+    }
+    return error;
+#else
+    (void)doc;
+    return DeserializationError::InvalidInput;
+#endif
+}
+
+void Config::clearStagedJsonCandidate() {
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+    static constexpr const char* APPLY_PATH = "/config_apply.tmp";
+    if (!acquireStorageWrite()) return;
+    ConfigStorageWriteRelease release;
+    LittleFS.remove(APPLY_PATH);
+#endif
 }
 
 bool Config::fromJson(const char* json, size_t len) {

@@ -22,10 +22,8 @@ public:
         // Proceed only when healthy feedback confirms low RPM, or when the
         // timeout expires. Missing/unhealthy RPM feedback should not skip the
         // wait, because the next cooldown step may spin the starter.
-        if ((ed.n1Healthy && ed.n1Rpm < rpmThreshold) ||
-            (millis() - _entryMs) > timeoutMs) {
-            return BlockResult::Complete;
-        }
+        if (ed.n1Healthy && ed.n1Rpm < rpmThreshold) return BlockResult::Complete;
+        if ((millis() - _entryMs) > timeoutMs) return BlockResult::TimeoutContinue;
         return BlockResult::Running;
     }
 

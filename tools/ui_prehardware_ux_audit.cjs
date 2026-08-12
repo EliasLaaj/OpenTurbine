@@ -182,11 +182,11 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
         { disabled: button.disabled, detail: button.querySelector('.registry-add-default')?.textContent?.trim() || '', description: button.querySelector('small')?.textContent?.trim() || '' }
       ]))
     );
-    for (const label of ['N1 speed', 'N2 speed', 'TOT / EGT', 'TIT', 'Oil pressure', 'AB flame', 'Throttle input', 'Idle input']) {
+    for (const label of ['N1 speed', 'N2 speed', 'TOT / EGT', 'TIT', 'AB flame', 'Throttle input', 'Idle input']) {
       assert.equal(inputAddChoices[label]?.disabled, true, `${label} should not be addable twice`);
       assert.match(inputAddChoices[label]?.detail || '', /already installed/i);
     }
-    for (const label of ['Additional shaft speed', 'Generic digital input']) {
+    for (const label of ['Oil pressure', 'Additional shaft speed', 'Generic digital input']) {
       assert.doesNotMatch(inputAddChoices[label]?.detail || '', /already installed/i);
       if (inputAddChoices[label]?.disabled) assert.match(inputAddChoices[label]?.detail || '', /capacity full/i);
     }
@@ -205,11 +205,10 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
         { disabled: button.disabled, detail: button.querySelector('.registry-add-default')?.textContent?.trim() || '', description: button.querySelector('small')?.textContent?.trim() || '' }
       ]))
     );
-    for (const label of ['Main fuel pump', 'Starter', 'Starter enable', 'Fuel shutoff', 'Igniter', 'AB igniter', 'Afterburner fuel shutoff valve', 'Afterburner fuel pump', 'Glow plug', 'Prop pitch']) {
-      assert.equal(outputAddChoices[label]?.disabled, true, `${label} should not be addable twice`);
-      assert.match(outputAddChoices[label]?.detail || '', /already installed/i);
-    }
-    for (const label of ['Relay output', 'PWM output']) {
+    // Outputs may legitimately be multi-instance (series valves, redundant
+    // pumps, auxiliary starters, etc.). A full test inventory can still make
+    // every catalog entry unavailable because the channel capacity is real.
+    for (const label of ['Main fuel pump', 'Starter', 'Starter enable', 'Fuel shutoff', 'Igniter', 'AB igniter', 'Afterburner fuel shutoff valve', 'Afterburner fuel pump', 'Glow plug', 'Prop pitch', 'Relay output', 'PWM output']) {
       assert.doesNotMatch(outputAddChoices[label]?.detail || '', /already installed/i);
       if (outputAddChoices[label]?.disabled) assert.match(outputAddChoices[label]?.detail || '', /capacity full/i);
     }
@@ -224,7 +223,35 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.equal(await oilPumpCard.locator('a[href="/config.html#cf-oil_mm"]').count(), 1);
     assert.equal(await oilPumpCard.locator('a[href="/config.html#cf-so_rl"]').count(), 1);
     assert.equal(await oilPumpCard.locator('a[href="/sequence.html#tab-startup"]').count(), 1);
-    results.push('add-device catalog blocks duplicates while pump-owned flow and current sensors stay in their actuator cards');
+    results.push('add-device catalog reserves singleton checks for sensors while multi-instance outputs and pump-owned monitoring remain clear');
+
+    const multiPumpFlow = await page.evaluate(() => {
+      cfg.channel_registry = {version:1, bindings:[], inputs:[
+        {id:'oil_flow',name:'Legacy Oil Flow',purpose:'oil_flow',role:'flow',driver:2,pin:4,min:0,max:1}
+      ], outputs:[
+        {id:'abcdefghij_primary',name:'Oil Pump 1',purpose:'oil_pump',role:'oil_pump',driver:5,pin:16,min:0,max:1,has_flow_monitor:true},
+        {id:'abcdefghij_aux_one',name:'Oil Pump 2',purpose:'oil_pump',role:'oil_pump',driver:5,pin:17,min:0,max:1},
+        {id:'abcdefghij_aux_two',name:'Oil Pump 3',purpose:'oil_pump',role:'oil_pump',driver:5,pin:18,min:0,max:1}
+      ]};
+      setPumpFlowSensorEnabled(0, true);
+      setPumpFlowSensorEnabled(1, true);
+      setPumpFlowSensorEnabled(2, true);
+      return {
+        links: cfg.channel_registry.outputs.map(row => row.flow_input || ''),
+        ids: cfg.channel_registry.inputs.map(row => row.id),
+        secondLookup: pumpFlowInput(cfg.channel_registry.outputs[1]).channel?.id || '',
+        thirdLookup: pumpFlowInput(cfg.channel_registry.outputs[2]).channel?.id || ''
+      };
+    });
+    assert.equal(multiPumpFlow.links[0], 'oil_flow');
+    assert.equal(new Set(multiPumpFlow.links).size, 3);
+    assert.equal(new Set(multiPumpFlow.ids).size, 3);
+    assert.equal(multiPumpFlow.secondLookup, multiPumpFlow.links[1]);
+    assert.equal(multiPumpFlow.thirdLookup, multiPumpFlow.links[2]);
+    results.push('multiple oil pumps receive deterministic independent flow sensors with collision-safe IDs');
+
+    await reset(page);
+    await goto(page, 'hardware.html', '#registry-inputs');
 
     const flameUsers = await page.evaluate(() => ({
       main: registryCurrentUsers('input', 'flame_main'),
@@ -396,16 +423,65 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       const card = Array.from(document.querySelectorAll('#registry-outputs .registry-card')).at(-1);
       return /GPIO 17/.test(card?.textContent || '') && /Ready/.test(card?.textContent || '');
     });
-    assert.equal(await draftedAbIgniter.locator('select').nth(3).inputValue(), 'relay');
+    assert.equal(await draftedAbIgniter.locator('select').nth(1).inputValue(), '4');
+    assert.equal(await draftedAbIgniter.locator('select').nth(3).inputValue(), '0',
+      'a new relay output should default to Active high polarity');
     assert.equal(await draftedAbIgniter.locator('.registry-subcard', { hasText: 'Current sensing' }).locator('input[type="checkbox"]').isChecked(), false);
     assert.doesNotMatch(await draftedAbIgniter.textContent(), /Current sensing required/i);
     await page.reload();
     await page.waitForSelector('#registry-outputs .registry-card');
     results.push('new cards ignore phantom legacy pins, refresh readiness, and reset stale device-specific modes');
 
+    const topologyMutation = await page.evaluate(() => {
+      const oldRegistry = cfg.channel_registry;
+      const oldStartup = cfg.startup_enter_actions;
+      const oldCustom = cfg.custom_blocks;
+      const oldRules = settingsCfg.rules;
+      try {
+        cfg.channel_registry = {
+          inputs:[],
+          outputs:[
+            {id:'main_fuel',name:'Primary fuel',purpose:'main_fuel',role:'fuel',driver:5,pin:25,min:0,max:1},
+            {id:'spare_pwm',name:'Spare PWM',purpose:'warning_indicator',role:'indicator',driver:5,pin:26,min:0,max:1},
+            {id:'tail_pwm',name:'Tail PWM',purpose:'warning_indicator',role:'indicator',driver:5,pin:27,min:0,max:1}
+          ],
+          bindings:[{key:'main_fuel_output',channel:'main_fuel'}]
+        };
+        updateRegistryChannel('output', 1, 'purpose', 'main_fuel');
+        const ownerPreserved = cfg.channel_registry.bindings.find(b => b.key === 'main_fuel_output')?.channel === 'main_fuel';
+
+        cfg.startup_enter_actions = [[{act:66}]];
+        cfg.custom_blocks = {tail_action:{type:'action',steps:[{actuator:66,act:66,target:66}]}};
+        settingsCfg.rules = [{sensor:0,actuator:66}];
+        cleanupRegistryReferences('output', 'spare_pwm');
+        shiftRegistryNumericHandlesAfterRemoval('output', 1, 3);
+        cfg.channel_registry.outputs.splice(1, 1);
+        const refs = {
+          side:cfg.startup_enter_actions[0][0].act,
+          actuator:cfg.custom_blocks.tail_action.steps[0].actuator,
+          act:cfg.custom_blocks.tail_action.steps[0].act,
+          target:cfg.custom_blocks.tail_action.steps[0].target,
+          rule:settingsCfg.rules[0].actuator
+        };
+        return {ownerPreserved, refs, tailId:cfg.channel_registry.outputs[1]?.id};
+      } finally {
+        cfg.channel_registry = oldRegistry;
+        cfg.startup_enter_actions = oldStartup;
+        cfg.custom_blocks = oldCustom;
+        settingsCfg.rules = oldRules;
+        renderRegistryInventory();
+      }
+    });
+    assert.equal(topologyMutation.ownerPreserved, true,
+      're-purposing a spare output must not silently steal the existing primary binding');
+    assert.deepEqual(topologyMutation.refs, {side:65, actuator:65, act:65, target:65, rule:65});
+    assert.equal(topologyMutation.tailId, 'tail_pwm');
+    results.push('output re-purpose and removal keep explicit ownership and surviving numeric references attached to the same card');
+
     const mainFuelCard = page.locator('#registry-outputs .registry-card').first();
     assert.match(await mainFuelCard.locator('strong').first().textContent(), /Main Fuel Pump/);
-    assert.equal(await mainFuelCard.locator('button', { hasText: 'Duplicate' }).count(), 0);
+    assert.equal(await mainFuelCard.locator('button', { hasText: 'Duplicate' }).count(), 1,
+      'core-purpose outputs remain duplicable for redundant or auxiliary hardware');
     assert.equal(await mainFuelCard.locator('button.danger', { hasText: 'Remove' }).count(), 1);
     const mainFuelEdit = mainFuelCard.locator('button', { hasText: 'Edit' });
     const mainFuelRemove = mainFuelCard.locator('button.remove-action', { hasText: 'Remove' });
@@ -426,8 +502,9 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       const card = installedOutputCards.nth(i);
       await card.locator('button', { hasText: 'Edit' }).click();
       const fallback = card.locator('input[onchange*="force_safe_on_fault"]');
-      assert.equal(await fallback.count(), 1);
-      assert.equal(await fallback.isChecked(), false);
+      const fixedInvariant = card.getByText('Running fault state', { exact:true });
+      assert.equal((await fallback.count()) + (await fixedInvariant.count()), 1);
+      if (await fallback.count()) assert.equal(await fallback.isChecked(), false);
       await card.locator('button', { hasText: 'Done' }).click();
     }
     const igniterCard = installedOutputCards.nth(3);
@@ -439,13 +516,22 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     }), true);
     await igniterCard.locator('button', { hasText: 'Done' }).click();
 
-    await mainFuelCard.locator('button', { hasText: 'Edit' }).click();
-    await mainFuelCard.locator('summary', { hasText: 'Advanced output settings' }).click();
-    const mainFuelFaultFallback = mainFuelCard.locator('input[onchange*="force_safe_on_fault"]');
+    let faultOverrideCard = null;
+    let mainFuelFaultFallback = null;
+    for (let i = 0; i < await installedOutputCards.count(); i++) {
+      const card = installedOutputCards.nth(i);
+      await card.locator('button', { hasText: 'Edit' }).click();
+      const advanced = card.locator('summary', { hasText: 'Advanced output settings' });
+      if (await advanced.count()) await advanced.click();
+      const candidate = card.locator('input[onchange*="force_safe_on_fault"]');
+      if (await candidate.count()) { faultOverrideCard = card; mainFuelFaultFallback = candidate; break; }
+      await card.locator('button', { hasText: 'Done' }).click();
+    }
+    assert.ok(faultOverrideCard, 'at least one general/mechanical output keeps the configurable fault override');
     await mainFuelFaultFallback.check();
-    assert.equal(await mainFuelCard.evaluate(el => el.classList.contains('field-changed')), true);
+    assert.equal(await faultOverrideCard.evaluate(el => el.classList.contains('field-changed')), true);
     const faultFallbackChanges = await page.evaluate(() => _buildChanges());
-    assert.match(JSON.stringify(faultFallbackChanges), /Main Fuel Pump.*Force safe state on fault.*Disabled.*Enabled/is);
+    assert.match(JSON.stringify(faultFallbackChanges), /Force safe state on fault.*Disabled.*Enabled/is);
     const saveDialogs = [];
     const captureSaveDialog = async dialog => {
       saveDialogs.push(dialog.message());
@@ -463,7 +549,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.equal(await page.locator('#save-recap-modal').isVisible(), true,
       `save recap stayed hidden; state: ${JSON.stringify(hiddenSaveState)}; preflight dialog: ${saveDialogs.join(' | ') || 'none'}`);
     page.off('dialog', captureSaveDialog);
-    assert.match(await text(page, '#save-recap-body'), /Main Fuel Pump.*Force safe state on fault.*Disabled.*Enabled/is);
+    assert.match(await text(page, '#save-recap-body'), /Force safe state on fault.*Disabled.*Enabled/is);
     await page.locator('#save-recap-modal button', { hasText: 'Cancel' }).click();
     await page.reload();
     await page.waitForSelector('#registry-outputs .registry-card');
@@ -485,6 +571,99 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await page.reload();
     await page.waitForSelector('#registry-outputs .registry-card');
     results.push('outputs hide internal IDs, normalize re-added-device recaps, and explain rejected device data');
+
+    const registryCalibrationRecap = await page.evaluate(() => {
+      const before = {version:1, bindings:[], inputs:[
+        {id:'test_pressure',name:'Test Pressure',purpose:'coolant_pressure',role:'pressure',driver:9,pin:-1,
+         i2c_address:16,device_channel:0,min:0,max:4095,analog_zero_mv:500,analog_mv_per_unit:400,
+         analog_divider:1,i2c_reference_mv:3300,filter_alpha:1,calibration_points:[]},
+        {id:'test_thrust',name:'Test Thrust',purpose:'thrust',role:'thrust',driver:10,pin:-1,
+         i2c_address:42,device_channel:0,min:0,max:1,loadcell_gain:128,loadcell_rate_sps:80,
+         loadcell_zero:0,loadcell_n_per_count:1,lever_arm_m:0,filter_alpha:.25}
+      ], outputs:[
+        {id:'test_scavenge',name:'Test Scavenge',purpose:'scavenge_pump',role:'scavenge_pump',driver:5,pin:18,
+         min:0,max:1,has_flow_monitor:true,minimum_flow_l_min:.1,flow_input:'flow_a'},
+        {id:'test_relay',name:'Test Relay',purpose:'generic',role:'generic',driver:11,pin:-1,
+         i2c_address:32,device_channel:0,min:0,max:1,has_current:false}
+      ]};
+      cfg.channel_registry = structuredClone(before);
+      _registrySnap = structuredClone(before);
+      cfg.channel_registry.inputs[0].i2c_address = 17;
+      cfg.channel_registry.inputs[0].device_channel = 3;
+      cfg.channel_registry.inputs[0].analog_zero_mv = 625;
+      cfg.channel_registry.inputs[0].calibration_points = [{raw:200,value:0},{raw:3800,value:12}];
+      cfg.channel_registry.inputs[1].loadcell_gain = 64;
+      cfg.channel_registry.inputs[1].loadcell_zero = 12345;
+      cfg.channel_registry.inputs[1].loadcell_n_per_count = .002;
+      cfg.channel_registry.outputs[0].flow_input = 'flow_b';
+      cfg.channel_registry.outputs[1].i2c_address = 33;
+      cfg.channel_registry.outputs[1].device_channel = 4;
+      cfg.channel_registry.outputs[1].has_current = true;
+      cfg.channel_registry.outputs[1].current_pin = 34;
+      return [..._registryDiffRows('input'), ..._registryDiffRows('output')];
+    });
+    const registryCalibrationRecapText = JSON.stringify(registryCalibrationRecap);
+    for (const expected of ['I2C address','Device channel','Analog zero offset','Multi-point calibration curve',
+                            'Load-cell gain','Load-cell zero','Load-cell scale','Flow sensor','Current sensing','Current sensor pin'])
+      assert.match(registryCalibrationRecapText, new RegExp(expected, 'i'));
+    assert.equal((registryCalibrationRecapText.match(/I2C address/gi) || []).length, 2,
+      'both input and output I2C routing changes must be reviewable');
+    assert.doesNotMatch(registryCalibrationRecapText, /\[object Object\]/,
+      'multi-point calibration recap must remain readable');
+    await page.reload();
+    await page.waitForSelector('#registry-outputs .registry-card');
+    results.push('hardware save review includes every editable I2C, curve, load-cell, and flow-routing change');
+
+    const concurrentRegistryMerge = await page.evaluate(() => {
+      const base = {channel_registry:{version:1,bindings:[],inputs:[
+        {id:'pressure_a',name:'Pressure A',purpose:'coolant_pressure',role:'pressure',driver:9,pin:-1,
+         i2c_address:16,device_channel:0,min:0,max:4095,analog_zero_mv:500,analog_mv_per_unit:400},
+        {id:'pressure_b',name:'Pressure B',purpose:'generic',role:'generic',driver:9,pin:-1,
+         i2c_address:16,device_channel:1,min:0,max:4095,calibration_points:[]}
+      ],outputs:[]}};
+      const edited = structuredClone(base);
+      edited.channel_registry.inputs[0].name = 'Oil Gallery';
+      const fresh = structuredClone(base);
+      fresh.channel_registry.inputs[0].analog_zero_mv = 612;
+      fresh.channel_registry.inputs[1].calibration_points = [{raw:100,value:0},{raw:3900,value:10}];
+      fresh.channel_registry.inputs.push({id:'fresh_input',name:'Fresh Input',purpose:'generic',role:'generic',driver:0,pin:21,min:0,max:1});
+      const merged = mergeHardwareEdits(base, edited, fresh);
+      return merged.channel_registry.inputs;
+    });
+    assert.equal(concurrentRegistryMerge.find(row => row.id === 'pressure_a').name, 'Oil Gallery');
+    assert.equal(concurrentRegistryMerge.find(row => row.id === 'pressure_a').analog_zero_mv, 612);
+    assert.equal(concurrentRegistryMerge.find(row => row.id === 'pressure_b').calibration_points.length, 2);
+    assert.equal(concurrentRegistryMerge.some(row => row.id === 'fresh_input'), true);
+    results.push('hardware three-way save preserves concurrent per-sensor calibration and newly added registry cards');
+
+    const digitalRegistryEditors = await page.evaluate(() => {
+      const tcaSwitch = {id:'remote_stop',purpose:'stop_switch',role:'digital_switch',driver:8,min:0,max:1,active_high:false};
+      const tlaSwitch = {id:'remote_gate',purpose:'sequence_gate',role:'sequence_gate',driver:9,min:0,max:4095,active_high:true};
+      tlaSwitch.i2c_reference_mv = 3300;
+      tlaSwitch.digital_threshold_raw = 32;
+      tlaSwitch.digital_hysteresis_raw = 64;
+      const analogAbFlame = {id:'ab_flame_test',purpose:'ab_flame',role:'flame',driver:1,min:0,max:4095,invert:true,active_high:true};
+      const holder = document.createElement('div');
+      holder.innerHTML = registryI2cEditor('input', tlaSwitch, 1);
+      const hysteresisField = Array.from(holder.querySelectorAll('.hw-field')).find(field =>
+        field.querySelector('.hw-label')?.textContent.includes('Switch hysteresis'));
+      return {
+        tcaRange: registryRangeEditor('input', tcaSwitch, 0),
+        tcaOptions: registryInputOptionsEditor('input', tcaSwitch, 0),
+        tlaOptions: registryInputOptionsEditor('input', tlaSwitch, 1),
+        tlaHysteresisMax: Number(hysteresisField?.querySelector('input')?.max),
+        tlaHysteresisValue: Number(hysteresisField?.querySelector('input')?.value),
+        abInvert: registryInvertEditor('input', analogAbFlame, 2)
+      };
+    });
+    assert.match(digitalRegistryEditors.tcaRange, /inactive.*active.*active electrical state/is);
+    assert.doesNotMatch(digitalRegistryEditors.tcaRange, /type="number"/i);
+    assert.match(digitalRegistryEditors.tcaOptions, /Active state.*High.*Low/is);
+    assert.match(digitalRegistryEditors.tlaOptions, /Active state.*above threshold.*below threshold/is);
+    assert.ok(digitalRegistryEditors.tlaHysteresisMax > 0 && digitalRegistryEditors.tlaHysteresisMax < .1);
+    assert.ok(digitalRegistryEditors.tlaHysteresisValue <= digitalRegistryEditors.tlaHysteresisMax);
+    assert.equal(digitalRegistryEditors.abInvert, '');
+    results.push('digital and threshold I2C inputs expose one real polarity control and no ignored range or AB inversion controls');
 
     const stopCard = page.locator('#builtin-inputs .hw-item-card[data-workflow-key="stop"]');
     await stopCard.locator('button', { hasText: 'Edit' }).click();
@@ -527,16 +706,74 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
 
     await reset(page);
     await patchHardware(page, {
-      channel_registry: {version:1, inputs:[{installed:true,id:'ab_flame_main',name:'AB Flame',purpose:'ab_flame',role:'flame',driver:1,pin:32,min:0,max:4095}], outputs:[{installed:true,id:'ab_pump',name:'AB Fuel Pump',purpose:'ab_pump',role:'ab_pump',driver:5,pin:17,min:0,max:1,pwm_freq_hz:5000,pwm_res_bits:10}], bindings:[]},
+      channel_registry: {version:1, inputs:[{installed:true,id:'ab_flame_main',name:'AB Flame',purpose:'ab_flame',role:'flame',driver:1,pin:32,min:0,max:4095,digital_threshold_raw:900,digital_hysteresis_raw:80,active_high:false}], outputs:[{installed:true,id:'ab_pump',name:'AB Fuel Pump',purpose:'ab_pump',role:'ab_pump',driver:5,pin:17,min:0,max:1,pwm_freq_hz:5000,pwm_res_bits:10}], bindings:[]},
       ab_trigger: {source:2, switch_pin:34, switch_active_h:true, input_pin:33, input_threshold:2048, requires_arm:true, arm_pin:35, arm_active_h:true}
     });
     await page.request.post(`${base}/__sim/scenario/minimal`);
     await goto(page, 'hardware.html', '#registry-inputs');
     assert.match(await text(page, '#registry-inputs'), /AB Flame/);
+    const abFlameCard = page.locator('#registry-inputs .registry-card[data-registry-id="ab_flame_main"]');
+    await abFlameCard.locator('button', {hasText:'Edit'}).click();
+    assert.match(await abFlameCard.textContent(), /Flame active state.*Below threshold.*Threshold: 900 raw ADC.*Hysteresis/is);
+    assert.equal(await abFlameCard.locator('input[aria-label="AB flame hysteresis"]').inputValue(), '80');
     assert.match(await text(page, '#builtin-inputs'), /Afterburner trigger and arm.*Physical trigger switch.*arm GPIO 35/is);
     assert.match(await text(page, '#save-msg'), /Loaded/i);
     assert.equal(await page.locator('.save-bar').evaluate(el => el.classList.contains('is-dirty')), false);
     results.push('canonical AB flame and trigger hardware loads as visible reviewable inventory');
+
+    await goto(page, 'calibration.html', '#ab-flame-cal-row');
+    assert.equal(await page.locator('#ab-flame-thr-direct').inputValue(), '900');
+    await page.locator('#ab-flame-thr-direct').fill('1234');
+    await page.locator('#ab-flame-cal-row button', {hasText:'Set threshold'}).click();
+    await page.waitForFunction(() => document.querySelector('#ab-flame-status')?.textContent.includes('1234'));
+    const savedAbFlame = await state(page);
+    assert.equal(savedAbFlame.hardware.ab_flame, undefined);
+    assert.equal(savedAbFlame.hardware.channel_registry.inputs.find(row => row.id === 'ab_flame_main').digital_threshold_raw, 1234);
+    await page.locator('#ab-flame-thr-direct').fill('3601');
+    await page.locator('#ab-flame-cal-row button', {hasText:'Set threshold'}).click();
+    await page.waitForFunction(() => document.querySelector('#ab-flame-status')?.textContent.includes('false flame detection'));
+    assert.match(await text(page, '#ab-flame-status'), /active-below.*false flame detection/is);
+    await page.locator('#ab-flame-thr-direct').fill('0');
+    await page.locator('#ab-flame-cal-row button', {hasText:'Set threshold'}).click();
+    await page.waitForFunction(() => document.querySelector('#ab-flame-status')?.textContent.includes('weak flame'));
+    assert.match(await text(page, '#ab-flame-status'), /active-below.*weak flame may not be detected/is);
+    results.push('AB flame Calibration updates only the canonical registry threshold');
+
+    const digitalAbHardware = (await (await page.request.get(`${base}/api/hardware`)).json());
+    const digitalAbFlame = digitalAbHardware.channel_registry.inputs.find(row => row.id === 'ab_flame_main');
+    digitalAbFlame.driver = 0;
+    digitalAbFlame.active_high = false;
+    await patchHardware(page, { channel_registry: digitalAbHardware.channel_registry });
+    await goto(page, 'calibration.html', '#ab-flame-cal-row');
+    assert.equal(await page.locator('#ab-flame-cal-row > #ab-flame-threshold-tools').count(), 1);
+    assert.equal(await page.locator('#flame-cal-row > #flame-threshold-tools').count(), 1);
+    assert.equal(await visible(page, '#flame-threshold-tools'), true);
+    assert.equal(await visible(page, '#ab-flame-threshold-tools'), false);
+    assert.match(await text(page, '#ab-flame-digital-note'), /direct On\/Off state.*active-high or active-low.*no ADC threshold/is);
+    results.push('digital AB flame inputs do not expose an ineffective analog threshold wizard');
+
+    const adcSwitchHardware = (await (await page.request.get(`${base}/api/hardware`)).json());
+    adcSwitchHardware.channel_registry.inputs.push({installed:true,id:'pressure_accumulator_ready',name:'Accumulator Ready',purpose:'digital_switch',role:'digital_switch',driver:1,pin:39,min:0,max:4095,digital_threshold_raw:2048,digital_hysteresis_raw:64,active_high:true});
+    await patchHardware(page, {channel_registry:adcSwitchHardware.channel_registry});
+    await patchData(page, {registry_inputs:[{id:'pressure_accumulator_ready',value:0,raw:700,healthy:true}]});
+    await goto(page, 'calibration.html', '#adc-switch-cal-row');
+    assert.equal(await visible(page, '#adc-switch-cal-row'), true);
+    const adcSwitch = page.locator('#adc-switch-cal-list [data-channel-id="pressure_accumulator_ready"]');
+    await adcSwitch.locator('button', {hasText:'Capture inactive'}).click();
+    await page.waitForFunction(() => document.querySelector('[data-channel-id="pressure_accumulator_ready"] [data-adc-status]')?.textContent.includes('Inactive captured'));
+    await patchData(page, {registry_inputs:[{id:'pressure_accumulator_ready',value:1,raw:3300,healthy:true}]});
+    await adcSwitch.locator('button', {hasText:'Capture active'}).click();
+    await page.waitForFunction(() => document.querySelector('[data-channel-id="pressure_accumulator_ready"] [data-adc-status]')?.textContent.includes('Calculated threshold'));
+    assert.equal(await adcSwitch.locator('[data-adc-threshold]').inputValue(), '2000');
+    assert.equal(await adcSwitch.locator('[data-adc-polarity]').inputValue(), '1');
+    await adcSwitch.locator('button', {hasText:'Save'}).click();
+    await page.waitForFunction(() => document.querySelector('[data-channel-id="pressure_accumulator_ready"] [data-adc-status]')?.textContent === 'Saved.');
+    const savedAdcSwitch = (await state(page)).hardware.channel_registry.inputs.find(row => row.id === 'pressure_accumulator_ready');
+    assert.equal(savedAdcSwitch.digital_threshold_raw, 2000);
+    assert.equal(savedAdcSwitch.active_high, true);
+    results.push('ADC switches capture inactive and active states and save one threshold contract');
+
+    await goto(page, 'hardware.html', '#builtin-inputs');
 
     const abTriggerCard = page.locator('#builtin-inputs [data-workflow-key="ab_trigger"]');
     await abTriggerCard.locator('button', {hasText:'Edit'}).click();
@@ -562,6 +799,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     results.push('AB command-input setup exposes its threshold, highlights edits, and includes them in the reboot recap');
 
     await reset(page);
+    await patchData(page, { mode:'STANDBY', config_locked:false });
 
     await goto(page, 'config.html', '#cf-rpm_limit');
     await page.locator('#btn-view-expert').click();
@@ -664,10 +902,10 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(await text(page, '#btn-edit-safety'), /Done editing/i);
     assert.match(await text(page, '#btn-edit-controllers'), /Done editing/i);
     assert.match(await text(page, '#hardware-safety-summary'), /Not available yet:/i);
-    assert.match(await text(page, '#hardware-controllers-summary'), /N2 commands fuel|Prop Pitch output makes pitch primary/i);
+    assert.match(await text(page, '#hardware-controllers-summary'), /proportional main fuel controls N2|relay fine\/coarse control/i);
     const setupGuide = await text(page, '#shaft-control-setup-guide');
     assert.match(setupGuide, /N2-controlled idle.*Main Fuel.*N2 Speed.*Automatic idle control/is);
-    assert.match(setupGuide, /Turboprop.*Prop Pitch.*pitch primary.*fuel.*fallback/is);
+    assert.match(setupGuide, /Turboprop.*Prop Pitch.*pitch primary.*fuel remains operator-controlled.*N2 pullback/is);
     assert.match(setupGuide, /Generator or turboshaft.*commands main fuel/is);
     assert.equal(await page.locator('#shaft-control-setup-guide a[href="/config.html#idle-control-cfg-section"]').count(), 1);
     assert.equal(await page.locator('#shaft-control-setup-guide a[href="/config.html#governor-cfg-section"]').count(), 2);
@@ -676,6 +914,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(await text(page, '#hardware-requirements-summary'), /Add a Main Fuel Pump.*Required before the ECU can run an engine/is);
     results.push('compact bus, controller and safety editors expose setup details and prerequisites on demand');
 
+    await patchData(page, { mode:'STANDBY', config_locked:false });
     await goto(page, 'config.html#cf-sf_bv', '#cf-sf_bv');
     assert.equal(await page.locator('.cfg-field.deep-link-target[data-key="sf_bv"]').count(), 1);
     assert.equal(await page.locator('#cf-sf_bv').isVisible(), true);
@@ -762,6 +1001,23 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     results.push('sequencer and rules expose fitted N2/afterburner devices without obsolete master flags');
 
     await reset(page);
+    const registryAbHardware = await (await page.request.get(`${base}/api/hardware`)).json();
+    registryAbHardware.channel_registry.inputs.push({
+      id:'ab_command', name:'AB Command', purpose:'ab_command', role:'operator',
+      driver:3, pin:17, min:1000, max:2000
+    });
+    await patchHardware(page, { channel_registry: registryAbHardware.channel_registry });
+    await goto(page, 'sequence.html', '#save-btn');
+    await page.locator('.seq-tab', { hasText: 'Control Rules' }).click();
+    assert.equal(await page.locator('#rule-sensor-0 option[value="24"]').isDisabled(), false);
+    assert.equal(await page.locator('#rule-sensor-0 option', { hasText: /^AB (Input|Command)/ }).count(), 1);
+    await goto(page, 'config.html', '#rc-pwm-section');
+    await page.locator('#btn-view-expert').click();
+    assert.equal(await visible(page, '#rc-pwm-section'), true);
+    assert.equal(await page.locator('#cf-ab_pcm option[value="2"]').isDisabled(), false);
+    results.push('registry RC afterburner command is one named rule source and exposes its signal-loss settings');
+
+    await reset(page);
     await patchHardware(page, {
       channel_registry: {version:1, inputs:[
         {id:'operator_throttle',name:'Throttle Input',purpose:'throttle',role:'operator',driver:3,pin:4,min:1000,max:2000},
@@ -786,6 +1042,10 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       idle_input_type: 'servo',
       idle_input_us: 1320
     });
+    await patchConfig(page, { calibration: {
+      throttle_min_raw: 1075, throttle_max_raw: 1925,
+      idle_min_raw: 1125, idle_max_raw: 1875
+    }});
     await goto(page, 'calibration.html', '#throttle-cal-row');
     assert.equal(await visible(page, '#oil-press-cal-row'), false);
     assert.equal(await visible(page, '#flame-cal-row'), false);
@@ -793,6 +1053,14 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(await text(page, '#cal-th-raw'), /1510.*(us|s)/i);
     assert.match(await text(page, '#cal-idle-raw'), /1320.*(us|s)/i);
     results.push('calibration hides absent sensors and labels servo pulse units');
+    await goto(page, 'hardware.html', '#registry-inputs');
+    const throttleCard = page.locator('#registry-inputs .registry-card[data-registry-id="operator_throttle"]');
+    await throttleCard.locator('button', {hasText:'Edit'}).click();
+    assert.match(await throttleCard.textContent(), /RC pulse calibration.*1075.*1925.*Calibration page.*authoritative/is);
+    assert.equal(await throttleCard.locator('input[oninput*="updateRegistryRangeField"]').count(), 0,
+      'Hardware must not expose RC endpoints that the ECU does not consume');
+    assert.ok(await throttleCard.locator('a[href="/calibration.html#throttle-cal-row"]').count() >= 1);
+    results.push('canonical RC operator endpoints have one visible authority on the Calibration page');
 
     await reset(page);
     await goto(page, 'log.html', '#tab-session');

@@ -1,6 +1,7 @@
 {
   "$comment": "OpenTurbine hardware-in-the-loop bench rig — single source of truth for the wiring, shared by the OTBench tester firmware and the PC harness. DUT = ESP32-S3 running OpenTurbine. Tester = ESP32 classic running OTBench firmware. Edit pins here to match your physical harness; the firmware table (bench/firmware/src/main.cpp) MUST be kept in step with the tester_gpio/tester_kind values below.",
   "meta": {
+    "dut_target": "s3",
     "dut_board": "esp32-s3-devkitc-1",
     "tester_board": "esp32dev (classic)",
     "dut_ip": "192.168.4.1",

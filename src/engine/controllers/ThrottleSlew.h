@@ -79,6 +79,7 @@ public:
         else if (dt > 0.05f) dt = 0.05f;
 
         float target = constrain(ed.throttleDemand, 0.0f, 1.0f);
+        bool protectionActive = false;
         // Dry Bench Mode intentionally permits actuator travel without fitted
         // feedback. In normal operation this interlock must still prevent a
         // fuel increase with missing speed or temperature feedback.
@@ -95,7 +96,7 @@ public:
               !FeedbackRequirements::isOverridden(ed, FeedbackRequirements::P2)) ||
              (FeedbackRequirements::torqueForProtectionOrControl() && !ed.torqueHealthy &&
               !FeedbackRequirements::isOverridden(ed, FeedbackRequirements::TORQUE)))) {
-            if (target > _current) target = _current;
+            if (target > _current) { target = _current; protectionActive = true; }
         }
 
         // Safety pullback: approach overspeed
@@ -172,6 +173,7 @@ public:
         if (p1PullbackEnabled && ed.p1Healthy) applyPullback(p1val, p1SoftLimit, p1HardLimit);
         if (p2PullbackEnabled && ed.p2Healthy) applyPullback(p2val, p2SoftLimit, p2HardLimit);
         if (torquePullbackEnabled && ed.torqueHealthy) applyPullback(torqueVal, torqueSoftLimit, torqueHardLimit);
+        if (target + 0.0001f < unrestrictedTarget) protectionActive = true;
 
         // Guard: if rampMs is 0 (instant) or dt is 0 (same-millisecond tick),
         // dividing would produce Inf or NaN.  Treat 0 ms ramp as instant (maxStep=1).
@@ -186,6 +188,8 @@ public:
                              0.0f, 1.0f);
 
         ed.throttleDemand = _current;
+        ed.protectedThrottleDemand = _current;
+        ed.mainFuelProtectionActive = protectionActive;
     }
 
     void reset() override {
@@ -195,6 +199,9 @@ public:
         _p1Rate = _p2Rate = _torqueRate = 0.0f;
         _p1SeenSeq = _p2SeenSeq = _torqueSeenSeq = 0;
         _p1LastMs = _p2LastMs = _torqueLastMs = 0;
+        auto& ed = EngineData::instance();
+        ed.mainFuelProtectionActive = false;
+        ed.protectedThrottleDemand = 0.0f;
     }
 
     // Returns the slew-limited output before any external offset (e.g. AB fuel offset)

@@ -45,6 +45,8 @@ def main() -> int:
         hw["shutdown_exit_actions"] = [[], []]
 
     def start_and_wait():
+        if not runner.dc._wait_config_apply():
+            raise RuntimeError("configuration transaction did not finish before START")
         code, resp = dut.start()
         running, data = dut.poll_until(lambda d: d.get("mode") == "RUNNING", timeout=8, interval=0.04)
         if code != 200 or not running:
@@ -61,6 +63,7 @@ def main() -> int:
             "engine": {"rpm_limit": 90000, "min_rpm": 0},
             "oil": {"startup_pct": 70},
             "sequence": {"shutdown": {"final_stop_timeout_ms": 2000}},
+            "throttle": {"ramp_down_ms": 0},
             "rules": [],
         }, verify=False)
         if not ok:
@@ -72,19 +75,21 @@ def main() -> int:
         start_and_wait()
 
         code, resp = dut.patch("/api/config", {
-            "engine": {"rpm_limit": 91000},
-            "sequence": {"shutdown": {"final_stop_timeout_ms": 800}},
+            "throttle": {"ramp_up_ms": 250},
         })
-        applied, live = dut.poll_until(
-            lambda d: int(d.get("rpm_limit") or 0) == 91000,
-            timeout=4, interval=0.05,
-        )
+        live_apply_complete = code == 200 and runner.dc._wait_config_apply()
+        live = dut.data()
+        applied = int(dut.config().get("throttle", {}).get("ramp_up_ms") or 0) == 250
         record(
-            "DEV_MODE_APPLIES_CONFIG_WHILE_RUNNING",
-            code == 200 and applied,
+            "DEV_MODE_APPLIES_MARKED_LIVE_FIELD_WHILE_RUNNING",
+            code == 200 and live_apply_complete and applied,
             http=code, response=resp, mode=live.get("mode"),
-            telemetry_rpm_limit=live.get("rpm_limit"),
+            saved_ramp_up_ms=dut.config().get("throttle", {}).get("ramp_up_ms"),
         )
+
+        block_code, block_resp = dut.patch("/api/config", {
+            "sequence": {"shutdown": {"final_stop_timeout_ms": 1000}},
+        })
 
         oil_before = tester.get("OILPUMP_OUT")
         started = time.monotonic()
@@ -113,9 +118,12 @@ def main() -> int:
             shutdown_mode=shutdown_data.get("mode"),
         )
 
-        # The running write must not reinitialise active block instances. The
-        # first stop above therefore used the old 2 s value. Once STANDBY was
-        # reached, the queued block copy must become effective for the next run.
+        # Sequence topology/timing is not a marked live field. It must be
+        # rejected while RUNNING, then apply normally after reaching STANDBY.
+        stopped_code, stopped_resp = dut.patch("/api/config", {
+            "sequence": {"shutdown": {"final_stop_timeout_ms": 1000}},
+        })
+        stopped_apply_complete = stopped_code == 200 and runner.dc._wait_config_apply()
         start_and_wait()
         started = time.monotonic()
         dut.stop()
@@ -124,19 +132,22 @@ def main() -> int:
         )
         deferred_elapsed = time.monotonic() - started
         record(
-            "RUNNING_BLOCK_CHANGE_APPLIES_ON_NEXT_STANDBY",
-            standby and 0.55 <= deferred_elapsed <= 1.6,
+            "RUNNING_BLOCK_CHANGE_REJECTED_THEN_STOPPED_CHANGE_APPLIES",
+            block_code == 423 and stopped_code == 200 and stopped_apply_complete and standby and
+            0.8 <= deferred_elapsed <= 1.9,
             elapsed_s=round(deferred_elapsed, 3),
-            configured_timeout_ms=800, last_event=stopped.get("last_event"),
+            running_edit={"http": block_code, "response": block_resp},
+            stopped_edit={"http": stopped_code, "response": stopped_resp},
+            configured_timeout_ms=1000, last_event=stopped.get("last_event"),
         )
 
         dut.ensure_bench_mode(False)
         dut.ensure_dev_mode(False)
         start_and_wait()
-        code, resp = dut.patch("/api/config", {"engine": {"rpm_limit": 92000}})
+        code, resp = dut.patch("/api/config", {"throttle": {"ramp_down_ms": 333}})
         record(
-            "NORMAL_RUNNING_MODE_STILL_LOCKS_CONFIG",
-            code == 423 and int(dut.data().get("rpm_limit") or 0) == 91000,
+            "NORMAL_RUNNING_MODE_LOCKS_EVEN_MARKED_LIVE_FIELDS",
+            code == 423 and int(dut.config().get("throttle", {}).get("ramp_down_ms") or 0) == 0,
             http=code, response=resp,
         )
         dut.stop()
@@ -171,7 +182,8 @@ def main() -> int:
     passed = sum(1 for row in rows if row["ok"])
     print(f"RESULT: {passed}/{len(rows)} checks passed; restored={restored}", flush=True)
     print("Results:", os.path.abspath(path), flush=True)
-    return 0 if error is None and restored and result["firmware_match"] and passed == 5 else 1
+    return 0 if (error is None and restored and result["firmware_match"] and
+                 len(rows) == 5 and passed == len(rows)) else 1
 
 
 if __name__ == "__main__":

@@ -237,6 +237,7 @@ static bool i2cEmuBegin(I2cEmuMode mode, int32_t value) {
 // ledc_timer_config with distinct timer_num) makes them fully independent.
 static int8_t sigLedcChan[NUM_SIGNALS];   // LEDC channel (== timer) for this signal, or -1
 static ledc_timer_bit_t sigFreqResolution[NUM_SIGNALS];
+static bool sigLedcAttached[NUM_SIGNALS];
 
 static inline int sigIndex(const Signal& s) { return (int)(&s - SIGNALS); }
 
@@ -270,6 +271,7 @@ static void ledcSetupSignal(int idx, const Signal& s, int chan) {
     cc.duty       = 0;
     cc.hpoint     = 0;
     ledc_channel_config(&cc);
+    sigLedcAttached[idx] = true;
 }
 
 static inline void ledcSetDuty(int chan, uint32_t duty) {
@@ -295,6 +297,14 @@ static ledc_timer_bit_t freqResolutionFor(float hz) {
 
 static bool ledcConfigureFrequencyTimer(int chan, float hz) {
     const ledc_timer_bit_t resolution = freqResolutionFor(hz);
+    // ledc_timer_config() resets the timer. Repeating it for every step in a
+    // simulated spool ramp inserts brief zero/high-frequency artifacts that
+    // are not present in a real magnetic pickup. If the resolution band has
+    // not changed, update only the divider and leave the channel running.
+    if (sigFreqResolution[chan] == resolution &&
+        ledc_set_freq(LEDC_LOW_SPEED_MODE, (ledc_timer_t)chan,
+                      (uint32_t)(hz + 0.5f)) > 0)
+        return true;
     ledc_timer_config_t tc = {};
     tc.speed_mode      = LEDC_LOW_SPEED_MODE;
     tc.duty_resolution = resolution;
@@ -471,6 +481,8 @@ static void emuStop() {
 static void emuBegin(EmuMode mode) {
     if (g_emuMode != EMU_NONE) emuStop();
     ledcDetach(EMU_DATA); // N1 normally owns this S3 pin
+    for (int i = 0; i < NUM_SIGNALS; ++i)
+        if (SIGNALS[i].gpio == EMU_DATA) sigLedcAttached[i] = false;
     pinMode(EMU_CLK, INPUT);
     pinMode(EMU_CS, INPUT_PULLUP);
     pinMode(EMU_MOSI, INPUT);
@@ -518,6 +530,7 @@ static void emuSetHx711(const char* value) {
     emuDataWrite(false);
     interrupts();
 }
+
 #endif
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -579,6 +592,7 @@ static void initSignals() {
     for (int i = 0; i < NUM_SIGNALS; i++) {
         sigLedcChan[i] = -1;
         sigFreqResolution[i] = LEDC_TIMER_10_BIT;
+        sigLedcAttached[i] = false;
     }
     int nextCh = 0;
     for (int i = 0; i < NUM_SIGNALS; i++) {
@@ -614,10 +628,13 @@ static bool applyOutput(const Signal& s, const char* valStr, String& err) {
             if (hz < 1.0f) {
                 ledcSetDuty(ch, 0);                                    // stop -> line low
             } else {
-                // A digital-sensor emulator may temporarily repurpose this
-                // GPIO and release it as an input. Reattach the original LEDC
-                // channel whenever frequency output resumes.
-                ledcSetupSignal(sigIndex(s), s, ch);
+                // Changing a live timer's frequency must not detach/recreate
+                // its channel: that inserts a zero-RPM hole into every ramp
+                // step and can create false ECU underspeed trips. Reattach
+                // only after an emulator or static-level command actually
+                // repurposed the GPIO.
+                if (!sigLedcAttached[sigIndex(s)])
+                    ledcSetupSignal(sigIndex(s), s, ch);
                 if (!ledcConfigureFrequencyTimer(ch, hz)) {
                     err = "frequency outside LEDC timer range";
                     return false;
@@ -815,6 +832,8 @@ static void handleLine(char* line) {
             // EMU OFF means the emulated converter is physically absent, so
             // release DOUT and let the DUT's pull-up report missing data.
             pinMode(EMU_DATA, INPUT);
+            for (int i = 0; i < NUM_SIGNALS; ++i)
+                if (SIGNALS[i].gpio == EMU_DATA) sigLedcAttached[i] = false;
             Serial.println("OK");
             return;
         }

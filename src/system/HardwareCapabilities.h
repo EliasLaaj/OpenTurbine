@@ -19,8 +19,10 @@ public:
             return hasInputBindingOrPurpose("primary_n2", "n2_speed") || HardwareConfig::hasN2Rpm;
         if (!strcmp(feature, "n2_governor"))
             return (hasInputBindingOrPurpose("primary_n2", "n2_speed") &&
-                    (hasOutputPurpose("main_fuel") || hasOutputPurpose("prop_pitch"))) ||
-                   (HardwareConfig::hasN2Rpm && (HardwareConfig::hasThrottle || HardwareConfig::hasPropPitch));
+                    (hasProportionalOutputPurpose("main_fuel") || hasOutputPurpose("prop_pitch"))) ||
+                   (HardwareConfig::hasN2Rpm &&
+                    ((HardwareConfig::hasThrottle && HardwareConfig::throttleType != 2) ||
+                     HardwareConfig::hasPropPitch));
         if (!strcmp(feature, "egt_safety"))
             return (hasInputBindingOrPurpose("primary_egt", "tot") || hasInputPurpose("tit")) ||
                    HardwareConfig::hasTot || HardwareConfig::hasTit;
@@ -28,9 +30,9 @@ public:
             return ((hasInputBindingOrPurpose("primary_n1", "n1_speed") ||
                     hasInputBindingOrPurpose("primary_n2", "n2_speed") ||
                     hasInputPurpose("p1_pressure") || hasInputPurpose("p2_pressure")) &&
-                    hasOutputPurpose("main_fuel")) ||
+                    hasProportionalOutputPurpose("main_fuel")) ||
                    ((HardwareConfig::hasN1Rpm || HardwareConfig::hasN2Rpm || HardwareConfig::hasP1 || HardwareConfig::hasP2) &&
-                    HardwareConfig::hasThrottle);
+                    HardwareConfig::hasThrottle && HardwareConfig::throttleType != 2);
         return false;
     }
     static const char* enabledFeatureRejectReason() {
@@ -50,8 +52,6 @@ public:
             return "Low-oil safety requires an oil pressure input or low-oil switch";
         if (HardwareConfig::safetyOilZero && !hasOilSafetyInput("oil_zero_switch"))
             return "Zero-oil safety requires an oil pressure input or zero-oil switch";
-        if (HardwareConfig::safetyTitOvertemp && !(hasInputPurpose("tit") || HardwareConfig::hasTit))
-            return "TIT safety requires a TIT/temperature input";
         if (HardwareConfig::safetyOilTempHigh && !(hasInputPurpose("oil_temperature") || HardwareConfig::hasOilTemp))
             return "Oil temperature safety requires an oil temperature input";
         if (HardwareConfig::safetyFuelPressLow && !(hasInputPurpose("fuel_pressure") || HardwareConfig::hasFuelPress))
@@ -82,7 +82,9 @@ public:
             if (!hasInputRole("speed") && !hasInputPurpose("p1_pressure") && !hasInputPurpose("p2_pressure") &&
                 !HardwareConfig::hasN1Rpm && !HardwareConfig::hasN2Rpm && !HardwareConfig::hasP1 && !HardwareConfig::hasP2)
                 addMissing(missing, "idle_feedback", "Add an N1, N2, P1, or P2 feedback input");
-            if (!hasOutputPurpose("main_fuel") && !HardwareConfig::hasThrottle) addMissing(missing, "throttle_output", "Add a main fuel output");
+            if (!hasProportionalOutputPurpose("main_fuel") &&
+                !(HardwareConfig::hasThrottle && HardwareConfig::throttleType != 2))
+                addMissing(missing, "throttle_output", "Add a PWM or servo main-fuel output");
         }
     }
 private:
@@ -113,6 +115,13 @@ private:
         const ChannelRegistry::Channel* list = direction == ChannelRegistry::Input ? r.inputs : r.outputs;
         uint8_t n = direction == ChannelRegistry::Input ? r.inputCount : r.outputCount;
         for (uint8_t i=0;i<n;i++) if (list[i].installed && !strcmp(list[i].purpose, purpose)) return true;
+        return false;
+    }
+    static bool hasProportionalOutputPurpose(const char* purpose) {
+        const ChannelRegistry& r = HardwareConfig::channelRegistry;
+        for (uint8_t i = 0; i < r.outputCount; ++i)
+            if (r.outputs[i].installed && !strcmp(r.outputs[i].purpose, purpose) &&
+                ChannelRegistry::driverIsProportionalOutput(r.outputs[i].driver)) return true;
         return false;
     }
     static bool hasBindingOrRole(const char* key, const char* role) {

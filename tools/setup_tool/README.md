@@ -6,10 +6,9 @@ The home screen separates **Clean install / reinstall** (USB, erases the entire
 selected board) from **Update and keep my setup** (Wi-Fi, backs up and retains
 the existing engine setup). Do not weaken this distinction in release builds.
 
-Driver installation is INF-only. The recommended ZIP must bundle complete,
-unmodified, vendor-signed CP210x and WCH INF/CAT/SYS driver packages. The GUI
-detects the connected USB bridge hardware ID, elevates only a small helper, runs
-`pnputil`, scans for devices, and writes a diagnostic log.
+The tool does not redistribute or silently install serial drivers. If Windows
+cannot see a board, the GUI identifies the likely USB bridge and opens the
+official Silicon Labs or WCH download page for the user.
 
 Build from this directory:
 
@@ -33,19 +32,12 @@ Build the recommended ZIP from the repository root:
 
 ```powershell
 python tools/build_setup_package.py `
-  --esptool "$env:USERPROFILE\.platformio\penv\Scripts\esptool.exe" `
-  --cp210x-driver C:\path\to\extracted\CP210x_Windows_Drivers `
-  --ch340-driver C:\path\to\extracted\wch-serial-drivers
+  --esptool "$env:USERPROFILE\.platformio\penv\Scripts\esptool.exe"
 ```
 
-Release packages require both complete driver packages. Keep each full extracted
-vendor folder; a copied installer EXE is rejected. CP210x payloads are packaged
-under `drivers/cp210x/`; WCH CH340/CH341/CH343 payloads are packaged under
-`drivers/wch/`. The generated manifest includes `package_schema: 3` so the EXE
-and ZIP must come from the same release family.
-
-For local packaging validation only, `--allow-missing-drivers` may be used. Do
-not publish that development package as the recommended release.
+The generated manifest includes `package_schema: 4`; the EXE and ZIP must come
+from the same release family. The ZIP also includes OpenTurbine's license and
+the bundled esptool third-party notice.
 
 Release assets:
 

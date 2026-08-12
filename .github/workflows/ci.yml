@@ -1,4 +1,4 @@
-name: Release checks
+name: Required safety gate
 
 on:
   push:
@@ -8,120 +8,26 @@ permissions:
   contents: read
 
 jobs:
-  web-ui:
+  required-safety-gate:
+    name: Required safety gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
           cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - name: Verify generated web assets
-        run: |
-          python3 tools/gzip_data.py
-          git diff --exit-code -- data
-          node tools/generate_site_config_reference.cjs
-          git diff --exit-code -- site/_includes/generated-config-fields.html
-          python3 tools/validate_public_content.py
-      - name: Run every browser audit
-        run: npm run audit:ui
-      - name: Run control, setup-matrix, and I2C audits
-        run: |
-          node tools/safety_regression_audit.cjs
-          node tools/turbine_setup_matrix_test.cjs
-          node tools/i2c_support_audit.cjs
-
-  firmware:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-      - run: python -m pip install platformio==6.1.19
-      - run: python tools/gzip_data.py
-      - name: Build classic ESP32 firmware and filesystem
-        run: |
-          pio run -e esp32dev
-          pio run -e esp32dev -t buildfs
-          python tools/check_firmware_budget.py \
-            --partitions partitions.csv \
-            --firmware .pio3/esp32dev/firmware.bin \
-            --filesystem .pio3/esp32dev/littlefs.bin \
-            --map .pio3/esp32dev/firmware.map \
-            --minimum-dram-headroom 16384
-      - name: Build ESP32-S3 firmware and filesystem
-        run: |
-          pio run -e esp32s3dev
-          pio run -e esp32s3dev -t buildfs
-          python tools/check_firmware_budget.py \
-            --partitions partitions_8mb.csv \
-            --firmware .pio3/esp32s3dev/firmware.bin \
-            --filesystem .pio3/esp32s3dev/littlefs.bin \
-            --map .pio3/esp32s3dev/firmware.map \
-            --minimum-dram-headroom 65536
-
-  package-builder:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.13"
-      - run: python -m unittest tools/test_build_setup_package.py
-
-  windows-installer:
-    runs-on: windows-latest
-    env:
-      WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
-    defaults:
-      run:
-        working-directory: tools/setup_tool
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: tools/setup_tool/go.mod
           cache-dependency-path: tools/setup_tool/go.mod
-      - name: Format Go files
-        shell: pwsh
-        run: |
-          $files = Get-ChildItem -Filter *.go | ForEach-Object { $_.FullName }
-          gofmt -w $files
-      - name: Require committed Go formatting
-        working-directory: .
-        run: git diff --exit-code -- tools/setup_tool
-      - run: go test ./...
-      - name: Generate Windows icon and manifest resources
-        run: go run github.com/akavel/rsrc@v0.10.2 -ico OpenTurbineSetupTool.ico -manifest OpenTurbineSetupTool.manifest -o rsrc_windows_amd64.syso
-      - run: go build -ldflags="-H windowsgui -s -w" -o OpenTurbineSetupTool.exe .
-      - name: Sign setup tool when a signing certificate is configured
-        if: env.WINDOWS_SIGNING_CERT_BASE64 != ''
-        env:
-          WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
-        shell: pwsh
-        run: |
-          $certPath = Join-Path $env:RUNNER_TEMP "OpenTurbineCodeSigning.pfx"
-          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
-          try {
-            & ..\sign_windows_setup_tool.ps1 `
-              -ExePath .\OpenTurbineSetupTool.exe `
-              -CertificatePath $certPath `
-              -CertificatePassword $env:WINDOWS_SIGNING_CERT_PASSWORD
-          } finally {
-            Remove-Item -LiteralPath $certPath -Force -ErrorAction SilentlyContinue
-          }
-      - name: Write setup tool SHA-256
-        shell: pwsh
-        run: |
-          $hash = (Get-FileHash .\OpenTurbineSetupTool.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  OpenTurbineSetupTool.exe" | Set-Content -Encoding ascii .\OpenTurbineSetupTool.exe.sha256
-      - name: Upload setup tool artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: OpenTurbineSetupTool
-          path: |
-            tools/setup_tool/OpenTurbineSetupTool.exe
-            tools/setup_tool/OpenTurbineSetupTool.exe.sha256
+      - run: python -m pip install platformio==6.1.19
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run canonical OpenTurbine release checks
+        run: python tools/run_release_checks.py
+      - name: Require generated assets to be committed
+        run: git diff --exit-code -- data site/_includes/generated-config-fields.html

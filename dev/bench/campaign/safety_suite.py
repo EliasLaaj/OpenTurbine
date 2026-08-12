@@ -128,3 +128,4 @@ print("\n=== summary ===")
 for name, ok, neg, pos in rig.rows:
     print("  %-13s %s" % (name, "PASS" if ok else "FAIL  " + repr(pos)))
 rig.t.set_tot("off"); rig.t.close()
+raise SystemExit(0 if rig.rows and all(row[1] for row in rig.rows) else 1)

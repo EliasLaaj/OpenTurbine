@@ -62,6 +62,40 @@ def make_dut(args):
     return DUT(base=args.dut)
 
 
+def _tester_signal_inventory(lines):
+    inventory = {}
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 3 or fields[0] != "SIG":
+            continue
+        details = {}
+        for field in fields[3:]:
+            if "=" in field:
+                key, value = field.split("=", 1)
+                details[key] = value
+        inventory[fields[1]] = {"kind": fields[2].lower(), **details}
+    return inventory
+
+
+def _tester_pinmap_errors(pinmap, signal_lines):
+    inventory = _tester_signal_inventory(signal_lines)
+    errors = []
+    for signal in pinmap.signals:
+        actual = inventory.get(signal["name"])
+        if actual is None:
+            errors.append("%s missing from tester firmware" % signal["name"])
+            continue
+        expected_kind = str(signal.get("tester_kind", "")).lower()
+        if expected_kind and actual.get("kind") != expected_kind:
+            errors.append("%s kind=%s expected=%s" %
+                          (signal["name"], actual.get("kind"), expected_kind))
+        expected_gpio = str(signal.get("tester_gpio"))
+        if actual.get("gpio") != expected_gpio:
+            errors.append("%s gpio=%s expected=%s" %
+                          (signal["name"], actual.get("gpio"), expected_gpio))
+    return errors
+
+
 # ── commands ─────────────────────────────────────────────────
 def cmd_ports(args):
     ports = available_ports()
@@ -74,18 +108,23 @@ def cmd_ports(args):
 
 
 def cmd_doctor(args):
-    pm = PinMap()
+    pm = PinMap(args.pinmap)
     print("Pin map: %s" % pm.path)
     print("  DUT %s   tester %s   %d signals"
           % (pm.meta.get("dut_board"), pm.meta.get("tester_board"), len(pm.signals)))
 
     print("\nTester (serial):")
+    tester_ok = False
     try:
         t = make_tester(args)
         print("  port %s" % t.port)
         print("  PING -> %s" % t.ping())
         sigs = t.list_signals()
         print("  %d signals reported by firmware" % len(sigs))
+        tester_errors = _tester_pinmap_errors(pm, sigs)
+        for error in tester_errors:
+            print("  ERROR: " + error)
+        tester_ok = bool(sigs) and not tester_errors
         t.close()
     except SystemExit:
         raise
@@ -103,7 +142,7 @@ def cmd_doctor(args):
     else:
         print("  UNREACHABLE: %s" % s)
         print("  (join the S3 Wi-Fi AP; default http://192.168.4.1)")
-    return 0
+    return 0 if tester_ok and ok else 1
 
 
 def cmd_tester(args):
@@ -144,7 +183,7 @@ def cmd_dut_stop(args):
 
 
 def cmd_monitor(args):
-    pm = PinMap()
+    pm = PinMap(args.pinmap)
     t = make_tester(args)
     dut = make_dut(args)
     fields = ["mode", "n1", "tot", "oil", "throttle_effective", "oil_pct",
@@ -252,7 +291,7 @@ def _configured_signal_pins(hw):
 
 
 def cmd_verify_wiring(args):
-    pm = PinMap()
+    pm = PinMap(args.pinmap)
     dut = make_dut(args)
     try:
         hw = dut.hardware()
@@ -266,6 +305,7 @@ def cmd_verify_wiring(args):
         print("  GPIO %-3d  %s" % (v, p))
     print("\nExpected from pin map (DUT side):")
     problems = 0
+    optional_missing = 0
     for s in pm.signals:
         g = s["dut_gpio"]
         configured = signal_pins.get(s["name"], set())
@@ -274,15 +314,24 @@ def cmd_verify_wiring(args):
             if configured else "NOT configured"
         )
         if g not in configured:
-            problems += 1
+            if s.get("optional") and not args.require_all:
+                optional_missing += 1
+            else:
+                problems += 1
         print("  %-13s GPIO %-3d  ot=%-22s  %s" % (s["name"], g, s["ot_signal"], status))
-    print("\n%d signal(s) do not match the DUT config — enable/repin them on the Hardware page."
-          % problems if problems else "\nAll pin-map GPIOs are present in the DUT config.")
-    return 0
+    if problems:
+        print("\n%d required signal(s) do not match the DUT config — enable/repin them on the Hardware page."
+              % problems)
+    elif optional_missing:
+        print("\nRequired pin-map GPIOs match; %d optional signal(s) are not fitted."
+              % optional_missing)
+    else:
+        print("\nAll pin-map GPIOs are present in the DUT config.")
+    return 1 if problems else 0
 
 
 def cmd_run(args):
-    pm = PinMap()
+    pm = PinMap(args.pinmap)
     only = set(args.only.split(",")) if args.only else None
     tests = suite.get_tests(advanced=args.advanced)
     dut = make_dut(args)
@@ -305,7 +354,9 @@ def cmd_run(args):
         except Exception:  # noqa: BLE001
             pass
         t.close()
-    passed = runner.print_report(results, verbose=args.verbose)
+    passed = runner.print_report(
+        results, verbose=args.verbose, require_all=args.require_all
+    )
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
             json.dump([r.to_dict() for r in results], f, indent=2)
@@ -319,11 +370,15 @@ def build_parser():
     p.add_argument("--port", help="tester serial port (default: auto / OTBENCH_PORT env)")
     p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--dut", default="http://192.168.4.1", help="DUT web API base URL")
+    p.add_argument("--pinmap", help="fixture pin-map JSON (default: OTBENCH_PINMAP or bench/pinmap.json)")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("ports", help="list serial ports").set_defaults(func=cmd_ports)
     sub.add_parser("doctor", help="check tester + DUT connectivity").set_defaults(func=cmd_doctor)
-    sub.add_parser("verify-wiring", help="compare DUT config pins to the pin map").set_defaults(func=cmd_verify_wiring)
+    pw = sub.add_parser("verify-wiring", help="compare DUT config pins to the pin map")
+    pw.add_argument("--require-all", action="store_true",
+                    help="treat missing optional fixture signals as failures")
+    pw.set_defaults(func=cmd_verify_wiring)
 
     pt = sub.add_parser("tester", help="send a raw line to the tester")
     pt.add_argument("words", nargs="+")
@@ -352,6 +407,10 @@ def build_parser():
     pr.add_argument("--only", help="comma-separated test names to run")
     pr.add_argument("--seq-secs", type=int, default=45, help="timeout for the bench sequence test")
     pr.add_argument("--json", help="write results as JSON to this path")
+    pr.add_argument(
+        "--require-all", action="store_true",
+        help="fail the run if any selected test is skipped (qualification mode)",
+    )
     pr.add_argument("-v", "--verbose", action="store_true")
     pr.set_defaults(func=cmd_run)
 

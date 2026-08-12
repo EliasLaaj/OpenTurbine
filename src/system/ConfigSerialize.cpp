@@ -3,6 +3,9 @@
 #include "HardwareConfig.h"
 #include "RulesEngine.h"
 #include "hardware_profile.h"
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+#include <LittleFS.h>
+#endif
 
 namespace {
 
@@ -68,7 +71,7 @@ const ConfigField<bool> THROTTLE_BOOL_FIELDS[] = {
 const ConfigField<float> IDLE_FLOAT_FIELDS[] = {
     CONFIG_FIELD(idleTargetRpm, "target_rpm"), CONFIG_FIELD(idleRampUpMs, "ramp_up_ms"),
     CONFIG_FIELD(idleRampDownMs, "ramp_down_ms"), CONFIG_FIELD(idleDeadbandRpm, "deadband_rpm"),
-    CONFIG_FIELD(idleRpmLimit, "rpm_limit"), CONFIG_FIELD(idleMinMultiplier, "min_multiplier"),
+    CONFIG_FIELD(idleRpmLimit, "rpm_limit"),
     CONFIG_FIELD(idleMaxMultiplier, "max_multiplier"), CONFIG_FIELD(idleTargetPressure, "target_pressure_bar"),
     CONFIG_FIELD(idlePressureDeadband, "pressure_deadband_bar"), CONFIG_FIELD(idlePressureLimit, "pressure_limit_bar"),
     CONFIG_FIELD(idleIGain, "i_gain"), CONFIG_FIELD(idleIMax, "i_max"),
@@ -77,6 +80,10 @@ const ConfigField<float> IDLE_FLOAT_FIELDS[] = {
     CONFIG_FIELD(idleFullResponseRpm, "full_response_rpm"), CONFIG_FIELD(idleTrimUpPctPerSec, "trim_up_pct_s"),
     CONFIG_FIELD(idleTrimDownPctPerSec, "trim_down_pct_s"), CONFIG_FIELD(idleLearnRate, "learn_rate"),
     CONFIG_FIELD(idleLearnAccelMax, "learn_accel_max"),
+    CONFIG_FIELD(idlePressureDecelEnter, "pressure_decel_enter_bar"),
+    CONFIG_FIELD(idlePressureSettleBand, "pressure_settle_band_bar"),
+    CONFIG_FIELD(idlePressureFullResponse, "pressure_full_response_bar"),
+    CONFIG_FIELD(idlePressureLearnRateMax, "pressure_learn_rate_max_bar_s"),
 };
 const ConfigField<int> IDLE_INT_FIELDS[] = {
     CONFIG_FIELD(idleSource, "source"), CONFIG_FIELD(idleMode, "idle_mode"),
@@ -118,7 +125,8 @@ const ConfigField<float> AFTERBURNER_FLOAT_FIELDS[] = {
     CONFIG_FIELD(abStabilizeMaxTot, "stabilize_max_tot"),
 };
 const ConfigField<int> AFTERBURNER_INT_FIELDS[] = {
-    CONFIG_FIELD(abTorchDurationMs, "torch_duration_ms"), CONFIG_FIELD(abFlameMode, "flame_mode"),
+    CONFIG_FIELD(abTorchDurationMs, "torch_duration_ms"), CONFIG_FIELD(abTorchGuardMode, "torch_guard_mode"),
+    CONFIG_FIELD(abFlameMode, "flame_mode"),
     CONFIG_FIELD(abTotRiseWindowMs, "tot_rise_window_ms"), CONFIG_FIELD(abAssumeIgnitedMs, "assume_ignited_ms"),
     CONFIG_FIELD(abFlameTimeoutMs, "flame_timeout_ms"), CONFIG_FIELD(abFlameLossDelayMs, "flame_loss_delay_ms"),
     CONFIG_FIELD(abPumpControlMode, "pump_control_mode"), CONFIG_FIELD(abStabilizeMs, "stabilize_ms"),
@@ -165,7 +173,7 @@ const ConfigField<float> CAL_FLOAT_FIELDS[] = {
 const ConfigField<int> CAL_INT_FIELDS[] = {
     CONFIG_FIELD(throttleMinRaw, "throttle_min_raw"), CONFIG_FIELD(throttleMaxRaw, "throttle_max_raw"),
     CONFIG_FIELD(idleMinRaw, "idle_min_raw"), CONFIG_FIELD(idleMaxRaw, "idle_max_raw"),
-    CONFIG_FIELD(flameThreshold, "flame_threshold"), CONFIG_FIELD(p1RawMin, "p1_raw_min"),
+    CONFIG_FIELD(p1RawMin, "p1_raw_min"),
     CONFIG_FIELD(p1RawMax, "p1_raw_max"), CONFIG_FIELD(p2RawMin, "p2_raw_min"),
     CONFIG_FIELD(p2RawMax, "p2_raw_max"), CONFIG_FIELD(fuelPressRawMin, "fuel_press_raw_min"),
     CONFIG_FIELD(fuelPressRawMax, "fuel_press_raw_max"), CONFIG_FIELD(fuelFlowRawMin, "fuel_flow_raw_min"),
@@ -304,31 +312,85 @@ const ConfigField<int> RC_INPUT_INT_FIELDS[] = {CONFIG_FIELD(rcFailsafeMs, "fail
 }  // namespace
 
 // ── Private helpers ───────────────────────────────────────────
-bool Config::applyJsonRuntimeOnly(const JsonDocument& doc) {
-    if (isLocked() || !validateJson(doc)) return false;
+bool Config::applyJsonRuntimeOnly(const JsonDocument& doc, bool allowActiveLive,
+                                  bool validateHardwareDependencies) {
+    if (isLocked() && !allowActiveLive) {
+        Serial.println("[Config] Runtime candidate rejected: configuration is locked");
+        return false;
+    }
+    if (!(validateHardwareDependencies ? validateJson(doc) : validateJsonValues(doc))) {
+        Serial.printf("[Config] Runtime candidate rejected: validation failed (overflow=%d, bytes=%u)\n",
+                      doc.overflowed() ? 1 : 0, (unsigned)measureJson(doc));
+        return false;
+    }
     const char* id = doc["profile_id"] | "";
-    if (!id[0] || strcmp(id, HardwareConfig::profileId) != 0) return false;
+    if (!id[0] || strcmp(id, HardwareConfig::profileId) != 0) {
+        Serial.printf("[Config] Runtime candidate rejected: profile '%s' != '%s'\n",
+                      id, HardwareConfig::profileId);
+        return false;
+    }
     _fromDoc(doc);
     profileMatch = true;
     EngineData::instance().configVersionMismatch = false;
     return true;
 }
 
-bool Config::applyJsonAndSaveReleasing(JsonDocument& doc) {
-    if (!applyJsonRuntimeOnly(doc)) return false;
-    // Config::save() parses the persisted hardware section. Keeping the
-    // request document alive at the same time can exhaust fragmented heap on
-    // a fully fitted profile, making LittleFS report that it cannot allocate a
-    // file descriptor. The committed file is still untouched at this point.
+bool Config::persistJsonCandidateReleasing(JsonDocument& doc, char*& outJson, size_t& outLen) {
+    outJson = nullptr;
+    outLen = 0;
+    if (!validateJson(doc)) return false;
+    const char* id = doc["profile_id"] | "";
+    if (!id[0] || strcmp(id, HardwareConfig::profileId) != 0) return false;
+    const size_t required = measureJson(doc);
+    if (required == 0 || required > 32768) return false;
+#if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
+    // On either ESP32 target, do not allocate a transfer buffer while the complete
+    // ArduinoJson tree is still resident. A two-byte settings growth was
+    // enough to cross the largest-free-block boundary on a real board. Stage
+    // the validated tree first, release its pool, then read the compact text
+    // back. The same staged generation is used by the unified-config storage
+    // transaction and by the ECU-core apply.
+    static constexpr const char* APPLY_PATH = "/config_apply.tmp";
+    if (!acquireStorageWrite()) {
+        Serial.println("[Config] Candidate staging mutex timeout");
+        return false;
+    }
+    File staged = LittleFS.open(APPLY_PATH, "w");
+    const bool stagedOk = staged && serializeJson(doc, staged) == required;
+    if (staged) staged.close();
+    if (!stagedOk) LittleFS.remove(APPLY_PATH);
+    releaseStorageWrite();
+    if (!stagedOk) {
+        Serial.println("[Config] Candidate staging write failed");
+        return false;
+    }
     doc.clear();
     doc.shrinkToFit();
-    if (save()) return true;
-
-    // Atomic save leaves the previous engine file authoritative on failure.
-    // Restore runtime values from it so a rejected web save never runs with
-    // settings that were only applied in RAM.
-    load();
-    return false;
+    delay(0);
+    // The exact validated generation is already staged.  Do not read it into
+    // a second heap buffer merely to write the same bytes back to the staging
+    // file and then parse them on the ECU core.  Apart from being redundant,
+    // that large short-lived allocation fragments the small internal DRAM
+    // pool shared with Wi-Fi.  A non-zero length with a null pointer tells the
+    // unified writer and ECU core to stream this staged generation directly.
+    char* candidate = nullptr;
+#else
+    char* candidate = static_cast<char*>(malloc(required + 1));
+    if (!candidate) return false;
+    if (serializeJson(doc, candidate, required + 1) != required) {
+        free(candidate);
+        return false;
+    }
+    doc.clear();
+    doc.shrinkToFit();
+#endif
+    if (!_saveSettingsJson(candidate, required)) {
+        free(candidate);
+        return false;
+    }
+    outJson = candidate;
+    outLen = required;
+    return true;
 }
 
 float Config::applyFuelPumpMinimum(float demand01) {
@@ -336,6 +398,28 @@ float Config::applyFuelPumpMinimum(float demand01) {
     float minDemand = constrain(fuelPumpMinPct / 100.0f, 0.0f, 1.0f);
     if (minDemand <= 0.0f) return demand;
     return (demand > 0.0f && demand < minDemand) ? 0.0f : demand;
+}
+
+float Config::effectiveMainFuelDemand(const EngineData& ed) {
+    const float base = constrain(ed.throttleDemand, 0.0f, 1.0f);
+    // An authoritative zero is Off. A stale or simultaneous AB coordination
+    // request must never create main fuel from an already-off command.
+    if (base <= 0.0f) return 0.0f;
+
+    const float requestedOffset = ed.abFuelOffset;
+    const float allowedOffset = (ed.mainFuelProtectionActive || ed.limpMode)
+        ? min(requestedOffset, 0.0f) : requestedOffset;
+    float demand = constrain(base + allowedOffset, 0.0f, 1.0f);
+
+    // Negative AB coordination may reduce a running pump, but it may not push
+    // that pump through the calibrated unreliable band and thereby turn it off.
+    const float minRun = constrain(fuelPumpMinPct / 100.0f, 0.0f, 1.0f);
+    const bool baseWasRunning = minRun <= 0.0f || base >= minRun;
+    if (allowedOffset < 0.0f && baseWasRunning && demand < minRun) demand = minRun;
+
+    if (ed.limpMode && (ed.mode == SysMode::STARTUP || ed.mode == SysMode::RUNNING))
+        demand = min(demand, constrain(limpMaxThrottlePct / 100.0f, 0.0f, 1.0f));
+    return ed.mode == SysMode::STANDBY ? demand : applyFuelPumpMinimum(demand);
 }
 
 void Config::_applyDefaults() {
@@ -388,13 +472,15 @@ void Config::_applyDefaults() {
     rpmLimiterMode = 0; pullbackLookaheadMs = 1500.0f; pullbackNearLimitRampUpMs = 4000.0f;
     pullbackApproachZoneRpm = 0.0f; rpmAccelFilter = 0.20f;
     idleTargetRpm = 44000; idleRampUpMs = 10000; idleRampDownMs = 20000;
-    idleDeadbandRpm = 300; idleRpmLimit = 60000; idleMinMultiplier = 0.75f; idleMaxMultiplier = 1.50f;
+    idleDeadbandRpm = 300; idleRpmLimit = 60000; idleMaxMultiplier = 1.50f;
     idleUseN2 = ConfigInternal::idleUseN2Default; idleIGain = 0.0f; idleIMax = 0.10f;
     idleSource = ConfigInternal::idleUseN2Default ? 1 : 0;
     idleTargetPressure = 1.0f; idlePressureDeadband = 0.03f; idlePressureLimit = 2.0f;
     idleMode = 0; idleDecelEnterRpm = 1000.0f; idleDecelDropPct = 2.0f; idleLookaheadMs = 2500.0f;
     idleSettleBandRpm = 1500.0f; idleFullResponseRpm = 12000.0f; idleTrimUpPctPerSec = 4.0f;
     idleTrimDownPctPerSec = 2.0f; idleLearnRate = 0.02f; idleLearnAccelMax = 1200.0f;
+    idlePressureDecelEnter = 0.12f; idlePressureSettleBand = 0.03f;
+    idlePressureFullResponse = 0.25f; idlePressureLearnRateMax = 1.0f;
     safetyCheckIntervalMs = 100; flameoutShutdownMs = 3000;
     lowOilConfirmMs = 500; oilZeroConfirmMs = 100; oilTempConfirmMs = 1000;
     fuelPressConfirmMs = 500; battLowConfirmMs = 1000;
@@ -426,7 +512,7 @@ void Config::_applyDefaults() {
     govHoldTimeoutMs = 10000;
     abMinN1 = 30000.0f; abMaxN1 = 0.0f; abMaxTotForLight = 0.0f;
     abThrottleThreshold = 0.80f; abUseTorch = false; abUseIgniter = false;
-    abTorchSpikePct = 30.0f; abTorchDurationMs = 400; abTorchTotLimit = 0.0f;
+    abTorchSpikePct = 30.0f; abTorchDurationMs = 400; abTorchTotLimit = 0.0f; abTorchGuardMode = 0;
     abFlameMode = 2; abTotRiseDegC = 30.0f; abTotRiseWindowMs = 2000;
     abAssumeIgnitedMs = 1500; abFlameTimeoutMs = 3000; abFlameLossDelayMs = 1000;
     abLightupPumpPct = 80.0f; abPumpMinPct = 80.0f; abPumpMaxPct = 100.0f; abPumpControlMode = 0;
@@ -438,7 +524,7 @@ void Config::_applyDefaults() {
     governorKp = 0.00025f; governorPitchKp = 0.00020f; governorPitchRampSec = 10.0f;
     glowPreheatMs = 10000; glowPreheatMaxPct = 80.0f; glowHoldPct = 30.0f; glowWaitUntilHot = false;
     throttleMinRaw = 0; throttleMaxRaw = 4095;
-    idleMinRaw = 0; idleMaxRaw = 4095; flameThreshold = 500;
+    idleMinRaw = 0; idleMaxRaw = 4095;
     oilPolyA = 0; oilPolyB = 0; oilPolyC = 0; oilPolyD = 0;
     oilPolyXMin = 0; oilPolyXMax = 4095;
     p1RawMin = 0; p1RawMax = 4095; p1ValMax = 10.0f;
@@ -498,11 +584,25 @@ void Config::_fromDoc(const JsonDocument& doc) {
     readConfigFields(th, THROTTLE_BOOL_FIELDS);
 
     auto di = doc["dynamic_idle"];
+    const bool hasPressureDecelEnter = !di["pressure_decel_enter_bar"].isNull();
+    const bool hasPressureSettleBand = !di["pressure_settle_band_bar"].isNull();
+    const bool hasPressureFullResponse = !di["pressure_full_response_bar"].isNull();
+    const bool hasPressureLearnRate = !di["pressure_learn_rate_max_bar_s"].isNull();
     readConfigFields(di, IDLE_FLOAT_FIELDS);
     readConfigFields(di, IDLE_BOOL_FIELDS);
     const bool idleSourceMissing = di["source"].isNull();
     readConfigFields(di, IDLE_INT_FIELDS);
     if (idleSourceMissing) idleSource = idleUseN2 ? 1 : 0;
+    // Preserve the former derived pressure-mode behavior when upgrading a file
+    // that predates explicit pressure-domain predictive tuning.
+    if (!hasPressureDecelEnter)
+        idlePressureDecelEnter = max(idlePressureDeadband * 4.0f, idleTargetPressure * 0.05f);
+    if (!hasPressureSettleBand)
+        idlePressureSettleBand = max(idlePressureDeadband, idleTargetPressure * 0.01f);
+    if (!hasPressureFullResponse)
+        idlePressureFullResponse = max(idlePressureDeadband, idleTargetPressure * 0.25f);
+    if (!hasPressureLearnRate)
+        idlePressureLearnRateMax = max(0.01f, idleTargetPressure);
 
     auto sf = doc["safety"];
     if (sf["egt_source"].isNull()) _missingRequiredSections = true;
@@ -728,7 +828,9 @@ void Config::_fromDoc(const JsonDocument& doc) {
     if (idleRampUpMs < 0.0f) idleRampUpMs = 0.0f;
     if (idleRampDownMs < 0.0f) idleRampDownMs = 0.0f;
     if (glowPreheatMs < 0) glowPreheatMs = 0;
-    if (relightTimeoutMs < 0) relightTimeoutMs = 0;
+    if (relightTimeoutMs > 30000)
+        Serial.printf("[Config] relight_timeout_ms %d exceeds hard maximum; using 30000 ms\n", relightTimeoutMs);
+    relightTimeoutMs = constrain(relightTimeoutMs, 0, 30000);
     relightIgnitionTarget = constrain(relightIgnitionTarget, 0, 2);
     relightConfirmSource = constrain(relightConfirmSource, 0, 3);
     if (relightMinRpm < 1.0f) relightMinRpm = max(1.0f, minRpm);
@@ -741,7 +843,8 @@ void Config::_fromDoc(const JsonDocument& doc) {
     standbyOilSource = constrain(standbyOilSource, 0, 2);
     manualRelightIgnitionTarget = constrain(manualRelightIgnitionTarget, 0, 2);
     for (int i = 0; i < ruleCount; i++) {
-        if (rules[i].sensor > 26 && !ChannelRegistry::isInputSensor(rules[i].sensor))
+        if (rules[i].sensor > RulesEngine::THRUST &&
+            !ChannelRegistry::isInputSensor(rules[i].sensor))
             rules[i].enabled = false;
         rules[i].kind = constrain(rules[i].kind, 0, 1);
         rules[i].op = constrain(rules[i].op, 0, 1);
@@ -754,7 +857,7 @@ void Config::_fromDoc(const JsonDocument& doc) {
         rules[i].outputMax = constrain(rules[i].outputMax, 0.0f, 1.0f);
         if (!isfinite(rules[i].inputMin)) rules[i].inputMin = 0.0f;
         if (!isfinite(rules[i].inputMax) || rules[i].inputMax <= rules[i].inputMin) rules[i].inputMax = rules[i].inputMin + 1.0f;
-        rules[i].modeMask &= 0x0E;
+        rules[i].modeMask &= 0x0F;
         if (rules[i].modeMask == 0) rules[i].enabled = false;
     }
     if (standbyOilRpmLimit < 0.0f) standbyOilRpmLimit = 0.0f;
@@ -835,7 +938,6 @@ void Config::_fromDoc(const JsonDocument& doc) {
     idleTargetPressure = constrain(idleTargetPressure, 0.0f, 1000.0f);
     idlePressureDeadband = constrain(idlePressureDeadband, 0.0f, 1000.0f);
     idlePressureLimit = constrain(idlePressureLimit, 0.0f, 1000.0f);
-    idleMinMultiplier = constrain(idleMinMultiplier, 0.0f, 1.0f);
     idleMaxMultiplier = constrain(idleMaxMultiplier, 1.0f, 3.0f);
     idleIGain = constrain(idleIGain, 0.0f, 2.0f);
     idleIMax = constrain(idleIMax, 0.0f, 0.5f);
@@ -849,6 +951,10 @@ void Config::_fromDoc(const JsonDocument& doc) {
     idleTrimDownPctPerSec = constrain(idleTrimDownPctPerSec, 0.0f, 50.0f);
     idleLearnRate = constrain(idleLearnRate, 0.0f, 1.0f);
     if (idleLearnAccelMax < 0.0f) idleLearnAccelMax = 0.0f;
+    idlePressureDecelEnter = constrain(idlePressureDecelEnter, 0.0f, 1000.0f);
+    idlePressureSettleBand = constrain(idlePressureSettleBand, 0.0f, 1000.0f);
+    idlePressureFullResponse = constrain(idlePressureFullResponse, 0.0001f, 1000.0f);
+    idlePressureLearnRateMax = constrain(idlePressureLearnRateMax, 0.0f, 1000.0f);
     glowPreheatMaxPct = constrain(glowPreheatMaxPct, 0.0f, 100.0f);
     glowHoldPct = constrain(glowHoldPct, 0.0f, 100.0f);
     starterAssistPwmPct = constrain(starterAssistPwmPct, 0.0f, 100.0f);
@@ -889,7 +995,8 @@ void Config::_fromDoc(const JsonDocument& doc) {
     if (abMaxN1 < 0.0f) abMaxN1 = 0.0f;
     if (abMaxTotForLight < 0.0f) abMaxTotForLight = 0.0f;
     if (abTorchTotLimit < 0.0f) abTorchTotLimit = 0.0f;
-    if (abFlameMode < 0 || abFlameMode > 2) abFlameMode = 2;
+    if (abTorchGuardMode < 0 || abTorchGuardMode > 2) abTorchGuardMode = 0;
+    if (abFlameMode < 0 || abFlameMode > 3) abFlameMode = 2;
     if (abTotRiseDegC < 0.0f) abTotRiseDegC = 0.0f;
     if (abTotRiseWindowMs < 0) abTotRiseWindowMs = 0;
     if (abAssumeIgnitedMs < 0) abAssumeIgnitedMs = 0;

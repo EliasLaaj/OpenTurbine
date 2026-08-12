@@ -26,6 +26,8 @@ struct SessionRow {
     float    loopHz, loopExecAvgMs, loopExecMaxMs;
     int      abMode;
     bool     abFlameOn;
+    bool     abRequest, abPermitted, abExecuting, abEvidence;
+    uint32_t abUnconfirmedFuelMs;
     uint8_t  sysMode;   // SysMode cast to byte
 };
 
@@ -37,6 +39,8 @@ static uint32_t          _rowCount  = 0;
 static volatile uint32_t _droppedRows = 0;
 static volatile bool     _healthy = true;
 static volatile uint8_t  _errorCode = 0;
+static uint32_t          _evictionCount = 0;
+static uint32_t          _lastEvictedSession = 0;
 static char              _currentPath[40] = {};
 static QueueHandle_t     _rowQueue  = nullptr;
 static volatile bool     _startPending = false;
@@ -56,6 +60,10 @@ const char* SessionLogger::currentPath() {
 }
 
 uint32_t SessionLogger::droppedRows() { return _droppedRows; }
+uint32_t SessionLogger::evictionCount() { return _evictionCount; }
+uint32_t SessionLogger::lastEvictedSession() { return _lastEvictedSession; }
+size_t SessionLogger::freeBytes() { return LittleFS.totalBytes() - LittleFS.usedBytes(); }
+size_t SessionLogger::reserveBytes() { return SESSION_MIN_FREE_BYTES; }
 bool SessionLogger::healthy() { return _healthy; }
 uint8_t SessionLogger::errorCode() { return _errorCode; }
 
@@ -94,11 +102,12 @@ static uint8_t _csvColumnCount(uint32_t mask) {
     if (mask & Config::SLOG_IGN2_CURRENT) count += 1;
     if (mask & Config::SLOG_OIL_CURRENT)  count += 1;
     if (mask & Config::SLOG_FP2)        count += 1;
-    if (mask & Config::SLOG_AB)         count += 4;
+    if (mask & Config::SLOG_AB)         count += 9;
     if (mask & Config::SLOG_PROP)       count += 1;
     if (mask & Config::SLOG_OIL_PCT)    count += 1;
     if (mask & Config::SLOG_LOOP)       count += 3;
     if (mask & Config::SLOG_TORQUE)     count += 2;
+    if (mask & Config::SLOG_THRUST)     count += 1;
     if (mask & Config::SLOG_STARTER)    count += 1;
     return count;
 }
@@ -146,11 +155,16 @@ static void _writeRow(const SessionRow& row) {
     if (mask & Config::SLOG_IGN2_CURRENT) APPEND_ROW_FIELD(",%.2f",(double)row.igniter2CurrentAmps);
     if (mask & Config::SLOG_OIL_CURRENT)  APPEND_ROW_FIELD(",%.2f",(double)row.oilPumpCurrentAmps);
     if (mask & Config::SLOG_FP2)        APPEND_ROW_FIELD(",%.1f",(double)(row.fuelPump2Demand * 100.0f));
-    if (mask & Config::SLOG_AB)         APPEND_ROW_FIELD(",%d,%d,%.1f,%.1f",
+    if (mask & Config::SLOG_AB)         APPEND_ROW_FIELD(",%d,%d,%.1f,%.1f,%d,%d,%d,%d,%lu",
                                                          row.abMode,
                                                          row.abFlameOn ? 1 : 0,
                                                          (double)(row.abPumpDemand * 100.0f),
-                                                         (double)(row.abFuelOffset * 100.0f));
+                                                         (double)(row.abFuelOffset * 100.0f),
+                                                         row.abRequest ? 1 : 0,
+                                                         row.abPermitted ? 1 : 0,
+                                                         row.abExecuting ? 1 : 0,
+                                                         row.abEvidence ? 1 : 0,
+                                                         (unsigned long)row.abUnconfirmedFuelMs);
     if (mask & Config::SLOG_PROP)       APPEND_ROW_FIELD(",%.1f",(double)(row.propPitchDemand * 100.0f));
     if (mask & Config::SLOG_OIL_PCT)    APPEND_ROW_FIELD(",%.1f",(double)row.oilPumpPct);
     if (mask & Config::SLOG_LOOP)       APPEND_ROW_FIELD(",%.1f,%.3f,%.3f",
@@ -243,6 +257,8 @@ static void _evictOldSessions() {
             Serial.printf("[SessionLogger] Could not evict %s (in use?) - will retry\n", oldestPath);
             break;
         }
+        _evictionCount++;
+        _lastEvictedSession = (uint32_t)oldest;
         Serial.printf("[SessionLogger] Evicted %s - flash low\n", oldestPath);
     }
 }
@@ -258,10 +274,30 @@ static void _openSession() {
 
     _evictOldSessions();
 
-    uint32_t run = EngineData::instance().runCount + 1;
-    do {
-        snprintf(_currentPath, sizeof(_currentPath), "/logs/session_%lu.csv", (unsigned long)run++);
-    } while (LittleFS.exists(_currentPath));
+    uint32_t highestStored = 0;
+    File dir = LittleFS.open("/logs");
+    if (dir) {
+        File entry = dir.openNextFile();
+        while (entry) {
+            int num = -1;
+            if (SessionFiles::parseRunNumber(entry.name(), num) && num > 0)
+                highestStored = max(highestStored, (uint32_t)num);
+            entry.close();
+            entry = dir.openNextFile();
+        }
+        dir.close();
+    }
+    const uint32_t durableRun = EngineData::instance().runCount;
+    const uint32_t base = max(durableRun, highestStored);
+    if (base == UINT32_MAX) {
+        _currentPath[0] = '\0';
+        _healthy = false;
+        _errorCode = 7;
+        Serial.println("[SessionLogger] Session identity exhausted");
+        return;
+    }
+    const uint32_t run = base + 1U;
+    snprintf(_currentPath, sizeof(_currentPath), "/logs/session_%lu.csv", (unsigned long)run);
 
     _file = LittleFS.open(_currentPath, "w");
     if (!_file) {
@@ -294,7 +330,7 @@ static void _openSession() {
     if (mask & Config::SLOG_IGN2_CURRENT) _file.print(",ign2_current_a");
     if (mask & Config::SLOG_OIL_CURRENT)  _file.print(",oil_current_a");
     if (mask & Config::SLOG_FP2)        _file.print(",fp2_pct");
-    if (mask & Config::SLOG_AB)         _file.print(",ab_mode,ab_flame,ab_pump_pct,ab_offset_pct");
+    if (mask & Config::SLOG_AB)         _file.print(",ab_mode,ab_flame,ab_pump_pct,ab_offset_pct,ab_request,ab_permitted,ab_executing,ab_evidence,ab_unconfirmed_fuel_ms");
     if (mask & Config::SLOG_PROP)       _file.print(",prop_pct");
     if (mask & Config::SLOG_OIL_PCT)    _file.print(",oil_pump_pct");
     if (mask & Config::SLOG_LOOP)       _file.print(",loop_hz,loop_exec_avg_ms,loop_exec_max_ms");
@@ -413,6 +449,11 @@ void SessionLogger::tick() {
     row.loopExecMaxMs   = ed.loopExecMaxMs;
     row.abMode          = (int)ed.abMode;
     row.abFlameOn       = ed.abFlameOn;
+    row.abRequest       = ed.abTriggerActive;
+    row.abPermitted     = ed.abPermitted;
+    row.abExecuting     = ed.abExecutionActive;
+    row.abEvidence      = ed.abEvidenceValid;
+    row.abUnconfirmedFuelMs = ed.abFirstFuelMs && !ed.abConfirmedMs ? millis() - ed.abFirstFuelMs : 0;
     row.sysMode         = (uint8_t)ed.mode;
 
     // Active-engine flash writes are forbidden, so retain a bounded tail in

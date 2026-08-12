@@ -4,8 +4,8 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Tools</title>
-<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260731a" data-ot-version="20260731a" data-ot-app="true"></script>
+<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 <style>
 .test-settings-card{width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .test-settings-head,.test-settings-foot{flex:0 0 auto;padding:1rem}
@@ -90,7 +90,7 @@ const TOOLS = [
   { id:'FUEL_PRIME',          name:'Main Fuel Prime',   durationMs:3000, configKey:'tools.fuel_prime_ms',    desc:'Briefly opens the main fuel shutoff to prime the main fuel line.', visibleIf: hw => !!hw?.actuators?.fuel_sol?.enabled },
   { id:'OIL_PRIME',           name:'Oil Prime',          durationMs:5000, configKey:'tools.oil_prime_ms',     desc:'Runs oil pump at 100% - primes oil circuit. This is a direct bench command, not the controller minimum duty.', visibleIf: hw => !!hw?.actuators?.oil_pump?.enabled },
   { id:'IGN_TEST',            name:'Igniter 1 Test',     durationMs:2000, configKey:'tools.ign_test_ms',      desc:'Fires igniter 1 - verify spark visually.', visibleIf: hw => !!hw?.actuators?.igniter?.enabled },
-  { id:'IGN2_TEST',           name:'AB Igniter Test',    durationMs:2000, configKey:'tools.ign2_test_ms',     desc:'Fires the afterburner / pilot igniter output — verify spark visually.', visibleIf: hw => !!hw?.actuators?.igniter2?.enabled },
+  { id:'IGN2_TEST',           name:'AB Igniter Test',    durationMs:2000, configKey:'tools.ign2_test_ms',     desc:'Fires the afterburner / secondary igniter output — verify spark visually.', visibleIf: hw => !!hw?.actuators?.igniter2?.enabled },
   { id:'START_TEST',          name:'Starter Test',       durationMs:2000, configKey:'tools.start_test_ms',    desc:'Spins starter at configured demand - verify motor turns.', visibleIf: hw => !!hw?.actuators?.starter?.enabled },
   { id:'PULSED_STARTER_ASSIST_TEST', name:'Pulsed Starter Assist Test', durationMs:500, desc:'Runs one configured assist pulse in STANDBY. Use it to verify starter direction and pulse output before allowing the startup sequence to use the feature.',
     visibleIf: hw => !!(cfgData?.starter_control?.pulsed_assist_enabled && hw?.actuators?.starter?.enabled && Number(hw?.actuators?.starter?.type ?? 0) !== 2 && hw?.sensors?.n1_rpm?.enabled) },
@@ -103,7 +103,7 @@ const TOOLS = [
   { id:'AIRSTARTER_TEST',  name:'Air Starter Valve Pulse', durationMs:1000, configKey:'tools.airstarter_test_ms', desc:'Opens the air starter valve for the configured duration.', visibleIf: hw => !!hw?.actuators?.airstarter_sol?.enabled },
   { id:'BLEED_VALVE_TEST', name:'Bleed Valve Test',    durationMs:1000, configKey:'tools.bleed_valve_test_ms', desc:'Opens bleed valve for configured duration.', visibleIf: hw => !!hw?.actuators?.bleed_valve?.enabled },
   { id:'GLOW_TEST',        name:'Glow Plug Test',      durationMs:10000, configKey:'tools.glow_test_ms', desc:'Runs glow plug at configured demand — confirm heating element.', visibleIf: hw => !!hw?.actuators?.glow_plug?.enabled },
-  { id:'FUEL_PUMP2_TEST',  name:'Pilot / Auxiliary Fuel Pump Test', durationMs:3000, configKey:'tools.fuel_pump2_test_ms', desc:'Runs the independent pilot/auxiliary fuel pump at configured demand.', visibleIf: hw => !!hw?.actuators?.fuel_pump2?.enabled },
+  { id:'FUEL_PUMP2_TEST',  name:'Secondary / Auxiliary Fuel Pump Test', durationMs:3000, configKey:'tools.fuel_pump2_test_ms', desc:'Runs the independent secondary/auxiliary fuel pump at configured demand.', visibleIf: hw => !!hw?.actuators?.fuel_pump2?.enabled },
   { id:'AB_SOL_TEST',      name:'AB Fuel Valve Test',   durationMs:1000, configKey:'tools.ab_sol_test_ms', desc:'Opens the afterburner fuel shutoff valve for the configured duration.', visibleIf: hw => !!hw?.actuators?.ab_sol?.enabled },
   { id:'AB_PUMP_TEST',     name:'AB Fuel Pump Test',    durationMs:2000, configKey:'tools.ab_pump_test_ms', desc:'Runs the afterburner fuel pump at the configured demand.', visibleIf: hw => !!hw?.actuators?.ab_pump?.enabled },
   { id:'PROP_PITCH_TEST',  name:'Prop Pitch Test',      durationMs:3000, configKey:'tools.prop_pitch_test_ms', desc:'Moves prop pitch output to configured position.', visibleIf: hw => !!hw?.actuators?.prop_pitch?.enabled },
@@ -179,9 +179,9 @@ function plainRegistryToolName(raw,fallback='Output'){
     user_throttle:'Throttle Input',operator_throttle:'Throttle Input',operator_thrott:'Throttle Input',throttle_input:'Throttle Input',
     user_idle:'Idle Input',operator_idle:'Idle Input',idle_input:'Idle Input',
     main_fuel:'Main Fuel Pump',main_fuel_output:'Main Fuel Pump',fuel_shutoff:'Main Fuel Shutoff',main_fuel_shutoff:'Main Fuel Shutoff',
-    oil_pump:'Oil Pump',oil_pump_main:'Oil Pump',fuel_pump:'Pilot / Auxiliary Fuel Pump',starter_enable:'Starter Enable',
+    oil_pump:'Oil Pump',oil_pump_main:'Oil Pump',fuel_pump:'Secondary / Auxiliary Fuel Pump',starter_enable:'Starter Enable',
     flame:'Flame Sensor',flame_main:'Flame Sensor',coolant_pump:'Coolant Pump',coolant_temperature:'Coolant Temperature',
-    pilot_fuel:'Pilot Gas',purge_valve:'Purge Valve',air_starter:'Air Starter',
+    pilot_fuel:'Start Fuel',purge_valve:'Purge Valve',air_starter:'Air Starter',
     ab_pump:'AB Fuel Pump',ab_solenoid:'AB Fuel Valve',ab_igniter:'AB Igniter',
     prop_pitch:'Prop Pitch',nozzle_actuator:'Nozzle Actuator',generic_pwm_output:'PWM Output',generic_servo_output:'Servo Output',generic_relay_output:'Relay Output'
   };
@@ -207,7 +207,7 @@ function syncRegistryOutputTools(){
   outs.forEach((c,i)=>{
     const driver=Number(c?.driver);
     const hasPhysicalEndpoint=driver===11
-      ? Number(c?.i2c_address)>=0&&Number(c?.device_channel)>=0
+      ? Number(c?.i2c_address)>=0x20&&Number(c?.i2c_address)<=0x27&&Number(c?.device_channel)>=0
       : c?.pin!=null&&Number(c.pin)>=0;
     if(!c||!hasPhysicalEndpoint) return;
     if(CORE_REGISTRY_OUTPUT_IDS.has(String(c.id||''))||coreBound.has(String(c.id||''))) return;
@@ -244,7 +244,7 @@ function openTestSettings(){
     const durationKey=t.configKey?.split('.')[1]; if(!durationKey)return;
     const ms=Number(cfgData?.tools?.[durationKey]??t.durationMs);
     const outKey=TEST_OUTPUT_KEYS[t.id], out=outKey?Number(cfgData?.tools?.[outKey]??100):null;
-    html+=`<div class="tool-card" style="margin:0"><div class="tool-name">${escHtml(t.name)}</div><label class="tool-desc">Duration (seconds)<input class="test-setting" data-key="${durationKey}" data-kind="seconds" type="number" min="0.05" step="0.05" value="${ms/1000}" title="How long this test command remains active."></label>${outKey?`<label class="tool-desc">Output (%)<input class="test-setting" data-key="${outKey}" data-kind="percent" type="number" min="0" max="100" step="1" value="${out}" title="Proportional output used by this test. Relay outputs ignore percentage."></label>`:''}</div>`;
+    html+=`<div class="tool-card" style="margin:0"><div class="tool-name">${escHtml(t.name)}</div><label class="tool-desc">Duration (seconds)<input class="test-setting" data-key="${durationKey}" data-kind="seconds" type="number" min="0.05" max="60" step="0.05" value="${ms/1000}" title="How long this test command remains active (maximum 60 seconds)."></label>${outKey?`<label class="tool-desc">Output (%)<input class="test-setting" data-key="${outKey}" data-kind="percent" type="number" min="0" max="100" step="1" value="${out}" title="Proportional output used by this test. Relay outputs ignore percentage."></label>`:''}</div>`;
   });
   body.innerHTML=html||'<div style="color:var(--dim)">No configurable actuator tests match the fitted hardware.</div>';
   document.getElementById('test-settings-status').textContent='';
@@ -254,7 +254,10 @@ function closeTestSettings(){document.getElementById('test-settings-modal').styl
 async function saveTestSettings(){
   const toolsPatch={};
   for(const el of document.querySelectorAll('.test-setting')){
-    const v=Number(el.value); if(!Number.isFinite(v)||v<0){alert('Enter valid non-negative test settings.');return;}
+    const v=Number(el.value);
+    if(!Number.isFinite(v)||v<0||(el.dataset.kind==='seconds'&&v>60)){
+      alert('Enter valid test settings. Test duration must be between 0 and 60 seconds.');return;
+    }
     toolsPatch[el.dataset.key]=el.dataset.kind==='seconds'?Math.round(v*1000):v;
   }
   const r=await fetch('/api/config',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({tools:toolsPatch})});
@@ -292,7 +295,7 @@ function renderTools() {
         ${t.registryOutput && !t.relayOutput ? `<label class="tool-time" style="display:flex;align-items:center;gap:.35rem;white-space:nowrap">Test output
           <input id="demand-${t.id}" type="number" min="0" max="100" step="1" value="${Number(t.testDemandPct??50)}"
                  style="width:4.5rem;min-height:34px;padding:.25rem .4rem" aria-label="${safeName} test output percentage">%</label>` : ''}
-        ${!isToggle ? `<div class="tool-time" id="time-${t.id}">${Number((t.durationMs/1000).toFixed(2))} s</div>` : ''}
+        ${!isToggle ? `<div class="tool-time" id="time-${t.id}">${Number((toolRunDurationMs(t)/1000).toFixed(2))} s</div>` : ''}
         <button id="btn-${t.id}" onclick="runTool('${t.id}')" disabled>
           ${isToggle ? 'Toggle' : 'Run'}
         </button>
@@ -519,9 +522,10 @@ async function runTool(id) {
   let skipConfirmation = false;
   try { skipConfirmation = localStorage.getItem(TOOL_CONFIRMATION_SKIP_KEY) === '1'; } catch (_) {}
   if (tool.durationMs > 0 && !skipConfirmation) {
-    const seconds = (tool.durationMs / 1000).toFixed(tool.durationMs % 1000 ? 1 : 0);
+    const runMs = toolRunDurationMs(tool);
+    const seconds = (runMs / 1000).toFixed(runMs % 1000 ? 1 : 0);
     const confirmed = await OTDialog.confirm(
-      `${tool.name} will energize its fitted output for ${seconds} s.\n\n${tool.desc}\n\nConfirm the engine is in a safe test state, fuel and ignition risks are controlled, and all moving hardware is clear.`,
+      `${tool.name} will energize its temporary output sequence for ${seconds} s.\n\n${tool.desc}\n\nConfirm the engine is in a safe test state, fuel and ignition risks are controlled, and all moving hardware is clear.`,
       {
         title:`Run ${tool.name}?`,
         confirmText:'Energize output',
@@ -587,6 +591,7 @@ function startProgress(tool) {
   if (activeTick) { clearInterval(activeTick); activeTick = null; }
   activeId    = tool.id;
   activeStart = Date.now();
+  const runDurationMs = toolRunDurationMs(tool);
 
   setAllButtons(true);
   setState(tool.id, 'Active', 'active');
@@ -595,15 +600,15 @@ function startProgress(tool) {
 
   activeTick = setInterval(() => {
     const elapsed = Date.now() - activeStart;
-    const pct     = Math.min(100, (elapsed / tool.durationMs) * 100);
-    const remain  = Math.max(0, (tool.durationMs - elapsed) / 1000);
+    const pct     = Math.min(100, (elapsed / runDurationMs) * 100);
+    const remain  = Math.max(0, (runDurationMs - elapsed) / 1000);
 
     const pf = document.getElementById('prog-' + tool.id);
     const tm = document.getElementById('time-' + tool.id);
     if (pf) pf.style.width = pct + '%';
     if (tm) tm.textContent = remain.toFixed(1) + ' s';
 
-    if (elapsed >= tool.durationMs) {
+    if (elapsed >= runDurationMs) {
       clearInterval(activeTick); activeTick = null; activeId = null;
       if (pf) { pf.style.width = '100%'; pf.classList.remove('running'); }
       setState(tool.id, 'Done', 'done');
@@ -611,7 +616,7 @@ function startProgress(tool) {
       setTimeout(() => {
         setState(tool.id, 'Ready', '');
         if (pf) pf.style.width = '0%';
-        if (tm) tm.textContent = (tool.durationMs / 1000).toFixed(0) + ' s';
+        if (tm) tm.textContent = Number((toolRunDurationMs(tool) / 1000).toFixed(2)) + ' s';
       }, 2000);
     }
   }, 40);
@@ -666,6 +671,7 @@ function isStandbyLike(m) { return m === 'STANDBY' || m === 'FAULT'; }
 
 function setAllButtons(forcedOff) {
   const inStandby = isStandbyLike(engineMode);
+  const ecActive = !!(liveData && liveData.extra_cooldown_active);
   TOOLS.forEach(t => {
     const btn = document.getElementById('btn-' + t.id);
     if (!btn) return;
@@ -673,24 +679,24 @@ function setAllButtons(forcedOff) {
     // FAULT counts as STANDBY for per-tool mode lists.
     const effMode = engineMode === 'FAULT' ? 'STANDBY' : engineMode;
     const modeOk = t.modes ? t.modes.includes(effMode) : (isToggle || inStandby);
-    btn.disabled = forcedOff || !modeOk;
+    btn.disabled = forcedOff || !modeOk || (ecActive && !isToggle);
   });
   // Cooldown start button — only standby-like and not already running
   const ecBtn = document.getElementById('btn-EXTRA_COOLDOWN');
-  const ecActive = !!(liveData && liveData.extra_cooldown_active);
   if (ecBtn) ecBtn.disabled = forcedOff || !inStandby || ecActive || !extraCooldownAvailable();
   // Factory reset — standby-like only (card label says so; enforce it here)
   const frBtn = document.getElementById('btn-factory-reset');
   if (frBtn) frBtn.disabled = forcedOff || !inStandby;
 }
 function refreshTimedToolLockStates() {
-  const locked = !isStandbyLike(engineMode);
+  const cooldownLocked = !!(liveData && liveData.extra_cooldown_active);
+  const locked = !isStandbyLike(engineMode) || cooldownLocked;
   TOOLS.filter(tool => tool.durationMs > 0).forEach(tool => {
     if (activeId === tool.id) return;
     const state = document.getElementById('state-' + tool.id);
     if (!state) return;
     if (locked) {
-      setState(tool.id, `Locked · ${engineMode}`, 'off');
+      setState(tool.id, cooldownLocked ? 'Locked · cooldown' : `Locked · ${engineMode}`, 'off');
     } else if (state.textContent.startsWith('Locked ·')) {
       setState(tool.id, 'Ready', '');
     }
@@ -698,7 +704,9 @@ function refreshTimedToolLockStates() {
 }
 
 // ── WS integration ────────────────────────────────────────────
+function installToolsTelemetryExtension() {
 const _base = window.applyData;
+if (typeof _base !== 'function' || _base._toolsExtended) return;
 window.applyData = function(d) {
   const merged = _base(d);
   if (!merged) return;
@@ -820,6 +828,9 @@ window.applyData = function(d) {
   const ecBtn = document.getElementById('btn-EXTRA_COOLDOWN');
   if (ecBtn) ecBtn.disabled = (d.mode !== 'STANDBY') || ecActive || !extraCooldownAvailable();
 };
+window.applyData._toolsExtended = true;
+}
+document.addEventListener('DOMContentLoaded', installToolsTelemetryExtension, { once:true });
 
 // ── Dev mode toggle ───────────────────────────────────────────
 async function toggleDevMode() {
@@ -881,6 +892,16 @@ function getNestedVal(obj, dotPath) {
   return dotPath.split('.').reduce((cur, k) => (cur && typeof cur === 'object' ? cur[k] : undefined), obj);
 }
 
+function starterEnableDelayMs() {
+  const starterEnable = hwCfg?.actuators?.starter_en;
+  return starterEnable?.enabled ? Math.max(0, Number(starterEnable.delay_ms ?? 0)) : 0;
+}
+
+function toolRunDurationMs(tool) {
+  return Math.max(1, Number(tool?.durationMs || 0) +
+    (tool?.id === 'START_TEST' ? starterEnableDelayMs() : 0));
+}
+
 function syncDynamicToolText() {
   const tools = cfgData?.tools || {};
   const act = key => hwCfg?.actuators?.[key] || {};
@@ -896,7 +917,11 @@ function syncDynamicToolText() {
   const outputText = (key, pct) => isRelay(key) ? 'ON' : pctText(pct);
   const setDesc = (id, text) => { const t = tool(id); if (t) t.desc = text; };
 
-  setDesc('START_TEST', `Output: starter ${outputText('starter', tools.start_test_pct ?? 30)} for ${sec(tools.start_test_ms ?? 2000)} s.`);
+  const starterTestMs = Number(tools.start_test_ms ?? 2000);
+  const starterDelayMs = starterEnableDelayMs();
+  setDesc('START_TEST', starterDelayMs
+    ? `Sequence: starter enable ON, wait ${sec(starterDelayMs)} s, then starter ${outputText('starter', tools.start_test_pct ?? 30)} for ${sec(starterTestMs)} s. Total ${sec(starterDelayMs + starterTestMs)} s.`
+    : `Output: starter ${outputText('starter', tools.start_test_pct ?? 30)} for ${sec(starterTestMs)} s.`);
   const assist = cfgData?.starter_control || {};
   const assistTool = tool('PULSED_STARTER_ASSIST_TEST');
   if (assistTool) {
@@ -922,7 +947,7 @@ function syncDynamicToolText() {
   setDesc('COOL_FAN_TEST', `Output: cooling fan ${fullOut('cool_fan')} for ${sec(tools.cool_fan_test_ms ?? 3000)} s.`);
   setDesc('AIRSTARTER_TEST', `Output: air starter valve OPEN for ${sec(tools.airstarter_test_ms ?? 1000)} s.`);
   setDesc('BLEED_VALVE_TEST', `Output: bleed valve ${fullOut('bleed_valve')} for ${sec(tools.bleed_valve_test_ms ?? 1000)} s.`);
-  setDesc('FUEL_PUMP2_TEST', `Output: pilot/auxiliary fuel pump ${outputText('fuel_pump2', tools.fuel_pump2_test_pct ?? 30)} for ${sec(tools.fuel_pump2_test_ms ?? 3000)} s.`);
+  setDesc('FUEL_PUMP2_TEST', `Output: secondary/auxiliary fuel pump ${outputText('fuel_pump2', tools.fuel_pump2_test_pct ?? 30)} for ${sec(tools.fuel_pump2_test_ms ?? 3000)} s.`);
   setDesc('AB_SOL_TEST', `Output: afterburner fuel valve OPEN for ${sec(tools.ab_sol_test_ms ?? 1000)} s.`);
   setDesc('AB_PUMP_TEST', `Output: afterburner fuel pump ${outputText('ab_pump', tools.ab_pump_test_pct ?? 30)} for ${sec(tools.ab_pump_test_ms ?? 2000)} s.`);
   setDesc('PROP_PITCH_TEST', `Output: prop pitch ${outputText('prop_pitch', tools.prop_pitch_test_pct ?? 50)} for ${sec(tools.prop_pitch_test_ms ?? 3000)} s.`);
@@ -939,8 +964,8 @@ function syncDynamicToolText() {
     const delayMs = Number(glow.fuel_delay_ms ?? 8000);
     const delayS = sec(delayMs);
     const fuelText = durationMs > delayMs
-      ? `pilot fuel starts after ${delayS} s`
-      : `pilot fuel will not start unless duration exceeds ${delayS} s`;
+      ? `start fuel starts after ${delayS} s`
+      : `start fuel will not start unless duration exceeds ${delayS} s`;
     glowTool.desc = `Output: wet glow ${demandText} for ${durationS} s; ${fuelText}.`;
   } else {
     glowTool.name = 'Glow Plug Test';
@@ -948,6 +973,7 @@ function syncDynamicToolText() {
   }
 }
 
+document.addEventListener('DOMContentLoaded', () => {
 loadToolConfig().then(({cfg, hw}) => {
   hwCfg = hw || {};
   cfgData = cfg || {};
@@ -962,6 +988,7 @@ loadToolConfig().then(({cfg, hw}) => {
   startToolsTelemetry();
 });
 updateToolConfirmationReset();
+}, { once:true });
 
 async function fetchJsonWithTimeout(url, ms = 8000) {
   const controller = new AbortController();
@@ -1025,13 +1052,30 @@ window.addEventListener('ot:navigation-start', stopToolsTelemetry);
 
 
 // ── Config backup ─────────────────────────────────────────────
-function backupConfig() {
+async function backupConfig() {
   const msg = document.getElementById('cfg-backup-msg');
-  // Fetch both config and hardware data to attach metadata
-  Promise.all([fetch('/api/ecu_config'), fetch('/api/data')])
-    .then(([cfgRes, dataRes]) => {
-      if (!cfgRes.ok) throw new Error('HTTP ' + cfgRes.status);
-      return Promise.all([cfgRes.json(), dataRes.ok ? dataRes.json() : Promise.resolve({})]);
+  // The engine file is the large response. Finish it before requesting live
+  // metadata so a backup cannot overlap two heap-heavy snapshots on the ECU.
+  stopToolsTelemetry();
+  const fetchEngineFile = async () => {
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const cfgRes = await fetch('/api/ecu_config', { cache:'no-store' });
+        if (!cfgRes.ok) throw new Error('HTTP ' + cfgRes.status);
+        return JSON.parse(await cfgRes.text());
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 700 * (attempt + 1)));
+      }
+    }
+    throw lastError || new Error('No response');
+  };
+  fetchEngineFile()
+    .then(async cfg => {
+      const dataRes = await fetch('/api/data');
+      const live = dataRes.ok ? await dataRes.json() : {};
+      return [cfg, live];
     })
     .then(([cfg, live]) => {
       cfg._backup_meta = {
@@ -1062,7 +1106,8 @@ function backupConfig() {
     })
     .catch(e => {
       if (msg) { msg.textContent = 'Backup failed: ' + e.message; msg.style.color = 'var(--red)'; msg.style.display = ''; }
-    });
+    })
+    .finally(startToolsTelemetry);
 }
 
 // ── Factory reset ─────────────────────────────────────────────
@@ -1146,6 +1191,9 @@ async function restoreConfig(input) {
     input.value = '';
     return;
   }
+  stopToolsTelemetry();
+  if (typeof stopGlobalTelemetry === 'function') stopGlobalTelemetry();
+  await new Promise(resolve => setTimeout(resolve, 250));
   btn.disabled = true;
   document.getElementById('cfg-backup-state').textContent = 'Restoring…';
   document.getElementById('cfg-backup-state').className   = 'tool-state active';
@@ -1154,11 +1202,18 @@ async function restoreConfig(input) {
     const postRestore = async () => {
       let response;
       for (let attempt = 0; attempt < 3; attempt++) {
-        response = await fetch('/api/ecu_config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: compactEngineFileForRestore(ev.target.result)
-        });
+        try {
+          response = await fetch('/api/ecu_config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: compactEngineFileForRestore(ev.target.result)
+          });
+        } catch (error) {
+          if (attempt === 2) throw error;
+          document.getElementById('cfg-backup-state').textContent = 'Retrying ECU connection...';
+          await new Promise(resolve => setTimeout(resolve, 2200));
+          continue;
+        }
         if (![500, 503].includes(response.status) || attempt === 2) return response;
         document.getElementById('cfg-backup-state').textContent = 'Waiting for ECU storage…';
         await new Promise(resolve => setTimeout(resolve, 2200));

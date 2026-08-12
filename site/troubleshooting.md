@@ -37,7 +37,7 @@ Wait for a successful firmware boot, confirm stable ECU power, and look for the 
 
 ## Dashboard does not open
 
-Join the board Wi-Fi and browse directly to `http://192.168.4.1`. Mobile data, VPN, captive-portal behavior, and automatic network switching can send the browser elsewhere; temporarily disable them if needed. If Wi-Fi is visible but pages fail, reinstall or update the web assets without interrupting power.
+Join the board Wi-Fi and browse directly to `http://192.168.4.1`. Keep only one OpenTurbine tab or browser client open; this limit applies to both Classic ESP32 and ESP32-S3 ECUs. Close duplicate tabs or dashboards on other devices before retrying. Mobile data, VPN, captive-portal behavior, and automatic network switching can send the browser elsewhere; temporarily disable them if needed. If Wi-Fi is visible but pages still fail, reinstall or update the web assets without interrupting power.
 
 ## Update fails
 

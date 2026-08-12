@@ -196,7 +196,7 @@ class V2ControlsQualification:
                 "source": source, "target_pressure_bar": 1.5,
                 "pressure_deadband_bar": 0.05, "pressure_limit_bar": 3.0,
                 "ramp_up_ms": 700, "ramp_down_ms": 700,
-                "min_multiplier": 1.0, "max_multiplier": 2.0,
+                "max_multiplier": 2.0,
                 "i_gain": 0, "idle_mode": 0,
             },
             "throttle": {
@@ -312,11 +312,29 @@ class V2ControlsQualification:
 
         wait_sample(0.2, lambda d: float(d.get("p1") or 0) < 0.4 and
                     float(d.get("throttle_effective") or 0) > 0.75)
+        # Limiter strategy is intentionally not a live-tunable field.  End the
+        # simple-mode run before selecting predictive mode, then establish a
+        # fresh RUNNING baseline so this test follows the same workflow as the
+        # web UI and does not rely on a rejected mid-run structural edit.
+        self.dut.stop()
+        # FinalStop is a real spool-down guard and may legitimately consume
+        # the configured 10 s timeout even with the simulated rotor at zero.
+        stopped, _ = self.dut.ensure_mode_standby(timeout=25)
+        if not stopped:
+            raise RuntimeError("Simple limiter run did not return to STANDBY")
         ok, response = self.dc.patch_cfg({
             "throttle": {"rpm_limiter_mode": 1, "pullback_lookahead_ms": 5000}
         })
         if not ok:
             raise RuntimeError("Predictive-limiter config rejected: %r" % (response,))
+        code, response = self.dut.start()
+        if code != 200:
+            raise RuntimeError("Predictive limiter START rejected: HTTP %s %r" %
+                               (code, response))
+        reached, _ = self.dut.poll_until(
+            lambda d: d.get("mode") == "RUNNING", timeout=8)
+        if not reached:
+            raise RuntimeError("Predictive limiter profile did not reach RUNNING")
         _, data = wait_sample(0.2, lambda d: float(d.get("p1") or 0) < 0.4 and
                               float(d.get("throttle_effective") or 0) > 0.75)
         baseline = float(data.get("throttle_effective") or 0)
@@ -372,12 +390,14 @@ class V2ControlsQualification:
             json.dump(report, output, indent=2)
         print("\nResult: %d/%d passed\nReport: %s" %
               (report["passed"], report["total"], path), flush=True)
-        return report["passed"] == report["total"]
+        expected = 2 if os.environ.get("V2_LIMITER_ONLY") == "1" else 8
+        return report["total"] == expected and report["passed"] == report["total"]
 
 
 def main():
     q = V2ControlsQualification()
     passed = False
+    restored = False
     try:
         limiter_only = os.environ.get("V2_LIMITER_ONLY") == "1"
         if not limiter_only:
@@ -387,10 +407,10 @@ def main():
         passed = q.finish()
     finally:
         try:
-            q.r.restore_original()
+            restored = q.r.restore_original()
         finally:
             q.r.close()
-    return 0 if passed else 1
+    return 0 if passed and restored else 1
 
 
 if __name__ == "__main__":

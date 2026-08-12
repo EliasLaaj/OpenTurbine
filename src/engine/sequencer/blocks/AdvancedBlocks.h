@@ -14,7 +14,7 @@
 //
 //  GlowPreheat — ramps glow plug power up from 0 → maxPct
 //    over preheatMs, then holds at holdPct.  Used as the first
-//    sequence block before fuel delivery to pre-heat the pilot
+//    sequence block before fuel delivery to pre-heat the ignition element
 //    flame element.  Completes when preheat ramp finishes.
 //
 //  FuelPumpRamp — ramps fuelPump2Demand from startPct → endPct
@@ -129,7 +129,6 @@ public:
         _completed = false;
         auto& ed = EngineData::instance();
         ed.fuelPump2Demand = startPct / 100.0f;
-        if (ed.fuelPump2Demand > 0.001f) ed.fuelEverOpened = true;
     }
 
     BlockResult tick() override {
@@ -137,13 +136,11 @@ public:
         unsigned long elapsed = millis() - _startMs;
         if (elapsed >= rampMs) {
             ed.fuelPump2Demand = endPct / 100.0f;
-            if (ed.fuelPump2Demand > 0.001f) ed.fuelEverOpened = true;
             _completed = true;
             return BlockResult::Complete;
         }
         float frac = (float)elapsed / (float)rampMs;
         ed.fuelPump2Demand = (startPct + frac * (endPct - startPct)) / 100.0f;
-        if (ed.fuelPump2Demand > 0.001f) ed.fuelEverOpened = true;
         return BlockResult::Running;
     }
 
@@ -168,7 +165,6 @@ public:
     void onEnter() override {
         auto& ed = EngineData::instance();
         ed.fuelPump2Demand = demandPct / 100.0f;
-        if (ed.fuelPump2Demand > 0.001f) ed.fuelEverOpened = true;
     }
     BlockResult tick() override { return BlockResult::Complete; }
     void onExit() override {}
@@ -182,7 +178,6 @@ public:
     void onEnter() override {
         auto& ed = EngineData::instance();
         ed.fuelPump2Demand = 1.0f;
-        ed.fuelEverOpened = true;
     }
     BlockResult tick() override { return BlockResult::Complete; }
     void onExit() override {}
@@ -205,23 +200,28 @@ public:
 
     void onEnter() override {
         _startMs = millis();
+        _inBandSinceMs = 0;
+        EngineData::instance().governorHandoffActive = true;
         // bandRpm and timeoutMs are set by Hardware::applyConfig() before the
         // sequence runs — no need to re-read Config here.
     }
 
     BlockResult tick() override {
-        if ((millis() - _startMs) >= timeoutMs) return BlockResult::Complete; // timeout = proceed
+        if ((millis() - _startMs) >= timeoutMs) return BlockResult::Fault;
         auto& ed = EngineData::instance();
-        if (!ed.n2Healthy) return BlockResult::Running;  // wait for sensor
+        if (!ed.n2Healthy) { _inBandSinceMs = 0; return BlockResult::Running; }
         float targetRpm = Config::governorTargetRpm;
-        if (targetRpm > 0 && fabsf(ed.n2Rpm - targetRpm) < bandRpm) {
-            return BlockResult::Complete;
-        }
+        if (targetRpm <= 0) return BlockResult::Fault;
+        if (fabsf(ed.n2Rpm - targetRpm) < bandRpm) {
+            if (_inBandSinceMs == 0) _inBandSinceMs = millis();
+            if (millis() - _inBandSinceMs >= 500) return BlockResult::Complete;
+        } else _inBandSinceMs = 0;
         return BlockResult::Running;
     }
 
-    void onExit() override {}
+    void onExit() override { EngineData::instance().governorHandoffActive = false; }
 
 private:
     unsigned long _startMs = 0;
+    unsigned long _inBandSinceMs = 0;
 };

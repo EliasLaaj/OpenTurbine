@@ -54,6 +54,12 @@ class InteractionQualification:
         hw["controllers"].update(
             governor=True, dynamic_idle=True, oil_loop=True
         )
+        hw["oil_loops"] = [{
+            "id": "main_oil_loop", "enabled": True,
+            "pressure_input": "oil_pressure_main", "pump_output": "oil_pump_main",
+            "target_bar": 2.5, "deadband_bar": 0.2,
+            "min_demand": 0.18, "max_demand": 1.0,
+        }]
         for key in hw["safety"]:
             hw["safety"][key] = key in (
                 "overspeed", "n2_overspeed", "overtemp", "low_oil",
@@ -117,7 +123,6 @@ class InteractionQualification:
                 "min_pct": 15, "use_throttle_map": False,
             },
             "calibration": {
-                "flame_threshold": 500,
                 "oil_poly": {"a": 0, "b": 0, "c": OIL_C, "d": 0,
                              "x_min": 0, "x_max": 4095},
             },
@@ -140,12 +145,15 @@ class InteractionQualification:
             },
             "throttle": {
                 "ramp_up_ms": 0, "ramp_down_ms": 0, "fuel_pump_min_pct": 10,
+                "rpm_limiter_mode": 0,
                 "pullback_n1": True, "pullback_n1_soft_rpm": 40000,
                 "pullback_n1_hard_rpm": 50000,
                 "pullback_n2": True, "pullback_n2_soft_rpm": 35000,
                 "pullback_n2_hard_rpm": 45000,
                 "pullback_egt": True, "pullback_egt_soft_c": 650,
                 "pullback_egt_hard_c": 800, "pullback_min_pct": 8,
+                "pullback_p1": False, "pullback_p2": False,
+                "pullback_torque": False,
                 "pullback_strength": 1,
             },
             "limp_mode": {"max_throttle_pct": 30},
@@ -305,7 +313,8 @@ class InteractionQualification:
         self.t.set("N2", 0)
         ok, lost = self.dut.poll_until(
             lambda d: d.get("mode") == "RUNNING" and not d.get("n2_healthy") and
-                      d.get("limp_mode") and float(d.get("throttle_effective") or 1) <= 0.305 and
+                      d.get("limp_mode") and
+                      float(d.get("throttle_effective", 1) if d.get("throttle_effective") is not None else 1) <= 0.305 and
                       float(d.get("prop_pitch_demand") or 0) >= 0.99,
             timeout=7, interval=0.05,
         )
@@ -339,7 +348,10 @@ class InteractionQualification:
         self.recover()
 
         self.start_running()
-        before = self.drive(oil_v=2.5, seconds=1.0)
+        # Begin above the pressure target so the controller has room to raise
+        # pump demand when pressure is removed; starting exactly on the target
+        # can legitimately leave this simple P loop already saturated.
+        before = self.drive(oil_v=3.1, seconds=2.0)
         max_oil_pct = float(before.get("oil_pct") or 0)
         deadline = time.time() + 5
         low = None
@@ -435,9 +447,10 @@ class InteractionQualification:
         )
         self.recover()
 
-        # Developer Mode intentionally permits runtime Config changes. Removing
-        # an active rule must apply atomically on the ECU core and release its
-        # output; the following run must not inherit the deleted demand.
+        # Rule topology can command fuel, ignition, shutdown, or fault and is
+        # therefore deliberately not a live-edit field, even in Developer
+        # Mode. The active edit must be rejected; applying it after stopping
+        # must leave no stale output on the following run.
         ign_rule = [{
             "enabled": True, "kind": 0, "source": "tot_main",
             "target": "igniter_main", "op": 0, "threshold": 50,
@@ -465,9 +478,9 @@ class InteractionQualification:
         )
         physical_off = self.t.get("IGNITER")
         self.record(
-            "DEV_MODE_RUNNING_RULE_DELETE_ATOMICALLY_RELEASES_OUTPUT",
+            "RUNNING_RULE_EDIT_REJECTED_AND_STOPPED_EDIT_RELEASES_OUTPUT",
             on_ok and int(physical_on.get("level") or 0) == 1 and
-            edit_code == 200 and released_ok and off_ok and
+            edit_code == 423 and not released_ok and off_ok and
             int(physical_off.get("level") or 0) == 0,
             on_telemetry=on.get("igniter_on"), on_output=physical_on,
             running_edit={"code": edit_code, "response": edit_resp,

@@ -51,7 +51,7 @@ function makeHardware() {
         {id:'tot_main',name:'Main TOT',purpose:'tot',role:'temperature',driver:1,pin:-1,min:0,max:4095,temp_interface:2,spi_clk:18,spi_cs:5,spi_miso:19,spi_mosi:-1,tc_type:'K'},
         {id:'tit_main',name:'Main TIT',purpose:'tit',role:'temperature',driver:1,pin:-1,min:0,max:4095,temp_interface:2,spi_clk:18,spi_cs:17,spi_miso:19,spi_mosi:-1,tc_type:'K'},
         {id:'oil_pressure_main',name:'Oil Pressure',purpose:'oil_pressure',role:'pressure',driver:1,pin:32,min:0,max:4095,analog_zero_mv:500,analog_mv_per_unit:400},
-        {id:'flame_main',name:'Flame',purpose:'flame',role:'flame',driver:1,pin:33,min:0,max:4095},
+        {id:'flame_main',name:'Flame',purpose:'flame',role:'flame',driver:1,pin:33,min:0,max:4095,digital_threshold_raw:1800,digital_hysteresis_raw:64,active_high:true},
         {id:'fuel_flow',name:'Fuel Flow',purpose:'fuel_flow',role:'flow',driver:2,pin:25,min:0,max:100,pulses_per_unit:450},
         {id:'oil_flow',name:'Main Oil Flow',purpose:'oil_flow',role:'flow',driver:2,pin:26,min:0,max:20,pulses_per_unit:900},
         {id:'scavenge_flow',name:'Scavenge Flow',purpose:'scavenge_flow',role:'flow',driver:9,pin:-1,min:0,max:20,i2c_address:16,device_channel:1,analog_zero_mv:500,analog_mv_per_unit:100},
@@ -128,7 +128,7 @@ function makeHardware() {
       ab_pump: { enabled: true, pin: 13, type: 1, active_h: true, min_us: 1000, max_us: 2000, freq_hz: 5000, res_bits: 10 },
       oil_scavenge_pump: { enabled: true, pin: 12, type: 1, min_us: 1000, max_us: 2000, active_h: true, freq_hz: 5000, res_bits: 10 },
       fuel_pump2: { enabled: true, pin: 14, type: 1, active_h: true, min_us: 1000, max_us: 2000, freq_hz: 5000, res_bits: 10 },
-      bleed_valve: { enabled: true, pin: 15, type: 0, active_h: true, min_us: 1000, max_us: 2000, freq_hz: 5000, res_bits: 10 },
+      bleed_valve: { enabled: true, pin: 15, type: 2, active_h: true, min_us: 1000, max_us: 2000, freq_hz: 5000, res_bits: 10 },
       prop_pitch: { enabled: true, pin: 16, type: 0, min_us: 1000, max_us: 2000, freq_hz: 5000, res_bits: 10, active_h: true },
       glow_plug: { enabled: true, pin: 17, freq_hz: 1000, res_bits: 8, current_pin: 36, current_mv_a: 100, current_zero_v: 0, current_ready_a: 2, has_current: true },
       status_led: { enabled: true, pin: 2 }
@@ -143,7 +143,6 @@ function makeHardware() {
     shutdown_seq: ['ImmediateCut', 'TimedDelay', 'OilPumpOff'],
     shutdown_delay_ms: [0, 15000, 0],
     ab_trigger: { source: 0, requires_arm: true, arm_pin: 35, arm_active_h: true, switch_pin: 34, switch_active_h: true, input_pin: -1, input_rc_pwm: false, input_min_us: 1000, input_max_us: 2000, input_threshold: 2048 },
-    ab_flame: { enabled: true, pin: 32, threshold: 1800 },
     ab_seq: ['ABCheckReady', 'ABSolOpen', 'ABPumpOn', 'ABIgnite', 'ABFlameConfirm', 'ABStabilize'],
     ab_shut_seq: ['ABPumpOff', 'ABSolClose', 'ABIgnOff'],
     labels: { tot: 'TOT', tit: 'TIT', n1: 'N1', n2: 'N2', oil_press: 'Oil Press', oil_temp: 'Oil Temp', p1: 'Pressure 1', p2: 'Pressure 2', fuel_press: 'Fuel Press', fuel_flow: 'Fuel Flow', stop: 'Stop', start: 'Start', ab_arm: 'AB Arm' },
@@ -167,11 +166,11 @@ function makeSettings() {
       shutdown: { rpm_drop_threshold: 3000, rpm_drop_timeout_ms: 15000, cooldown_timeout_ms: 30000, final_stop_timeout_ms: 3000, oil_scavenge_ms: 4000, cooldown_use_scavenge: true, cooldown_use_starter: true, cooldown_use_oil: true, cooldown_starter_pct: 8, cooldown_oil_pct: 20, cooldown_oil_pressure_bar: 0.5, rpm_zero_threshold: 500 }
     },
     throttle: { ramp_up_ms: 800, ramp_down_ms: 500, fuel_pump_min_pct: 10, idle_max_pct: 20, expo: 1 },
-    dynamic_idle: { source: 0, target_rpm: 24000, target_pressure_bar: 1.5, ramp_up_ms: 300, ramp_down_ms: 400, deadband_rpm: 200, pressure_deadband_bar: 0.05, rpm_limit: 40000, pressure_limit_bar: 3.0, min_multiplier: 0.9, use_n2: false, i_gain: 0.001, i_max: 0.2 },
+    dynamic_idle: { source: 0, target_rpm: 24000, target_pressure_bar: 1.5, ramp_up_ms: 300, ramp_down_ms: 400, deadband_rpm: 200, pressure_deadband_bar: 0.05, rpm_limit: 40000, pressure_limit_bar: 3.0, max_multiplier: 1.5, use_n2: false, i_gain: 0.001, i_max: 0.2, pressure_decel_enter_bar: 0.12, pressure_settle_band_bar: 0.03, pressure_full_response_bar: 0.25, pressure_learn_rate_max_bar_s: 1.0 },
     safety: { check_interval_ms: 20, flameout_shutdown_ms: 500, flameout_egt_below_c: 300, flameout_egt_fall_rate_c_s: 50, tit_limit_c: 900, oil_temp_limit_c: 115, fuel_press_min_bar: 1.1, batt_volt_min_v: 10.5, surge_detect_rpm_variance: 5000 },
     governor: { target_rpm: 25000, band_rpm: 250, kp: 0.001, pitch_kp: 0.001, pitch_ramp_sec: 1, pitch_idle_deg: 5, pitch_max_deg: 35 },
     glow_plug: { preheat_ms: 1500, preheat_max_pct: 60, hold_pct: 20, wait_until_hot: false },
-    calibration: { throttle_min_raw: 1000, throttle_max_raw: 2000, idle_min_raw: 1000, idle_max_raw: 2000, flame_threshold: 1800, oil_poly: { a: 0, b: 0, c: 0.002, d: 0, x_min: 0, x_max: 4095 }, p1_raw_min: 200, p1_raw_max: 3800, p1_val_max: 8, p2_raw_min: 200, p2_raw_max: 3800, p2_val_max: 8, fuel_press_raw_min: 200, fuel_press_raw_max: 3800, fuel_press_val_max: 8, fuel_flow_raw_min: 0, fuel_flow_raw_max: 4095, fuel_flow_val_max: 50 },
+    calibration: { throttle_min_raw: 1000, throttle_max_raw: 2000, idle_min_raw: 1000, idle_max_raw: 2000, oil_poly: { a: 0, b: 0, c: 0.002, d: 0, x_min: 0, x_max: 4095 }, p1_raw_min: 200, p1_raw_max: 3800, p1_val_max: 8, p2_raw_min: 200, p2_raw_max: 3800, p2_val_max: 8, fuel_press_raw_min: 200, fuel_press_raw_max: 3800, fuel_press_val_max: 8, fuel_flow_raw_min: 0, fuel_flow_raw_max: 4095, fuel_flow_val_max: 50 },
     relight: { enabled: true, ignition_target: 0, confirm_source: 1, min_rpm: 6000, confirm_rpm: 8000, tot_rise_c: 30, relight_timeout_ms: 5000 },
     tools: { fuel_prime_ms: 3000, oil_prime_ms: 5000, ign_test_ms: 1000, start_test_ms: 2000, fuel_sol_test_ms: 1000 },
     telemetry: { ws_interval_ms: 100, snapshot_interval_ms: 500, log_standby: false },
@@ -202,7 +201,7 @@ function fullTelemetry() {
     max_n1: 67100, max_n2: 24900, max_tot: 676, max_oil_temp: 82, max_tit: 848, max_fuel_press: 2.9, max_batt_voltage: 12.6, max_p1: 1.8, max_p2: 3.9,
     rpm_limit: 95000, n2_rpm_limit: 30000, n2_limit: 30000, tot_limit: 720, egt_source: 1, egt_limit: 720, oil_running_min: 1.2, oil_temp_limit: 115, tit_limit: 900, fuel_press_min: 1.1, batt_volt_min: 10.5, tot_rise_rate: 2.5,
     fuel_pump_min_pct: 10, fuel_idle_max_pct: 25, oil_pump_on_pct: 100, ws_interval_ms: 333,
-    dynamic_idle_enabled: true, limp_mode: false, idle_target_rpm: 24000, relight_enabled: true, relight_armed: true, relight_attempts: 0,
+    dynamic_idle_enabled: true, limp_mode: false, idle_target: 24000, idle_target_unit: 'RPM', idle_source: 'N1', idle_controller_state: 'Active', governor_controller_state: 'Active: prop pitch', throttle_command_owner: 'Operator / throttle input', prop_pitch_command_owner: 'N2 governor', oil_command_owner: 'Oil pressure loop', relight_enabled: true, relight_armed: true, relight_attempts: 0,
     dev_mode_fw: true, dev_mode: false, skip_safety_checks: false, bench_mode: false,
     has_n1: true, has_n2: true, has_tot: true, has_oil_press: true, has_flame: true, has_p1: true, has_p2: true, has_oil_temp: true, has_batt_voltage: true, has_torque: true, has_thrust:true, has_fuel_press: true, has_fuel_flow: true, has_tit: true, has_governor: true,
     has_glow_plug: true, has_glow_current: true, has_igniter_current: true, has_igniter2_current: true, has_oil_pump_current: true, has_bleed_valve: true, has_prop_pitch: true, has_fuel_pump2: true, has_cool_fan: true, has_airstarter: true, has_oil_scavenge: true, has_afterburner: true, has_ab_flame: true,
@@ -337,10 +336,9 @@ function syncDataFromHardware(data, hardware) {
   data.has_cool_fan = !!a.cool_fan?.enabled;
   data.has_airstarter = !!a.airstarter_sol?.enabled;
   data.has_oil_scavenge = !!a.oil_scavenge_pump?.enabled;
-  data.has_afterburner = !!(a.ab_sol?.enabled || a.ab_pump?.enabled || a.igniter2?.enabled || hardware.ab_flame?.enabled ||
+  data.has_afterburner = !!(a.ab_sol?.enabled || a.ab_pump?.enabled || a.igniter2?.enabled ||
     hasOutputPurpose('ab_pump') || hasOutputPurpose('ab_igniter') || hasInputPurpose('ab_flame'));
-  data.has_ab_flame = !!(hardware.ab_flame?.enabled || hasInputPurpose('ab_flame'));
-  data.ab_flame_threshold = hardware.ab_flame?.threshold ?? data.ab_flame_threshold;
+  data.has_ab_flame = hasInputPurpose('ab_flame');
   data.has_governor = !!(hardware.controllers?.governor && data.has_n2);
   data.has_dynamic_idle = !!(hardware.controllers?.dynamic_idle && data.has_throttle &&
     (data.has_n1 || data.has_n2 || data.has_p1 || data.has_p2));
@@ -352,6 +350,11 @@ function syncDataFromHardware(data, hardware) {
   data.relight_enabled = !!(hardware.safety?.flameout && data.has_n1 && a.igniter?.enabled);
   data.throttle_input_type = s.throttle_input?.enabled ? (s.throttle_input?.rc_pwm ? 'servo' : 'adc') : 'none';
   data.idle_input_type = s.idle_input?.enabled ? (s.idle_input?.rc_pwm ? 'servo' : 'adc') : 'none';
+  data.rc_pwm_active = !!((s.throttle_input?.enabled && s.throttle_input?.rc_pwm) ||
+    (s.idle_input?.enabled && s.idle_input?.rc_pwm) ||
+    (hardware.ab_trigger?.input_rc_pwm && Number(hardware.ab_trigger?.input_pin) >= 0) ||
+    (hardware.channel_registry?.inputs || []).some(input =>
+      input?.installed !== false && [3, 7].includes(Number(input?.driver))));
   return data;
 }
 
@@ -442,6 +445,11 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && (url.pathname === '/api/data' || url.pathname === '/api/telemetry')) return sendJson(res, 200, state.data);
     if (req.method === 'GET' && url.pathname === '/api/status') return sendJson(res, 200, { ok: true, mode: state.data.mode, locked: !!state.data.config_locked });
+    if (req.method === 'GET' && url.pathname === '/api/device_info') return sendJson(res, 200, {
+      project: 'OpenTurbine', firmware_version: 'test', build_id: 'ui-mock',
+      target: 'esp32s3dev', chip: 'ESP32-S3', state: state.data.mode,
+      outputs_active: false, ota_allowed: true
+    });
     if (req.method === 'GET' && url.pathname === '/api/theme') return sendJson(res, 200, { theme: state.settings.ui_theme || 'carbon' });
     if (req.method === 'GET' && url.pathname === '/api/config') return sendJson(res, 200, state.settings);
     if (req.method === 'GET' && url.pathname === '/api/hardware') {
@@ -449,6 +457,8 @@ const server = http.createServer(async (req, res) => {
       hardware._i2c_discovery = mockI2cDiscovery();
       return sendJson(res, 200, hardware);
     }
+    if (req.method === 'GET' && url.pathname === '/api/i2c_discovery')
+      return sendJson(res, 200, mockI2cDiscovery());
     if (req.method === 'GET' && url.pathname === '/api/pcb_profile') {
       const profile = clone(state.hardware._pcb_profile || {state:'absent', ports:[], port_count:0});
       const offset = Math.max(0, Number(url.searchParams.get('offset') || 0));
@@ -473,6 +483,7 @@ const server = http.createServer(async (req, res) => {
 
     if ((req.method === 'POST' || req.method === 'PATCH') && url.pathname === '/api/config') {
       const body = await bodyJson(req);
+      if (req.method === 'PATCH') state.last_config_patch = clone(body);
       state.settings = req.method === 'POST' ? body : merge(state.settings, body);
       return sendJson(res, 200, { ok: true });
     }
@@ -483,6 +494,12 @@ const server = http.createServer(async (req, res) => {
     if ((req.method === 'POST' || req.method === 'PATCH') && url.pathname === '/api/hardware') {
       const body = await bodyJson(req);
       delete body._i2c_discovery;
+      if (req.method === 'PATCH' && body.channel_registry_calibration) {
+        const calibration = body.channel_registry_calibration;
+        const channel = (state.hardware.channel_registry?.inputs || []).find(row => row.id === calibration.id);
+        if (channel) merge(channel, Object.fromEntries(Object.entries(calibration).filter(([key]) => key !== 'id')));
+        delete body.channel_registry_calibration;
+      }
       state.hardware = req.method === 'POST' ? body : merge(state.hardware, body);
       syncDataFromHardware(state.data, state.hardware);
       if (req.method === 'POST' && state.hardware.profile_id) {

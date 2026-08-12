@@ -15,61 +15,32 @@ const char* deviceDriver(const PcbProfileManager::Mode& mode) {
 }
 
 bool purposeAcceptsAdapter(const ChannelRegistry::Channel& channel, const char* adapter) {
-    const char* purpose = channel.purpose;
-    if (channel.direction == ChannelRegistry::Output) {
-        const bool relay = !strcmp(adapter, "digital_output") ||
-                           !strcmp(adapter, "relay_output") ||
-                           !strcmp(adapter, "i2c_digital_output");
-        const bool pwm = !strcmp(adapter, "pwm_output");
-        const bool servo = !strcmp(adapter, "servo_output");
-        if (!strcmp(purpose, "main_fuel") || !strcmp(purpose, "prop_pitch") ||
-            !strcmp(purpose, "nozzle_actuator"))
-            return pwm || servo;
-        if (!strcmp(purpose, "fuel_shutoff") || !strcmp(purpose, "ab_valve"))
-            return relay;
-        if (!strcmp(purpose, "igniter") || !strcmp(purpose, "ab_igniter") ||
-            !strcmp(purpose, "glow_plug") || !strcmp(purpose, "warning_indicator"))
-            return relay || pwm;
-        if (!strcmp(purpose, "starter") || !strcmp(purpose, "starter_enable") ||
-            !strcmp(purpose, "oil_pump") || !strcmp(purpose, "coolant_pump") ||
-            !strcmp(purpose, "scavenge_pump") || !strcmp(purpose, "cooling_fan") ||
-            !strcmp(purpose, "fuel_pump") || !strcmp(purpose, "valve") ||
-            !strcmp(purpose, "air_starter") || !strcmp(purpose, "pilot_fuel") ||
-            !strcmp(purpose, "purge_valve") || !strcmp(purpose, "ab_pump") ||
-            !strcmp(purpose, "generic"))
-            return relay || pwm || servo;
-        return false;
-    }
-    const bool analog = !strcmp(adapter, "analog_input") || !strcmp(adapter, "i2c_adc_input");
-    const bool digital = !strcmp(adapter, "digital_input") || !strcmp(adapter, "i2c_digital_input");
-    if (!strcmp(purpose, "throttle") || !strcmp(purpose, "idle") ||
-        !strcmp(purpose, "ab_command"))
-        return analog || !strcmp(adapter, "rc_pwm_input") || !strcmp(adapter, "pwm_duty_input");
-    if (!strcmp(purpose, "start_switch") || !strcmp(purpose, "stop_switch") ||
-        !strcmp(purpose, "digital_switch") || !strcmp(purpose, "inhibit_start") ||
-        !strcmp(purpose, "estop") || !strcmp(purpose, "fault") ||
-        !strcmp(purpose, "low_oil_switch") || !strcmp(purpose, "oil_zero_switch") ||
-        !strcmp(purpose, "sequence_gate") || !strcmp(purpose, "ab_arm") ||
-        !strcmp(purpose, "ab_fire") || !strcmp(purpose, "limp_mode"))
-        return digital || !strcmp(adapter, "i2c_adc_digital_input");
-    if (!strcmp(purpose, "n1_speed") || !strcmp(purpose, "n2_speed") ||
-        !strcmp(purpose, "shaft_speed") || !strcmp(purpose, "fuel_flow"))
-        return analog || !strcmp(adapter, "pcnt_input");
-    if (!strcmp(purpose, "oil_pressure") || !strcmp(purpose, "fuel_pressure") ||
-        !strcmp(purpose, "p1_pressure") || !strcmp(purpose, "p2_pressure") ||
-        !strcmp(purpose, "coolant_pressure") || !strcmp(purpose, "battery_voltage"))
-        return analog;
-    if (!strcmp(purpose, "torque") || !strcmp(purpose, "thrust"))
-        return analog || !strcmp(adapter, "i2c_load_cell");
-    if (!strcmp(purpose, "flame") || !strcmp(purpose, "ab_flame"))
-        return analog || digital;
-    if (!strcmp(purpose, "tot") || !strcmp(purpose, "tit"))
-        return analog || !strcmp(adapter, "spi_thermocouple");
-    if (!strcmp(purpose, "oil_temperature") || !strcmp(purpose, "coolant_temp") ||
-        !strcmp(purpose, "intake_temperature"))
-        return analog || !strcmp(adapter, "spi_thermocouple") ||
-               !strcmp(adapter, "onewire_temperature");
-    return !strcmp(purpose, "generic");
+    using Driver = ChannelRegistry::Driver;
+    const bool lowTemperature = !strcmp(channel.purpose, "oil_temperature") ||
+                                !strcmp(channel.purpose, "coolant_temp") ||
+                                !strcmp(channel.purpose, "intake_temperature");
+    const bool thermocoupleTemperature = !strcmp(channel.purpose, "oil_temperature") ||
+                                         !strcmp(channel.purpose, "tot") ||
+                                         !strcmp(channel.purpose, "tit");
+    if (!strcmp(adapter, "spi_thermocouple") && !thermocoupleTemperature) return false;
+    if (!strcmp(adapter, "onewire_temperature") && !lowTemperature) return false;
+    Driver driver;
+    if (!strcmp(adapter, "digital_input")) driver = Driver::Digital;
+    else if (!strcmp(adapter, "analog_input") || !strcmp(adapter, "spi_thermocouple") ||
+             !strcmp(adapter, "onewire_temperature")) driver = Driver::Analog;
+    else if (!strcmp(adapter, "pcnt_input")) driver = Driver::Pulse;
+    else if (!strcmp(adapter, "rc_pwm_input")) driver = Driver::RcPwm;
+    else if (!strcmp(adapter, "pwm_duty_input")) driver = Driver::PwmDuty;
+    else if (!strcmp(adapter, "i2c_digital_input")) driver = Driver::I2cDigital;
+    else if (!strcmp(adapter, "i2c_adc_input") || !strcmp(adapter, "i2c_adc_digital_input")) driver = Driver::I2cAnalog;
+    else if (!strcmp(adapter, "i2c_load_cell")) driver = Driver::I2cLoadCell;
+    else if (!strcmp(adapter, "digital_output") || !strcmp(adapter, "relay_output")) driver = Driver::Relay;
+    else if (!strcmp(adapter, "pwm_output")) driver = Driver::Pwm;
+    else if (!strcmp(adapter, "servo_output")) driver = Driver::Servo;
+    else if (!strcmp(adapter, "i2c_digital_output")) driver = Driver::I2cRelay;
+    else return false;
+    return ChannelRegistry::purposeRoleDriverValid(channel.direction, channel.purpose,
+                                                   channel.role, driver);
 }
 
 bool applyMode(ChannelRegistry::Channel& channel,
@@ -239,6 +210,7 @@ bool PcbProfileResolver::addProfileDefaults(ChannelRegistry& registry,
             strlcpy(channel.physicalPortId, port.id, sizeof(channel.physicalPortId));
             strlcpy(channel.physicalModeId, mode.id, sizeof(channel.physicalModeId));
             channel.safeDemand = 0.0f;
+            if (!applyMode(channel, mode, reason, reasonSize)) return false;
             if (!registry.add(channel))
                 return fail(reason, reasonSize,
                             "PCB profile default assignment could not be added");

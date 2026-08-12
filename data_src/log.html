@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Log</title>
-<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260731a" data-ot-version="20260731a" data-ot-app="true"></script>
+<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body>
 <nav>
@@ -72,6 +72,10 @@
   <!-- Session Data tab -->
   <div id="pane-session" style="display:none">
 
+    <div id="persistence-health" style="font-size:.72rem;color:var(--dim);margin-bottom:.75rem;padding:.55rem .7rem;border:1px solid var(--border);border-radius:6px">
+      Loading recorder health…
+    </div>
+
     <!-- Past sessions list -->
     <div style="margin-bottom:1rem">
       <div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.5rem">
@@ -120,9 +124,9 @@
           <label class="slog-chk"><input type="checkbox" data-bit="wet_glow">Wet glow fuel output</label>
           <label class="slog-chk"><input type="checkbox" data-bit="glow_current">Glow current A</label>
           <label class="slog-chk"><input type="checkbox" data-bit="ign_current">Igniter 1 current A</label>
-          <label class="slog-chk"><input type="checkbox" data-bit="ign2_current">AB / pilot igniter current A</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="ign2_current">secondary igniter current A</label>
           <label class="slog-chk"><input type="checkbox" data-bit="oil_current">Oil current A</label>
-          <label class="slog-chk"><input type="checkbox" data-bit="fp2">Pilot / aux fuel pump %</label>
+          <label class="slog-chk"><input type="checkbox" data-bit="fp2">Secondary / aux fuel pump %</label>
           <label class="slog-chk"><input type="checkbox" data-bit="ab">Afterburner state/fuel</label>
           <label class="slog-chk"><input type="checkbox" data-bit="prop">Prop pitch %</label>
           <label class="slog-chk"><input type="checkbox" data-bit="mode">Engine state</label>
@@ -142,7 +146,7 @@
         <div id="session-rows" style="font-size:.72rem;color:var(--dim);margin-top:.2rem"></div>
       </div>
     </div>
-    <div style="font-size:.72rem;color:var(--dim);padding:.5rem 0">Session files are kept until manually cleared.</div>
+    <div style="font-size:.72rem;color:var(--dim);padding:.5rem 0">Session files are kept while the storage reserve is available. The oldest run is evicted first when space is needed; export important evidence.</div>
 
     <!-- In-browser CSV preview -->
     <div style="margin-top:.75rem">
@@ -169,9 +173,9 @@
           <label id="chart-lbl-wetg" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-wetg"        onchange="redrawChart()"> <span style="color:#e05f8a">Wet glow fuel output</span></label>
           <label id="chart-lbl-gcur" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-gcur"        onchange="redrawChart()"> <span style="color:#ff8b8b">Glow current</span></label>
           <label id="chart-lbl-icur" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-icur"        onchange="redrawChart()"> <span style="color:#ffb15c">Igniter 1 current</span></label>
-          <label id="chart-lbl-i2cur" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-i2cur"      onchange="redrawChart()"> <span style="color:#ffce6b">AB / pilot igniter current</span></label>
+          <label id="chart-lbl-i2cur" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-i2cur"      onchange="redrawChart()"> <span style="color:#ffce6b">secondary igniter current</span></label>
           <label id="chart-lbl-ocur" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-ocur"        onchange="redrawChart()"> <span style="color:#c7d96a">Oil current</span></label>
-          <label id="chart-lbl-fp2"  style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-fp2"         onchange="redrawChart()"> <span style="color:#68c97a">Pilot / aux fuel pump %</span></label>
+          <label id="chart-lbl-fp2"  style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-fp2"         onchange="redrawChart()"> <span style="color:#68c97a">Secondary / aux fuel pump %</span></label>
           <label id="chart-lbl-prop" style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-prop"        onchange="redrawChart()"> <span style="color:#7ab3f0">Prop pitch %</span></label>
           <label id="chart-lbl-ff"   style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-ff"          onchange="redrawChart()"> <span style="color:#f5c842">Fuel flow</span></label>
           <label id="chart-lbl-abm"  style="cursor:pointer;display:none"><input type="checkbox" id="chart-cb-abm"         onchange="redrawChart()"> <span style="color:#e84040">AB mode</span></label>
@@ -214,7 +218,46 @@ function showTab(tab) {
     document.getElementById('tab-'  + t).className = 'tab-btn' + (tab === t ? ' active' : '');
   });
   if (tab === 'events') loadLog();
-  if (tab === 'session') { loadSessionList(); loadSessionCfg(); loadSessionPreview(); }
+  if (tab === 'session') { loadSessionList(); loadSessionCfg(); loadSessionPreview(); loadPersistenceHealth(); }
+}
+
+async function loadPersistenceHealth() {
+  const el = document.getElementById('persistence-health');
+  if (!el) return;
+  const sessionErrors = ['OK','queue unavailable','file open failed','CSV header failed','RAM backlog/dropped rows','storage reserve reached','file write failed','run identity failed'];
+  const eventErrors = ['OK','recorder mutex unavailable','event file open failed','event write failed'];
+  try {
+    const response = await fetch('/api/data');
+    const d = await response.json();
+    if (!response.ok) throw new Error(d.error || `HTTP ${response.status}`);
+    const sessionCode = Number(d.session_logger_error || 0);
+    const eventCode = Number(d.event_recorder_error || 0);
+    const sessionState = d.session_logger_healthy === false
+      ? `Session CSV degraded: ${sessionErrors[sessionCode] || `error ${sessionCode}`}`
+      : (d.session_log_path ? `Session CSV healthy · ${d.session_log_path}` : 'Session CSV ready · no run active');
+    const eventState = d.event_recorder_healthy === false
+      ? `Event recorder degraded: ${eventErrors[eventCode] || `error ${eventCode}`}`
+      : 'Event recorder healthy';
+    const pending = Number(d.event_pending_count || 0);
+    const dropped = Number(d.event_dropped_events || 0);
+    const last = Number(d.event_last_append_ms || 0);
+    const free = Number(d.session_free_bytes || 0);
+    const reserve = Number(d.session_reserve_bytes || 0);
+    const eviction = Number(d.session_eviction_count || 0);
+    const detail = `${eventState} · pending ${pending} · dropped ${dropped}` +
+      (last ? ` · last durable append at ${last} ms` : '') +
+      ` · storage free ${free} B / reserve ${reserve} B` +
+      (eviction ? ` · evicted ${eviction}, last run #${Number(d.session_last_evicted || 0)}` : '');
+    const statsCode = Number(d.runtime_stats_error || 0);
+    const statsState = d.runtime_stats_healthy === false
+      ? `Lifetime totals degraded: ${statsCode === 1 ? 'NVS open failed' : statsCode === 2 ? 'NVS write failed' : `error ${statsCode}`}`
+      : (d.runtime_stats_pending ? 'Lifetime totals awaiting safe save' : 'Lifetime totals durable');
+    el.textContent = `${sessionState} · ${detail} · ${statsState}`;
+    el.style.color = (d.session_logger_healthy === false || d.event_recorder_healthy === false || d.runtime_stats_healthy === false) ? 'var(--yellow)' : 'var(--dim)';
+  } catch (error) {
+    el.textContent = `Recorder health unavailable: ${error.message || error}`;
+    el.style.color = 'var(--red)';
+  }
 }
 
 // ── Event helpers ─────────────────────────────────────────────
@@ -712,9 +755,9 @@ function _applyLogHwVisibility(hw) {
     wet_glow: 'Wet Glow fuel output',
     glow_current: 'Glow current sensor',
     ign_current: 'Igniter 1 current sensor',
-    ign2_current: 'AB / pilot igniter current sensor',
+    ign2_current: 'secondary igniter current sensor',
     oil_current: 'Oil pump current sensor',
-    fp2: 'Pilot / Auxiliary Fuel Pump', ab: 'Afterburner', prop: 'Prop Pitch',
+    fp2: 'Secondary / Auxiliary Fuel Pump', ab: 'Afterburner', prop: 'Prop Pitch',
   };
 
   SLOG_BITS.forEach(bit => {
@@ -812,34 +855,36 @@ function saveSessionCfg() {
     alert('Logging settings are locked until the engine is back in STANDBY.');
     return;
   }
-  fetch('/api/config').then(r => r.json()).then(cfg => {
-    if (!cfg.session_log) cfg.session_log = {};
-    if (!cfg.telemetry) cfg.telemetry = {};
+  try {
     const sb = document.getElementById('log-standby');
-    cfg.telemetry.log_standby = sb ? sb.checked : false;
     const sessionInterval = Number(document.getElementById('session-log-interval')?.value);
     const snapshotInterval = Number(document.getElementById('event-snapshot-interval')?.value);
     if (!Number.isFinite(sessionInterval) || sessionInterval < 100 || sessionInterval > 60000)
       throw new Error('Session CSV row interval must be between 100 and 60000 ms.');
     if (!Number.isFinite(snapshotInterval) || snapshotInterval < 500 || snapshotInterval > 3600000)
       throw new Error('Event snapshot interval must be between 500 and 3600000 ms.');
-    cfg.session_log.interval_ms = Math.round(sessionInterval);
-    cfg.telemetry.snapshot_interval_ms = Math.round(snapshotInterval);
+    const patch = {
+      session_log:{interval_ms:Math.round(sessionInterval)},
+      telemetry:{log_standby:sb ? sb.checked : false,
+                 snapshot_interval_ms:Math.round(snapshotInterval)}
+    };
     SLOG_BITS.forEach(bit => {
       const el = document.querySelector('[data-bit="' + bit + '"]');
-      cfg.session_log[bit] = el ? el.checked : false;
+      patch.session_log[bit] = el ? el.checked : false;
     });
-    return fetch('/api/config', {
-      method: 'POST',
-      body: JSON.stringify(cfg),
+    fetch('/api/config', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
       headers: { 'Content-Type': 'application/json' }
-    });
-  }).then(async r => {
-    if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
-  }).then(() => {
-    const msg = document.getElementById('session-save-msg');
-    if (msg) { msg.style.display = ''; setTimeout(() => msg.style.display = 'none', 2000); }
-  }).catch(e => alert('Save failed: ' + e));
+    }).then(async r => {
+      if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+    }).then(() => {
+      const msg = document.getElementById('session-save-msg');
+      if (msg) { msg.style.display = ''; setTimeout(() => msg.style.display = 'none', 2000); }
+    }).catch(e => alert('Save failed: ' + e));
+  } catch (e) {
+    alert('Save failed: ' + e.message);
+  }
 }
 
 function downloadSessionLog() {
@@ -1120,7 +1165,7 @@ function previewSession(run) {
   });
 }
 
-loadLog();
+document.addEventListener('DOMContentLoaded', loadLog, { once:true });
 </script>
 </body>
 </html>

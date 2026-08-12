@@ -5,8 +5,8 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine - Sequence</title>
-<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260731a" data-ot-version="20260731a"></script>
+<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -80,7 +80,7 @@
       <div class="automation-copy">
         <h3 style="margin:.1rem 0 .35rem">Control Rules</h3>
         <p>Turn an output on at a threshold, or map an input directly to a variable output. Each output can have one rule, so the result is always predictable.</p>
-        <p>Outside the selected engine states—or if its input becomes unavailable—the rule immediately returns its output to the configured off value. Fault hands control to the output's hardware-safe setting.</p>
+        <p>Outside the selected engine states, the rule releases the output and its normal sequencer/controller command resumes. In a selected state, a false or unavailable input applies the configured off value. Fault hands control to the output's hardware-safe setting.</p>
       </div>
       <span id="rules-count-label" style="font-size:.72rem;color:var(--dim);white-space:nowrap">0 / 16 rules</span>
     </div>

@@ -1,5 +1,16 @@
 # OpenTurbine bench rig (hardware-in-the-loop)
 
+> **Current final qualification:** use
+> [`HIL_QUALIFICATION_PLAN.md`](HIL_QUALIFICATION_PLAN.md). Historical result
+> files and the basic suite below are useful test assets, but they do not qualify
+> a new release candidate until they are rerun against its exact artifact hashes
+> on both ESP32 Classic and ESP32-S3. A required SKIP is a qualification gap.
+> The only automated release entrypoint is `harness/qualification.py`; it fails
+> closed on a skip, missing artifact, failed repetition, changed worktree, or
+> configuration that was not restored. Final release signoff additionally uses
+> `harness/release_signoff.py` so dry HIL cannot substitute for independent
+> scope, powered-load, and cold-spin evidence.
+
 Two ESP32s on the table, wired pin-to-pin, so OpenTurbine can be exercised end to
 end with no turbine attached:
 
@@ -100,6 +111,39 @@ python run.py --port COM6 monitor --secs 20 # live telemetry + pin reads
 python run.py --port COM6 run               # basic suite
 python run.py --port COM6 run --advanced -v # + sequence, N2 and throttle-ESC when fitted
 python run.py --port COM6 run --json out.json
+python run.py --port COM6 run --advanced --require-all # strict development pass
+```
+
+The basic commands are for fixture development. A release run is deliberately
+long: three complete core passes, repeated safety/interaction/I2C campaigns,
+100 causal plant lifecycles, and a 24-hour continuous plant soak.
+
+```
+python qualification.py --target s3 --port COM6 --fixture-revision rig-A ^
+  --artifact firmware=C:\path\firmware.bin ^
+  --artifact elf=C:\path\firmware.elf ^
+  --artifact filesystem=C:\path\littlefs.bin ^
+  --artifact partitions=C:\path\partitions.bin ^
+  --artifact setup_package=C:\path\OpenTurbine-setup.zip ^
+  --artifact tester_firmware=C:\path\otbench.bin ^
+  --artifact pcb_profile=C:\path\profile.bin
+```
+
+The S3 DUT uses `pinmap.json` by default. For fixture development with a
+Classic DUT, pass `--pinmap ..\pinmap-classic-role-reversed.json`. That file
+deliberately cannot pass release mode yet: it records the present role-reversed
+wiring and its missing analogue/starter transports. Replace it with the exact
+completed external-fixture revision when those links are built and verified.
+
+Use `--quick` only while developing the fixture. A quick run is permanently
+marked non-qualifying even if every command succeeds. After both target result
+files pass, copy `../evidence_template.json`, attach and review the independent
+evidence, then run:
+
+```
+python release_signoff.py --s3 C:\results\s3\qualification.json ^
+  --classic C:\results\classic\qualification.json ^
+  --evidence C:\results\evidence.json --out C:\results\release-signoff.json
 ```
 
 Ad-hoc probing:
@@ -122,8 +166,13 @@ Set `OTBENCH_PORT=COM6` to skip `--port`.
 - **Output paths:** fire the STANDBY actuator self-tests (IGN_TEST, OIL_PRIME,
   FUEL_SOL_TEST, STARTER_EN_TEST) → assert the tester measures the pin drive.
 - **Advanced:** START switch, a bench-mode timed startup that confirms the oil
-  pump and igniter actually fire on their sequence pins, plus N2 and 50 Hz
-  throttle-ESC checks when the optional bench wiring/profile is fitted.
+  pump, ignition, configured fuel/starter actions, sequence progress, and a
+  successful RUNNING outcome, plus N2 and throttle-output checks when fitted.
+- **Closed-loop plant:** physical starter, oil, fuel, shutoff, and ignition
+  outputs drive a deterministic low-order N1/N2/EGT/oil/flame model. The ECU
+  must causally complete startup, respond to operator demand, and cut and latch
+  combustion outputs on physical STOP. This is an ECU behavior oracle, not a
+  turbine thermodynamic model.
 
 ## 6. Serial protocol (PC ↔ tester)
 
@@ -158,6 +207,11 @@ EMU OFF 0            -> OK                 (restore normal bench signal roles)
   MCP4728 (4-ch I²C DAC) if you need calibrated intermediate-voltage sweeps.
 - **NeoPixel status LED** (WS2812) isn't decoded — use a plain-GPIO status LED on
   the bench profile if you want to assert LED state.
-- **Safety reactions** (overspeed/overtemp → shutdown within N ms) are the
-  highest-value tests to add next; they build directly on the input-injection
-  path already here.
+- **Independent timing remains mandatory.** Serial/HTTP HIL proves the state and
+  physical output agree, but the final STOP/fault latency claim must use a logic
+  analyser or oscilloscope included in the release evidence.
+- **Classic role reversal has no analogue DAC.** Full Classic qualification
+  therefore needs the external DAC/device fixture specified in the final plan;
+  a missing transport is a failure, not a waived skip.
+- Passing dry HIL is not permission for an unattended wet start. Powered-load
+  tests and a mechanically safe cold spin are explicit final signoff gates.

@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -32,14 +33,18 @@ import (
 )
 
 const (
-	appVersion                  = "0.6.2"
-	packageCompatibilityVersion = "0.6.0"
-	requiredPackageSchema       = 3
+	appVersion                  = "0.7.0"
+	packageCompatibilityVersion = "0.7.0"
+	requiredPackageSchema       = 4
 	appTitle                    = "OpenTurbine Setup Tool"
 	ecuBaseURL                  = "http://192.168.4.1"
 	defaultPackageURL           = "https://github.com/elia179/OpenTurbine/releases/latest/download/OpenTurbine_Recommended.zip"
 	cleanSafetyButtonLabel      = "I understand — choose board"
 	updateSafetyButtonLabel     = "My engine is safe — continue update"
+	maxPackageDownloadBytes     = int64(512 << 20)
+	maxPackageEntries           = 4096
+	maxPackageFileBytes         = int64(128 << 20)
+	maxPackageExpandedBytes     = int64(768 << 20)
 )
 
 var (
@@ -86,17 +91,20 @@ type Manifest struct {
 	PackageSchema           int                       `json:"package_schema"`
 	SetupToolVersion        string                    `json:"setup_tool_version"`
 	MinimumSetupToolVersion string                    `json:"minimum_setup_tool_version"`
+	SourceCommit            string                    `json:"source_commit"`
 	Targets                 map[string]ManifestTarget `json:"targets"`
 	FirmwareOTA             string                    `json:"firmware_ota"`
 	WebAssets               string                    `json:"web_assets"`
 }
 
 type ManifestTarget struct {
-	Chip        string              `json:"chip"`
-	USBFlash    []FlashEntry        `json:"usb_flash"`
-	FirmwareOTA string              `json:"firmware_ota"`
-	WebAssets   string              `json:"web_assets"`
-	PCBProfile  PCBProfilePartition `json:"pcb_profile"`
+	Chip           string              `json:"chip"`
+	USBFlash       []FlashEntry        `json:"usb_flash"`
+	FirmwareOTA    string              `json:"firmware_ota"`
+	WebAssets      string              `json:"web_assets"`
+	PCBProfile     PCBProfilePartition `json:"pcb_profile"`
+	BuildID        string              `json:"build_id"`
+	FirmwareSHA256 string              `json:"firmware_sha256"`
 }
 
 type PCBProfilePartition struct {
@@ -114,9 +122,14 @@ type ManifestPCBProfile struct {
 }
 
 type FlashEntry struct {
-	Address string `json:"address"`
-	File    string `json:"file"`
-	SHA256  string `json:"sha256,omitempty"`
+	Address      string `json:"address"`
+	File         string `json:"file"`
+	Target       string `json:"target"`
+	Bytes        int64  `json:"bytes"`
+	SHA256       string `json:"sha256"`
+	Version      string `json:"version"`
+	BuildID      string `json:"build_id"`
+	SourceCommit string `json:"source_commit"`
 }
 
 type sourcePCBProfile struct {
@@ -221,22 +234,6 @@ func (p *Package) cleanup() {
 	}
 }
 
-type driverInstallResult struct {
-	Kind             driverKind `json:"kind"`
-	DriverRoot       string     `json:"driver_root"`
-	INFPaths         []string   `json:"inf_paths"`
-	DeviceInstanceID string     `json:"device_instance_id,omitempty"`
-	HardwareIDs      []string   `json:"hardware_ids,omitempty"`
-	ExitCode         int        `json:"exit_code"`
-	Output           string     `json:"output"`
-	Error            string     `json:"error,omitempty"`
-	RebootRequired   bool       `json:"reboot_required,omitempty"`
-	COMPort          string     `json:"com_port,omitempty"`
-	LogPath          string     `json:"log_path,omitempty"`
-	ScanExitCode     int        `json:"scan_exit_code,omitempty"`
-	ScanOutput       string     `json:"scan_output,omitempty"`
-}
-
 type driverChoice struct {
 	Kind  driverKind
 	Label string
@@ -271,9 +268,6 @@ type Job struct {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--install-inf-driver" {
-		os.Exit(runINFDriverInstallHelper(os.Args[2:]))
-	}
 	runtime.LockOSThread()
 	setProcessDPIAware()
 	app := newApp()
@@ -338,6 +332,7 @@ var (
 	procGlobalAlloc        = kernel32.NewProc("GlobalAlloc")
 	procGlobalLock         = kernel32.NewProc("GlobalLock")
 	procGlobalUnlock       = kernel32.NewProc("GlobalUnlock")
+	procGlobalFree         = kernel32.NewProc("GlobalFree")
 
 	procCreateFontW            = gdi32.NewProc("CreateFontW")
 	procCreateSolidBrush       = gdi32.NewProc("CreateSolidBrush")
@@ -1490,6 +1485,7 @@ func setClipboardText(hwnd uintptr, s string) error {
 	}
 	ptr, _, err := procGlobalLock.Call(hmem)
 	if ptr == 0 {
+		procGlobalFree.Call(hmem)
 		return err
 	}
 	dst := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(size))
@@ -1498,6 +1494,8 @@ func setClipboardText(hwnd uintptr, s string) error {
 	procGlobalUnlock.Call(hmem)
 	r, _, err = procSetClipboardData.Call(cfUnicodeText, hmem)
 	if r == 0 {
+		// Ownership transfers to the clipboard only on success.
+		procGlobalFree.Call(hmem)
 		return err
 	}
 	return nil
@@ -1592,30 +1590,14 @@ func (j *Job) showDriverHelp(pkg *Package, reason string, bootloaderFailure bool
 		case "cp210x", "wch", "ch340":
 			kind := normalizeDriverKind(action)
 			name := driverKindLabel(kind)
-			j.ui().update(uiUpdate{screen: screenDriverHelp, title: "Installing " + name + " driver", subtitle: subtitleForMode(j.mode), body: body, detail: "Windows will ask for administrator permission for a small helper process. The helper installs the signed INF driver package with pnputil, scans for devices, and writes a full diagnostic log.", mode: j.mode, driverChoices: recommendation.Choices})
-			result, err := startDriverInstaller(j.app, pkg, kind, recommendation.Device)
-			if err != nil {
-				msg := name + " driver installation failed: " + err.Error()
-				j.addLog(msg)
-				j.ui().update(uiUpdate{screen: screenDriverHelp, title: "Driver installation failed", subtitle: subtitleForMode(j.mode), body: body, detail: msg + "\n\nDiagnostic log:\n" + result.LogPath + "\n\nUse Show details or Copy log for the full pnputil output.", mode: j.mode, appendLog: []string{msg, resultSummary(result)}, driverChoices: recommendation.Choices})
-				continue
+			url := "https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers?tab=downloads"
+			if kind == driverWCH {
+				url = "https://www.wch-ic.com/downloads/ch341ser_zip.html"
 			}
-			if result.RebootRequired {
-				msg := name + " driver installed. Windows reported that a restart is required before the USB port can be used."
-				j.addLog(msg)
-				j.ui().update(uiUpdate{screen: screenDriverHelp, title: "Restart Windows required", subtitle: subtitleForMode(j.mode), body: "Driver installed. Windows must be restarted before the USB port can be used.\n\nSave your work, restart Windows, reconnect the board, and run OpenTurbine Setup Tool again.", detail: "Diagnostic log:\n" + result.LogPath, mode: j.mode, appendLog: []string{msg, resultSummary(result)}, driverChoices: nil})
-				continue
-			}
-			if result.COMPort != "" {
-				msg := name + " driver installed and Windows reported " + result.COMPort + ". Continuing board detection."
-				j.addLog(msg)
-				j.ui().update(uiUpdate{screen: screenDriverHelp, title: "Driver installation finished", subtitle: subtitleForMode(j.mode), body: "Windows driver installation finished and the matching USB serial port appeared as " + result.COMPort + ".\n\nContinuing automatically.", detail: "Diagnostic log:\n" + result.LogPath, mode: j.mode, appendLog: []string{msg, resultSummary(result)}, driverChoices: nil})
-				return "retry"
-			}
-			msg := name + " driver installation finished, but the matching COM port did not appear yet."
-			finishedBody := "Windows driver installation finished, but the matching USB serial port did not appear yet.\n\n1. Unplug the board.\n2. Plug it in again.\n3. Hold BOOT if needed.\n4. Click Try Again."
+			procShellExecuteW.Call(j.ui().hwnd, uintptr(unsafe.Pointer(utf16Ptr("open"))), uintptr(unsafe.Pointer(utf16Ptr(url))), 0, 0, 1)
+			msg := "Opened the official " + name + " driver page. Install the vendor driver, reconnect the board, then click Try Again."
 			j.addLog(msg)
-			j.ui().update(uiUpdate{screen: screenDriverHelp, title: "Driver installation finished", subtitle: subtitleForMode(j.mode), body: finishedBody, detail: msg + "\n\nDiagnostic log:\n" + result.LogPath, mode: j.mode, appendLog: []string{msg, resultSummary(result)}, driverChoices: recommendation.Choices})
+			j.ui().update(uiUpdate{screen: screenDriverHelp, title: "Official driver download opened", subtitle: subtitleForMode(j.mode), body: body, detail: msg + "\n\nOpenTurbine does not run a generic elevated INF helper or redistribute this driver.", mode: j.mode, appendLog: []string{msg}, driverChoices: recommendation.Choices})
 		case "retry", "cancel":
 			return action
 		}
@@ -1807,7 +1789,7 @@ func (j *Job) runNewBoard() {
 		return
 	}
 
-	j.success("OpenTurbine installed", "OpenTurbine was installed and verified successfully.\n\nThe board is restarting with fresh defaults. Connect your computer or phone to the OpenTurbine Wi-Fi network; it has no password until you configure one. Windows may say 'No internet'; that is normal.\n\nThen open:\nhttp://192.168.4.1")
+	j.success("OpenTurbine installed", "OpenTurbine was written and esptool verified every flashed image.\n\nThe board is restarting with fresh defaults. Connect your computer or phone to the OpenTurbine Wi-Fi network; it has no password until you configure one. Windows may say 'No internet'; that is normal.\n\nOpen http://192.168.4.1 and confirm the version/build shown in About matches the package before reconnecting outputs.")
 }
 
 func (j *Job) runExistingUpdate() {
@@ -1900,14 +1882,14 @@ func (j *Job) runExistingUpdate() {
 		j.fail(errors.New("The files were uploaded, but the tool could not reconnect for final verification. Reconnect to the board Wi-Fi and run Update and keep my setup again; it is safe to repeat."))
 		return
 	}
-	if err := verifyUpdatedECU(version, assets); err != nil {
+	if err := verifyUpdatedECU(version, target, pkg.Manifest.Targets[target].BuildID, assets); err != nil {
 		j.fail(fmt.Errorf("Final verification failed: %w", err))
 		return
 	}
 	j.success("Update complete", "OpenTurbine was updated successfully.\n\nYour complete engine file was saved here:\n"+bpath+"\n\nOpen http://192.168.4.1 and check the setup before using fuel.")
 }
 
-func verifyUpdatedECU(expectedVersion string, assetPaths []string) error {
+func verifyUpdatedECU(expectedVersion, expectedTarget, expectedBuildID string, assetPaths []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(ctx, "GET", ecuBaseURL+"/api/device_info", nil)
@@ -1918,6 +1900,8 @@ func verifyUpdatedECU(expectedVersion string, assetPaths []string) error {
 	var info struct {
 		Project string `json:"project"`
 		Version string `json:"firmware_version"`
+		Target  string `json:"target"`
+		BuildID string `json:"build_id"`
 	}
 	decodeErr := json.NewDecoder(resp.Body).Decode(&info)
 	resp.Body.Close()
@@ -1926,6 +1910,10 @@ func verifyUpdatedECU(expectedVersion string, assetPaths []string) error {
 	}
 	if info.Project != "OpenTurbine" || info.Version != expectedVersion {
 		return fmt.Errorf("firmware version is %q, expected %q", info.Version, expectedVersion)
+	}
+	if info.Target != expectedTarget || info.BuildID != expectedBuildID {
+		return fmt.Errorf("installed identity is target %q build %q; expected target %q build %q; retry the update or use USB recovery",
+			info.Target, info.BuildID, expectedTarget, expectedBuildID)
 	}
 
 	for _, localPath := range assetPaths {
@@ -2297,6 +2285,9 @@ func downloadFileWithProgress(url, dst string, progress func(done, total int64))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("download returned %s", resp.Status)
 	}
+	if resp.ContentLength > maxPackageDownloadBytes {
+		return fmt.Errorf("download is %d bytes; package limit is %d bytes", resp.ContentLength, maxPackageDownloadBytes)
+	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
 	}
@@ -2305,7 +2296,10 @@ func downloadFileWithProgress(url, dst string, progress func(done, total int64))
 	if err != nil {
 		return err
 	}
-	_, copyErr := copyWithProgress(f, resp.Body, resp.ContentLength, progress)
+	written, copyErr := copyWithProgress(f, io.LimitReader(resp.Body, maxPackageDownloadBytes+1), resp.ContentLength, progress)
+	if copyErr == nil && written > maxPackageDownloadBytes {
+		copyErr = fmt.Errorf("download exceeded the %d-byte package limit", maxPackageDownloadBytes)
+	}
 	closeErr := f.Close()
 	if copyErr != nil {
 		_ = os.Remove(tmp)
@@ -2400,6 +2394,19 @@ func loadPackageFromDir(root string) (*Package, error) {
 			target.PCBProfile.Size < 32 {
 			return nil, fmt.Errorf("setup package target %s has invalid PCB-profile partition metadata", name)
 		}
+		if len(target.USBFlash) == 0 || strings.TrimSpace(target.BuildID) == "" {
+			return nil, fmt.Errorf("setup package target %s is missing image/build metadata", name)
+		}
+		for _, image := range target.USBFlash {
+			if image.Target != name || image.Bytes <= 0 ||
+				!regexp.MustCompile(`^[0-9a-fA-F]{64}$`).MatchString(image.SHA256) ||
+				strings.TrimSpace(image.Version) == "" || strings.TrimSpace(image.SourceCommit) == "" {
+				return nil, fmt.Errorf("setup package target %s has incomplete metadata for %s", name, image.File)
+			}
+			if image.File == target.FirmwareOTA && image.BuildID != target.BuildID {
+				return nil, fmt.Errorf("setup package target %s firmware build ID is inconsistent", name)
+			}
+		}
 	}
 	return &Package{Root: root, Manifest: m}, nil
 }
@@ -2476,17 +2483,35 @@ func unzip(src, dst string) error {
 		return err
 	}
 	defer r.Close()
+	if len(r.File) > maxPackageEntries {
+		return fmt.Errorf("package has %d entries; limit is %d", len(r.File), maxPackageEntries)
+	}
+	var expanded int64
 	for _, f := range r.File {
 		clean := filepath.Clean(f.Name)
 		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 			return fmt.Errorf("unsafe package path: %s", f.Name)
 		}
 		p := filepath.Join(dst, clean)
+		rel, relErr := filepath.Rel(dst, p)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return fmt.Errorf("package entry escapes extraction root: %s", f.Name)
+		}
 		if f.FileInfo().IsDir() {
 			if err := os.MkdirAll(p, 0755); err != nil {
 				return err
 			}
 			continue
+		}
+		if f.FileInfo().Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("package symbolic links are not allowed: %s", f.Name)
+		}
+		declared := int64(f.UncompressedSize64)
+		if declared < 0 || declared > maxPackageFileBytes {
+			return fmt.Errorf("package entry %s exceeds the %d-byte file limit", f.Name, maxPackageFileBytes)
+		}
+		if expanded+declared > maxPackageExpandedBytes {
+			return fmt.Errorf("package exceeds the %d-byte expanded-size limit", maxPackageExpandedBytes)
 		}
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 			return err
@@ -2500,283 +2525,21 @@ func unzip(src, dst string) error {
 			rc.Close()
 			return err
 		}
-		_, copyErr := io.Copy(out, rc)
+		written, copyErr := io.Copy(out, io.LimitReader(rc, maxPackageFileBytes+1))
 		closeErr := out.Close()
 		rc.Close()
 		if copyErr != nil {
 			return copyErr
 		}
+		if written > maxPackageFileBytes || written != declared {
+			return fmt.Errorf("package entry %s expanded to an unexpected size", f.Name)
+		}
+		expanded += written
 		if closeErr != nil {
 			return closeErr
 		}
 	}
 	return nil
-}
-
-func startDriverInstaller(app *App, pkg *Package, kind driverKind, device usbBridgeDevice) (driverInstallResult, error) {
-	kind = normalizeDriverKind(string(kind))
-	if kind != driverCP210x && kind != driverWCH {
-		return driverInstallResult{Kind: kind, Error: "unknown driver type"}, fmt.Errorf("unknown driver type")
-	}
-	root, err := findDriverINFRoot(pkg, kind)
-	if err != nil {
-		return driverInstallResult{Kind: kind, Error: err.Error()}, err
-	}
-	return startINFDriverInstaller(app, root, kind, device)
-}
-
-func startINFDriverInstaller(app *App, driverRoot string, kind driverKind, device usbBridgeDevice) (driverInstallResult, error) {
-	result := driverInstallResult{Kind: kind, DriverRoot: driverRoot, DeviceInstanceID: device.InstanceID, HardwareIDs: device.HardwareIDs}
-	if app == nil {
-		result.Error = "setup tool data folder is unavailable"
-		return result, fmt.Errorf(result.Error)
-	}
-	exe, err := os.Executable()
-	if err != nil || exe == "" {
-		result.Error = "could not find this setup tool executable"
-		return result, fmt.Errorf(result.Error)
-	}
-	if !dirExists(driverRoot) {
-		result.Error = fmt.Sprintf("%s driver folder was not found", kind)
-		return result, fmt.Errorf(result.Error)
-	}
-	req, err := buildDriverInstallRequest(app, kind, driverRoot, device)
-	if err != nil {
-		result.Error = err.Error()
-		return result, err
-	}
-	result, err = runElevatedINFDriverHelper(exe, req)
-	if err != nil {
-		return result, err
-	}
-	return result, driverInstallError(result)
-}
-
-func waitForDriverInstallResult(path string, timeout time.Duration) (driverInstallResult, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(path)
-		if err == nil && len(data) > 0 {
-			var result driverInstallResult
-			if err := json.Unmarshal(data, &result); err != nil {
-				return result, fmt.Errorf("could not read driver installer result: %w", err)
-			}
-			return result, nil
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return driverInstallResult{}, fmt.Errorf("driver installer did not report a result. The administrator prompt may have been cancelled or blocked by Windows")
-}
-
-func runINFDriverInstallHelper(args []string) int {
-	req := driverInstallRequest{}
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--driver-kind":
-			if i+1 < len(args) {
-				req.Kind = normalizeDriverKind(args[i+1])
-				i++
-			}
-		case "--driver-root":
-			if i+1 < len(args) {
-				req.DriverRoot = args[i+1]
-				i++
-			}
-		case "--device-instance-id":
-			if i+1 < len(args) {
-				req.DeviceInstanceID = args[i+1]
-				i++
-			}
-		case "--hardware-id":
-			if i+1 < len(args) {
-				req.HardwareIDs = append(req.HardwareIDs, args[i+1])
-				i++
-			}
-		case "--result":
-			if i+1 < len(args) {
-				req.ResultPath = args[i+1]
-				i++
-			}
-		case "--log":
-			if i+1 < len(args) {
-				req.LogPath = args[i+1]
-				i++
-			}
-		}
-	}
-	if req.DriverRoot == "" || req.ResultPath == "" || req.Kind == "" {
-		return 2
-	}
-	result := installINFDriverPackage(req)
-	data, _ := json.MarshalIndent(result, "", "  ")
-	_ = os.MkdirAll(filepath.Dir(req.ResultPath), 0755)
-	if err := os.WriteFile(req.ResultPath, data, 0644); err != nil {
-		return 1
-	}
-	if req.LogPath != "" {
-		_ = os.MkdirAll(filepath.Dir(req.LogPath), 0755)
-		_ = os.WriteFile(req.LogPath, []byte(formatDriverDiagnosticText(result)), 0644)
-	}
-	if driverInstallError(result) == nil {
-		return 0
-	}
-	return 1
-}
-
-func runDriverInstallerEXE(installerPath string) driverInstallResult {
-	if !fileExists(installerPath) {
-		return driverInstallResult{ExitCode: 1, Error: filepath.Base(installerPath) + " was not found"}
-	}
-	cmd := exec.Command(installerPath)
-	prepareHiddenCommand(cmd)
-	out, err := cmd.CombinedOutput()
-	result := driverInstallResult{Output: strings.TrimSpace(string(out))}
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		result.ExitCode = exitErr.ExitCode()
-		result.Error = strings.TrimSpace(string(out))
-	} else if err != nil {
-		result.ExitCode = 1
-		result.Error = err.Error()
-	} else {
-		result.ExitCode = 0
-	}
-	if result.ExitCode == 3010 {
-		result.RebootRequired = true
-	}
-	return result
-}
-
-func installINFDriverPackage(req driverInstallRequest) driverInstallResult {
-	result := driverInstallResult{
-		Kind:             req.Kind,
-		DriverRoot:       req.DriverRoot,
-		DeviceInstanceID: req.DeviceInstanceID,
-		HardwareIDs:      append([]string(nil), req.HardwareIDs...),
-		LogPath:          req.LogPath,
-	}
-	if !dirExists(req.DriverRoot) {
-		result.ExitCode = 1
-		result.Error = "driver folder was not found"
-		return result
-	}
-	infs := driverINFs(req.DriverRoot)
-	result.INFPaths = infs
-	if len(infs) == 0 {
-		result.ExitCode = 1
-		result.Error = "driver folder does not contain an INF file"
-		return result
-	}
-	pnputil := filepath.Join(os.Getenv("SystemRoot"), "System32", "pnputil.exe")
-	if !fileExists(pnputil) {
-		pnputil = "pnputil.exe"
-	}
-	install := runDriverCommand(pnputil, "/add-driver", filepath.Join(req.DriverRoot, "*.inf"), "/subdirs", "/install")
-	result.ExitCode = install.ExitCode
-	result.Output = install.Output
-	if install.Err != "" {
-		result.Error = install.Err
-	}
-	if result.ExitCode == 3010 {
-		result.RebootRequired = true
-	}
-	if result.ExitCode != 0 && result.ExitCode != 3010 {
-		if result.Error == "" {
-			result.Error = meaningfulTail(result.Output)
-		}
-		return result
-	}
-	scan := runDriverCommand(pnputil, "/scan-devices")
-	result.ScanExitCode = scan.ExitCode
-	result.ScanOutput = scan.Output
-	if scan.ExitCode == 3010 {
-		result.RebootRequired = true
-	}
-	if scan.ExitCode != 0 && scan.ExitCode != 3010 && result.Error == "" {
-		result.Error = strings.TrimSpace(scan.Err)
-		if result.Error == "" {
-			result.Error = meaningfulTail(scan.Output)
-		}
-		return result
-	}
-	if req.DeviceInstanceID != "" && !result.RebootRequired {
-		if port := waitForDeviceCOMPort(req.DeviceInstanceID, driverCOMWaitTimeout); port != "" {
-			result.COMPort = port
-		} else {
-			result.Error = "driver installed, but the matching COM port did not appear after scan-devices"
-		}
-	} else if req.DeviceInstanceID == "" && !result.RebootRequired {
-		result.Error = "driver installed, but the setup tool could not identify the exact USB device to verify the matching COM port"
-	}
-	return result
-}
-
-func driverPackageRoots(pkg *Package, kind string) []string {
-	if pkg == nil {
-		return nil
-	}
-	switch normalizeDriverKind(kind) {
-	case "cp210x":
-		return []string{filepath.Join(pkg.Root, "drivers", "cp210x")}
-	case "wch":
-		return []string{filepath.Join(pkg.Root, "drivers", "wch")}
-	default:
-		return nil
-	}
-}
-
-func findDriverINFRoot(pkg *Package, kind driverKind) (string, error) {
-	if pkg == nil {
-		return "", fmt.Errorf("setup package is not loaded")
-	}
-	for _, root := range driverPackageRoots(pkg, string(kind)) {
-		if err := validateDriverINFRoot(root); err == nil {
-			return root, nil
-		} else if dirExists(root) {
-			return "", err
-		}
-	}
-	return "", fmt.Errorf("expected a signed INF driver package inside OpenTurbine_Recommended.zip")
-}
-
-func validateDriverINFRoot(root string) error {
-	if !dirExists(root) {
-		return fmt.Errorf("driver folder was not found: %s", root)
-	}
-	if len(driverINFs(root)) == 0 {
-		return fmt.Errorf("driver folder does not contain an INF file: %s", root)
-	}
-	if len(driverFilesWithExt(root, ".cat")) == 0 {
-		return fmt.Errorf("driver folder does not contain a CAT signature file: %s", root)
-	}
-	if len(driverFilesWithExt(root, ".sys")) == 0 {
-		return fmt.Errorf("driver folder does not contain a SYS driver payload: %s", root)
-	}
-	if len(driverFilesWithExt(root, ".exe")) > 0 && len(driverINFs(root)) == 0 {
-		return fmt.Errorf("driver folder contains only installer executables; pass the extracted signed INF/CAT/SYS package")
-	}
-	return nil
-}
-
-func driverINFs(root string) []string {
-	return driverFilesWithExt(root, ".inf")
-}
-
-func driverFilesWithExt(root, ext string) []string {
-	if !dirExists(root) {
-		return nil
-	}
-	var files []string
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if strings.EqualFold(filepath.Ext(path), ext) {
-			files = append(files, path)
-		}
-		return nil
-	})
-	sort.Strings(files)
-	return files
 }
 
 func findEsptool(pkg *Package) (string, error) {
@@ -2834,9 +2597,9 @@ func usbDriverRecommendation() string {
 		s := strings.ToUpper(string(out))
 		switch {
 		case strings.Contains(s, "VID_10C4"):
-			return "Windows sees a Silicon Labs CP210x USB bridge. Install the CP210x driver below, then unplug and reconnect the board."
+			return "Windows sees a Silicon Labs CP210x USB bridge. Open the official CP210x driver page below, then unplug and reconnect the board."
 		case strings.Contains(s, "VID_1A86") || strings.Contains(s, "VID_1A2C"):
-			return "Windows sees a WCH USB bridge. Install the CH340/CH341/CH343 driver below, then unplug and reconnect the board."
+			return "Windows sees a WCH USB bridge. Open the official CH340/CH341/CH343 driver page below, then unplug and reconnect the board."
 		case strings.Contains(s, "VID_303A"):
 			return "Windows sees Espressif native USB. It normally needs no separate driver; try BOOT, another data cable, and another USB port."
 		}
@@ -3352,7 +3115,18 @@ func flashUSB(esptool, port, target string, pkg *Package, pcbProfilePath string,
 	}
 	segmentSizes := make([]int64, 0, len(entries))
 	seenAddresses := map[string]bool{}
-	for _, e := range entries {
+	type flashRange struct {
+		start, end uint64
+		file       string
+	}
+	ranges := make([]flashRange, 0, len(entries)+1)
+	flashBytes, flashErr := detectedFlashBytes(esptool, port)
+	if flashErr != nil {
+		return fmt.Errorf("could not verify board flash size: %w; board was not erased", flashErr)
+	}
+	profileStart, _ := strconv.ParseUint(strings.TrimPrefix(strings.ToLower(t.PCBProfile.Address), "0x"), 16, 64)
+	profileEnd := profileStart + uint64(t.PCBProfile.Size)
+	for index, e := range entries {
 		address := strings.ToLower(strings.TrimSpace(e.Address))
 		if !regexp.MustCompile(`^0x[0-9a-f]+$`).MatchString(address) {
 			return fmt.Errorf("setup package contains invalid flash address %q; board was not erased", e.Address)
@@ -3361,7 +3135,14 @@ func flashUSB(esptool, port, target string, pkg *Package, pcbProfilePath string,
 			return fmt.Errorf("setup package contains duplicate flash address %s; board was not erased", address)
 		}
 		seenAddresses[address] = true
+		start, parseErr := strconv.ParseUint(strings.TrimPrefix(address, "0x"), 16, 64)
+		if parseErr != nil {
+			return fmt.Errorf("invalid flash address %s; board was not erased", address)
+		}
 		p := e.File
+		if index < len(t.USBFlash) && filepath.IsAbs(p) {
+			return fmt.Errorf("manifest image path must be package-relative: %s; board was not erased", p)
+		}
 		if !filepath.IsAbs(p) {
 			var err error
 			p, err = packageFile(pkg, target, e.File)
@@ -3369,15 +3150,34 @@ func flashUSB(esptool, port, target string, pkg *Package, pcbProfilePath string,
 				return fmt.Errorf("%w; board was not erased", err)
 			}
 		}
-		if e.SHA256 != "" {
+		if index < len(t.USBFlash) {
+			if e.SHA256 == "" {
+				return fmt.Errorf("manifest image %s has no SHA-256; board was not erased", e.File)
+			}
 			if err := verifySHA256(p, e.SHA256); err != nil {
 				return fmt.Errorf("%w; board was not erased", err)
 			}
 		}
 		if info, statErr := os.Stat(p); statErr == nil {
+			if index < len(t.USBFlash) && info.Size() != e.Bytes {
+				return fmt.Errorf("image %s is %d bytes, manifest says %d; board was not erased", e.File, info.Size(), e.Bytes)
+			}
+			end := start + uint64(info.Size())
+			if end < start || end > flashBytes {
+				return fmt.Errorf("image %s range 0x%x-0x%x exceeds detected target flash plan; board was not erased", e.File, start, end)
+			}
+			if index < len(t.USBFlash) && start < profileEnd && end > profileStart {
+				return fmt.Errorf("image %s overlaps the PCB-profile partition; board was not erased", e.File)
+			}
+			for _, prior := range ranges {
+				if start < prior.end && end > prior.start {
+					return fmt.Errorf("flash ranges overlap: %s and %s; board was not erased", prior.file, e.File)
+				}
+			}
+			ranges = append(ranges, flashRange{start, end, e.File})
 			segmentSizes = append(segmentSizes, info.Size())
 		} else {
-			segmentSizes = append(segmentSizes, 1)
+			return fmt.Errorf("image %s cannot be read; board was not erased", e.File)
 		}
 		args = append(args, address, p)
 	}
@@ -3410,6 +3210,34 @@ func flashUSB(esptool, port, target string, pkg *Package, pcbProfilePath string,
 	return nil
 }
 
+func detectedFlashBytes(esptool, port string) (uint64, error) {
+	var combined strings.Builder
+	for _, command := range []string{"flash-id", "flash_id"} {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		cmd := exec.CommandContext(ctx, esptool, "--port", port, command)
+		prepareEsptoolCommand(cmd)
+		out, err := cmd.CombinedOutput()
+		cancel()
+		combined.Write(out)
+		if err != nil {
+			continue
+		}
+		match := regexp.MustCompile(`(?i)(?:detected\s+)?flash\s+size\s*:\s*([0-9]+)\s*(MB|KB)`).FindStringSubmatch(string(out))
+		if len(match) == 3 {
+			value, _ := strconv.ParseUint(match[1], 10, 64)
+			if strings.EqualFold(match[2], "MB") {
+				value <<= 20
+			} else {
+				value <<= 10
+			}
+			if value > 0 {
+				return value, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("esptool did not report flash capacity: %s", oneLine(combined.String()))
+}
+
 func packageFile(pkg *Package, target, name string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("setup package has a missing file name")
@@ -3420,6 +3248,15 @@ func packageFile(pkg *Package, target, name string) (string, error) {
 	}
 	tries = append(tries, filepath.Join(pkg.Root, filepath.FromSlash(name)))
 	for _, p := range tries {
+		root, rootErr := filepath.Abs(pkg.Root)
+		candidate, candidateErr := filepath.Abs(p)
+		if rootErr != nil || candidateErr != nil {
+			continue
+		}
+		rel, relErr := filepath.Rel(root, candidate)
+		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return "", fmt.Errorf("setup package file escapes package root: %s", name)
+		}
 		if fileExists(p) {
 			return p, nil
 		}
@@ -3544,7 +3381,17 @@ func detectTargetFromHardware() (string, error) {
 func firmwarePath(pkg *Package, target string) (string, error) {
 	if target != "" {
 		if t, ok := pkg.Manifest.Targets[target]; ok && t.FirmwareOTA != "" {
-			return packageFile(pkg, target, t.FirmwareOTA)
+			path, err := packageFile(pkg, target, t.FirmwareOTA)
+			if err != nil {
+				return "", err
+			}
+			if t.FirmwareSHA256 == "" {
+				return "", fmt.Errorf("setup package firmware has no SHA-256")
+			}
+			if err := verifySHA256(path, t.FirmwareSHA256); err != nil {
+				return "", err
+			}
+			return path, nil
 		}
 	}
 	if pkg.Manifest.FirmwareOTA != "" {

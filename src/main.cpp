@@ -14,6 +14,7 @@
 #include "system/RulesEngine.h"
 #include "system/ConfigApplyGate.h"
 #include "system/FeedbackRequirements.h"
+#include "system/OutputActivity.h"
 #include "system/pcb/PcbProfileManager.h"
 #include "engine/EngineData.h"
 #include "hal/RCInput.h"
@@ -145,13 +146,14 @@ public:
                             _whileReleased = true;
                             clearWaitReason();
                         } else {
-                            if (_def->timeoutMs > 0 && (millis() - _entryMs) >= _def->timeoutMs) {
+                            const unsigned long finiteTimeout = _def->timeoutMs ? _def->timeoutMs : 30000UL;
+                            if ((millis() - _entryMs) >= finiteTimeout) {
                                 if (_def->timeoutAction == 2) { _whileReleased = true; clearWaitReason(); }
                                 else return _def->timeoutAction == 1 ? BlockResult::Fault : BlockResult::Abort;
                             }
                             return BlockResult::Running;
                         }
-                    } else if (_def->timeoutMs > 0 && (millis() - _entryMs) >= _def->timeoutMs) {
+                    } else if ((millis() - _entryMs) >= (_def->timeoutMs ? _def->timeoutMs : 30000UL)) {
                         if (_def->timeoutAction == 2) {
                             _whileReleased = true;
                             clearWaitReason();
@@ -257,7 +259,7 @@ static bool ignitionTargetAvailable(uint8_t target) {
 
 static const char* ignitionTargetName(uint8_t target) {
     switch (target) {
-        case 1: return "AB / Pilot Igniter";
+        case 1: return "Secondary Igniter";
         case 2: return "Glow/Wet Glow";
         default: return "Igniter 1";
     }
@@ -494,7 +496,18 @@ static void validateSequences() {
     auto checkCustomBlockHardware = [&](const char* nm) {
         const auto* def = customDefFor(nm);
         if (!def) return false;
+        auto registryPurposeConfigured = [&](const char* purpose) {
+            for (uint8_t i = 0; i < hw.channelRegistry.inputCount; ++i)
+                if (!strcmp(hw.channelRegistry.inputs[i].purpose, purpose) &&
+                    ChannelRegistry::channelAddressable(hw.channelRegistry.inputs[i])) return true;
+            return false;
+        };
         auto sensorConfigured = [&](uint8_t sensor) {
+            if (ChannelRegistry::isInputSensor(sensor)) {
+                const uint8_t index = ChannelRegistry::inputIndexFromSensor(sensor);
+                return index < hw.channelRegistry.inputCount &&
+                       ChannelRegistry::channelAddressable(hw.channelRegistry.inputs[index]);
+            }
             switch (sensor) {
                 case 0:  return hw.hasOilTemp;
                 case 1:  return hw.hasTot;
@@ -520,9 +533,15 @@ static void validateSequences() {
                 case 21: return hw.hasIgniter && hw.hasIgniterCurrentSensor;
                 case 22: return hw.hasIgniter2 && hw.hasIgniter2CurrentSensor;
                 case 23: return hw.hasOilPump && hw.hasOilPumpCurrentSensor;
-                case 24: return hw.hasAfterburner && hw.abInputPin >= 0;
-                case 25: return hw.startPin >= 0;
-                case 26: return hw.stopPin >= 0;
+                case 24: return hw.hasAfterburner &&
+                                (hw.abInputPin >= 0 || registryPurposeConfigured("ab_command"));
+                case 25:
+                case 26: {
+                    const char* purpose = sensor == 25 ? "start_switch" : "stop_switch";
+                    if ((sensor == 25 ? hw.startPin : hw.stopPin) >= 0) return true;
+                    return registryPurposeConfigured(purpose);
+                }
+                case 27: return hw.hasThrust;
                 default: return false;
             }
         };
@@ -606,6 +625,9 @@ static void validateSequences() {
                 Config::safetyHoldCheckEgt || Config::safetyHoldCheckFlame;
             if (!anyFinalCheck)
                 addIssue(nm, "No Final Startup Check is enabled - choose at least one installed sensor", true);
+            if (Config::safetyHoldMs <= 0 || Config::safetyHoldTimeoutMs <= 0 ||
+                Config::safetyHoldTimeoutMs < Config::safetyHoldMs)
+                addIssue(nm, "Final-check stability and timeout must be finite and nonzero", true);
             if (Config::safetyHoldCheckN1 && !hw.hasN1Rpm) addIssue(nm, "N1 check is enabled but N1 is not configured", true);
             if (Config::safetyHoldCheckN2 && !hw.hasN2Rpm) addIssue(nm, "N2 check is enabled but N2 is not configured", true);
             if (Config::safetyHoldCheckP1 && !hw.hasP1) addIssue(nm, "P1 check is enabled but P1 pressure is not configured", true);
@@ -630,6 +652,8 @@ static void validateSequences() {
                              "or enable Bench Mode to test without sensors.", true);
         }
         else if (strcmp(nm, "OilPrime") == 0) {
+            if (Config::startupOilArmTimeoutMs <= 0)
+                addIssue(nm, "OilPrime dwell/timeout must be finite and nonzero", true);
             if (!hw.hasOilPump)
                 addIssue(nm, "No oil pump actuator configured - block will run for timeout with no physical effect", false);
             // (OilPrime drives the pump directly at a fixed % when the oil control loop is
@@ -678,6 +702,8 @@ static void validateSequences() {
                 addIssue(nm, "No main fuel pump / metering output configured - fuel demand has no physical output", false);
         }
         else if (strcmp(nm, "WaitForInput") == 0) {
+            if (Config::waitForInputTimeoutMs <= 0)
+                addIssue(nm, "Sequencer input waits require a finite nonzero timeout", true);
             if (Config::waitForInputChannel < 0 ||
                 Config::waitForInputChannel >= HardwareConfig::MAX_DI ||
                 hw.diCh[Config::waitForInputChannel].pin < 0)
@@ -708,7 +734,7 @@ static void validateSequences() {
         ed.seqHasStructuralErrors = true;
     } else {
         // Warn if no sustained fuel-delivery block is present. FuelPulse is
-        // intentionally pre-prime only and does not mark fuelEverOpened.
+        // intentionally pre-prime only and does not mark a combustion attempt.
         bool hasFuelDelivery = false;
         bool hasFuelPulseOnly = false;
         bool hasSpoolAction = false;
@@ -727,7 +753,7 @@ static void validateSequences() {
         if (!hasFuelDelivery) {
             addIssue("FuelOpen", hasFuelPulseOnly
                 ? "Only FuelPulse is present. FuelPulse is a pre-prime pulse and does not count as sustained fuel delivery or trigger hot cooldown."
-                : "No sustained fuel delivery block (FuelOpen/FuelPumpIdle or pilot/aux fuel pump block) in startup - engine will spin without fuel",
+                : "No sustained fuel delivery block (FuelOpen/FuelPumpIdle or secondary/auxiliary fuel pump block) in startup - engine will spin without fuel",
                 false);
         }
         if (!hasSpoolAction) {
@@ -863,7 +889,11 @@ static void validateSequences() {
         checkCommonBlockHardware(nm);
         if (strcmp(nm, "RPMDrop") == 0 && !hw.hasN1Rpm)
             addIssue(nm, "No N1 RPM sensor - will wait for full timeout then proceed", false);
+        if (strcmp(nm, "RPMDrop") == 0 && Config::shutdownRpmDropTimeoutMs <= 0)
+            addIssue(nm, "RPMDrop requires a finite nonzero timeout; remove the block if unused", true);
         else if (strcmp(nm, "CooldownSpin") == 0) {
+            if (Config::shutdownCooldownTimeoutMs <= 0)
+                addIssue(nm, "CooldownSpin requires a finite nonzero timeout; remove the block if unused", true);
             const bool coolUsesStarter = hw.hasStarter && Config::cooldownUseStarter;
             const bool coolUsesOil = hw.hasOilPump && Config::cooldownUseOilPump;
             const bool coolUsesScavenge = hw.hasOilScavengePump && Config::cooldownUseScavengePump;
@@ -877,6 +907,10 @@ static void validateSequences() {
                   Config::waitForInputChannel >= HardwareConfig::MAX_DI ||
                   hw.diCh[Config::waitForInputChannel].pin < 0))
             addIssue(nm, "No switch assigned to the selected DI channel - shutdown cannot finish", true);
+        if (strcmp(nm, "WaitForInputOff") == 0 && Config::waitForInputTimeoutMs <= 0)
+            addIssue(nm, "Sequencer input waits require a finite nonzero timeout", true);
+        if (strcmp(nm, "FinalStop") == 0 && Config::shutdownFinalStopTimeoutMs <= 0)
+            addIssue(nm, "FinalStop requires a finite nonzero timeout; remove the block if unused", true);
     }
 
     // ── Check AB ignition blocks ──────────────────────────────
@@ -895,18 +929,20 @@ static void validateSequences() {
     auto checkAbIgnitionBlock = [&](const char* nm) {
         checkAbActuatorBlockHardware(nm);
         if (strcmp(nm, "ABIgnite") == 0) {
-            const bool torchActive = g_blkABIgnite.useTorch && g_blkABIgnite.torchTotLimit > 0.0f;
+            const bool torchActive = g_blkABIgnite.useTorch;
             if (!torchActive && !g_blkABIgnite.useIgniter)
-                addIssue(nm, "No active ignition method - enable AB igniter or set Torch EGT Cut above 0 so torch can run", false);
+                addIssue(nm, "No active ignition method - enable Torch, the AB igniter, or both", false);
             if (g_blkABIgnite.useIgniter && !hw.hasIgniter2)
-                addIssue(nm, "AB igniter is enabled but no AB / pilot igniter actuator is configured", false);
-            // Torch is silently skipped at runtime when torchTotLimit == 0.
-            // Warn so the user knows to set abTorchTotLimit in config.
-            if (g_blkABIgnite.useTorch && g_blkABIgnite.torchTotLimit == 0.0f)
-                addIssue(nm, "Use Torch is enabled but Torch EGT Cut is 0 - torch is disabled until an EGT cut limit is set", false);
+                addIssue(nm, "AB igniter is enabled but no secondary igniter actuator is configured", false);
+            if (g_blkABIgnite.useTorch && Config::abTorchGuardMode == 2)
+                addIssue(nm, "Torch temperature guard is Off; the normal engine over-temperature shutdown remains active", false);
+            if (g_blkABIgnite.useTorch && Config::abTorchGuardMode == 1 &&
+                (Config::abTorchTotLimit <= 0.0f ||
+                 (Config::primaryEgtLimitC() > 0.0f && Config::abTorchTotLimit >= Config::primaryEgtLimitC())))
+                addIssue(nm, "Custom torch cut should be above 0 and below the main engine temperature shutdown", false);
         }
         else if (strcmp(nm, "ABFlameConfirm") == 0) {
-            if (g_blkABFlameConfirm.flameMode == 0 && !hw.hasAbFlame)
+            if ((g_blkABFlameConfirm.flameMode == 0 || g_blkABFlameConfirm.flameMode == 3) && !hw.hasAbFlame)
                 addIssue(nm, "AB flame sensor mode is selected but no dedicated AB flame sensor is configured", false);
             if (g_blkABFlameConfirm.flameMode == 1 && Config::effectiveEgtSource() == 0)
                 addIssue(nm, "EGT-rise confirmation is selected but no TOT/TIT sensor is configured", false);
@@ -1061,7 +1097,7 @@ static void validateSequences() {
         if (Config::governorTargetRpm <= 0.0f)
             addIssue("N2 speed control", "Automatic N2 speed control is enabled but Target N2 RPM is 0 - speed control will remain inactive", false);
         if (hw.hasPropPitch && hw.propPitchType == 2)
-            addIssue("Governor", "Prop pitch is configured as on/off; governor will ignore it and use throttle only if throttle is fitted", false);
+            addIssue("Governor", "Prop pitch uses relay fine/coarse two-position control with the configured N2 no-correction band", false);
         else if (hw.hasPropPitch && Config::governorPitchKp <= 0.0f)
             addIssue("Governor", "Prop pitch actuator is configured but Pitch Gain is 0 - governor will use throttle only", false);
     }
@@ -1122,7 +1158,7 @@ static void validateSequences() {
         if (Config::relightMinRpm < Config::minRpm)
             addIssue("AutoRelight", "Minimum N1 to fire relight is below Minimum Running N1; the ECU will use the higher Minimum Running N1 value", false);
         if (Config::relightTimeoutMs == 0)
-            addIssue("AutoRelight", "Relight timeout is 0 - igniter can stay active indefinitely during a failed relight attempt", false);
+            addIssue("AutoRelight", "Relight timeout is 0 - the ECU will use its hardcoded 30 second maximum", false);
     }
 
     if (ed.seqIssueCount == 0)
@@ -1143,7 +1179,7 @@ static void cutCombustionAndStarterNow() {
     ed.igniterOn = false; ed.igniter2On = false;
     ed.glowPlugDemand = 0.0f; ed.wetGlowFuelDemand = 0.0f;
     ed.abSolOpen = false; ed.abPumpDemand = 0.0f;
-    ed.starterDemand = 0.0f; ed.starterEnabled = false;
+    ed.starterDemand = 0.0f; ed.effectiveStarterDemand = 0.0f; ed.starterEnabled = false;
     ed.airstarterOpen = false;
     Hardware::cutRegistryHazardousDemands();
 }
@@ -1154,6 +1190,7 @@ static bool          _diRawLast[HardwareConfig::MAX_DI]    = {};
 
 // ── Run-time tracking ─────────────────────────────────────────
 static unsigned long _runStartMs            = 0;   // millis() when RUNNING entered
+static bool          _runTimingActive       = false;
 
 // ── Buzzer state machine ───────────────────────────────────────
 // Drives a passive piezo on buzzerPin via tone()/noTone() (Arduino API).
@@ -1242,15 +1279,60 @@ static bool anyToolTimerActive() {
 static bool          _relightActive    = false;
 static unsigned long _relightBeginMs   = 0;
 static float         _relightBeginEgt  = 0.0f;   // -1 = EGT unhealthy at relight start, baseline pending
+static float         _relightBeginN1   = 0.0f;
+static uint32_t      _relightBeginN1Seq = 0;
+static uint32_t      _relightBeginEgtSeq = 0;
+static uint32_t      _relightBeginFlameSeq = 0;
+static bool          _emergencyShutdownActive = false;
+static unsigned long _emergencyShutdownUntilMs = 0;
 
 static bool deadlineExpired(unsigned long now, unsigned long deadline) {
     return deadline && (long)(now - deadline) >= 0;
+}
+
+// Zero is the inactive sentinel for every absolute output deadline. Preserve
+// that contract even when a bounded timer lands exactly on millis() rollover.
+static unsigned long deadlineAfter(unsigned long now, unsigned long durationMs) {
+    const unsigned long deadline = now + durationMs;
+    return deadline ? deadline : 1UL;
 }
 
 // Last manual SET_OIL_PCT demand — restored when the standby oil feed
 // disengages or an oil-prime timer expires, so neither path silently wipes
 // the operator's setting to 0. Reset on entering STANDBY.
 static float _manualOilPct = 0.0f;
+
+// STOP's standby/fault path: release every temporary owner immediately while
+// preserving the current mode so a configuration FAULT remains visible.
+static void cancelTemporaryOutputOwners() {
+    auto& ed = EngineData::instance();
+    if (g_abSequencer.isRunning()) g_abSequencer.stopSequence();
+    cutCombustionAndStarterNow();
+    ed.abMode = ABMode::Off;
+    ed.abTriggerActive = false;
+    ed.extraCooldownActive = false;
+    ed.extraCooldownUntilMs = 0;
+    ed.oilTargetBar = 0.0f;
+    ed.oilPumpPct = 0.0f;
+    ed.oilScavengeDemand = 0.0f;
+    ed.oilScavengeOn = false;
+    ed.coolFanDemand = 0.0f;
+    ed.coolFanOn = false;
+    ed.bleedValveDemand = 0.0f;
+    ed.bleedValveOpen = false;
+    ed.propPitchDemand = Hardware::propPitchParkDemand();
+    _manualOilPct = 0.0f;
+    _fuelPrimeUntilMs = _oilPrimeUntilMs = _ignTestUntilMs = 0;
+    _ign2TestUntilMs = _startTestUntilMs = _idleTestUntilMs = 0;
+    _oilScavTestUntilMs = _coolFanTestUntilMs = _airstarterTestUntilMs = 0;
+    _bleedValveTestUntilMs = _glowTestUntilMs = _fuelPump2TestUntilMs = 0;
+    _abSolTestUntilMs = _abPumpTestUntilMs = _starterEnTestUntilMs = 0;
+    _propPitchTestUntilMs = _registryOutputTestUntilMs = 0;
+    _registryOutputTestIndex = 255;
+    for (uint8_t i = 0; i < ChannelRegistry::MAX_OUTPUT_CHANNELS; ++i)
+        ed.registryOutputDemand[i] = 0.0f;
+    Hardware::allOff();
+}
 
 static void checkToolTimers() {
     // FAULT is standby-like: tools work there, so their timers must expire too.
@@ -1282,7 +1364,7 @@ static void checkToolTimers() {
     if (deadlineExpired(now, _abSolTestUntilMs))      { ed.abSolOpen       = false; _abSolTestUntilMs      = 0; }
     if (deadlineExpired(now, _abPumpTestUntilMs))     { ed.abPumpDemand  = 0.0f;  _abPumpTestUntilMs     = 0; }
     if (deadlineExpired(now, _starterEnTestUntilMs))  { ed.starterEnabled  = false; _starterEnTestUntilMs  = 0; }
-    if (deadlineExpired(now, _propPitchTestUntilMs))  { ed.propPitchDemand = 0;     _propPitchTestUntilMs  = 0; }
+    if (deadlineExpired(now, _propPitchTestUntilMs))  { ed.propPitchDemand = Hardware::propPitchParkDemand(); _propPitchTestUntilMs = 0; }
     if (deadlineExpired(now, _registryOutputTestUntilMs)) {
         if (_registryOutputTestIndex < HardwareConfig::channelRegistry.outputCount)
             ed.registryOutputDemand[_registryOutputTestIndex] =
@@ -1342,11 +1424,12 @@ static int effectiveRelightConfirmSource() {
 static bool relightConfirmed(const EngineData& ed) {
     switch (effectiveRelightConfirmSource()) {
         case 1:
-            return HardwareConfig::hasFlame && ed.flameDetected;
+            return HardwareConfig::hasFlame && ed.flameDetected &&
+                   ed.flameSampleSeq != _relightBeginFlameSeq;
         case 2: {
-            float target = Config::relightConfirmRpm;
+            float target = fmaxf(Config::relightConfirmRpm, _relightBeginN1 + 100.0f);
             return HardwareConfig::hasN1Rpm && ed.n1Healthy && ed.n1Rpm >= target
-                && (millis() - _relightBeginMs) >= 1000UL;
+                && ed.n1SampleSeq != _relightBeginN1Seq;
         }
         case 3:
             if (!Config::primaryEgtHealthy(ed)) return false;
@@ -1356,7 +1439,9 @@ static bool relightConfirmed(const EngineData& ed) {
                 _relightBeginEgt = Config::primaryEgtC(ed);
                 return false;
             }
-            return Config::relightTotRiseC > 0.0f
+            return (Config::effectiveEgtSource() == 2 ? ed.titSampleSeq : ed.totSampleSeq) !=
+                    _relightBeginEgtSeq &&
+                Config::relightTotRiseC > 0.0f
                 && Config::primaryEgtC(ed) >= (_relightBeginEgt + Config::relightTotRiseC);
         default:
             return false;
@@ -1437,8 +1522,23 @@ static void checkStandbyOilFeed() {
         // The loop no-ops in bench mode, so pressure mode is validated on a real start.
         if (Config::standbyOilFeedBar > 0.0f && hw.hasOilPress && hw.hasOilLoop) {
             ed.oilTargetBar = Config::standbyOilFeedBar;
-            g_ctrlOilLoop.tick();
-            if (ed.oilPumpPct < Config::standbyOilFeedPct)
+            bool binaryPump = hw.oilPumpType == 2;
+            for (uint8_t i = 0; i < HardwareConfig::oilLoopCount; ++i) {
+                const auto& loop = HardwareConfig::oilLoops[i];
+                if (!loop.enabled || loop.pumpOutputIndex >= hw.channelRegistry.outputCount) continue;
+                binaryPump = ChannelRegistry::driverIsOnOffOutput(
+                    hw.channelRegistry.outputs[loop.pumpOutputIndex].driver);
+                break;
+            }
+            if (binaryPump && ed.oilHealthy) {
+                const float deadband = max(0.0f, Config::oilPressureDeadband);
+                if (ed.oilPressure < ed.oilTargetBar - deadband) ed.oilPumpPct = 100.0f;
+                else if (ed.oilPressure > ed.oilTargetBar + deadband) ed.oilPumpPct = 0.0f;
+            } else {
+                g_ctrlOilLoop.tick();
+                if (binaryPump) ed.oilPumpPct = ed.oilPumpPct > 0.0f ? 100.0f : 0.0f;
+            }
+            if (!binaryPump && ed.oilPumpPct < Config::standbyOilFeedPct)
                 ed.oilPumpPct = Config::standbyOilFeedPct;
         } else if (ed.oilPumpPct < Config::standbyOilFeedPct) {
             // Fixed % mode (default, or when no sensor/loop is available).
@@ -1472,6 +1572,9 @@ static void checkGeneralDI() {
     unsigned long now = millis();
     bool hasDiAbArm = false;
     bool diAbArmActive = false;
+    bool hasManualLimpInput = false;
+    bool manualLimpInputActive = false;
+    bool manualLimpInputUnavailable = false;
 
     for (int i = 0; i < HardwareConfig::MAX_DI; i++) {
         if (hw.diCh[i].pin < 0) continue;
@@ -1495,6 +1598,10 @@ static void checkGeneralDI() {
         if (strcmp(roleForLevel, "ab_arm") == 0 && activeInMode) {
             hasDiAbArm = true;
             if (ed.diState[i]) diAbArmActive = true;
+        }
+        if (strcmp(roleForLevel, "limp_mode") == 0 && activeInMode) {
+            hasManualLimpInput = true;
+            manualLimpInputActive |= ed.diState[i];
         }
 
         // Fault and E-Stop are LEVEL-sensitive while the engine operates:
@@ -1556,15 +1663,13 @@ static void checkGeneralDI() {
                 Serial.printf("[DI] ch%d ab_arm active\n", i);
 
             } else if (strcmp(role, "limp_mode") == 0) {
-                ed.limpMode = true;
                 Serial.printf("[DI] ch%d limp_mode activated\n", i);
 
             } else if (strcmp(role, "ab_fire") == 0) {
                 // Trigger AB fire — same effect as pressing AB FIRE button in the UI.
                 // DI polling already runs on the ECU core, so avoid losing the
                 // one-shot edge if the web command queue happens to be full.
-                handleCommand({OTCommand::AB_FIRE});
-                Serial.printf("[DI] ch%d ab_fire triggered\n", i);
+                Serial.printf("[DI] ch%d ab_fire request active\n", i);
             }
             // "inhibit_start" role: state is stored in ed.diState[i] and checked in handleCommand(START)
         }
@@ -1576,26 +1681,16 @@ static void checkGeneralDI() {
                 ed.abArmSwitchOn = false;
                 Serial.printf("[DI] ch%d ab_arm inactive\n", i);
             } else if (strcmp(role, "limp_mode") == 0) {
-                ed.limpMode = false;
                 Serial.printf("[DI] ch%d limp_mode deactivated\n", i);
             }
         }
 
-        // limp_mode is level-authoritative while the switch is HELD: re-assert
-        // ON every tick so a software TOGGLE_LIMP_MODE can't desync from a
-        // physically-held switch. Release is handled by the falling edge above,
-        // and a software toggle still works when no limp switch is held.
-        if (strcmp(hw.diCh[i].role, "limp_mode") == 0 && ed.diState[i] &&
-            (hw.diCh[i].activeModes & (uint8_t)(1u << (int)ed.mode))) {
-            ed.limpMode = true;
-        }
     }
 
     // Registry digital channels (including TCA9554 inputs) use the same
     // turbine semantics as native DI channels. Safety interlocks fail closed:
     // a configured but disconnected safety input blocks START and faults an
     // operating engine instead of silently assuming the switch is clear.
-    static bool registryPrevious[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
     bool hasRegistryAbArm = false, registryAbArmActive = false;
     for (uint8_t i = 0; i < hw.channelRegistry.inputCount; ++i) {
         const auto& channel = hw.channelRegistry.inputs[i];
@@ -1609,10 +1704,10 @@ static void checkGeneralDI() {
         if (!strcmp(role, "ab_arm")) {
             hasRegistryAbArm = true;
             registryAbArmActive |= active;
-        } else if (!strcmp(role, "limp_mode") && healthy) {
-            ed.limpMode = active;
-        } else if (!strcmp(role, "ab_fire") && active && !registryPrevious[i]) {
-            handleCommand({OTCommand::AB_FIRE});
+        } else if (!strcmp(role, "limp_mode")) {
+            hasManualLimpInput = true;
+            manualLimpInputActive |= active;
+            manualLimpInputUnavailable |= !healthy;
         }
         if (safetyRole && (active || unavailableTrip) &&
             (ed.mode == SysMode::STARTUP || ed.mode == SysMode::RUNNING)) {
@@ -1632,15 +1727,25 @@ static void checkGeneralDI() {
                 enterFaultShutdown();
             }
         }
-        registryPrevious[i] = active;
     }
+
+    // Physical limp inputs own the manual request as a level. The automatic
+    // ECU latch is independent, so releasing a switch cannot cancel a
+    // protection-triggered cap during the same run. An unavailable registry
+    // switch also cannot silently clear a cap that it asserted while healthy;
+    // a healthy inactive level is required to remove that manual request.
+    if (hasManualLimpInput) {
+        if (manualLimpInputActive) ed.manualLimpRequested = true;
+        else if (!manualLimpInputUnavailable) ed.manualLimpRequested = false;
+    }
+    ed.limpMode = ed.manualLimpRequested || ed.automaticLimpLatched;
 
     // A lost TCA9554 cannot be commanded to its safe state and may physically
     // retain its last latch value. Treat loss of an engine-affecting expander
     // output as a control fault instead of pretending the command succeeded.
     if ((ed.mode == SysMode::STARTUP || ed.mode == SysMode::RUNNING) &&
-        Hardware::unavailableEngineI2cOutput()) {
-        const auto* channel = Hardware::unavailableEngineI2cOutput();
+        Hardware::unavailableRunningCriticalI2cOutput()) {
+        const auto* channel = Hardware::unavailableRunningCriticalI2cOutput();
         snprintf(ed.faultDescription, sizeof(ed.faultDescription),
                  "I2C output %s is disconnected; its physical state cannot be guaranteed.",
                  channel->name[0] ? channel->name : channel->id);
@@ -1664,14 +1769,32 @@ static void checkGeneralDI() {
 // throttle threshold, dedicated switch, or analog/RC input.
 
 static bool _abInShutSeq = false;   // true while running ab shutdown sequence
+static unsigned long _abArmingStartedMs = 0;
+static float _abEgtBaselineSum = 0.0f;
+static uint8_t _abEgtBaselineCount = 0;
+static uint32_t _abEgtBaselineSeenSeq = 0;
 
-static void enterABIgniting() {
+static uint32_t primaryEgtSampleSeq(const EngineData& ed) {
+    return Config::effectiveEgtSource() == 2 ? ed.titSampleSeq : ed.totSampleSeq;
+}
+
+static void setABReason(const char* reason) {
+    auto& ed = EngineData::instance();
+    snprintf(ed.abFaultReason, sizeof(ed.abFaultReason), "%s", reason ? reason : "");
+}
+
+static void beginABSequenceAfterArming() {
     auto& ed = EngineData::instance();
     if (!HardwareConfig::hasAfterburner) return;
     if (ed.mode != SysMode::RUNNING) return;
-    if (ed.abMode != ABMode::Off && ed.abMode != ABMode::Arming) return;
+    if (ed.abMode != ABMode::Arming) return;
 
     ed.abMode = ABMode::Igniting;
+    ed.abEvidenceValid = false;
+    ed.abFirstFuelMs = 0;
+    ed.abFirstIgnitionMs = 0;
+    ed.abConfirmedMs = 0;
+    setABReason("");
     _abInShutSeq = false;
     FlightRecorder::logBlockEnter("AB_IGN_START");
     Serial.println("[AB] Entering ignition sequence");
@@ -1691,6 +1814,9 @@ static void enterABIgniting() {
     }
 }
 
+static void enterABIgniting();
+static void continueABArming();
+
 static void enterABShutdown() {
     auto& ed = EngineData::instance();
     if (ed.abMode == ABMode::Off || ed.abMode == ABMode::ShuttingDown) return;
@@ -1699,6 +1825,7 @@ static void enterABShutdown() {
 
     // Cut main fuel offset immediately — don't wait for the shutdown sequence
     ed.abFuelOffset = 0.0f;
+    ed.abEvidenceValid = false;
     // Cut igniter immediately
     ed.igniter2On = false;
     // AB fuel is never left to configurable shutdown timing. The custom
@@ -1719,7 +1846,7 @@ static void enterABShutdown() {
 }
 
 // Called when AB ignition sequence completes (g_abSequencer done callback)
-static void abSequenceDone() {
+static void abSequenceDone(const char*, BlockResult) {
     auto& ed = EngineData::instance();
     if (_abInShutSeq) {
         // Shutdown sequence done
@@ -1741,13 +1868,16 @@ static void abSequenceDone() {
                 break;
             }
         }
-        if (!explicitlyConfirmed) {
+        if (!explicitlyConfirmed || !ed.abEvidenceValid) {
             ed.abMode = ABMode::Fault;
             ed.abSolOpen = false;
             ed.abPumpDemand = 0.0f;
             ed.abFuelOffset = 0.0f;
             ed.igniter2On = false;
-            Serial.println("[AB] Ignition sequence rejected: no explicit flame-confirmation block");
+            setABReason(!explicitlyConfirmed
+                ? "AB SEQUENCE NEEDS FLAME CONFIRMATION"
+                : "AB FLAME EVIDENCE INVALID - RELEASE CONTROL TO RETRY");
+            Serial.printf("[AB] Ignition sequence rejected: %s\n", ed.abFaultReason);
         } else if (ed.abMode == ABMode::Igniting) {
             ed.abMode = ABMode::Running;
             Serial.println("[AB] Ignition confirmed - entering Running without stabilization hold");
@@ -1755,7 +1885,7 @@ static void abSequenceDone() {
     }
 }
 
-static void abSequenceAbort() {
+static void abSequenceAbort(const char*, BlockResult) {
     auto& ed = EngineData::instance();
     ed.abSolOpen      = false;
     ed.abPumpDemand = 0;
@@ -1773,11 +1903,13 @@ static void abSequenceAbort() {
         // is still asserted — which would create a rapid re-entry loop.
         // User must release and re-assert the trigger to retry.
         ed.abMode = ABMode::Fault;
-        Serial.println("[AB] Ignition sequence aborted - requires trigger release to retry");
+        if (ed.abFaultReason[0] == '\0')
+            setABReason("AB READINESS CHECK FAILED - RELEASE CONTROL TO RETRY");
+        Serial.printf("[AB] Ignition sequence aborted: %s\n", ed.abFaultReason);
     }
 }
 
-static void abSequenceFault() {
+static void abSequenceFault(const char* blockName, BlockResult) {
     auto& ed = EngineData::instance();
     ed.abMode         = ABMode::Fault;
     ed.abSolOpen      = false;
@@ -1785,7 +1917,13 @@ static void abSequenceFault() {
     ed.abFuelOffset   = 0.0f;
     ed.igniter2On     = false;
     _abInShutSeq      = false;
-    Serial.println("[AB] Sequence FAULT - ignition failed");
+    if (ed.abFaultReason[0] == '\0') {
+        char reason[96];
+        snprintf(reason, sizeof(reason), "AB FAILED AT %s - RELEASE CONTROL TO RETRY",
+                 blockName ? blockName : "UNKNOWN STEP");
+        setABReason(reason);
+    }
+    Serial.printf("[AB] Sequence FAULT: %s\n", ed.abFaultReason);
     // Don't fault the main engine; AB fault is non-critical
     // Leave abMode=Fault until next start attempt
 }
@@ -1794,7 +1932,10 @@ static void checkABTrigger() {
     if (!HardwareConfig::hasAfterburner) return;
     auto& ed  = EngineData::instance();
     auto& hw  = HardwareConfig::instance();
-    static bool _abTriggerPrev = false;
+    static bool _abEligiblePrev = false;
+    static bool _abConditionedTrigger = false;
+    static bool _abConditioningCandidate = false;
+    static unsigned long _abConditioningSinceMs = 0;
     static bool _abFlameLossArmed = false;
     static unsigned long _abFlameLossSinceMs = 0;
 
@@ -1802,7 +1943,10 @@ static void checkABTrigger() {
     // (handled above)
 
     // ── Evaluate trigger ─────────────────────────────────────
-    bool triggerAsserted = false;
+    bool rawRequest = false;
+    float requestValue = 0.0f;
+    float requestThreshold = 0.5f;
+    float requestHysteresis = 0.0f;
     auto registrySwitchActive = [&](const char* purpose, bool& found) {
         const auto& reg = hw.channelRegistry;
         found = false;
@@ -1821,44 +1965,125 @@ static void checkABTrigger() {
             break;
 
         case 1: // throttle threshold
-            // Use the protected demand when slew is active; otherwise the ordinary
-            // controller demand is already clean because AB offset is applied at output.
-            triggerAsserted = ((hw.hasThrottle ? g_ctrlThrottleSlew.currentDemand()
-                                                   : ed.throttleDemand)
-                                >= Config::abThrottleThreshold);
+            // Request follows the calibrated operator source, not a later
+            // controller, rule, slew, or protection-owned fuel command.
+            if (const int8_t idx = Hardware::registryPurposeInputIndex("throttle", "operator_throttle"); idx >= 0) {
+                if (ed.registryInputHealthy[idx]) {
+                    requestValue = constrain(ed.registryInputValue[idx], 0.0f, 1.0f);
+                    const auto& c = hw.channelRegistry.inputs[idx];
+                    requestHysteresis = 1.0f / fmaxf(1.0f, fabsf(c.maxValue - c.minValue));
+                }
+            } else if (hw.hasThrottleInput) {
+                if (hw.throttleInputRcPwm && ed.rcThrottleValid) {
+                    requestValue = constrain(ed.rcThrottleNorm, 0.0f, 1.0f);
+                    requestHysteresis = 1.0f / fmaxf(1.0f,
+                        fabsf((float)Config::throttleMaxRaw - Config::throttleMinRaw));
+                } else if (!hw.throttleInputRcPwm && ed.throttleInputValid) {
+                    const float signedSpan = (float)Config::throttleMaxRaw - Config::throttleMinRaw;
+                    requestValue = fabsf(signedSpan) > 0.0f
+                        ? constrain((ed.throttleInputRaw - Config::throttleMinRaw) / signedSpan, 0.0f, 1.0f)
+                        : 0.0f;
+                    requestHysteresis = 1.0f / fmaxf(1.0f, fabsf(signedSpan));
+                }
+            } else {
+                // Command-demand fallback is intentional only when no
+                // physical operator-throttle source is fitted.
+                requestValue = constrain(ed.throttleDemand, 0.0f, 1.0f);
+                requestHysteresis = 0.001f;
+            }
+            requestThreshold = Config::abThrottleThreshold;
             break;
 
         case 2: { // dedicated switch
             bool registryFound = false;
-            triggerAsserted = registrySwitchActive("ab_fire", registryFound);
-            if (!registryFound && hw.abSwitchPin >= 0)
-                triggerAsserted = (digitalRead(hw.abSwitchPin) ==
+            rawRequest = registrySwitchActive("ab_fire", registryFound);
+            bool nativeFound = false;
+            const uint8_t modeBit = (uint8_t)(1u << (int)ed.mode);
+            for (int i = 0; i < HardwareConfig::MAX_DI; ++i) {
+                if (hw.diCh[i].pin < 0 || strcmp(hw.diCh[i].role, "ab_fire")) continue;
+                nativeFound = true;
+                if (hw.diCh[i].activeModes & modeBit) rawRequest |= ed.diState[i];
+            }
+            if (!registryFound && !nativeFound && hw.abSwitchPin >= 0)
+                rawRequest = (digitalRead(hw.abSwitchPin) ==
                                    (hw.abSwitchActiveH ? HIGH : LOW));
             break;
         }
 
         case 3: // analog / RC input
-            triggerAsserted = ed.abInputValid && (ed.abInputRaw >= hw.abInputThreshold);
+            requestValue = ed.abInputValid ? constrain(ed.abInputNorm, 0.0f, 1.0f) : 0.0f;
+            requestThreshold = hw.abInputThreshold / 4095.0f;
+            requestHysteresis = 1.0f / 4095.0f;
+            if (const int8_t inputIndex = Hardware::registryPurposeInputIndex("ab_command");
+                inputIndex >= 0 && inputIndex < hw.channelRegistry.inputCount) {
+                const auto& input = hw.channelRegistry.inputs[inputIndex];
+                float calibratedSpan = 4095.0f;
+                if (input.driver == ChannelRegistry::Analog ||
+                    input.driver == ChannelRegistry::I2cAnalog ||
+                    input.driver == ChannelRegistry::RcPwm)
+                    calibratedSpan = fabsf(input.maxValue - input.minValue);
+                // One real count/us across the selected calibrated channel,
+                // bounded so a degenerate range cannot consume the trigger.
+                if (calibratedSpan > 0.0f)
+                    requestHysteresis = constrain(1.0f / calibratedSpan,
+                                                  1.0f / 4095.0f, 0.05f);
+            } else if (hw.abInputRcPwm) {
+                const float pulseSpan = fabsf((float)hw.abInputMaxUs - hw.abInputMinUs);
+                if (pulseSpan > 0.0f)
+                    requestHysteresis = constrain(1.0f / pulseSpan,
+                                                  1.0f / 4095.0f, 0.05f);
+            }
             break;
     }
 
-    ed.abTriggerActive = triggerAsserted;
-
-    // Apply arm switch gate (source 1/2/3 only; not manual)
-    if (hw.abTriggerSource != 0 && hw.abRequiresArmSwitch) {
-        if (!ed.abArmSwitchOn) triggerAsserted = false;
+    if (hw.abTriggerSource == 1 || hw.abTriggerSource == 3) {
+        const float halfBand = requestHysteresis * 0.5f;
+        rawRequest = _abConditionedTrigger
+            ? requestValue >= requestThreshold - halfBand
+            : requestValue >= requestThreshold + halfBand;
     }
+
+    // One small debounce applies consistently to throttle, GPIO, registry and
+    // I2C requests. It avoids chatter without exposing more tuning controls.
+    if (rawRequest != _abConditioningCandidate) {
+        _abConditioningCandidate = rawRequest;
+        _abConditioningSinceMs = millis();
+    } else if (_abConditionedTrigger != _abConditioningCandidate &&
+               millis() - _abConditioningSinceMs >= 75UL) {
+        _abConditionedTrigger = _abConditioningCandidate;
+    }
+    const bool requestAsserted = _abConditionedTrigger;
+    const bool armPermitted = !hw.abRequiresArmSwitch || ed.abArmSwitchOn;
+    const bool basePermitted = ed.mode == SysMode::RUNNING && !ed.limpMode && armPermitted;
+    const bool eligibleRequest = requestAsserted && basePermitted;
+    ed.abTriggerActive = requestAsserted;
+    ed.abPermitted = eligibleRequest;
+    snprintf(ed.abInhibitReason, sizeof(ed.abInhibitReason), "%s",
+             !requestAsserted ? "" :
+             ed.mode != SysMode::RUNNING ? "ENGINE NOT RUNNING" :
+             ed.limpMode ? "REDUCED-POWER MODE ACTIVE" :
+             !armPermitted ? "ARM SWITCH NOT ACTIVE" : "");
+    ed.abExecutionActive = ed.abMode == ABMode::Igniting || ed.abMode == ABMode::Running;
 
     if (ed.mode != SysMode::RUNNING) {
         _abFlameLossArmed = false;
-        _abTriggerPrev = triggerAsserted;
+        _abEligiblePrev = eligibleRequest;
         if (ed.abMode != ABMode::Off) {
             enterABShutdown();
         }
         return;
     }
-    if (ed.limpOverrideSensor != FeedbackRequirements::NONE) {
-        _abTriggerPrev = triggerAsserted;
+    if (ed.limpMode) {
+        _abEligiblePrev = eligibleRequest;
+        if (ed.abMode != ABMode::Off && ed.abMode != ABMode::ShuttingDown)
+            enterABShutdown();
+        return;
+    }
+
+    // An enabled arm switch is a continuous permission, not merely a start
+    // check. Apply it identically to manual and input-triggered operation.
+    if (!armPermitted) {
+        _abEligiblePrev = eligibleRequest;
         if (ed.abMode != ABMode::Off && ed.abMode != ABMode::ShuttingDown)
             enterABShutdown();
         return;
@@ -1868,7 +2093,7 @@ static void checkABTrigger() {
     // Rising-edge latch: only re-enter from Off/Fault on a fresh trigger assertion.
     // Without this, a Fault set while the trigger is still held causes an immediate
     // re-entry on the very next tick — creating the same rapid loop as Off did.
-    bool triggerRisingEdge = triggerAsserted && !_abTriggerPrev;
+    bool triggerRisingEdge = eligibleRequest && !_abEligiblePrev;
 
     switch (ed.abMode) {
         case ABMode::Off:
@@ -1879,7 +2104,7 @@ static void checkABTrigger() {
             break;
 
         case ABMode::Running:
-            if (Config::abFlameMode == 0 && HardwareConfig::hasAbFlame) {
+            if ((Config::abFlameMode == 0 || Config::abFlameMode == 3) && HardwareConfig::hasAbFlame) {
                 const bool flameLost = !ed.abFlameHealthy || !ed.abFlameOn;
                 const unsigned long now = millis();
                 if (flameLost) {
@@ -1924,17 +2149,24 @@ static void checkABTrigger() {
                 ed.abPumpDemand = constrain(pct / 100.0f, 0.0f, 1.0f);
             }
             // Shut down if trigger released
-            if (!triggerAsserted && hw.abTriggerSource != 0) {
+            if (!eligibleRequest && hw.abTriggerSource != 0) {
                 enterABShutdown();
             }
             break;
 
-        case ABMode::Igniting:
         case ABMode::Arming:
+            if (!eligibleRequest && hw.abTriggerSource != 0) {
+                enterABShutdown();
+            } else {
+                continueABArming();
+            }
+            break;
+
+        case ABMode::Igniting:
             // For hardware-triggered AB, releasing the trigger or losing the
             // arm gate during light-up must cut fuel promptly instead of
             // allowing the ignition sequence to finish.
-            if (!triggerAsserted && hw.abTriggerSource != 0) {
+            if (!eligibleRequest && hw.abTriggerSource != 0) {
                 enterABShutdown();
             }
             break;
@@ -1943,7 +2175,7 @@ static void checkABTrigger() {
             break;  // sequencer is running — let it finish
     }
 
-    _abTriggerPrev = triggerAsserted;
+    _abEligiblePrev = eligibleRequest;
 }
 
 // ── Cooldown skip (hold START+STOP in SHUTDOWN) ───────────────
@@ -1957,12 +2189,9 @@ static void checkCooldownSkip() {
         _cooldownSkipHoldStart = 0;
         return;
     }
-    auto& hcfg = HardwareConfig::instance();
-    bool startHeld = hcfg.startPin >= 0 &&
-                     (digitalRead(hcfg.startPin) == (hcfg.startActiveH ? HIGH : LOW));
-    bool stopHeld  = hcfg.stopPin >= 0 &&
-                     (digitalRead(hcfg.stopPin) == (hcfg.stopActiveH ? HIGH : LOW));
-    if (startHeld && stopHeld) {
+    const bool bothConfigured = ed.startSwitchConfigured && ed.stopSwitchConfigured;
+    const bool bothHealthy = ed.startSwitchHealthy && ed.stopSwitchHealthy;
+    if (bothConfigured && bothHealthy && ed.startSwitchActive && ed.stopSwitchActive) {
         if (_cooldownSkipHoldStart == 0) _cooldownSkipHoldStart = millis();
         else if ((millis() - _cooldownSkipHoldStart)
                  >= (unsigned long)Config::cooldownSkipHoldMs)
@@ -1982,6 +2211,7 @@ static void checkCooldownSkip() {
 static void enterRunning() {
     auto& ed = EngineData::instance();
     ed.mode               = SysMode::RUNNING;
+    ed.thermallyLoaded    = true;
     ed.faultShutdownActive = false;
     // Dev mode and bench mode runs are not real engine starts — don't count toward run log
     if (!ed.benchMode && !ed.devMode) {
@@ -2004,6 +2234,7 @@ static void enterRunning() {
     ed.lastRunFlameSamples = 0;
     ed.minOilPressure = -1.0f;
     _runStartMs        = millis();
+    _runTimingActive   = true;
     ed.runStartMs      = _runStartMs;   // mirror for the live hour meter in telemetry
     strncpy(ed.lastEvent, "Startup complete - engine self-sustained", sizeof(ed.lastEvent) - 1);
     _buzzerPattern = 2;  // startup OK beep
@@ -2106,10 +2337,9 @@ static void enterStandby() {
     // sequenceComplete() reaches here with the sequencer already stopped, so
     // the normal completion path remains unchanged.
     if (g_sequencer.isRunning()) g_sequencer.stopSequence();
-    ResetRecovery::markSafe();
     SessionLogger::endSession();   // close session log for this run
     // Accumulate engine-on time (only if we actually entered RUNNING this session)
-    if (_runStartMs > 0) {
+    if (_runTimingActive) {
         // Bench / dev mode runs are not real engine time — don't count toward total
         if (!ed.benchMode && !ed.devMode) {
             uint32_t elapsed = (millis() - _runStartMs) / 1000;
@@ -2119,12 +2349,14 @@ static void enterStandby() {
             Config::requestRuntimeStatsSave();
         }
         _runStartMs = 0;
+        _runTimingActive = false;
         ed.runStartMs = 0;   // stop the live hour meter; persisted total now reflects this run
     }
     _buzzerPattern = 0;  // silence any buzzer
     ed.mode               = SysMode::STANDBY;
     ed.throttleDemand     = 0;
-    ed.propPitchDemand    = 0;
+    ed.finalCoreFuelDemand = 0;
+    ed.propPitchDemand    = Hardware::propPitchParkDemand();
     ed.abPumpDemand       = 0;
     ed.fuelPump2Demand    = 0;
     ed.oilTargetBar          = 0;
@@ -2133,6 +2365,8 @@ static void enterStandby() {
     ed.fuelSolOpen        = false;
     ed.igniterOn          = false;
     ed.starterDemand      = 0;
+    strlcpy(ed.governorControllerState, "Off", sizeof(ed.governorControllerState));
+    strlcpy(ed.idleControllerState, "Off", sizeof(ed.idleControllerState));
     ed.starterEnabled     = false;
     ed.manualRelightActive = false;
     ed.flameMonitorActive = false;
@@ -2167,10 +2401,16 @@ static void enterStandby() {
     _relightBeginMs        = 0;
     _relightBeginEgt       = 0.0f;
     _manualOilPct          = 0.0f;
+    ed.manualLimpRequested = false;
+    ed.automaticLimpLatched = false;
+    ed.limpFailureMask    = FeedbackRequirements::NONE;
     ed.limpMode           = false;
     ed.limpOverrideSensor = FeedbackRequirements::NONE;
     ed.clusterCode        = 0;
-    ed.fuelEverOpened     = false;
+    ed.fuelAdmitted       = false;
+    ed.combustionAttempted = false;
+    ed.thermallyLoaded    = false;
+    ed.startupEgtBaseline = 0.0f;
     // AB cleanup
     if (g_abSequencer.isRunning()) g_abSequencer.stopSequence();
     ed.abMode          = ABMode::Off;
@@ -2187,9 +2427,9 @@ static void enterStandby() {
     Serial.println("[OT] STANDBY");
 }
 
-static void enterAbortStandby() {
+static void enterAbortStandby(const char* resultBlock, BlockResult) {
     auto& ed = EngineData::instance();
-    const char* blockName = ed.currentBlock[0] ? ed.currentBlock : "UNKNOWN";
+    const char* blockName = resultBlock && resultBlock[0] ? resultBlock : "UNKNOWN";
     snprintf(ed.lastEvent, sizeof(ed.lastEvent), "Aborted at: %s", blockName);
     FlightRecorder::logAbort(blockName, "startup_abort");
     // Set a plain-language description for the fault/abort banner
@@ -2221,7 +2461,8 @@ static void enterAbortStandby() {
     ed.faultDescription[sizeof(ed.faultDescription) - 1] = '\0';
     _buzzerPattern = 1;  // rapid fault beep
 
-    if (ed.fuelEverOpened) {
+    cutCombustionAndStarterNow();
+    if (ed.combustionAttempted) {
         // Fuel was opened this attempt — engine may have partial combustion and hot EGT.
         // Run the full shutdown sequence (ImmediateCut → RPMDrop → CooldownSpin → FinalStop)
         // to keep bearings oiled through spindown and cool the turbine before standby.
@@ -2229,6 +2470,14 @@ static void enterAbortStandby() {
         cutCombustionAndStarterNow();
         ed.faultShutdownActive = true;
         FlightRecorder::logFaultShutdown("STARTUP_ABORT");
+        if (_shutdownCount == 0) {
+            // Keep this recovery path identical to normal/fault shutdown. An
+            // empty imported sequence cannot be allowed to strand the ECU in
+            // SHUTDOWN after an ignition attempt.
+            Serial.println("[OT] Startup abort: shutdown sequence empty - immediate all-off to STANDBY");
+            enterStandby();
+            return;
+        }
         g_sequencer.startSequence(_shutdownBlocks, _shutdownCount,
                                   HardwareConfig::shutdownEnterActions,
                                   HardwareConfig::shutdownExitActions);
@@ -2242,7 +2491,7 @@ static void enterAbortStandby() {
 // ── Sequence complete dispatcher ──────────────────────────────
 // The sequencer uses a single Complete callback for both startup and shutdown.
 // We check current mode to decide which transition to make.
-static void sequenceComplete() {
+static void sequenceComplete(const char*, BlockResult) {
     if (EngineData::instance().mode == SysMode::STARTUP) {
         enterRunning();   // startup finished successfully → RUNNING
     } else {
@@ -2255,24 +2504,171 @@ static void sequenceComplete() {
 // fault raised BY the shutdown sequence itself must not restart the sequence
 // from block 0 (a deterministic fault would loop forever, never reaching
 // STANDBY and flooding the event log) — cut all outputs and land in STANDBY.
-static void sequenceFaulted() {
+static void sequenceFaulted(const char* resultBlock, BlockResult) {
     auto& ed = EngineData::instance();
     if (ed.mode != SysMode::SHUTDOWN) {
+        const char* blockName = resultBlock && resultBlock[0] ? resultBlock : "UNKNOWN";
+        snprintf(ed.faultDescription, sizeof(ed.faultDescription),
+                 "Startup sequence fault at %s. Fuel, ignition, and starter were cut; inspect the sequence event log before retrying.",
+                 blockName);
+        g_safety.setExternalFault("STARTUP_SEQUENCE_FAULT");
         enterFaultShutdown();
         return;
     }
-    const char* blockName = ed.currentBlock[0] ? ed.currentBlock : "UNKNOWN";
+    const char* blockName = resultBlock && resultBlock[0] ? resultBlock : "UNKNOWN";
     FlightRecorder::logFault("SHUTDOWN_SEQ_FAULT");
     snprintf(ed.lastEvent, sizeof(ed.lastEvent), "Shutdown fault at: %s", blockName);
     _buzzerPattern = 1;  // rapid fault beep
-    Serial.printf("[OT] Shutdown sequence FAULT at %s - cutting outputs, STANDBY\n", blockName);
-    enterStandby();      // zeroes demands + Hardware::allOff()
+    Serial.printf("[OT] Shutdown sequence FAULT at %s - fixed emergency cooling\n", blockName);
+    if (g_sequencer.isRunning()) g_sequencer.stopSequence();
+    cutCombustionAndStarterNow();
+    ed.faultShutdownActive = true;
+    _emergencyShutdownActive = true;
+    _emergencyShutdownUntilMs = deadlineAfter(millis(), 10000UL);
+    ResetRecovery::markActive();
+}
+
+static void enterABIgniting() {
+    auto& ed = EngineData::instance();
+    if (!HardwareConfig::hasAfterburner || ed.mode != SysMode::RUNNING) return;
+    if (ed.abMode != ABMode::Off && ed.abMode != ABMode::Fault) return;
+
+    ed.abMode = ABMode::Arming;
+    ed.abEvidenceValid = false;
+    ed.abFlameOffObserved = false;
+    ed.abFlameOffSampleSeq = 0;
+    ed.abEgtBaselineValid = false;
+    ed.abEgtBaseline = 0.0f;
+    ed.abEgtBaselineSampleSeq = 0;
+    _abArmingStartedMs = millis();
+    _abEgtBaselineSum = 0.0f;
+    _abEgtBaselineCount = 0;
+    _abEgtBaselineSeenSeq = primaryEgtSampleSeq(ed);
+    setABReason("WAITING FOR PRE-IGNITION CHECK");
+    Serial.println("[AB] Arming - collecting pre-fuel evidence");
+}
+
+static void continueABArming() {
+    auto& ed = EngineData::instance();
+    const unsigned long elapsed = millis() - _abArmingStartedMs;
+
+    // Conditions before fuel or ignition are permissions, not failed light
+    // attempts. Keep waiting while the request remains selected; faults after
+    // the sequence starts still require release before another attempt.
+    if (!ed.benchMode) {
+        if ((g_blkABCheckReady.minN1 > 0.0f || g_blkABCheckReady.maxN1 > 0.0f) &&
+            (!HardwareConfig::hasN1Rpm || !ed.n1Healthy)) {
+            setABReason("WAITING FOR N1 FEEDBACK");
+            return;
+        }
+        if (g_blkABCheckReady.minN1 > 0.0f && ed.n1Rpm < g_blkABCheckReady.minN1) {
+            setABReason("WAITING FOR MINIMUM N1");
+            return;
+        }
+        if (g_blkABCheckReady.maxN1 > 0.0f && ed.n1Rpm > g_blkABCheckReady.maxN1) {
+            setABReason("WAITING FOR N1 TO REDUCE");
+            return;
+        }
+        if (g_blkABCheckReady.maxTotForLight > 0.0f && !Config::primaryEgtHealthy(ed)) {
+            setABReason("WAITING FOR EGT FEEDBACK");
+            return;
+        }
+        if (g_blkABCheckReady.maxTotForLight > 0.0f &&
+            Config::primaryEgtC(ed) > g_blkABCheckReady.maxTotForLight) {
+            setABReason("WAITING FOR EGT TO COOL");
+            return;
+        }
+        if (g_blkABCheckReady.minThrottle > 0.0f &&
+            ed.throttleDemand < g_blkABCheckReady.minThrottle) {
+            setABReason("WAITING FOR MINIMUM THROTTLE");
+            return;
+        }
+    }
+
+    const uint32_t egtSeq = primaryEgtSampleSeq(ed);
+    if (Config::primaryEgtHealthy(ed) && egtSeq != 0 && egtSeq != _abEgtBaselineSeenSeq) {
+        _abEgtBaselineSeenSeq = egtSeq;
+        _abEgtBaselineSum += Config::primaryEgtC(ed);
+        if (_abEgtBaselineCount < 20) ++_abEgtBaselineCount;
+    }
+    if (Config::abFlameMode == 0 && ed.abFlameHealthy && !ed.abFlameOn) {
+        ed.abFlameOffObserved = true;
+        ed.abFlameOffSampleSeq = ed.abFlameSampleSeq;
+    }
+
+    const bool egtReady = Config::abFlameMode != 1 || _abEgtBaselineCount >= 2;
+    const bool flameSensorMode = Config::abFlameMode == 0 || Config::abFlameMode == 3;
+    const bool flameInputReady = !flameSensorMode || ed.abFlameHealthy;
+    const bool flameEvidenceReady = Config::abFlameMode != 0 || ed.abFlameOffObserved;
+    const bool flameReady = flameInputReady && flameEvidenceReady;
+    if (elapsed >= 250UL && egtReady && flameReady) {
+        if (_abEgtBaselineCount) {
+            ed.abEgtBaseline = _abEgtBaselineSum / _abEgtBaselineCount;
+            ed.abEgtBaselineValid = true;
+            ed.abEgtBaselineSampleSeq = _abEgtBaselineSeenSeq;
+        }
+        beginABSequenceAfterArming();
+        return;
+    }
+    if (!egtReady) setABReason("WAITING FOR FRESH EGT BASELINE");
+    else if (!flameInputReady) setABReason("WAITING FOR FLAME FEEDBACK");
+    else if (!flameEvidenceReady) setABReason("WAITING FOR FLAME INPUT OFF");
+    else setABReason("PRE-IGNITION CHECK COMPLETE");
+}
+
+static void enforceEmergencyShutdownTerminal() {
+    if (!_emergencyShutdownActive) return;
+    auto& ed = EngineData::instance();
+    cutCombustionAndStarterNow();
+    if ((long)(millis() - _emergencyShutdownUntilMs) < 0) {
+        // Fixed, bounded bearing/cooling assistance. This path deliberately
+        // does not execute editable sequence actions or indefinite waits.
+        if (HardwareConfig::hasOilPump) ed.oilPumpPct = 30.0f;
+        if (HardwareConfig::hasOilScavengePump) {
+            ed.oilScavengeDemand = 1.0f;
+            ed.oilScavengeOn = true;
+        }
+        if (HardwareConfig::hasCoolFan) {
+            ed.coolFanDemand = 1.0f;
+            ed.coolFanOn = true;
+        }
+        return;
+    }
+    Hardware::allOff();
+    ed.mode = SysMode::FAULT;
+    ed.recoveryLockout = true;
+    ed.recoveryStopAcknowledged = false;
+    ed.faultShutdownActive = false;
+    _emergencyShutdownActive = false;
+    strncpy(ed.lastEvent, "FAULT: shutdown sequence failed; emergency cooling complete",
+            sizeof(ed.lastEvent) - 1);
 }
 
 // ── Command handler (called from ECU loop on Core 1) ─────────
 
 static void handleCommand(const OTPacket& pkt) {
     auto& ed = EngineData::instance();
+    const bool startCommand = pkt.cmd == OTCommand::START || pkt.cmd == OTCommand::START_LIMITED;
+    // The web task may cancel an unclaimed timed-out START. Claim it before
+    // any state or output change so a response can never say "not started"
+    // while a still-live queue packet starts the turbine later.
+    if (startCommand && pkt.requestId && !CommandQueue::claimPendingResult(pkt.requestId)) {
+        Serial.println("[OT] Discarded canceled or stale START request");
+        return;
+    }
+    if (startCommand && pkt.requestId)
+        strncpy(ed.lastEvent, "START rejected at ECU core", sizeof(ed.lastEvent) - 1);
+    struct StartResultReporter {
+        const OTPacket& packet;
+        EngineData& data;
+        bool applies;
+        ~StartResultReporter() {
+            if (!applies || !packet.requestId) return;
+            const bool accepted = data.mode == SysMode::STARTUP;
+            CommandQueue::completeResult(packet.requestId, accepted,
+                accepted ? "" : (data.lastEvent[0] ? data.lastEvent : "START rejected at ECU core"));
+        }
+    } startResult{pkt, ed, startCommand};
     // FAULT is a light lockout: START stays blocked, but tools, toggles and
     // dev mode behave exactly as in STANDBY so the user can diagnose and fix.
     const bool standbyLike = (ed.mode == SysMode::STANDBY || ed.mode == SysMode::FAULT);
@@ -2315,6 +2711,18 @@ static void handleCommand(const OTPacket& pkt) {
         return;
     }
 
+    if (ed.stopSwitchActive &&
+        (mayEnergizeOutput(pkt.cmd) || pkt.cmd == OTCommand::START ||
+         pkt.cmd == OTCommand::START_LIMITED)) {
+        strncpy(ed.lastEvent, "Command blocked: STOP input is active", sizeof(ed.lastEvent) - 1);
+        return;
+    }
+    if (ed.stopSwitchConfigured && !ed.stopSwitchHealthy &&
+        (mayEnergizeOutput(pkt.cmd) || pkt.cmd == OTCommand::START ||
+         pkt.cmd == OTCommand::START_LIMITED)) {
+        strncpy(ed.lastEvent, "Command blocked: STOP input unavailable", sizeof(ed.lastEvent) - 1);
+        return;
+    }
     if (WebServer::otaInProgress() &&
         pkt.cmd != OTCommand::STOP && pkt.cmd != OTCommand::AB_STOP) {
         if (pkt.cmd == OTCommand::START || pkt.cmd == OTCommand::START_LIMITED) {
@@ -2360,13 +2768,28 @@ static void handleCommand(const OTPacket& pkt) {
             }
             if (ed.mode == SysMode::STANDBY &&
                 Config::profileMatch && !ed.configLocked) {
-                if (HardwareConfig::startPin >= 0 && !ed.startReleasedSinceBoot) {
-                    strncpy(ed.lastEvent, "START blocked: release START after boot", sizeof(ed.lastEvent) - 1);
+                if (ed.startSwitchConfigured &&
+                    (!ed.startSwitchHealthy || !ed.startSwitchReady)) {
+                    strncpy(ed.lastEvent,
+                            !ed.startSwitchHealthy
+                                ? "START blocked: START input unavailable"
+                                : "START blocked: release START input",
+                            sizeof(ed.lastEvent) - 1);
                     break;
                 }
                 if (ed.recoveryLockout && !ed.skipSafetyChecks) {
                     strncpy(ed.lastEvent, "START blocked: abnormal-reset recovery", sizeof(ed.lastEvent) - 1);
                     break;
+                }
+                // Expander readiness is transient and already guarded by the
+                // common recheck window. A device that has recovered before a
+                // new START must not require an ECU reboot; never clear any
+                // unrelated local/sensor initialization fault here.
+                if (!ed.hardwareReady &&
+                    strstr(ed.hardwareFault, "I2C output unavailable") &&
+                    Hardware::unavailableEngineI2cOutput() == nullptr) {
+                    ed.hardwareReady = true;
+                    ed.hardwareFault[0] = '\0';
                 }
                 if ((!ed.hardwareReady || !ed.watchdogReady) && !ed.skipSafetyChecks) {
                     snprintf(ed.lastEvent, sizeof(ed.lastEvent), "START blocked: hardware readiness fault");
@@ -2432,22 +2855,32 @@ static void handleCommand(const OTPacket& pkt) {
                     Serial.println("[OT] START blocked: actuator tool active");
                     break;
                 }
-                // Check inhibit_start DI channels
+                // Check every native safety DI that applies during STARTUP.
+                // Use the physical level here rather than the debounced
+                // standby snapshot: an asserted interlock must never create a
+                // START acceptance window.
                 {
                     auto& hwi = HardwareConfig::instance();
                     bool inhibited = false;
                     for (int _i = 0; _i < HardwareConfig::MAX_DI; _i++) {
-                        if (hwi.diCh[_i].pin >= 0
-                            && strcmp(hwi.diCh[_i].role, "inhibit_start") == 0
-                            && ed.diState[_i])
-                        {
-                            const char* label = hwi.diCh[_i].label[0] ? hwi.diCh[_i].label : "inhibit_start";
-                            snprintf(ed.lastEvent, sizeof(ed.lastEvent), "START blocked: inhibit input active");
+                        const auto& channel = hwi.diCh[_i];
+                        if (channel.pin < 0 ||
+                            !(channel.activeModes & (1u << (int)SysMode::STARTUP))) continue;
+                        const bool inhibitRole = !strcmp(channel.role, "inhibit_start");
+                        const bool safetyRole = inhibitRole || !strcmp(channel.role, "estop") ||
+                            !strcmp(channel.role, "fault") ||
+                            (hwi.safetyLowOil && !strcmp(channel.role, "low_oil_switch")) ||
+                            (hwi.safetyOilZero && !strcmp(channel.role, "oil_zero_switch"));
+                        const bool active = digitalRead(channel.pin) ==
+                            (channel.activeH ? HIGH : LOW);
+                        if (safetyRole && active) {
+                            const char* label = channel.label[0] ? channel.label : channel.role;
+                            snprintf(ed.lastEvent, sizeof(ed.lastEvent), "START blocked: safety input active");
                             snprintf(ed.faultDescription, sizeof(ed.faultDescription),
-                                     "Cannot start: inhibit input is active on DI channel %d (%s). "
+                                     "Cannot start: safety input is active on DI channel %d (%s). "
                                      "Release that switch or fix the input wiring before pressing START.",
                                      _i + 1, label);
-                            Serial.printf("[OT] START inhibited by DI ch%d (%s)\n", _i, label);
+                            Serial.printf("[OT] START blocked by DI ch%d (%s)\n", _i, label);
                             inhibited = true;
                             break;
                         }
@@ -2518,9 +2951,11 @@ static void handleCommand(const OTPacket& pkt) {
                 // protects restored/corrupt files and stale in-memory state.
                 if (!HardwareConfig::channelRegistry.validate()) {
                     strncpy(ed.lastEvent, "START blocked: invalid channel registry", sizeof(ed.lastEvent) - 1);
-                    strncpy(ed.faultDescription,
-                            "Cannot start: hardware channel inventory has invalid IDs, pins, bindings, or safe demands. Fix it on the Hardware page.",
-                            sizeof(ed.faultDescription) - 1);
+                    snprintf(ed.faultDescription, sizeof(ed.faultDescription),
+                             "Cannot start: %s",
+                             ChannelRegistry::validationError()[0]
+                                ? ChannelRegistry::validationError()
+                                : "hardware channel inventory has invalid IDs, pins, bindings, or safe demands. Fix it on the Hardware page.");
                     ed.lastEvent[sizeof(ed.lastEvent) - 1] = '\0';
                     ed.faultDescription[sizeof(ed.faultDescription) - 1] = '\0';
                     Serial.println("[OT] START blocked: invalid channel registry");
@@ -2568,8 +3003,15 @@ static void handleCommand(const OTPacket& pkt) {
                     break;
                 }
                 ed.mode = SysMode::STARTUP;
+                ed.fuelAdmitted = false;
+                ed.combustionAttempted = false;
+                ed.thermallyLoaded = false;
+                ed.startupEgtBaseline = Config::primaryEgtHealthy(ed)
+                    ? Config::primaryEgtC(ed) : 0.0f;
                 ed.limpOverrideSensor = limited ? overrideSensor : FeedbackRequirements::NONE;
-                ed.limpMode = limited;
+                ed.limpFailureMask = limited ? overrideSensor : FeedbackRequirements::NONE;
+                ed.automaticLimpLatched = limited;
+                ed.limpMode = ed.manualLimpRequested || ed.automaticLimpLatched;
                 ConfigApplyGate::release();
                 ResetRecovery::markActive();
                 ed.faultShutdownActive = false;
@@ -2580,6 +3022,11 @@ static void handleCommand(const OTPacket& pkt) {
                                 : "Start sequence initiated",
                         sizeof(ed.lastEvent) - 1);
                 Hardware::applyConfig();  // re-apply config before each start
+                // A new run must not inherit integrators, slew targets, pitch
+                // state, oil fallback timers, or learned idle state from the
+                // previous run. begin() seeds bumplessly from the cleared
+                // standby demands and the freshly configured oil prime.
+                Hardware::initControllers();
                 if (!ed.benchMode && !ed.devMode) {
                     Config::incStartAttemptCount(); // guarded RMW
                     Config::requestRuntimeStatsSave();
@@ -2604,6 +3051,8 @@ static void handleCommand(const OTPacket& pkt) {
             if (ed.mode == SysMode::RUNNING || ed.mode == SysMode::STARTUP) {
                 enterShutdown();
             } else if (ed.mode == SysMode::SHUTDOWN) {
+                cutCombustionAndStarterNow();
+                if (HardwareConfig::hasAfterburner) enterABShutdown();
                 // Already shutting down — do nothing
             }
             break;
@@ -2620,7 +3069,8 @@ static void handleCommand(const OTPacket& pkt) {
         case OTCommand::TOGGLE_LIMP_MODE:
             if (HardwareConfig::hasThrottle &&
                 (standbyLike || ed.mode == SysMode::RUNNING)) {
-                ed.limpMode = !ed.limpMode;
+                ed.manualLimpRequested = !ed.manualLimpRequested;
+                ed.limpMode = ed.manualLimpRequested || ed.automaticLimpLatched;
             }
             break;
 
@@ -2660,7 +3110,7 @@ static void handleCommand(const OTPacket& pkt) {
 
         case OTCommand::SET_OIL_PCT:
             // Manual oil override is allowed only in STANDBY.
-            if (standbyLike) {
+            if (standbyLike && !anyToolTimerActive()) {
                 // fParam gives calibration tools fractional-percent control;
                 // iParam remains as a fallback for older clients.
                 ed.oilPumpPct = constrain((pkt.fParam != 0.0f) ? pkt.fParam : (float)pkt.iParam,
@@ -2674,70 +3124,82 @@ static void handleCommand(const OTPacket& pkt) {
             // commanded % in STANDBY so the user can ramp it and find where the pump
             // starts to spin. Reuses the idle-test timer, so it auto-returns to 0 if
             // the UI stops refreshing it.
-            if (HardwareConfig::hasThrottle && standbyLike && !anyToolTimerActive()) {
-                ed.throttleDemand = constrain((pkt.fParam != 0.0f) ? pkt.fParam : (float)pkt.iParam,
-                                               0.0f, 100.0f) / 100.0f;
-                _idleTestUntilMs  = millis() + Config::toolIdleTestMs;
+            // Its own timer must not reject slider refreshes or the explicit
+            // 0% release; temporarily remove only that owner while checking
+            // for competing tools. A zero command releases ownership at once.
+            {
+                const unsigned long previousIdleDeadline = _idleTestUntilMs;
+                _idleTestUntilMs = 0;
+                if (HardwareConfig::hasThrottle && standbyLike &&
+                    !anyToolTimerActive() && !ed.extraCooldownActive) {
+                    ed.throttleDemand = constrain(
+                        (pkt.fParam != 0.0f) ? pkt.fParam : (float)pkt.iParam,
+                        0.0f, 100.0f) / 100.0f;
+                    _idleTestUntilMs = ed.throttleDemand > 0.0f
+                        ? deadlineAfter(millis(), Config::toolIdleTestMs) : 0;
+                } else {
+                    _idleTestUntilMs = previousIdleDeadline;
+                }
             }
             break;
 
         case OTCommand::FUEL_PRIME:
-            if (HardwareConfig::hasFuelSol && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasFuelSol && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.fuelSolOpen    = true;
-                _fuelPrimeUntilMs = millis() + Config::toolFuelPrimeMs;
+                _fuelPrimeUntilMs = deadlineAfter(millis(), Config::toolFuelPrimeMs);
             }
             break;
 
         case OTCommand::OIL_PRIME:
-            if (HardwareConfig::hasOilPump && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasOilPump && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.oilPumpPct  = 100.0f;
-                _oilPrimeUntilMs = millis() + Config::toolOilPrimeMs;
+                _oilPrimeUntilMs = deadlineAfter(millis(), Config::toolOilPrimeMs);
             }
             break;
 
         case OTCommand::IGN_TEST:
-            if (HardwareConfig::hasIgniter && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasIgniter && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.igniterOn     = true;
-                _ignTestUntilMs  = millis() + Config::toolIgnTestMs;
+                _ignTestUntilMs  = deadlineAfter(millis(), Config::toolIgnTestMs);
             }
             break;
 
         case OTCommand::IGN2_TEST:
-            if (HardwareConfig::hasIgniter2 && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasIgniter2 && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.igniter2On    = true;
-                _ign2TestUntilMs = millis() + Config::toolIgn2TestMs;
+                _ign2TestUntilMs = deadlineAfter(millis(), Config::toolIgn2TestMs);
             }
             break;
 
         case OTCommand::START_TEST:
-            if (HardwareConfig::hasStarter && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasStarter && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.starterEnabled  = true;
                 ed.starterDemand   = constrain(Config::toolStartTestPct / 100.0f, 0.0f, 1.0f);
                 // If a starter-enable output is configured, the starter motor
                 // is intentionally gated until starterEnDelayMs has elapsed.
                 // Keep the test active long enough that "starter test" always
                 // produces a visible starter output after that hardware delay.
-                _startTestUntilMs  = millis() + Config::toolStartTestMs +
-                                     (HardwareConfig::hasStarterEn
-                                          ? (unsigned long)HardwareConfig::starterEnDelayMs
-                                          : 0UL);
+                _startTestUntilMs = deadlineAfter(
+                    millis(), Config::toolStartTestMs +
+                    (HardwareConfig::hasStarterEn
+                         ? (unsigned long)HardwareConfig::starterEnDelayMs : 0UL));
             }
             break;
 
         case OTCommand::FUEL_SOL_TEST:
             // Brief solenoid pulse — audible click only, reuses fuel prime timer
-            if (HardwareConfig::hasFuelSol && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasFuelSol && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.fuelSolOpen    = true;
-                _fuelPrimeUntilMs = millis() + Config::toolFuelSolTestMs;
+                _fuelPrimeUntilMs = deadlineAfter(millis(), Config::toolFuelSolTestMs);
             }
             break;
 
         case OTCommand::IDLE_TEST:
             // Move throttle/fuel output to the calibrated min-spin position for
             // the configured test duration.
-            if (HardwareConfig::hasThrottle && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasThrottle && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.throttleDemand = Config::fuelPumpMinPct / 100.0f;
-                _idleTestUntilMs  = millis() + Config::toolIdleTestMs;
+                _idleTestUntilMs  = deadlineAfter(millis(), Config::toolIdleTestMs);
             }
             break;
 
@@ -2747,7 +3209,8 @@ static void handleCommand(const OTPacket& pkt) {
             const bool ecUseOil = HardwareConfig::hasOilPump && Config::cooldownUseOilPump;
             const bool ecUseScavenge = HardwareConfig::hasOilScavengePump && Config::cooldownUseScavengePump;
             if ((ecUseStarter || ecUseOil || ecUseScavenge) && standbyLike) {
-                if (!ed.extraCooldownActive && pkt.iParam > 0) {
+                if (pkt.iParam > 0 && !ed.extraCooldownActive) {
+                    if (anyToolTimerActive()) break;
                     // iParam = duration in seconds from UI slider (60–300 s)
                     int seconds = constrain(pkt.iParam, 60, 300);
                     unsigned long durationMs  = (unsigned long)seconds * 1000UL;
@@ -2758,11 +3221,13 @@ static void handleCommand(const OTPacket& pkt) {
                     ed.oilPumpPct             = ecUseOil ? Config::cooldownOilPct : 0.0f;
                     ed.oilScavengeDemand      = ecUseScavenge ? 1.0f : 0.0f;
                     ed.oilScavengeOn          = ecUseScavenge;
-                    ed.extraCooldownUntilMs     = millis() + durationMs;
+                    ed.extraCooldownUntilMs = deadlineAfter(millis(), durationMs);
                     Serial.printf("[OT] Extra cooldown started (%lu s)\n",
                         (unsigned long)seconds);
-                } else {
-                    // Cancel — either toggle-off or iParam == 0 (stop button)
+                } else if (pkt.iParam <= 0) {
+                    // Only an explicit zero/negative command cancels. A
+                    // repeated positive start is idempotent and must not turn
+                    // an already-running cooldown off.
                     ed.extraCooldownActive = false;
                     ed.oilFailsafeActive   = false;
                     ed.starterDemand       = 0;
@@ -2778,13 +3243,18 @@ static void handleCommand(const OTPacket& pkt) {
             break;
 
         case OTCommand::PULSED_STARTER_ASSIST_TEST:
-            if (Config::starterAssistEnabled && HardwareConfig::hasStarter &&
-                HardwareConfig::starterType != 2 && HardwareConfig::hasN1Rpm &&
-                standbyLike && !anyToolTimerActive()) {
-                ed.starterEnabled = true;
-                ed.starterDemand = constrain(Config::starterAssistPwmPct / 100.0f, 0.0f, 1.0f);
-                _startTestUntilMs = millis() + Config::starterAssistOnMs +
-                    (HardwareConfig::hasStarterEn ? (unsigned long)HardwareConfig::starterEnDelayMs : 0UL);
+            if (standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
+                // Exactly one bounded temporary output owner is allowed at a
+                // time. STOP uses the common cancellation path.
+                if (Config::starterAssistEnabled && HardwareConfig::hasStarter &&
+                    HardwareConfig::starterType != 2 && HardwareConfig::hasN1Rpm) {
+                    ed.starterEnabled = true;
+                    ed.starterDemand = constrain(Config::starterAssistPwmPct / 100.0f, 0.0f, 1.0f);
+                    _startTestUntilMs = deadlineAfter(
+                        millis(), Config::starterAssistOnMs +
+                        (HardwareConfig::hasStarterEn
+                             ? (unsigned long)HardwareConfig::starterEnDelayMs : 0UL));
+                }
             }
             break;
 
@@ -2802,7 +3272,8 @@ static void handleCommand(const OTPacket& pkt) {
                 && HardwareConfig::abTriggerSource == 0
                 && (HardwareConfig::hasAbSol || HardwareConfig::hasAbPump)
                 && ed.mode == SysMode::RUNNING
-                && ed.limpOverrideSensor == FeedbackRequirements::NONE
+                && !ed.limpMode
+                && (!HardwareConfig::abRequiresArmSwitch || ed.abArmSwitchOn)
                 && (ed.abMode == ABMode::Off || ed.abMode == ABMode::Fault))
             {
                 Serial.println("[AB] Manual fire command received");
@@ -2849,87 +3320,87 @@ static void handleCommand(const OTPacket& pkt) {
 
         // ── Actuator tests (STANDBY only, auto-expire via checkToolTimers) ────
         case OTCommand::OIL_SCAV_TEST:
-            if (HardwareConfig::hasOilScavengePump && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasOilScavengePump && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.oilScavengeDemand = 1.0f; ed.oilScavengeOn = true;
-                _oilScavTestUntilMs = millis() + Config::toolOilScavTestMs;
+                _oilScavTestUntilMs = deadlineAfter(millis(), Config::toolOilScavTestMs);
             }
             break;
 
         case OTCommand::COOL_FAN_TEST:
-            if (HardwareConfig::hasCoolFan && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasCoolFan && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.coolFanDemand = 1.0f; ed.coolFanOn = true;
-                _coolFanTestUntilMs  = millis() + Config::toolCoolFanTestMs;
+                _coolFanTestUntilMs = deadlineAfter(millis(), Config::toolCoolFanTestMs);
             }
             break;
 
         case OTCommand::AIRSTARTER_TEST:
-            if (HardwareConfig::hasAirstarterSol && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasAirstarterSol && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.airstarterOpen       = true;
-                _airstarterTestUntilMs  = millis() + Config::toolAirstarterTestMs;
+                _airstarterTestUntilMs = deadlineAfter(millis(), Config::toolAirstarterTestMs);
             }
             break;
 
         case OTCommand::BLEED_VALVE_TEST:
-            if (HardwareConfig::hasBleedValve && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasBleedValve && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.bleedValveDemand = 1.0f; ed.bleedValveOpen = true;
-                _bleedValveTestUntilMs  = millis() + Config::toolBleedValveTestMs;
+                _bleedValveTestUntilMs = deadlineAfter(millis(), Config::toolBleedValveTestMs);
             }
             break;
 
         case OTCommand::GLOW_TEST:
-            if (HardwareConfig::hasGlowPlug && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasGlowPlug && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.glowPlugDemand = constrain(Config::toolGlowTestPct / 100.0f, 0.0f, 1.0f);
-                _glowTestUntilMs  = millis() + Config::toolGlowTestMs;
+                _glowTestUntilMs = deadlineAfter(millis(), Config::toolGlowTestMs);
             }
             break;
 
         case OTCommand::FUEL_PUMP2_TEST:
-            if (HardwareConfig::hasFuelPump2 && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasFuelPump2 && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.fuelPump2Demand     = constrain(Config::toolFuelPump2TestPct / 100.0f, 0.0f, 1.0f);
-                _fuelPump2TestUntilMs  = millis() + Config::toolFuelPump2TestMs;
+                _fuelPump2TestUntilMs = deadlineAfter(millis(), Config::toolFuelPump2TestMs);
             }
             break;
 
         case OTCommand::AB_SOL_TEST:
             if (HardwareConfig::hasAfterburner && HardwareConfig::hasAbSol &&
-                standbyLike && !anyToolTimerActive()) {
+                standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.abSolOpen      = true;
-                _abSolTestUntilMs = millis() + Config::toolAbSolTestMs;
+                _abSolTestUntilMs = deadlineAfter(millis(), Config::toolAbSolTestMs);
             }
             break;
 
         case OTCommand::AB_PUMP_TEST:
             if (HardwareConfig::hasAfterburner && HardwareConfig::hasAbPump &&
-                standbyLike && !anyToolTimerActive()) {
+                standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.abPumpDemand   = constrain(Config::toolAbPumpTestPct / 100.0f, 0.0f, 1.0f);
-                _abPumpTestUntilMs  = millis() + Config::toolAbPumpTestMs;
+                _abPumpTestUntilMs = deadlineAfter(millis(), Config::toolAbPumpTestMs);
             }
             break;
 
         case OTCommand::STARTER_EN_TEST:
-            if (HardwareConfig::hasStarterEn && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasStarterEn && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.starterEnabled      = true;
-                _starterEnTestUntilMs  = millis() + Config::toolStarterEnTestMs;
+                _starterEnTestUntilMs = deadlineAfter(millis(), Config::toolStarterEnTestMs);
             }
             break;
 
         case OTCommand::PROP_PITCH_TEST:
             // Move prop pitch to mid-travel (0.5) for 3 s — verify servo range
-            if (HardwareConfig::hasPropPitch && standbyLike && !anyToolTimerActive()) {
+            if (HardwareConfig::hasPropPitch && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.propPitchDemand     = constrain(Config::toolPropPitchTestPct / 100.0f, 0.0f, 1.0f);
-                _propPitchTestUntilMs  = millis() + Config::toolPropPitchTestMs;
+                _propPitchTestUntilMs = deadlineAfter(millis(), Config::toolPropPitchTestMs);
             }
             break;
 
         case OTCommand::REGISTRY_OUTPUT_TEST:
-            if (standbyLike && !anyToolTimerActive()) {
+            if (standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 uint8_t idx = (uint8_t)constrain(pkt.iParam, 0, (int)ChannelRegistry::MAX_OUTPUT_CHANNELS - 1);
                 if (idx < HardwareConfig::channelRegistry.outputCount &&
                     !HardwareConfig::channelRegistry.ownsCoreOutput(HardwareConfig::channelRegistry.outputs[idx]) &&
                     !HardwareConfig::channelRegistry.boundToCoreOutput(HardwareConfig::channelRegistry.outputs[idx])) {
                     ed.registryOutputDemand[idx] = constrain(pkt.fParam, 0.0f, 1.0f);
                     _registryOutputTestIndex = idx;
-                    _registryOutputTestUntilMs = millis() + 3000UL;
+                    _registryOutputTestUntilMs = deadlineAfter(millis(), 3000UL);
                 }
             }
             break;
@@ -2962,16 +3433,18 @@ static void handleCommand(const OTPacket& pkt) {
 static constexpr unsigned long SWITCH_DEBOUNCE_MS = 30;
 
 static bool registryControlInput(const char* purpose, bool& configured,
-                                 bool& healthy) {
+                                 bool& healthy, bool& activeHigh) {
     auto& hw = HardwareConfig::instance();
     auto& ed = EngineData::instance();
     configured = false;
     healthy = false;
+    activeHigh = false;
     for (uint8_t i = 0; i < hw.channelRegistry.inputCount; ++i) {
         const auto& channel = hw.channelRegistry.inputs[i];
         if (!channel.installed || strcmp(channel.purpose, purpose)) continue;
         configured = true;
         healthy = ed.registryInputHealthy[i];
+        activeHigh = channel.activeHigh;
         return healthy && ed.registryInputValue[i] >= 0.5f;
     }
     return false;
@@ -2980,14 +3453,34 @@ static bool registryControlInput(const char* purpose, bool& configured,
 static void checkStopSwitch() {
     auto& ed = EngineData::instance();
     auto& hc  = HardwareConfig::instance();
-    bool registryConfigured = false, registryHealthy = false;
+    bool registryConfigured = false, registryHealthy = false, registryActiveHigh = false;
     const bool registryRaw = registryControlInput("stop_switch",
                                                    registryConfigured,
-                                                   registryHealthy);
+                                                   registryHealthy,
+                                                   registryActiveHigh);
+    ed.stopSwitchConfigured = hc.stopPin >= 0 || registryConfigured;
     if (hc.stopPin < 0 && !registryConfigured) {
         ed.stopSwitchActive = false;
+        ed.stopSwitchHealthy = false;
         return;
     }
+    ed.stopSwitchHealthy = !registryConfigured || registryHealthy;
+    static bool stopInputLossHandled = false;
+    if (registryConfigured && !registryHealthy) {
+        ed.stopSwitchActive = false;
+        if (!stopInputLossHandled &&
+            (ed.mode == SysMode::STARTUP || ed.mode == SysMode::RUNNING)) {
+            stopInputLossHandled = true;
+            strncpy(ed.lastEvent, "Fault shutdown: STOP input unavailable", sizeof(ed.lastEvent) - 1);
+            strncpy(ed.faultDescription,
+                    "STOP input device remained unavailable beyond the 500 ms recheck window. Fuel, ignition, and starter were cut.",
+                    sizeof(ed.faultDescription) - 1);
+            g_safety.setExternalFault("STOP_INPUT_LOST");
+            enterFaultShutdown();
+        }
+        return;
+    }
+    stopInputLossHandled = false;
     const bool raw = registryConfigured
         ? registryRaw
         : (digitalRead(hc.stopPin) == (hc.stopActiveH ? HIGH : LOW));
@@ -3000,37 +3493,55 @@ static void checkStopSwitch() {
     if (now - _lastChange >= SWITCH_DEBOUNCE_MS) _debounced = raw;
     ed.stopSwitchActive = _debounced;
     if (_debounced && !_wasDebounced && ed.recoveryLockout && ed.startReleasedSinceBoot) {
-        ed.recoveryLockout = false;
-        ed.faultDescription[0] = '\0';
-        strncpy(ed.lastEvent, "Recovery lockout acknowledged", sizeof(ed.lastEvent) - 1);
+        ed.recoveryStopAcknowledged = true;
+        strncpy(ed.lastEvent, "Recovery acknowledgement received; verifying outputs off",
+                sizeof(ed.lastEvent) - 1);
+    }
+    if (_debounced && !_wasDebounced) {
+        handleCommand({OTCommand::STOP});
+        strncpy(ed.lastEvent, "Stop switch activated", sizeof(ed.lastEvent) - 1);
     }
     _wasDebounced = _debounced;
-    if (_debounced) {
-        if (ed.mode == SysMode::RUNNING || ed.mode == SysMode::STARTUP) {
-            enterShutdown();
-            strncpy(ed.lastEvent, "Stop switch activated", sizeof(ed.lastEvent) - 1);
-        }
-    }
 }
 
 static void checkStartSwitch() {
     // Edge-detect: normalise to active-low convention (cur==LOW means "pressed")
     // so all downstream logic is unchanged regardless of startActiveH.
     auto& hca = HardwareConfig::instance();
-    bool registryConfigured = false, registryHealthy = false;
+    bool registryConfigured = false, registryHealthy = false, registryActiveHigh = false;
     const bool registryPressed = registryControlInput("start_switch",
                                                        registryConfigured,
-                                                       registryHealthy);
+                                                       registryHealthy,
+                                                       registryActiveHigh);
+    auto& ed = EngineData::instance();
+    ed.startSwitchConfigured = hca.startPin >= 0 || registryConfigured;
+    ed.startSwitchActiveHigh = registryConfigured ? registryActiveHigh : hca.startActiveH;
     if (hca.startPin < 0 && !registryConfigured) {
-        auto& ed = EngineData::instance();
         ed.startSwitchActive = false;
+        ed.startSwitchRawLevel = false;
+        ed.startSwitchHealthy = false;
+        ed.startSwitchReady = true;
         ed.startReleasedSinceBoot = true;
         return;
     }
+    if (registryConfigured && !registryHealthy) {
+        ed.startSwitchActive = false;
+        ed.startSwitchRawLevel = false;
+        ed.startSwitchHealthy = false;
+        ed.startSwitchReady = false;
+        ed.startReleasedSinceBoot = false;
+        if (ed.manualRelightActive) {
+            commandIgnitionTarget((uint8_t)Config::manualRelightIgnitionTarget, false);
+            ed.manualRelightActive = false;
+        }
+        return;
+    }
+    ed.startSwitchHealthy = true;
     const int rawLevel = registryConfigured ? HIGH : digitalRead(hca.startPin);
     const bool rawPressed = registryConfigured
         ? registryPressed
         : (hca.startActiveH ? (rawLevel == HIGH) : (rawLevel == LOW));
+    ed.startSwitchRawLevel = registryConfigured ? registryPressed : rawLevel == HIGH;
     // Debounce the raw level first — the edge detect and the manual-relight
     // hold logic below both act on the debounced state.
     static bool          _rawLast    = false;
@@ -3045,9 +3556,9 @@ static void checkStartSwitch() {
         _lastChange = nowSw;
         _last = rawPressed ? LOW : HIGH;
         _initialized = true;
-        auto& ed0 = EngineData::instance();
-        ed0.startSwitchActive = rawPressed;
-        ed0.startReleasedSinceBoot = !rawPressed;
+        ed.startSwitchActive = rawPressed;
+        ed.startReleasedSinceBoot = !rawPressed;
+        ed.startSwitchReady = !rawPressed;
         return;
     }
     if (rawPressed != _rawLast) { _lastChange = nowSw; _rawLast = rawPressed; }
@@ -3055,11 +3566,13 @@ static void checkStartSwitch() {
     const bool pressed = _pressed;
     // Represent as a synthetic LOW/HIGH for the _last comparison below
     int cur = pressed ? LOW : HIGH;
-    auto& ed = EngineData::instance();
     ed.startSwitchActive = pressed;
-    if (!pressed) ed.startReleasedSinceBoot = true;
+    if (!pressed) {
+        ed.startReleasedSinceBoot = true;
+        ed.startSwitchReady = true;
+    }
 
-    if (_last == HIGH && cur == LOW) {
+    if (ed.startSwitchReady && _last == HIGH && cur == LOW) {
         // Only send START command in STANDBY — in RUNNING the hold logic below handles it.
         // FAULT: push anyway so handleCommand reports the block reason on the dashboard.
         if (ed.mode == SysMode::STANDBY || ed.mode == SysMode::FAULT) {
@@ -3123,6 +3636,13 @@ void setup() {
     // without driving either profile or generic pins.
     PcbProfileManager::begin();
     PlatformInit::begin(PcbProfileManager::state() == PcbProfileManager::State::Absent);
+
+    // IDF diagnostics use newlib stdout rather than Arduino Serial. Force its
+    // recursive lock to be allocated while boot heap is plentiful; otherwise
+    // the first rare Wi-Fi/mDNS diagnostic can lazily allocate it during a
+    // low-memory HTTP response and abort solely because the log lock is absent.
+    printf("[OT] system diagnostics ready\n");
+    fflush(stdout);
 
     // Load hardware topology FIRST (pins, feature flags, sequence order).
     // Must be called after LittleFS is mounted (PlatformInit::begin() does that).
@@ -3265,6 +3785,7 @@ void setup() {
             if (state && strcmp(hdi.diCh[i].role, "ab_arm") == 0) {
                 EngineData::instance().abArmSwitchOn = true;
             } else if (state && strcmp(hdi.diCh[i].role, "limp_mode") == 0) {
+                EngineData::instance().manualLimpRequested = true;
                 EngineData::instance().limpMode = true;
             }
         }
@@ -3272,6 +3793,7 @@ void setup() {
 
     g_sequencer.setCallbacks(sequenceComplete, enterAbortStandby, sequenceFaulted);
     g_abSequencer.setCallbacks(abSequenceDone, abSequenceAbort, abSequenceFault);
+    g_abSequencer.setAfterburnerContext(true);
     g_safety.begin(enterShutdown, enterFaultShutdown);
     RulesEngine::begin(enterShutdown, [](const char* code) {
         g_safety.setExternalFault(code);
@@ -3291,6 +3813,10 @@ void setup() {
             _relightBeginMs    = millis();
             // -1 sentinel: baseline set on first healthy reading in relightConfirmed()
             _relightBeginEgt   = Config::primaryEgtHealthy(ed) ? Config::primaryEgtC(ed) : -1.0f;
+            _relightBeginN1    = ed.n1Rpm;
+            _relightBeginN1Seq = ed.n1SampleSeq;
+            _relightBeginEgtSeq = Config::effectiveEgtSource() == 2 ? ed.titSampleSeq : ed.totSampleSeq;
+            _relightBeginFlameSeq = ed.flameSampleSeq;
             ed.clusterCode     = 2;   // ClCode::RelightActive
             FlightRecorder::logRelight(ed.relightAttempts);
             Serial.printf("[OT] Relight started - N1=%.0f RPM\n", (double)ed.n1Rpm);
@@ -3349,15 +3875,100 @@ void loop() {
     // boundary; Developer Mode may save while active, in which case the newest
     // copy remains queued.
     if (ConfigApplyGate::tryBeginCoreApply()) {
+        static uint8_t configHeapRetryCount = 0;
+        size_t candidateLen = 0;
+        char* candidateJson = ConfigApplyGate::takeCandidate(candidateLen);
+        JsonDocument candidate;
+        const bool hasCandidate = candidateLen > 0;
+        DeserializationError candidateError = candidateJson && hasCandidate
+            ? deserializeJson(candidate, candidateJson, candidateLen)
+            : (hasCandidate ? DeserializationError::NoMemory : DeserializationError::Ok);
+        bool candidateParsed = hasCandidate && candidateError == DeserializationError::Ok;
+        if (candidateJson && hasCandidate && !candidateParsed) {
+            Serial.printf("[OT] Config candidate parse failed: %s (bytes=%u heap=%u max=%u)\n",
+                          candidateError.c_str(), (unsigned)candidateLen,
+                          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
+        }
+        // ArduinoJson uses zero-copy string storage for mutable input. Keep
+        // the published buffer alive through validation and _fromDoc(); the
+        // Classic ESP32 reuses this freed block quickly enough that releasing
+        // it here corrupts profile_id/field names before applyJsonRuntimeOnly.
+        // Hardware/calibration saves also use this gate while already in a
+        // safe mode and intentionally have no settings candidate.
         const SysMode configMode = EngineData::instance().mode;
-        if (configMode == SysMode::STANDBY || configMode == SysMode::FAULT) {
+        const bool liveApply = configMode == SysMode::RUNNING && EngineData::instance().devMode;
+        const uint32_t candidateGeneration = ConfigApplyGate::pendingGeneration();
+        bool candidateApplied = !hasCandidate ||
+            (candidateParsed && Config::applyJsonRuntimeOnly(candidate, liveApply));
+        if (hasCandidate && !candidateParsed &&
+            candidateError == DeserializationError::NoMemory) {
+            // A maximum Classic configuration may not fit beside both the
+            // serialized transfer buffer and a second ArduinoJson tree. The
+            // web core staged this exact validated candidate with the atomic
+            // settings write. Release the text block, then stream that same
+            // candidate into the document; never invoke the full boot loader
+            // from inside an HTTP transaction.
+            free(candidateJson);
+            candidateJson = nullptr;
+            candidate.clear();
+            candidate.shrinkToFit();
+            delay(0);
+            candidateError = Config::loadStagedJsonCandidate(candidate);
+            candidateParsed = candidateError == DeserializationError::Ok;
+            candidateApplied = candidateParsed &&
+                Config::applyJsonRuntimeOnly(candidate, liveApply);
+            if (candidateError == DeserializationError::NoMemory) {
+                ConfigApplyGate::retryStagedCandidate(candidateLen, 250);
+                Serial.println("[OT] Config staged apply waiting for a contiguous heap block");
+            } else {
+                Serial.printf("[OT] Config candidate applied from staged stream: %s\n",
+                              candidateApplied ? "OK" : "FAILED");
+            }
+        }
+        if (candidateJson) free(candidateJson);
+        const bool retryForHeap = hasCandidate && !candidateParsed &&
+            candidateError == DeserializationError::NoMemory;
+        if (retryForHeap) {
+            if (configHeapRetryCount < 255) ++configHeapRetryCount;
+        } else {
+            configHeapRetryCount = 0;
+        }
+        if (hasCandidate && !retryForHeap) Config::clearStagedJsonCandidate();
+        if (retryForHeap) {
+            // Keep the transaction queued. Continue normal ECU processing;
+            // retrying never blocks the real-time loop.
+        } else if (!candidateApplied) {
+            Serial.println("[OT] ERROR: persisted configuration candidate could not be published");
+        } else if (configMode == SysMode::STANDBY || configMode == SysMode::FAULT) {
             applyConfigOnEcuCore("web update");
             _configApplyDeferred = false;
+        } else if (configMode == SysMode::RUNNING) {
+            Hardware::applyLiveControllerTuning();
+            _configApplyDeferred = false;
+            Serial.println("[OT] Developer tuning applied live as one controller transaction");
         } else {
+            // Active non-running modes reject web settings writes. Retain this
+            // guard for any future producer using the transaction gate.
             _configApplyDeferred = true;
-            Serial.println("[OT] Config saved while active: block/hardware apply deferred until STANDBY");
+            Serial.println("[OT] Config apply deferred until STANDBY");
         }
-        ConfigApplyGate::release();
+        if (hasCandidate && !retryForHeap)
+            ConfigApplyGate::completeCoreApply(candidateGeneration, candidateApplied);
+        else if (!hasCandidate)
+            ConfigApplyGate::release();
+        if (retryForHeap && configHeapRetryCount >= 8 &&
+            (configMode == SysMode::STANDBY || configMode == SysMode::FAULT)) {
+            // The exact validated generation is already atomically persisted.
+            // A maximally fitted Classic profile can permanently lack the
+            // contiguous block needed for a second full runtime tree. Boot's
+            // section-streaming loader is the bounded fallback, but never
+            // restart while an engine is active.
+            Serial.println("[OT] Config apply heap remained fragmented; rebooting safely into persisted settings");
+            Hardware::allOff();
+            delay(50);
+            ESP.restart();
+            return;
+        }
     }
 
     // Claim the same transaction gate before consuming a deferred update. This
@@ -3395,6 +4006,7 @@ void loop() {
     // RC PWM input — updates rcIdle*/rcThrottle* and synthesises pot ADC values
     RCInput::tick();
 
+    RulesEngine::releaseOwnedTargets();
     g_safety.check();
 
     g_sequencer.tick();
@@ -3402,6 +4014,24 @@ void loop() {
     uint32_t afterSequencersUs = micros();
 
     Hardware::runControllers();
+    {
+        auto& ownerEd = EngineData::instance();
+        const bool controllersMayOwn = ownerEd.mode == SysMode::STARTUP ||
+                                       ownerEd.mode == SysMode::RUNNING;
+        strlcpy(ownerEd.throttleCommandOwner, "Sequencer / operator", sizeof(ownerEd.throttleCommandOwner));
+        strlcpy(ownerEd.propPitchCommandOwner, "Sequencer / parked", sizeof(ownerEd.propPitchCommandOwner));
+        strlcpy(ownerEd.oilCommandOwner, "Sequencer / fixed", sizeof(ownerEd.oilCommandOwner));
+        if (controllersMayOwn && !strncmp(ownerEd.governorControllerState, "Active", 6)) {
+            if (g_ctrlGovernor.usePropPitch)
+                strlcpy(ownerEd.propPitchCommandOwner, "N2 governor", sizeof(ownerEd.propPitchCommandOwner));
+            else
+                strlcpy(ownerEd.throttleCommandOwner, "N2 governor", sizeof(ownerEd.throttleCommandOwner));
+        }
+        if (controllersMayOwn && !strncmp(ownerEd.idleControllerState, "Active", 6))
+            strlcpy(ownerEd.throttleCommandOwner, "Automatic Idle", sizeof(ownerEd.throttleCommandOwner));
+        if (HardwareConfig::instance().hasOilLoop && ownerEd.mode == SysMode::RUNNING)
+            strlcpy(ownerEd.oilCommandOwner, "Oil-pressure controller", sizeof(ownerEd.oilCommandOwner));
+    }
 
     checkToolTimers();
     checkExtraCooldown();
@@ -3412,14 +4042,64 @@ void loop() {
     buzzerTick();
     checkCooldownSkip();
 
+    // Oil regulation uses the previous tick's final protected core-fuel
+    // demand. Running it before rules preserves rule-final ownership of an
+    // oil-pump target without creating an algebraic loop.
+    // OilPrime deliberately hands ownership to the configured pressure loop
+    // during STARTUP. Restricting registry oil loops to RUNNING leaves that
+    // target with no consumer, so the pump stays off until the prime times
+    // out. Other startup blocks also rely on maintained oil pressure.
+    const auto controlMode = EngineData::instance().mode;
+    if (controlMode == SysMode::STARTUP || controlMode == SysMode::RUNNING)
+        Hardware::runOilLoops();
+
     // Rules may override ordinary demand targets; throttle still passes
     // through limp limits and slew/sensor safeguards before output.
-    RulesEngine::evaluate();
+    // A saved hardware/config generation is already committed once reboot is
+    // pending. Do not let a new automation edge energize an output and create
+    // an unrecoverable reboot-postponed state while configuration commands are
+    // locked. Rule ownership was released above; turbine-owned windmilling oil
+    // and other safety behavior still run and may legitimately delay reboot.
+    if (!WebServer::rebootPending()) RulesEngine::evaluate();
+    enforceEmergencyShutdownTerminal();
     Hardware::applyThrottleProtection();
+    EngineData::instance().finalCoreFuelDemand =
+        constrain(EngineData::instance().throttleDemand, 0.0f, 1.0f);
     uint32_t afterControllersUs = micros();
 
+    // Track what can actually reach hardware, after every controller, rule,
+    // timer, protection, and command guard has settled the final demand.  A
+    // command merely capable of driving an output may still be rejected, while
+    // a rule can create demand without passing through the command queue at
+    // all.  START is additionally marked at its accepted mode transition so
+    // the short interval before its first physical demand remains covered.
+    if (OutputActivity::anyPhysicalDemand(false)) ResetRecovery::markActive();
     Hardware::updateActuators();
     uint32_t afterActuatorsUs = micros();
+
+    // Clear the retained active marker only after two complete ECU loops have
+    // physically applied an all-off state. An unavailable engine I2C output
+    // prevents proof because its latch state cannot be guaranteed.
+    {
+        static uint8_t stableSafeLoops = 0;
+        auto& safeEd = EngineData::instance();
+        const bool safeMode = safeEd.mode == SysMode::STANDBY || safeEd.mode == SysMode::FAULT;
+        const bool recoveryAllowed = !safeEd.recoveryLockout || safeEd.recoveryStopAcknowledged;
+        const bool safe = safeMode && recoveryAllowed &&
+            !OutputActivity::anyPhysicalDemand(false) &&
+            Hardware::unavailableEngineI2cOutput() == nullptr;
+        stableSafeLoops = safe ? (stableSafeLoops < 2 ? stableSafeLoops + 1 : 2) : 0;
+        if (stableSafeLoops >= 2) {
+            ResetRecovery::markSafe();
+            if (safeEd.recoveryLockout) {
+                safeEd.recoveryLockout = false;
+                safeEd.recoveryStopAcknowledged = false;
+                safeEd.faultDescription[0] = '\0';
+                strncpy(safeEd.lastEvent, "Recovery lockout cleared: outputs verified off",
+                        sizeof(safeEd.lastEvent) - 1);
+            }
+        }
+    }
 
     FlightRecorder::tick();
     SessionLogger::tick();
@@ -3498,7 +4178,7 @@ void loop() {
     }
     edp.loopExecAvgMs = loopExecAvgUs / 1000.0f;
     edp.uptimeMs = nowMs;
-    edp.publishSnapshot();
+    edp.publishSnapshot(nowMs);
 
     const uint32_t loopElapsedUs = micros() - loopStartUs;
     const uint32_t targetHz = constrain((uint32_t)Config::controlLoopHz, 50u, 1000u);

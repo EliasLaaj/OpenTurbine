@@ -73,10 +73,9 @@ const SCHEMA = [
     { key:'di_ru', path:['dynamic_idle','ramp_up_ms'],    label:'Fuel Increase Time (ms)', desc:'How quickly automatic idle control may increase fuel.', step:500, min:0 },
     { key:'di_rd', path:['dynamic_idle','ramp_down_ms'],  label:'Fuel Decrease Time (ms)', desc:'How quickly automatic idle control may reduce fuel.', step:500, min:0 },
     { key:'di_db', path:['dynamic_idle','deadband_rpm'],  label:'No-Correction Band (N1/N2)', unit:'RPM', desc:'Used for an N1/N2 feedback source.', step:100, min:0 },
-    { key:'di_rl', path:['dynamic_idle','rpm_limit'],     label:'Stop Controlling Above (N1/N2)', unit:'RPM', desc:'Used for an N1/N2 feedback source.', step:1000, min:0 },
+    { key:'di_rl', path:['dynamic_idle','rpm_limit'],     label:'Stop Controlling Above (N1/N2)', unit:'RPM', desc:'Used for an N1/N2 feedback source. 0 = Disabled - no automatic idle control.', step:1000, min:0 },
     { key:'di_pd', path:['dynamic_idle','pressure_deadband_bar'], label:'No-Correction Band (P1/P2)', unitType:'press', desc:'Used for a P1/P2 feedback source.', step:0.01, min:0, max:1000 },
-    { key:'di_pl', path:['dynamic_idle','pressure_limit_bar'], label:'Stop Controlling Above (P1/P2)', unitType:'press', desc:'Used for a P1/P2 feedback source.', step:0.1, min:0, max:1000 },
-    { key:'di_mm', path:['dynamic_idle','min_multiplier'],label:'Minimum Fuel Range Multiplier', desc:'Scales the calibrated minimum reliable fuel-pump output to set the controller floor.', step:0.05, min:0, max:1 },
+    { key:'di_pl', path:['dynamic_idle','pressure_limit_bar'], label:'Stop Controlling Above (P1/P2)', unitType:'press', desc:'Used for a P1/P2 feedback source. 0 = Disabled - no automatic idle control.', step:0.1, min:0, max:1000 },
     { key:'di_mx', path:['dynamic_idle','max_multiplier'],label:'Maximum Fuel Range Multiplier', desc:'Allows the controller extra fuel authority above the configured maximum idle output.', step:0.05, min:1, max:3 },
     { key:'di_ig', path:['dynamic_idle','i_gain'],       label:'Long-Term Correction Strength', desc:'Removes a persistent speed error caused by changing accessory load. 0 disables this correction. Start small: 0.05–0.15. Technical name: integral gain.', step:0.01, min:0, max:2 },
     { key:'di_im', path:['dynamic_idle','i_max'],        label:'Maximum Long-Term Correction', desc:'Limits how much fuel the long-term correction may add or remove. 0.10 means 10% of the available fuel range.', step:0.01, min:0, max:0.5 },
@@ -90,6 +89,10 @@ const SCHEMA = [
     { key:'di_td', path:['dynamic_idle','trim_down_pct_s'], label:'Maximum Fuel Correction Decrease (%/s)', desc:'Fastest rate at which predictive idle control may remove fuel.', step:0.5, min:0 },
     { key:'di_lr', path:['dynamic_idle','learn_rate'], label:'Steady-Idle Learning Speed (0-1)', desc:'How quickly the learned steady-idle fuel output adapts after speed settles. Smaller values are steadier.', step:0.01, min:0 },
     { key:'di_la', path:['dynamic_idle','learn_accel_max'], label:'Maximum Speed Change While Learning (RPM/s)', desc:'The ECU learns steady-idle fuel only while RPM is changing more slowly than this value.', step:100, min:0 },
+    { key:'di_pde', path:['dynamic_idle','pressure_decel_enter_bar'], label:'Catch Entry Above Target', unit:'bar', desc:'Predictive pressure control enters deceleration catch this far above target.', step:0.01, min:0 },
+    { key:'di_psb', path:['dynamic_idle','pressure_settle_band_bar'], label:'Settled Pressure Band', unit:'bar', desc:'Pressure band in which the ECU may learn the steady-idle fuel demand.', step:0.01, min:0 },
+    { key:'di_pfr', path:['dynamic_idle','pressure_full_response_bar'], label:'Pressure Error for Full Correction', unit:'bar', desc:'Pressure error where predictive idle reaches its configured correction rate.', step:0.01, min:0 },
+    { key:'di_plr', path:['dynamic_idle','pressure_learn_rate_max_bar_s'], label:'Maximum Pressure Change While Learning', unit:'bar/s', desc:'Learning pauses while pressure changes faster than this value.', step:0.01, min:0 },
   ]},
   { title: 'Combustion & Startup Protection', id: 'safety-monitor', sectionNote:'Combustion-loss handling and temperature protection specifically for starting and running. Test sensor behavior before relying on automatic shutdowns.', fields: [
     { key:'sf_ci', path:['safety','check_interval_ms'],    label:'Safety Check Interval (ms)', desc:'How often general safety conditions are evaluated. Hard overspeed and current-delay timing run independently. Restricted to 10-250 ms so protection cannot be delayed by configuration.', step:10, min:10, max:250 },
@@ -103,12 +106,12 @@ const SCHEMA = [
   ]},
   { title: 'Automatic Flameout Relight', id:'relight-section', sectionNote:'A flame sensor, N1, or the configured EGT conditions can trigger combustion-loss handling. Automatic relight additionally requires healthy N1 feedback and will never energize ignition below the minimum relight speed.', fields: [
     { key:'rl_en', path:['relight','enabled'],      label:'Attempt Automatic Relight', desc:'After combustion loss, try to restore flame before committing to shutdown.', type:'checkbox', basic:true },
-    { key:'rl_it', path:['relight','ignition_target'], label:'Ignition Output to Use', type:'select', options:[{v:0,l:'Primary igniter'},{v:1,l:'Afterburner / pilot igniter'},{v:2,l:'Glow plug / wet glow'}], desc:'Output energized during the relight attempt.' },
+    { key:'rl_it', path:['relight','ignition_target'], label:'Ignition Output to Use', type:'select', options:[{v:0,l:'Primary igniter'},{v:1,l:'Afterburner / secondary igniter'},{v:2,l:'Glow plug / wet glow'}], desc:'Output energized during the relight attempt.' },
     { key:'rl_cs', path:['relight','confirm_source'], label:'How Successful Relight Is Confirmed', type:'select', options:[{v:0,l:'Match the combustion-loss sensor'},{v:1,l:'Flame sensor detects flame'},{v:2,l:'N1 speed recovers'},{v:3,l:'Engine temperature rises'}], desc:'Signal that confirms combustion has returned and allows ignition to turn off.' },
     { key:'rl_mr', path:['relight','min_rpm'],            label:'Minimum N1 to Fire Relight Ignition', unit:'RPM', desc:'The ECU will not energize automatic relight below this healthy N1 speed or below Minimum Running N1, whichever is higher. If N1 falls below the effective floor during an attempt, ignition is cut and the engine shuts down. Choose a speed that proves adequate self-sustaining airflow.', step:1000, min:1, basic:true },
     { key:'rl_cr', path:['relight','confirm_rpm'],         label:'N1 Recovery Confirmation', unit:'RPM', desc:'For N1 relight confirmation: ignition stays on until healthy N1 reaches this explicit speed. Normally set this at or above the minimum firing speed and above the N1 flameout trigger.', step:1000, min:1, basic:true },
     { key:'rl_tr', path:['relight','tot_rise_c'],          label:'EGT Recovery Rise', unitType:'temp_delta', desc:'For EGT relight confirmation: igniter stays on until selected EGT rises this much above the temperature at relight start. 0 prevents EGT-rise confirmation. Set too low and EGT noise/throttle changes can false-confirm; too high can reject a real relight. Verify on a real start.', step:5, min:0, basic:true },
-    { key:'rl_to', path:['relight','relight_timeout_ms'], label:'Relight Timeout (ms)',      desc:'Maximum continuous relight ignition time after a flameout. If combustion is not restored, ignition is cut and the engine shuts down. A normal combustor usually relights within 1,000-2,000 ms; increase only from verified engine tests. 0 = no timeout (not recommended).', step:100, min:0 },
+    { key:'rl_to', path:['relight','relight_timeout_ms'], label:'Relight Timeout (ms)',      desc:'Maximum relight time after a flameout. If combustion is not restored, ignition is cut and the engine shuts down. 0 uses the hard 30-second maximum; shorter configured values win.', step:100, min:0, max:30000 },
   ]},
   { title: 'ECU Runtime', sectionNote:'Advanced control-loop scheduling. Logging frequency and channel selection are configured on the Log page.', fields: [
     { key:'tm_lh', path:['telemetry','control_loop_hz'], label:'ECU Loop Target Hz', desc:'Main control-loop target frequency. Default 400 Hz. Lower values reduce CPU use; higher values improve control granularity but increase load. Recommended range: 200-500 Hz. Takes effect after a reboot.', step:50, min:50, max:1000 },
@@ -135,7 +138,7 @@ const SCHEMA = [
   { title: 'Manual Relight and Cooldown Override', fields: [
     { key:'tot_cooldown_target', path:['engine','tot_cooldown_target'], label:'Cooldown Temperature Target', unitType:'temp', desc:'Cooldown completes after the selected engine temperature falls below this value.', step:10, min:0, max:100000, basic:true },
     { key:'ms_cs', path:['misc','cooldown_skip_hold_ms'], label:'Cooldown Skip Hold (ms)', desc:'Hold START+STOP simultaneously for this long during SHUTDOWN to force-skip the cooldown and go to STANDBY, even if selected EGT is still above the cooldown target.', step:500, min:500 },
-    { key:'ms_it', path:['misc','igniter_on_start_target'], label:'START Relight Output', type:'select', options:[{v:0,l:'Igniter 1'},{v:1,l:'AB / Pilot Igniter'},{v:2,l:'Glow / Wet Glow'}], desc:'Which configured ignition output is held on while START is held during RUNNING.' },
+    { key:'ms_it', path:['misc','igniter_on_start_target'], label:'START Relight Output', type:'select', options:[{v:0,l:'Igniter 1'},{v:1,l:'Secondary Igniter'},{v:2,l:'Glow / Wet Glow'}], desc:'Which configured ignition output is held on while START is held during RUNNING.' },
     { key:'ms_is', path:['misc','igniter_on_start'],      label:'Igniter on START (running)', desc:'Fire igniter while START button is held during RUNNING — manual relight aid. Disable if accidental button presses are a concern.', type:'checkbox' },
   ]},
   { title: 'RPM Sensor Fault Detection', fields: [
@@ -153,21 +156,22 @@ const SCHEMA = [
     { key:'ab_ui',   path:['afterburner','use_igniter'],       label:'Use AB Igniter',      type:'checkbox', desc:'Fire the dedicated afterburner igniter installed in Hardware during the ignition window. Can be used alone or with torch.', basic:true },
     { key:'ab_tpct', path:['afterburner','torch_spike_pct'],   label:'Torch Spike %',       desc:'Main fuel pump extra demand % during the torch window. Higher = more fuel pushed through. Typical: 20–40%.', step:5, min:0, max:100 },
     { key:'ab_tms',  path:['afterburner','torch_duration_ms'], label:'Torch Duration (ms)', desc:'How long to hold the fuel spike before cutting back. Typical: 300–600 ms.', step:50, min:0, max:3000 },
-    { key:'ab_ttl',  path:['afterburner','torch_tot_limit'],   label:'Torch EGT Cut',  unitType:'temp', zeroOff:true, desc:'Cut torch spike if selected EGT exceeds this during ignition. Protects turbine from over-temperature. 0 = disabled. Typical: 900-1000 °C / 1650-1830 °F.', step:10, min:0 },
+    { key:'ab_tgm',  path:['afterburner','torch_guard_mode'],  label:'Torch Temperature Guard', type:'select', options:[{v:0,l:'Automatic margin below engine shutdown'},{v:1,l:'Custom torch-only cut'},{v:2,l:'Off — use engine shutdown only'}], desc:'Automatic is the simple default. Off removes only the extra torch pulse at the normal engine over-temperature shutdown.', basic:true },
+    { key:'ab_ttl',  path:['afterburner','torch_tot_limit'],   label:'Custom Torch EGT Cut',  unitType:'temp', desc:'Used only in Custom mode. It should be below the configured main-engine temperature shutdown.', step:10, min:0 },
     { key:'ab_lpp',  path:['afterburner','lightup_pump_pct'],  label:'Light-Up Pump %', desc:'AB fuel pump demand used while the light-up sequence is trying to establish a confirmed flame.', step:5, min:0, max:100 },
   ]},
   { title: 'Afterburner — Flame Confirmation', id: 'ab-flame-section', fields: [
-    { key:'ab_fm',  path:['afterburner','flame_mode'],          label:'Light-up Evidence',    type:'select', options:[{v:0,l:'Flame sensor verification'},{v:1,l:'EGT-rise verification'},{v:2,l:'Timed assumption - no flame verification'}], desc:'How light-up is assessed. Timed assumption provides no evidence that fuel has ignited and should be used only when the installation has no usable flame or EGT feedback.', basic:true },
+    { key:'ab_fm',  path:['afterburner','flame_mode'],          label:'Light-up Evidence',    type:'select', options:[{v:0,l:'Verified flame sensor OFF → ON'},{v:1,l:'EGT-rise verification'},{v:2,l:'Timed assumption — unverified'},{v:3,l:'Externally conditioned flame level'}], desc:'Verified sensor mode rejects an input already ON before fuel. External level mode is for a separate flame controller whose asserted level is itself trusted. Timed mode provides no flame evidence.', basic:true },
     { key:'ab_tr',  path:['afterburner','tot_rise_deg_c'],      label:'EGT Rise', unitType:'temp_delta', desc:'Minimum selected EGT rise required to confirm ignition (EGT Rise mode). Typical: 20-50 C. Too low can false-confirm on noise/throttle changes; too high can reject a real light. Verify on a real start.', step:5, min:0 },
     { key:'ab_tw',  path:['afterburner','tot_rise_window_ms'],  label:'EGT Rise Window (ms)',desc:'Time window in which the required EGT rise must occur (EGT Rise mode). Typical: 1500-3000 ms.', step:100, min:0 },
     { key:'ab_ams', path:['afterburner','assume_ignited_ms'],   label:'Unverified Timed Delay (ms)',desc:'Delay before continuing without verifying flame. This is not flame confirmation. Typical starting point: 1000-2000 ms, verified on a restrained test setup.', step:100, min:0 },
     { key:'ab_fto', path:['afterburner','flame_timeout_ms'],    label:'Confirmation Timeout (ms)', desc:'Overall deadline for flame confirmation. Exceeding this triggers an AB fault and shuts down the afterburner. Typical: 3000-5000 ms.', step:200, min:0, max:3600000 },
   ]},
   { title: 'Afterburner — Running', id: 'ab-run-section', fields: [
-    { key:'ab_pcm', path:['afterburner','pump_control_mode'],     label:'Pump Command Source',   type:'select', options:[{v:0,l:'Fixed Max Output'},{v:1,l:'Follow Main Throttle'},{v:2,l:'Dedicated AB Input'}], desc:'Choose how AB pump flow is commanded while lit. Dedicated AB Input uses the ADC or servo-PWM AB input configured in Hardware. Note: if the AB input was not in use when the ECU booted, switching to Dedicated AB Input needs a reboot before the input is read.' },
+    { key:'ab_pcm', path:['afterburner','pump_control_mode'],     label:'Pump Command Source',   type:'select', options:[{v:0,l:'Fixed Max Output'},{v:1,l:'Follow Main Throttle'},{v:2,l:'Dedicated AB Input'}], desc:'Choose how AB pump flow is commanded while lit. Dedicated AB Input uses the analog, RC, PWM-duty, or registry/I2C AB command configured in Hardware.' },
     { key:'ab_pmn', path:['afterburner','pump_min_pct'],         label:'Afterburner Fuel Pump Min %', desc:'Minimum afterburner fuel-pump demand for a variable command source. With a missing servo-PWM afterburner input, demand fails to this minimum.', step:5, min:0, max:100 },
     { key:'ab_pmx', path:['afterburner','pump_max_pct'],         label:'Afterburner Fuel Pump Max %', desc:'Maximum afterburner fuel-pump demand. Fixed Max Output holds this value while the afterburner is running.', step:5, min:0, max:100 },
-    { key:'ab_mo',  path:['afterburner','main_fuel_offset_pct'], label:'Main Fuel Offset %',    desc:'Add this to main throttle demand while AB is running (extra air/fuel for compressor). 0 = none.', step:2, min:-20, max:50 },
+    { key:'ab_mo',  path:['afterburner','main_fuel_offset_pct'], label:'Main Fuel Offset %',    desc:'Adds to main fuel while AB is running. A negative value may reduce fuel, but a running pump is held at its calibrated reliable minimum; an Off command remains Off. 0 = none.', step:2, min:-20, max:50 },
     { key:'ab_sms', path:['afterburner','stabilize_ms'],         label:'Stabilize Hold (ms)',   desc:'Hold time after confirmed ignition before declaring the afterburner Running. Typical: 500-2000 ms.', step:100, min:0, max:3600000 },
     { key:'ab_smt', path:['afterburner','stabilize_max_tot'],    label:'Stabilize Max EGT',  unitType:'temp', zeroOff:true, desc:'AB faults if selected EGT exceeds this during the stabilize hold. 0 = disabled.', step:10, min:0, max:100000 },
     { key:'ab_fld', path:['afterburner','flame_loss_delay_ms'], label:'Running Flame-Loss Delay (ms)', desc:'When flame-sensor verification is selected, shut down only the afterburner if its flame signal is absent or unhealthy for this long while Running. Default 1000 ms. The main engine keeps running.', step:100, min:0, max:60000 },
@@ -181,7 +185,7 @@ const SCHEMA = [
     { key:'sf_bv_d', path:['safety','batt_low_confirm_ms'], label:'Bus-Voltage Confirmation (ms)', desc:'Low battery or bus voltage must persist for this time before shutdown.', step:100, min:0, max:60000 },
     { key:'sf_sg',  path:['safety','surge_detect_rpm_variance'],label:'Experimental Surge Detection (RPM²)', desc:'Experimental statistical N1-instability detector over a 10-sample rolling window, not an RPM limit. It requires tuning from recorded stable and surge data for this exact engine. 500,000 RPM² corresponds to about 707 RPM standard deviation. 0 disables it.', step:10000, min:0 },
   ]},
-  { title: 'Automatic N2 Speed Control', id: 'governor-cfg-section', sectionNote:'Enable this controller in Hardware > Controllers. Generator/turboshaft setup: N2 Speed + Main Fuel makes the governor command fuel. Turboprop setup: also fit a proportional Prop Pitch output; a nonzero pitch response makes pitch primary and fuel the fallback at pitch travel limits.', fields: [
+  { title: 'Automatic N2 Speed Control', id: 'governor-cfg-section', sectionNote:'Enable this controller in Hardware > Controllers. Generator/turboshaft setup uses proportional Main Fuel. Prop Pitch may be proportional, or an on/off relay using deliberate fine/coarse control and the N2 no-correction band. Overspeed fuel pullback remains separate.', fields: [
     { key:'gv_tr', path:['governor','target_rpm'],   label:'Target N2 RPM',      desc:'Power turbine (N2) speed setpoint for the governor. Set to your rated output shaft RPM. 0 = governor disabled. In prop-pitch mode the governor adds propeller load to hold this speed, so set it to your rated power-turbine RPM — too low can over-load and stall the core.',                                                             step:100,   min:0, basic:true },
     { key:'gv_bd', path:['governor','band_rpm'],     label:'No-Correction Speed Band (RPM)', desc:'The controller makes no correction while N2 is within this distance above or below the target. A small band prevents hunting. Typical: 200–500 RPM.', step:50, min:0, max:1000000000 },
     { key:'gv_kp', path:['governor','kp'], label:'Fuel Change at 1,000 RPM Error (%/s)', scale:100000, desc:'Fuel correction rate produced by a 1,000 RPM error outside the no-correction band. Example: 25 means fuel changes 25 percentage points per second at that error. Start around 10-25 and increase only while checking for hunting.', step:5, min:0, max:0.01 },
@@ -193,13 +197,21 @@ const SCHEMA = [
     { key:'gl_mx', path:['glow_plug','preheat_max_pct'], label:'Preheat Peak Command (%)',  desc:'Peak glow command during the preheat ramp. PWM glow uses this as duty percent; relay glow turns ON for any nonzero command. Typical PWM value: 60–90%.', step:5, min:0, max:100 },
     { key:'gl_hd', path:['glow_plug','hold_pct'],        label:'Hold Command (%)',          desc:'Glow command held after preheat completes. PWM glow uses this as duty percent; relay glow stays ON for any nonzero hold command. Typical PWM value: 20–40%.', step:5, min:0, max:100 },
   ]},
-  { title: 'RC / Servo Signal Loss Detection', id: 'rc-pwm-section', sectionNote:'Throttle and idle receiver-pulse endpoints are calibrated independently on the Calibration page.', fields: [
+  { title: 'RC / Servo Signal Loss Detection', id: 'rc-pwm-section', sectionNote:'Receiver-pulse endpoints are calibrated independently on the Calibration page; this timeout also protects registry PWM-duty inputs.', fields: [
     { key:'rc_fs', path:['rc_input','failsafe_ms'], label:'Signal-Loss Timeout (ms)', desc:'Marks a receiver input invalid when no valid pulse arrives in time. A lost operator-throttle signal returns main fuel toward the calibrated minimum output; STOP still performs the immediate fuel cut.', step:50, min:100 },
   ]},
 ];
 
 let cfg      = {};
 let isLocked = false;
+let runtimeMode = 'STANDBY';
+let runtimeDevMode = false;
+const LIVE_CONFIG_KEYS = new Set([
+  'th_ru','th_rd','gv_tr','gv_bd','gv_kp','gv_pk','gv_pr',
+  'di_tr','di_tp','di_ru','di_rd','di_db','di_rl','di_pd','di_pl','di_mx','di_ig','di_im',
+  'di_de','di_dd','di_lk','di_sb','di_fr','di_tu','di_td','di_lr','di_la',
+  'di_pde','di_psb','di_pfr','di_plr'
+]);
 let _cfgDirty = false;
 
 // ── Per-field changed-state tracking (mirrors hardware.html) ──
@@ -249,6 +261,7 @@ function _buildChanges() {
       const wrap = el.closest('.cfg-field');
       const inactive = _fieldIsHardwareInactive(wrap);
       changes.push({
+        key:   el.id.slice(3),
         label: _getFieldLabel(el),
         was:   _formatValue(el, snap),
         now:   _formatValue(el, cur),

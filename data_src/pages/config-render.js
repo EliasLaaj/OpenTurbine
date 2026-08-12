@@ -64,6 +64,7 @@ function _refreshDependencyEditability() {
     const inactive = _fieldIsHardwareInactive(field);
     const logicallyDisabled = field.dataset.logicalDisabled === '1' || field.dataset.hardHidden === '1';
     const control = field.querySelector('input,select');
+    const activeLocked = control?.dataset.activeLocked === '1';
     // Future tuning values may be prepared before their hardware is installed,
     // but an enable checkbox must never be armed while its prerequisites are
     // absent. Otherwise adding hardware later could unexpectedly activate a
@@ -71,7 +72,7 @@ function _refreshDependencyEditability() {
     const activationLocked = inactive && control?.type === 'checkbox';
     const inactiveEditable = inactive && futureEditMode && !activationLocked;
     field.classList.toggle('cfg-field-inactive', inactive);
-    field.classList.toggle('inactive-editable', inactiveEditable && !isLocked && !logicallyDisabled);
+    field.classList.toggle('inactive-editable', inactiveEditable && !isLocked && !logicallyDisabled && !activeLocked);
 
     let badge = field.querySelector('.cfg-inactive-badge');
     if (!badge) {
@@ -93,7 +94,7 @@ function _refreshDependencyEditability() {
           ? 'Saved for future use; inactive now. ' + _fieldInactiveReason(field)
           : _fieldInactiveReason(field))
       : '';
-    if (control) control.disabled = isLocked || logicallyDisabled || (inactive && (!futureEditMode || activationLocked));
+    if (control) control.disabled = isLocked || activeLocked || logicallyDisabled || (inactive && (!futureEditMode || activationLocked));
   });
 
   document.querySelectorAll('select option[data-hardware-unavailable]').forEach(option => {
@@ -290,14 +291,18 @@ function updateRpmLimiterFields() {
 }
 function updateIdleModeFields() {
   const adv = parseInt((document.getElementById('cf-di_mode') || {}).value || 0) === 1;
+  const pressure = parseInt((document.getElementById('cf-di_src') || {}).value || 0, 10) >= 2;
   _setFieldDesc('di_mode', _DI_MODE_DESC[adv ? 1 : 0]);
-  ['di_de', 'di_dd', 'di_lk', 'di_sb', 'di_fr', 'di_tu', 'di_td', 'di_lr', 'di_la'].forEach(k => setCfgFieldVisible(k, adv));
+  ['di_dd', 'di_lk', 'di_tu', 'di_td', 'di_lr'].forEach(k => setCfgFieldVisible(k, adv));
+  ['di_de', 'di_sb', 'di_fr', 'di_la'].forEach(k => setCfgFieldVisible(k, adv && !pressure));
+  ['di_pde', 'di_psb', 'di_pfr', 'di_plr'].forEach(k => setCfgFieldVisible(k, adv && pressure));
 }
 function updateIdleSourceFields() {
   const source = parseInt((document.getElementById('cf-di_src') || {}).value || 0, 10);
   const pressure = source >= 2;
   ['di_tr','di_db','di_rl'].forEach(k => setCfgFieldHardHidden(k, pressure));
   ['di_tp','di_pd','di_pl'].forEach(k => setCfgFieldHardHidden(k, !pressure));
+  updateIdleModeFields();
   _setFieldDesc('di_src', pressure
     ? 'Experimental pressure-based idle feedback. Validate stability carefully on a restrained test setup; N1/N2 shaft speed remains the normal proven method.'
     : 'N1/N2 shaft-speed feedback is the normal proven method for automatic idle control.');
@@ -378,6 +383,11 @@ function setConfigPressUnit(value) {
 }
 
 function renderForm() {
+  const configuredOilPumps = (hwCfg?.channel_registry?.outputs || []).filter(channel =>
+    channel?.installed !== false && String(channel.purpose || channel.role || '') === 'oil_pump');
+  const oilPumpIsBinary = channel => [4, 11].includes(Number(channel?.driver));
+  const allOilPumpsBinary = configuredOilPumps.length > 0 && configuredOilPumps.every(oilPumpIsBinary);
+  const mixedOilPumpDrivers = configuredOilPumps.some(oilPumpIsBinary) && configuredOilPumps.some(channel => !oilPumpIsBinary(channel));
   const protectionGroups = [
     {id:'n1', title:'N1 core speed', desc:'Gradual fuel reduction, overspeed shutdown, and minimum running speed.',
       keys:['pb_n1e','pb_n1s','pb_n1h','rpm_limit','min_rpm']},
@@ -399,7 +409,16 @@ function renderForm() {
   const renderField = (f, sec, group) => {
     let val = getPath(cfg, f.path);
     const isCb  = f.type === 'checkbox';
-    const isSel = f.type === 'select';
+    const binaryOilFallback = f.key === 'oil_fp' && allOilPumpsBinary;
+    const isSel = f.type === 'select' || binaryOilFallback;
+    const runtimeOptions = binaryOilFallback
+      ? [{v:0,l:'Off'},{v:100,l:'On'}]
+      : (f.options || []);
+    if (binaryOilFallback) val = Number(val) > 0 ? 100 : 0;
+    const fieldLabel = binaryOilFallback ? 'Pump State After Pressure-Sensor Failure' : f.label;
+    const fieldDesc = f.key === 'oil_fp' && mixedOilPumpDrivers
+      ? `${f.desc} Binary pumps use 0% as Off and any positive value as On.`
+      : f.desc;
     if (!isCb && !isSel && (f.unitType || f.scale) && val !== undefined) {
       val = _fieldToDisplay(f, val);
       val = Math.round(val * 1000) / 1000;
@@ -413,21 +432,21 @@ function renderForm() {
     const min = (!isCb && !isSel && f.min !== undefined) ? ` min="${_roundedDisplay(_fieldToDisplay(f, f.min))}"` : '';
     const max = (!isCb && !isSel && f.max !== undefined) ? ` max="${_roundedDisplay(_fieldToDisplay(f, f.max))}"` : '';
     const step = (!isCb && !isSel) ? _roundedDisplay(_fieldStepToDisplay(f, f.step || 1)) : null;
-    const aria = ` aria-label="${_escHtml(f.label)}"`;
+    const aria = ` aria-label="${_escHtml(fieldLabel)}"`;
     const inp = isCb
       ? `<input type="checkbox" id="cf-${f.key}"${aria}${val ? ' checked' : ''}${isLocked ? ' disabled' : ''}>`
       : isSel
-      ? `<select id="cf-${f.key}"${aria}${isLocked ? ' disabled' : ''}>${(f.options||[]).map(o => `<option value="${o.v}"${val == o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select>`
+      ? `<select id="cf-${f.key}"${aria}${isLocked ? ' disabled' : ''}>${runtimeOptions.map(o => `<option value="${o.v}"${val == o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select>`
       : `<input type="number" id="cf-${f.key}"${aria} value="${val !== undefined ? val : ''}"
         step="${step}"${min}${max}${isLocked ? ' disabled' : ''}>`;
     const wid = f.wrapId ? ` id="${f.wrapId}"` : '';
     const level = f.basic ? 'essential' : 'advanced';
-    const searchText = `${f.key} ${f.label} ${f.desc} ${sec.title} ${sec.sectionNote || ''} ${group.title}`.toLowerCase();
+    const searchText = `${f.key} ${fieldLabel} ${fieldDesc} ${sec.title} ${sec.sectionNote || ''} ${group.title}`.toLowerCase();
     return `<div class="cfg-field"${wid} data-key="${f.key}" data-level="${level}" data-search="${_escHtml(searchText)}">
-      <div class="cfg-field-head"><div class="cfg-label">${f.label}${unitSuffix}</div>
+      <div class="cfg-field-head"><div class="cfg-label">${fieldLabel}${unitSuffix}</div>
         ${level === 'advanced' ? '<span class="field-level">Advanced</span>' : ''}</div>
       ${inp}
-      <details class="cfg-help"><summary>About this setting</summary><div class="cfg-desc">${f.desc}</div></details>
+      <details class="cfg-help"><summary>About this setting</summary><div class="cfg-desc">${fieldDesc}</div></details>
     </div>`;
   };
 

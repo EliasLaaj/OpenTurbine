@@ -11,6 +11,8 @@ SemaphoreHandle_t FlightRecorder::_mutex          = nullptr;
 static volatile bool s_clearPending = false;
 static volatile int  s_activeRawDownloads = 0;
 static volatile uint32_t s_droppedEvents = 0;
+static volatile uint8_t s_lastError = 0;
+static volatile uint32_t s_lastDurableAppendMs = 0;
 unsigned long     FlightRecorder::_lastSnapshotMs  = 0;
 float             FlightRecorder::_runMaxN1        = 0.0f;
 static float      s_runMaxN2                        = 0.0f;
@@ -18,6 +20,7 @@ float             FlightRecorder::_runMaxTot       = 0.0f;
 float             FlightRecorder::_runMaxTit       = 0.0f;
 float             FlightRecorder::_runMinOil       = 9999.0f;
 uint32_t          FlightRecorder::_runStartSec     = 0;
+bool              FlightRecorder::_runActive       = false;
 
 // Tracked in-memory line count so we don't re-count the file on every append.
 // -1 means not yet initialised (counted on first drain after boot).
@@ -75,6 +78,7 @@ void FlightRecorder::begin() {
     }
     s_lineCount = -1;   // force recount on first drain
     if (!_mutex) _mutex = xSemaphoreCreateMutex();
+    if (!_mutex) s_lastError = 1;
 }
 
 void FlightRecorder::tick() {
@@ -186,6 +190,7 @@ void FlightRecorder::logRunningEntry() {
     _runMaxTit   = 0.0f;
     _runMinOil   = 9999.0f;
     _runStartSec = _uptimeSec();
+    _runActive = true;
 
     auto& ed = EngineData::instance();
     char buf[128];
@@ -218,7 +223,7 @@ void FlightRecorder::logFault(const char* code) {
 
 void FlightRecorder::logRunSummary() {
     // Skip if logRunningEntry() was never called this boot (engine faulted before RUNNING)
-    if (_runStartSec == 0) return;
+    if (!_runActive) return;
 
     uint32_t runS = _uptimeSec() - _runStartSec;
     char buf[220];
@@ -248,6 +253,7 @@ void FlightRecorder::logRunSummary() {
     #undef APPEND_SUMMARY_FIELD
     _append(buf);
     _runStartSec = 0;   // prevent duplicate summary if shutdown handlers chain
+    _runActive = false;
 }
 
 void FlightRecorder::logNormalShutdown() {
@@ -306,15 +312,43 @@ uint32_t FlightRecorder::droppedEvents() {
     return s_droppedEvents;
 }
 
+uint8_t FlightRecorder::pendingCount() {
+    portENTER_CRITICAL(&s_ringMux);
+    const uint8_t head = s_ringHead;
+    const uint8_t tail = s_ringTail;
+    portEXIT_CRITICAL(&s_ringMux);
+    return head >= tail ? (uint8_t)(head - tail) : (uint8_t)(RING_SLOTS - tail + head);
+}
+
+bool FlightRecorder::healthy() { return _mutex != nullptr && s_lastError == 0; }
+uint8_t FlightRecorder::errorCode() { return s_lastError; }
+uint32_t FlightRecorder::lastDurableAppendMs() { return s_lastDurableAppendMs; }
+
 void FlightRecorder::clear() {
     if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
+    portENTER_CRITICAL(&s_ringMux);
+    s_ringTail = s_ringHead;
+    s_droppedEvents = 0;
+    s_droppedMarked = 0;
+    s_clearPending = false;
+    portEXIT_CRITICAL(&s_ringMux);
     LittleFS.remove(PATH);
     s_lineCount = 0;
     if (_mutex) xSemaphoreGive(_mutex);
 }
 
 void FlightRecorder::requestClear() {
+    // Establish the clear boundary now: queued pre-clear events are discarded,
+    // while events appended after this point remain in the ring and are written
+    // after Core 0 removes the old file.
+    if (_mutex) xSemaphoreTake(_mutex, portMAX_DELAY);
+    portENTER_CRITICAL(&s_ringMux);
+    s_ringTail = s_ringHead;
+    s_droppedEvents = 0;
+    s_droppedMarked = 0;
     s_clearPending = true;
+    portEXIT_CRITICAL(&s_ringMux);
+    if (_mutex) xSemaphoreGive(_mutex);
 }
 
 size_t FlightRecorder::toJson(char* buf, size_t len) {
@@ -493,7 +527,7 @@ static void _drainRingLocked() {
         if (s_lineCount >= FlightRecorder::MAX_RECORDS) _makeRoomLocked();
 
         File fa = LittleFS.open(FlightRecorder::PATH, "a");
-        if (!fa) return;   // FS unusable — leave events queued, retry next tick
+        if (!fa) { s_lastError = 2; return; }   // leave queued and retry
 
         // Record a marker for events dropped while the ring was full, so gaps
         // in the black box are never silent. Snapshot the counter: Core 1 may
@@ -505,18 +539,21 @@ static void _drainRingLocked() {
                 "{\"t\":%lu,\"ev\":\"EVENTS_DROPPED\",\"n\":%lu}",
                 (unsigned long)(millis() / 1000),
                 (unsigned long)(dropped - s_droppedMarked));
-            if (fa.println(marker) == 0) { fa.close(); return; }   // retry next tick
+            if (fa.println(marker) == 0) { s_lastError = 3; fa.close(); return; }
             s_droppedMarked = dropped;
             s_lineCount++;
+            s_lastDurableAppendMs = millis();
         }
 
         int writtenSinceYield = 0;
         while (s_ringTail != s_ringHead && s_lineCount < FlightRecorder::MAX_RECORDS) {
             if (fa.println(s_ring[s_ringTail]) == 0) {
+                s_lastError = 3;
                 fa.close();
                 return;   // write failed (flash full?) — keep event, retry next tick
             }
             s_lineCount++;
+            s_lastDurableAppendMs = millis();
             s_ringTail = (uint8_t)((s_ringTail + 1) % RING_SLOTS);
             if (++writtenSinceYield >= 4) {
                 writtenSinceYield = 0;
@@ -525,6 +562,7 @@ static void _drainRingLocked() {
         }
         fa.close();
     }
+    if (FlightRecorder::pendingCount() == 0) s_lastError = 0;
 }
 
 void FlightRecorder::runEviction() {

@@ -23,15 +23,17 @@
 
 class SequenceEngine {
 public:
-    using DoneFn    = void(*)();   // called when sequence finishes normally
-    using AbortFn   = void(*)();   // called on BlockResult::Abort
-    using FaultFn   = void(*)();   // called on BlockResult::Fault
+    using ResultFn  = void(*)(const char* blockName, BlockResult result);
+    using DoneFn    = ResultFn;   // called when sequence finishes normally
+    using AbortFn   = ResultFn;   // called on BlockResult::Abort
+    using FaultFn   = ResultFn;   // called on BlockResult::Fault
 
     void setCallbacks(DoneFn done, AbortFn abort, FaultFn fault) {
         _done  = done;
         _abort = abort;
         _fault = fault;
     }
+    void setAfterburnerContext(bool afterburner) { _afterburner = afterburner; }
 
     void startSequence(IBlock** blocks, size_t count,
                        const HardwareConfig::SeqSideAction (*enterActions)[HardwareConfig::MAX_SEQ_SIDE_ACTIONS] = nullptr,
@@ -40,11 +42,12 @@ public:
         // onExit() cleanup runs (e.g. ABIgnite restores pre-torch throttle).
         // Without this, interrupting mid-sequence (e.g. fault during AB ignition)
         // leaves actuators in whatever state the block had set them.
-        // Configured exit side-actions run too — same pairing as the Complete path.
+        // Replacement is ECU-owned cleanup. User success/timeout exit actions
+        // must not run for a forced replacement.
         const uint32_t operation = ++_generation;
         if (_running && _blocks && _idx < _count) {
+            IBlock::setAfterburnerContext(_afterburner);
             _blocks[_idx]->onExit();
-            _applyActions(_exitActions, _idx);
             if (_generation != operation) return;
         }
         _blocks  = blocks;
@@ -54,16 +57,23 @@ public:
         _exitActions  = exitActions;
         _running = count > 0;
         auto& ed = EngineData::instance();
-        ed.seqBlockTotal = (uint8_t)count;
-        ed.seqBlockIdx   = 0;
+        if (_afterburner) {
+            ed.abSeqBlockTotal = (uint8_t)count; ed.abSeqBlockIdx = 0;
+            ed.abSeqStartedMs = millis(); ed.abSeqEndedMs = 0; ed.abSeqLastResult[0] = '\0';
+            ed.abSeqFaultBlock[0] = '\0';
+        } else {
+            ed.seqBlockTotal = (uint8_t)count; ed.seqBlockIdx = 0;
+            ed.seqStartedMs = millis(); ed.seqEndedMs = 0; ed.seqLastResult[0] = '\0';
+            ed.seqFaultBlock[0] = '\0';
+        }
         if (_running) _enter(0);
     }
 
     void stopSequence() {
         const uint32_t operation = ++_generation;
         if (_running && _idx < _count) {
+            IBlock::setAfterburnerContext(_afterburner);
             _blocks[_idx]->onExit();
-            _applyActions(_exitActions, _idx);
             if (_generation != operation) return;
         }
         _running = false;
@@ -73,15 +83,24 @@ public:
         _enterActions = nullptr;
         _exitActions  = nullptr;
         auto& ed = EngineData::instance();
-        ed.currentBlock[0] = '\0';
-        ed.seqBlockTotal   = 0;
-        ed.seqBlockIdx     = 0;
+        if (_afterburner) {
+            ed.abCurrentBlock[0] = '\0'; ed.abSeqBlockTotal = 0; ed.abSeqBlockIdx = 0;
+            ed.abSeqEndedMs = millis();
+            strncpy(ed.abSeqLastResult, "stopped", sizeof(ed.abSeqLastResult)-1);
+            ed.abSeqLastResult[sizeof(ed.abSeqLastResult)-1] = '\0';
+        } else {
+            ed.currentBlock[0] = '\0'; ed.seqBlockTotal = 0; ed.seqBlockIdx = 0;
+            ed.seqEndedMs = millis();
+            strncpy(ed.seqLastResult, "stopped", sizeof(ed.seqLastResult)-1);
+            ed.seqLastResult[sizeof(ed.seqLastResult)-1] = '\0';
+        }
     }
 
     void tick() {
         if (!_running || !_blocks || _idx >= _count) return;
         const uint32_t operation = _generation;
 
+        IBlock::setAfterburnerContext(_afterburner);
         BlockResult r = _blocks[_idx]->tick();
         if (_generation != operation) return;
 
@@ -90,18 +109,24 @@ public:
                 break;
 
             case BlockResult::Complete:
-                FlightRecorder::logBlockExit(_blocks[_idx]->name(), "ok");
+            case BlockResult::TimeoutContinue:
+                {
+                const bool acceptedTimeout = r == BlockResult::TimeoutContinue;
+                const char* completedBlock = _blocks[_idx]->name();
+                FlightRecorder::logBlockExit(_blocks[_idx]->name(), acceptedTimeout ? "timeout_continue" : "ok");
                 _blocks[_idx]->onExit();
                 _applyActions(_exitActions, _idx);
                 if (_generation != operation) return;
                 _idx++;
                 if (_idx >= _count) {
                     _running = false;
-                    if (_done) _done();
+                    _recordResult(acceptedTimeout ? "timeout_continue" : "complete");
+                    if (_done) _done(completedBlock, r);
                 } else {
                     _enter(_idx);
                 }
                 break;
+                }
 
             case BlockResult::Abort:
                 // In bench mode: treat abort as Complete so the full sequence still runs.
@@ -112,16 +137,16 @@ public:
                     _applyActions(_exitActions, _idx);
                     if (_generation != operation) return;
                     _idx++;
-                    if (_idx >= _count) { _running = false; if (_done) _done(); }
+                    if (_idx >= _count) { _running = false; _recordResult("complete"); if (_done) _done(_blocks[_idx - 1]->name(), BlockResult::Complete); }
                     else { _enter(_idx); }
                     break;
                 }
                 FlightRecorder::logBlockExit(_blocks[_idx]->name(), "abort");
                 _blocks[_idx]->onExit();
-                _applyActions(_exitActions, _idx);
                 if (_generation != operation) return;
                 _running = false;
-                if (_abort) _abort();
+                _recordResult("abort");
+                if (_abort) _abort(_blocks[_idx]->name(), BlockResult::Abort);
                 break;
 
             case BlockResult::Fault:
@@ -132,16 +157,17 @@ public:
                     _applyActions(_exitActions, _idx);
                     if (_generation != operation) return;
                     _idx++;
-                    if (_idx >= _count) { _running = false; if (_done) _done(); }
+                    if (_idx >= _count) { _running = false; _recordResult("complete"); if (_done) _done(_blocks[_idx - 1]->name(), BlockResult::Complete); }
                     else { _enter(_idx); }
                     break;
                 }
                 FlightRecorder::logBlockExit(_blocks[_idx]->name(), "fault");
+                _recordFaultBlock(_blocks[_idx]->name());
                 _blocks[_idx]->onExit();
-                _applyActions(_exitActions, _idx);
                 if (_generation != operation) return;
                 _running = false;
-                if (_fault) _fault();
+                _recordResult("fault");
+                if (_fault) _fault(_blocks[_idx]->name(), BlockResult::Fault);
                 break;
         }
     }
@@ -160,6 +186,7 @@ private:
     const HardwareConfig::SeqSideAction (*_enterActions)[HardwareConfig::MAX_SEQ_SIDE_ACTIONS] = nullptr;
     const HardwareConfig::SeqSideAction (*_exitActions)[HardwareConfig::MAX_SEQ_SIDE_ACTIONS] = nullptr;
     bool      _running = false;
+    bool      _afterburner = false;
     uint32_t  _generation = 0;
     DoneFn    _done    = nullptr;
     AbortFn   _abort   = nullptr;
@@ -171,15 +198,34 @@ private:
         // Update last-event for dashboard display
         snprintf(ed.lastEvent, sizeof(ed.lastEvent), "Seq: %s", bname);
         // Update sequence progress fields for web UI
-        strncpy(ed.currentBlock, bname, sizeof(ed.currentBlock) - 1);
-        ed.currentBlock[sizeof(ed.currentBlock) - 1] = '\0';
-        ed.seqBlockIdx = (uint8_t)i;
+        char* current = _afterburner ? ed.abCurrentBlock : ed.currentBlock;
+        const size_t currentSize = _afterburner ? sizeof(ed.abCurrentBlock) : sizeof(ed.currentBlock);
+        strncpy(current, bname, currentSize - 1); current[currentSize - 1] = '\0';
+        if (_afterburner) ed.abSeqBlockIdx = (uint8_t)i; else ed.seqBlockIdx = (uint8_t)i;
         FlightRecorder::logBlockEnter(bname);
+        IBlock::setAfterburnerContext(_afterburner);
         _blocks[i]->onEnter();
         _applyActions(_enterActions, i);
         // A configurable side action must never be able to re-energize a
         // combustion or starter output in the hard-cut shutdown block.
         if (strcmp(bname, "ImmediateCut") == 0) _blocks[i]->onEnter();
+    }
+
+    void _recordResult(const char* result) {
+        auto& ed = EngineData::instance();
+        char* target = _afterburner ? ed.abSeqLastResult : ed.seqLastResult;
+        const size_t size = _afterburner ? sizeof(ed.abSeqLastResult) : sizeof(ed.seqLastResult);
+        strncpy(target, result, size - 1); target[size - 1] = '\0';
+        if (_afterburner) { ed.abSeqEndedMs = millis(); ed.abCurrentBlock[0] = '\0'; }
+        else { ed.seqEndedMs = millis(); ed.currentBlock[0] = '\0'; }
+    }
+
+    void _recordFaultBlock(const char* blockName) {
+        auto& ed = EngineData::instance();
+        char* target = _afterburner ? ed.abSeqFaultBlock : ed.seqFaultBlock;
+        const size_t size = _afterburner ? sizeof(ed.abSeqFaultBlock) : sizeof(ed.seqFaultBlock);
+        strncpy(target, blockName ? blockName : "UNKNOWN", size - 1);
+        target[size - 1] = '\0';
     }
 
     void _applyActions(const HardwareConfig::SeqSideAction (*actions)[HardwareConfig::MAX_SEQ_SIDE_ACTIONS], size_t i) {

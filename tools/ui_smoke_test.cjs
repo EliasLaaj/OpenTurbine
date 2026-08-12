@@ -276,6 +276,7 @@ function installedBrowser() {
     results.push('fault scenario exposes the current diagnosis and direct investigation routes');
 
     await scenario(page, 'full');
+    await page.request.post(`${base}/__sim/data`, { data: { mode:'STANDBY', config_locked:false } });
     await page.goto(`${base}/config.html`);
     await page.waitForSelector('#cf-tot_limit');
     await openConfigWorkspace(page);
@@ -359,7 +360,7 @@ function installedBrowser() {
     await page.evaluate(() => closeRegistryAddDialog());
     await page.evaluate(() => addRegistryChannel('output'));
     const outputCatalog = await text(page, '#registry-add-catalog');
-    for (const label of ['Coolant pump', 'Air starter', 'Pilot gas / start-fuel solenoid',
+    for (const label of ['Coolant pump', 'Air starter', 'Start-fuel solenoid',
       'Air / fuel purge valve', 'Variable nozzle actuator']) {
       assert.match(outputCatalog, new RegExp(label.replace(/[()]/g, '\\$&')));
     }
@@ -455,6 +456,24 @@ function installedBrowser() {
     });
     assert.deepEqual(sharedSpi, { allConfigured:true, busConflict:false });
     results.push('hardware page allows configured SPI bus sharing across temperature sensors');
+
+    const concurrentMerge = await page.evaluate(() => {
+      const hardware = mergeHardwareEdits(
+        {profile_desc:'old', startup_seq:['OldStart']},
+        {profile_desc:'edited', startup_seq:['OldStart']},
+        {profile_desc:'newer elsewhere', startup_seq:['FreshStart']});
+      const settings = mergeHardwareSettingsCleanup(
+        {oil_advanced:{shutdown_on_underflow:true}, rules:[{name:'removed'},{name:'kept'}]},
+        {oil_advanced:{shutdown_on_underflow:false}, rules:[{name:'kept'}]},
+        {oil_advanced:{shutdown_on_underflow:true}, rules:[{name:'removed'},{name:'kept',threshold:2},{name:'new'}]});
+      return {hardware, settings};
+    });
+    assert.equal(concurrentMerge.hardware.profile_desc, 'edited');
+    assert.deepEqual(concurrentMerge.hardware.startup_seq, ['FreshStart']);
+    assert.equal(concurrentMerge.settings.oil_advanced.shutdown_on_underflow, false);
+    assert.deepEqual(concurrentMerge.settings.rules,
+      [{name:'kept',threshold:2},{name:'new'}]);
+    results.push('hardware save merges only page-owned edits and dependency cleanup onto the latest engine file');
 
     await page.request.patch(`${base}/api/hardware`, { data: { platform: 'esp32s3' } });
     await page.reload();

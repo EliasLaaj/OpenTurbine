@@ -51,3 +51,4 @@ else:
 
 rig.summary("Run C (RUNNING-mode: oil_zero, flameout)")
 rig.close()
+raise SystemExit(0 if rig.rows and all(row[1] for row in rig.rows) else 1)

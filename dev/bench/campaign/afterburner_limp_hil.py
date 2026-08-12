@@ -27,14 +27,13 @@ def main() -> int:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}", flush=True)
 
     def build(hw):
-        runner.common_turbine(hw, with_idle_input=False)
+        runner.common_turbine(hw, with_idle_input=False, with_fuel_sol=False)
         runner.enable_n1(hw)
         runner.enable_tot(hw)
         hw["has_afterburner"] = True
-        hw["actuators"]["ab_sol"].update(enabled=True, pin=39, active_h=True)
-        hw["actuators"]["ab_pump"].update(enabled=True, pin=17, type=2, active_h=True)
+        hw["actuators"]["ab_sol"].update(enabled=True, pin=12, active_h=True)
+        hw["actuators"]["ab_pump"].update(enabled=True, pin=39, type=2, active_h=True)
         hw["ab_trigger"].update(source=0, requires_arm=False)
-        hw["ab_flame"].update(enabled=False, pin=-1)
         # Bench mode makes ABFlameConfirm deterministic, while retaining the
         # same explicit confirmation contract required from production sequences.
         hw["ab_seq"] = ["ABSolOpen", "ABPumpOn", "ABFlameConfirm", "ABStabilize"]
@@ -51,7 +50,13 @@ def main() -> int:
         })
         ok, resp = runner.dc.patch_cfg({
             "engine": {"rpm_limit": 90000, "min_rpm": 0, "tot_limit": 900},
-            "throttle": {"ramp_up_ms": 0, "ramp_down_ms": 0, "fuel_pump_min_pct": 10},
+            "throttle": {
+                "ramp_up_ms": 0, "ramp_down_ms": 0, "fuel_pump_min_pct": 10,
+                "rpm_limiter_mode": 0,
+                "pullback_n1": False, "pullback_n2": False,
+                "pullback_egt": False, "pullback_p1": False,
+                "pullback_p2": False, "pullback_torque": False,
+            },
             "limp_mode": {"max_throttle_pct": 30},
             "afterburner": {
                 "main_fuel_offset_pct": 20, "pump_min_pct": 20,
@@ -88,31 +93,44 @@ def main() -> int:
         )
         time.sleep(0.2)
         ab_pulse = t.get("THROTTLE_OUT")
-        ab_sol = t.get("STARTER_EN")
+        ab_sol = t.get("FUEL_SOL")
+        ab_pump = t.get("STARTER_EN")
         record(
             "AFTERBURNER_OFFSET_REACHES_PHYSICAL_MAIN_FUEL_OUTPUT",
             code == 200 and ab_ok and int(ab_sol.get("level") or 0) == 1 and
+            int(ab_pump.get("level") or 0) == 1 and
             int(ab_pulse.get("us") or 0) > int(base_pulse.get("us") or 0) + 120,
             command=resp, baseline_effective=base.get("throttle_effective"),
             baseline_pulse=base_pulse, ab_offset=ab.get("ab_fuel_offset"),
-            ab_pulse=ab_pulse, ab_solenoid=ab_sol,
+            ab_pulse=ab_pulse, ab_solenoid=ab_sol, ab_pump=ab_pump,
         )
 
         code, resp = dut.command("TOGGLE_LIMP_MODE")
         capped_ok, capped = dut.poll_until(
-            lambda d: d.get("limp_mode") and d.get("ab_mode") == "Running",
+            lambda d: d.get("limp_mode") and
+                      float(d.get("throttle_effective", 1) if d.get("throttle_effective") is not None else 1) <= 0.305,
             timeout=3, interval=0.05,
         )
         time.sleep(0.2)
         capped_pulse = t.get("THROTTLE_OUT")
+        capped_sol = t.get("FUEL_SOL")
+        capped_pump = t.get("STARTER_EN")
+        ab_stopped_safely = (
+            capped.get("ab_mode") != "Running" and
+            float(capped.get("ab_fuel_offset") or 0) <= 0.001 and
+            int(capped_sol.get("level") or 0) == 0 and
+            int(capped_pump.get("level") or 0) == 0
+        )
         # 1000..2000 us calibration: a true 30% total main-fuel cap is <=1300 us.
         record(
             "REDUCED_POWER_CAP_INCLUDES_AFTERBURNER_MAIN_FUEL_OFFSET",
             code == 200 and capped_ok and
-            float(capped.get("throttle_effective") or 1) <= 0.305 and
-            int(capped_pulse.get("us") or 0) <= 1305,
+            float(capped.get("throttle_effective", 1) if capped.get("throttle_effective") is not None else 1) <= 0.305 and
+            int(capped_pulse.get("us") or 0) <= 1305 and
+            (capped.get("ab_mode") == "Running" or ab_stopped_safely),
             command=resp, throttle_effective=capped.get("throttle_effective"),
-            ab_offset=capped.get("ab_fuel_offset"), capped_pulse=capped_pulse,
+            ab_mode=capped.get("ab_mode"), ab_offset=capped.get("ab_fuel_offset"),
+            capped_pulse=capped_pulse, ab_solenoid=capped_sol, ab_pump=capped_pump,
         )
 
         t.set("STOP", 1)
@@ -177,7 +195,8 @@ def main() -> int:
     print(f"RESULT: {passed}/{len(rows)} afterburner interaction checks passed; "
           f"firmware={runner.firmware_before}; restored={restored}", flush=True)
     print("Results:", os.path.abspath(path), flush=True)
-    return 0 if error is None and restored and result["firmware_match"] and passed == 3 else 1
+    return 0 if (error is None and restored and result["firmware_match"] and
+                 len(rows) == 3 and passed == len(rows)) else 1
 
 
 if __name__ == "__main__":

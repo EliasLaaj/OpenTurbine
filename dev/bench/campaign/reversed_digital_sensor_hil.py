@@ -8,7 +8,6 @@ analogue thermocouple junction or load-cell bridge ahead of the converter IC.
 """
 from __future__ import annotations
 
-import copy
 import json
 import os
 import sys
@@ -21,6 +20,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "harness"))
 
 from otbench.dut import DUT  # noqa: E402
+from otbench.dutconfig import DutConfig  # noqa: E402
 from otbench.tester import Tester  # noqa: E402
 from ten_build_webui_hil import chan_input  # noqa: E402
 
@@ -28,11 +28,13 @@ from ten_build_webui_hil import chan_input  # noqa: E402
 class ReversedDigitalSensorHil:
     def __init__(self):
         self.dut = DUT()
+        self.dc = DutConfig(self.dut)
         self.tester = Tester(os.environ.get("OTBENCH_PORT", "COM4")).open()
         self.firmware = self.dut.data().get("fw_version", "unknown")
         self.tester_version = self.tester.ping()
         self.original_hw = self.dut.hardware()
         self.rows: list[dict] = []
+        self.restored = False
         self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.result_path = os.path.join(
             ROOT, "dev", "bench", "results", f"reversed_digital_sensor_hil_{self.run_id}.json"
@@ -73,8 +75,10 @@ class ReversedDigitalSensorHil:
             if "assist_enabled" in item:
                 item["assist_enabled"] = False
         # A physical STOP input is mandatory even in a sensor-only bench
-        # profile. GPIO27 is unused by the protected role-reversal harness.
-        hw["controls"].update(start_pin=-1, stop_pin=27)
+        # profile. GPIO27 is the wired FLAME stimulus and rests LOW, so using
+        # it as active-low STOP silently blocks every actuator tool. GPIO26 is
+        # deliberately unwired in the protected role-reversal harness.
+        hw["controls"].update(start_pin=-1, stop_pin=26)
         for row in hw.get("di_channels", []):
             row["pin"] = -1
             row["role"] = "none"
@@ -116,18 +120,20 @@ class ReversedDigitalSensorHil:
 
     def install_channel(self, channel, legacy=None, spi=None):
         self.dut.ensure_mode_standby()
-        hw = copy.deepcopy(self.dut.hardware())
-        self.quiet_profile(hw)
-        hw["channel_registry"]["inputs"] = [channel]
-        if spi is not None:
-            hw["spi"].update(spi)
-        if legacy:
-            hw["sensors"][legacy[0]].update(legacy[1])
-        old_boot = self.dut.data().get("boot_count")
-        code, response = self.dut._post("/api/hardware", hw)
-        if code != 200:
-            raise RuntimeError(f"hardware save rejected: HTTP {code} {response}")
-        self.wait_online(old_boot)
+        def mutate(hw):
+            self.quiet_profile(hw)
+            hw["channel_registry"]["inputs"] = [channel]
+            if spi is not None:
+                hw["spi"].update(spi)
+            if legacy:
+                hw["sensors"][legacy[0]].update(legacy[1])
+        ok, response = self.dc.multi(
+            mutate,
+            check=lambda hw: len(hw["channel_registry"]["inputs"]) == 1 and
+                hw["channel_registry"]["inputs"][0].get("id") == channel["id"],
+        )
+        if not ok:
+            raise RuntimeError(f"hardware save rejected: {response}")
         saved = self.dut.hardware()["channel_registry"]["inputs"]
         if len(saved) != 1 or saved[0].get("id") != channel["id"]:
             raise RuntimeError(f"channel did not persist: {saved}")
@@ -240,12 +246,9 @@ class ReversedDigitalSensorHil:
             pass
         try:
             self.dut.ensure_mode_standby()
-            old_boot = self.dut.data().get("boot_count")
-            code, response = self.dut._post("/api/hardware", self.original_hw)
-            if code == 200:
-                self.wait_online(old_boot)
-            else:
-                print(f"WARNING: classic DUT restore rejected: HTTP {code} {response}")
+            self.restored, response = self.dc.restore(self.original_hw)
+            if not self.restored:
+                print(f"WARNING: classic DUT restore rejected: {response}")
         except Exception as exc:
             print(f"WARNING: classic DUT restore failed: {exc}")
 
@@ -268,12 +271,16 @@ class ReversedDigitalSensorHil:
                 "results": self.rows,
                 "passed": sum(1 for row in self.rows if row["ok"]),
                 "total": len(self.rows),
+                "restored": self.restored,
             }
             os.makedirs(os.path.dirname(self.result_path), exist_ok=True)
             with open(self.result_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
             print(f"Result: {payload['passed']}/{payload['total']} -> {self.result_path}")
-        return all(row["ok"] for row in self.rows)
+        # Each thermocouple contributes decode + open-circuit checks; HX711
+        # contributes positive, signed-negative, and missing-data checks.
+        expected = 3 if os.environ.get("OTBENCH_HX_ONLY") == "1" else 9
+        return self.restored and len(self.rows) == expected and all(row["ok"] for row in self.rows)
 
 
 if __name__ == "__main__":

@@ -113,7 +113,6 @@ public:
     static float idleRampDownMs;
     static float idleDeadbandRpm;
     static float idleRpmLimit;
-    static float idleMinMultiplier;
     static float idleMaxMultiplier;      // idle ceiling = throttleIdleMaxPct * this (>=1)
     static bool  idleUseN2;          // false = N1 (default), true = N2
     static int   idleSource;         // 0=N1, 1=N2, 2=P1, 3=P2
@@ -133,6 +132,10 @@ public:
     static float idleTrimDownPctPerSec;
     static float idleLearnRate;
     static float idleLearnAccelMax;
+    static float idlePressureDecelEnter;
+    static float idlePressureSettleBand;
+    static float idlePressureFullResponse;
+    static float idlePressureLearnRateMax;
 
     // ── Safety ────────────────────────────────────────────────
     static int   safetyCheckIntervalMs;
@@ -158,11 +161,11 @@ public:
     // ── Relight ───────────────────────────────────────────────
     static bool     relightEnabled;      // opt-in; false = flameout → immediate fault
     static float    relightMinRpm;       // min N1 to attempt relight (falls below → fault)
-    static int      relightIgnitionTarget; // 0=Igniter 1, 1=AB / Pilot Igniter, 2=Glow/Wet Glow
+    static int      relightIgnitionTarget; // 0=Igniter 1, 1=Secondary Igniter, 2=Glow/Wet Glow
     static int      relightConfirmSource; // 0=auto, 1=flame, 2=N1 recovered, 3=selected EGT rise
     static float    relightConfirmRpm;
     static float    relightTotRiseC;
-    static int      relightTimeoutMs;    // ms to keep trying after first relight trigger (0 = unlimited)
+    static int      relightTimeoutMs;    // 0 = hardcoded 30 s maximum; never unlimited
 
     // ── Tool test durations (standby diagnostics) ─────────────
     static uint32_t toolFuelPrimeMs;
@@ -225,7 +228,7 @@ public:
 
     // ── Misc ──────────────────────────────────────────────────
     static bool  igniterOnStart;         // fire igniter while START held during RUNNING
-    static int   manualRelightIgnitionTarget; // 0=Igniter 1, 1=AB / Pilot Igniter, 2=Glow/Wet Glow
+    static int   manualRelightIgnitionTarget; // 0=Igniter 1, 1=Secondary Igniter, 2=Glow/Wet Glow
 
     // ── Cooldown hardware selection ───────────────────────────
     static bool  cooldownUseStarter;          // spin starter motor during CooldownSpin block
@@ -240,7 +243,7 @@ public:
     // ── WaitForInput block ────────────────────────────────────
     static int   waitForInputChannel;    // DI channel index (0-3)
     static bool  waitForInputExpected;   // wait until active (true) or inactive (false)
-    static int   waitForInputTimeoutMs;  // 0 = wait indefinitely
+    static int   waitForInputTimeoutMs;  // finite when the block is included
 
     // ── Cooldown skip ─────────────────────────────────────────
     static int   cooldownSkipHoldMs;     // hold both buttons this long in SHUTDOWN to skip cooldown
@@ -294,9 +297,10 @@ public:
     static bool  abUseIgniter;         // fire AB igniter (igniter2) on ignition
     static float abTorchSpikePct;      // main fuel pump spike % during torch
     static int   abTorchDurationMs;    // torch spike duration
-    static float abTorchTotLimit;      // cut torch if TOT exceeds this (°C); 0=disabled
+    static float abTorchTotLimit;      // custom torch-only EGT cut (°C)
+    static int   abTorchGuardMode;     // 0=auto, 1=custom limit, 2=off
     // Flame confirmation
-    static int   abFlameMode;          // 0=sensor, 1=EGT rise, 2=timed
+    static int   abFlameMode;          // 0=verified edge, 1=EGT rise, 2=timed, 3=external level
     static float abTotRiseDegC;        // selected EGT rise required for EGT-rise mode
     static int   abTotRiseWindowMs;    // time window for selected EGT rise
     static int   abAssumeIgnitedMs;    // timed mode: wait this long then assume lit
@@ -328,6 +332,7 @@ public:
     static const char* primaryEgtLabel();
     static float effectiveRelightMinRpm();       // never below configured minimum running N1
     static float applyFuelPumpMinimum(float demand01);
+    static float effectiveMainFuelDemand(const EngineData& ed);
 
     // ── RC PWM input calibration ──────────────────────────────
     // GPIO pin and ADC/servo input type are selected in Hardware.
@@ -398,7 +403,6 @@ public:
     static int   throttleMaxRaw;
     static int   idleMinRaw;
     static int   idleMaxRaw;
-    static int   flameThreshold;
     static float oilPolyA, oilPolyB, oilPolyC, oilPolyD;
     static float oilPolyXMin, oilPolyXMax;
     // P1 / P2 two-point linear calibration (rawMin/Max = ADC counts, valMax = bar at rawMax)
@@ -466,20 +470,25 @@ public:
     // Auto-fill a sane default threshold for any threshold-based
     // safeties just ENABLED (off->on) while its threshold is 0, so a ticked
     // safety cannot stay silently off. Pass the pre-change enable flags.
-    static void autoFillNewlyEnabledSafety(bool prevTit, bool prevOilTemp,
+    static void autoFillNewlyEnabledSafety(bool prevOilTemp,
                                            bool prevFuelPress, bool prevBatt,
                                            bool prevSurge, bool prevHotStart);
     static void requestSave();   // Core 1: mark save needed, zero file I/O
     static bool flushPendingSave(); // Core 0 in STANDBY/FAULT: perform deferred save
     static void requestRuntimeStatsSave(); // Core 1: persist hour meter through NVS
     static bool flushPendingRuntimeStats(); // Core 0 in STANDBY/FAULT: deferred NVS write
+    static bool runtimeStatsPending() { return _runtimeStatsSavePending; }
+    static bool runtimeStatsHealthy() { return _runtimeStatsError == 0; }
+    static uint8_t runtimeStatsError() { return _runtimeStatsError; }
     static void loadRuntimeStats(); // merge per-engine NVS hour meter after profile load
-    static void clearRuntimeStats(); // factory reset current engine's hour meter
+    static bool clearRuntimeStats(); // verified factory-reset of current engine's hour meter
     // Guarded RMW helpers for the persisted counters (called from the Core 1
     // ECU path); protected against a concurrent Core 0 restore-merge.
     static void addRunSeconds(uint32_t seconds);
     static void incStartAttemptCount();
     static void incRunCount();
+    // True while the engine is active. Developer Mode's narrow RUNNING-only
+    // live-tuning exception is enforced by the PATCH endpoint, not here.
     static bool isLocked();
     static bool acquireStorageWrite(); // serialize all ecu_config.json replacement operations
     static void releaseStorageWrite();
@@ -492,19 +501,34 @@ public:
     // Parse and apply JSON from web upload
     static bool validateJson(const char* json, size_t len);
     static bool validateJson(const JsonDocument& doc);
+    // Full-engine restore validates settings before its uploaded hardware is
+    // resident. This checks schema/ranges only; dependency cleanup is run
+    // after that uploaded hardware has been applied.
+    static bool validateJsonValues(const JsonDocument& doc);
     static bool fromJson(const char* json, size_t len);
     static bool fromJson(const JsonDocument& doc);  // PATCH merge variant
     // Applies a validated settings document, releases its heap before the
     // unified-file write, and reloads the on-disk values if the write fails.
-    static bool applyJsonAndSaveReleasing(JsonDocument& doc);
-    static bool applyJsonRuntimeOnly(const JsonDocument& doc); // no flash write; restore staging only
+    // Persists a validated candidate without touching live Config statics.
+    // On success, ownership of outJson transfers to ConfigApplyGate/the ECU core.
+    static bool persistJsonCandidateReleasing(JsonDocument& doc, char*& outJson, size_t& outLen);
+    static bool applyJsonRuntimeOnly(const JsonDocument& doc, bool allowActiveLive = false,
+                                     bool validateHardwareDependencies = true); // no flash write
+    // Classic ESP32 can become too fragmented to hold the serialized transfer
+    // buffer and a second complete JSON tree at once. Settings persistence also
+    // stages the exact validated candidate so Core 1 can retry from a stream
+    // after releasing that buffer. Other targets implement these as no-ops.
+    static DeserializationError loadStagedJsonCandidate(JsonDocument& doc);
+    static void clearStagedJsonCandidate();
 
 private:
     static void _applyDefaults();
     static void _fromDoc(const JsonDocument& doc);
     static void _toDoc(JsonDocument& doc);
     static void _writeDoc(JsonObject doc);
+    static bool _saveSettingsJson(const char* settingsJson, size_t settingsLen);
     static volatile bool _savePending;
     static volatile bool _runtimeStatsSavePending;
+    static volatile uint8_t _runtimeStatsError; // 0=ok, 1=NVS open, 2=write
     static bool _missingRequiredSections;
 };

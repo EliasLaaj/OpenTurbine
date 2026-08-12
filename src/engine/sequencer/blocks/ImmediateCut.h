@@ -24,7 +24,8 @@ public:
         ed.flameMonitorActive = false;
         ed.oilMinBar          = 0;        // stop oil safety check during cooldown
         ed.relightArmed       = false;
-        ed.limpMode           = false;
+        // Limp remains latched through shutdown. enterStandby() is the single
+        // clean ownership boundary that releases it.
         // Do NOT zero oilPumpPct here.
         // The P-loop does not run during SHUTDOWN, so oilPumpPct stays at whatever
         // the running loop last set — keeping the bearings lubricated through RPMDrop.

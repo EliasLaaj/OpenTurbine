@@ -63,3 +63,4 @@ print("\n=== DI + switches: %d/%d passed ===" % (npass, len(results)))
 for n, ok in results:
     if not ok: print("  FAIL:", n)
 rig.close()
+raise SystemExit(0 if npass == len(results) else 1)

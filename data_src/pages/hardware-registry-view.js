@@ -31,8 +31,8 @@ function registryPurposeLabel(direction, c) {
   return registryPurposeDefinition(direction, registryDerivedPurpose(direction,c))?.label || 'Generic channel';
 }
 const REGISTRY_SINGLETON_PURPOSES = {
-  input: new Set(['n1_speed','n2_speed','tot','tit','oil_pressure','oil_temperature','fuel_pressure','p1_pressure','p2_pressure','fuel_flow','oil_flow','scavenge_flow','flame','ab_flame','torque','thrust','battery_voltage','throttle','idle','ab_command','start_switch','stop_switch','low_oil_switch','oil_zero_switch']),
-  output: new Set(['main_fuel','fuel_shutoff','starter','starter_enable','oil_pump','scavenge_pump','cooling_fan','fuel_pump','igniter','ab_igniter','ab_valve','glow_plug','ab_pump','prop_pitch','air_starter','drain_valve'])
+  input: new Set(['n1_speed','n2_speed','tot','tit','oil_temperature','fuel_pressure','p1_pressure','p2_pressure','fuel_flow','flame','ab_flame','torque','thrust','battery_voltage','throttle','idle','ab_command','start_switch','stop_switch','low_oil_switch','oil_zero_switch']),
+  output: new Set()
 };
 function registryPurposeIsSingleton(direction, purpose) {
   return REGISTRY_SINGLETON_PURPOSES[direction]?.has(String(purpose || '')) || false;
@@ -68,7 +68,11 @@ function registryStatus(c) {
   const thermocouple = registryTemperatureIsSpi(c);
   if (remote && !profileBacked) {
     if (cfg.i2c?.enabled === false) return {kind:'error', text:'Enable the shared I2C bus or remove this assignment'};
-    if (!(Number(c.i2c_address) >= 0x08 && Number(c.i2c_address) <= 0x77)) return {kind:'error', text:'Choose a detected I2C device'};
+    const address = Number(c.i2c_address);
+    const validAddress = Number(c.driver) === 10 ? address === 0x2A
+      : [8,11].includes(Number(c.driver)) ? address >= 0x20 && address <= 0x27
+      : Number(c.driver) === 9 && address >= 0x10 && address <= 0x17;
+    if (!validAddress) return {kind:'error', text:'Choose a compatible detected I2C device'};
     const maxChannel = Number(c.driver) === 10 ? 2 : 8;
     if (Number(c.device_channel) < 0 || Number(c.device_channel) >= maxChannel) return {kind:'error', text:'I2C channel is invalid'};
     const device = (cfg._i2c_discovery?.devices || []).find(d=>Number(d.address)===Number(c.i2c_address));
@@ -101,11 +105,18 @@ function registryStatus(c) {
   }
   if (Number(c.temp_interface||0) === 4 && (!(Number(c.ntc_beta) > 0) || !(Number(c.ntc_r0) > 0) || !(Number(c.ntc_r_fixed) > 0))) return {kind:'error', text:'NTC calibration invalid'};
   if (Number(c.temp_interface||0) === 5 && (Number(c.temp_resolution) < 9 || Number(c.temp_resolution) > 12)) return {kind:'error', text:'DS18B20 resolution invalid'};
+  const curveProblem = registryCurveProblem(c);
+  if (curveProblem) return {kind:'error', text:curveProblem};
   const rangeProblem = registryRangeProblem(c);
   if (rangeProblem) return {kind:'error', text:rangeProblem};
   if (Number(c.min_run_demand ?? 0) < 0 || Number(c.min_run_demand ?? 0) > 1) return {kind:'error', text:'Minimum reliable command must be 0-100%'};
   if (c.pullup && c.pulldown) return {kind:'error', text:'Pull-up/down conflict'};
   const actKey = registryCoreActuatorKey(c);
+  const engineActuatorPurpose = registryCoreActuatorPurposeKey(c);
+  if (direction === 'output' && purpose !== 'prop_pitch' &&
+      (engineActuatorPurpose || ['ab_valve','pilot_fuel'].includes(purpose)) &&
+      Number(c.safe_demand || 0) !== 0)
+    return {kind:'error', text:'Core engine outputs must initialize Off'};
   const dedicatedCurrent = ['oil_pump','glow_plug','igniter','igniter2'].includes(actKey) ? ensureActuatorObject(actKey) : null;
   const currentEnabled = dedicatedCurrent ? !!dedicatedCurrent.has_current : !!c.has_current;
   const currentPin = dedicatedCurrent ? dedicatedCurrent.current_pin : c.current_pin;
@@ -124,8 +135,11 @@ function registryStatus(c) {
     if (!(registryRoot().inputs || []).some(row => registryDerivedPurpose('input', row) === inputPurpose))
       return {kind:'error', text:'Matching flow meter missing'};
   }
-  if (Number(c.driver) === 5 && (Number(c.pwm_freq_hz ?? 5000) < 1 || Number(c.pwm_freq_hz ?? 5000) > 100000 || Number(c.pwm_res_bits ?? 10) < 8 || Number(c.pwm_res_bits ?? 10) > 14)) {
-    return {kind:'error', text:'PWM timing invalid'};
+  if (Number(c.driver) === 5) {
+    const frequency = Number(c.pwm_freq_hz ?? 5000), resolution = Number(c.pwm_res_bits ?? 10);
+    const maxFrequency = Math.min(100000, Math.floor(80000000 / (2 ** resolution)));
+    if (frequency < 1 || frequency > maxFrequency || resolution < 8 || resolution > 14)
+      return {kind:'error', text:`PWM timing is not achievable: ${resolution} bits supports at most ${maxFrequency} Hz`};
   }
   if ((actKey === 'igniter' || actKey === 'igniter2') && ensureActuatorObject(actKey).coil && !ensureActuatorObject(actKey).has_current) {
     return {kind:'error', text:'Current sensing required'};
@@ -144,7 +158,7 @@ function registryRangeProblem(c) {
   const min = Number(c?.min ?? 0);
   const max = Number(c?.max ?? 1);
   if (!Number.isFinite(min) || !Number.isFinite(max)) return 'Invalid range';
-  if (driver === 0 || driver === 4) return '';
+  if (driver === 0 || outputDriverIsOnOff(driver)) return '';
   if (max <= min) return 'Invalid range';
   if (driver === 1 && (min < 0 || max > 4095)) return 'ADC range 0-4095';
   if (driver === 1) {
@@ -286,7 +300,7 @@ function focusRegistryInvalid(details) {
 function registryReferenceSummary(direction, id) {
   const users = registryCurrentUsers(direction, id);
   if (users.length) return `Used by: ${users.join(', ')}`;
-  return 'Not used yet';
+  return direction === 'input' ? 'Monitoring only' : 'Available to rules and sequences';
 }
 function registryImpactDisplay(text) {
   const s = String(text || '');
@@ -314,8 +328,8 @@ function registryBlockLabel(block) {
     OilScavengeOn:'Scavenge On', OilScavengeOff:'Scavenge Off', StarterOff:'Starter Off',
     ImmediateCut:'Immediate Fuel and Ignition Cut', RPMDrop:'Wait for Rotor to Slow',
     CooldownSpin:'Cooldown', FinalStop:'Wait for Complete Stop', ThrottleSet:'Set Main Fuel Demand',
-    GlowPreheat:'Glow Preheat', FuelPumpRamp:'Pilot / Auxiliary Fuel Pump Ramp', FuelPump2Set:'Pilot / Auxiliary Fuel Pump Set',
-    FuelPump2On:'Pilot / Auxiliary Fuel Pump On', FuelPump2Off:'Pilot / Auxiliary Fuel Pump Off',
+    GlowPreheat:'Glow Preheat', FuelPumpRamp:'Secondary / Auxiliary Fuel Pump Ramp', FuelPump2Set:'Secondary / Auxiliary Fuel Pump Set',
+    FuelPump2On:'Secondary / Auxiliary Fuel Pump On', FuelPump2Off:'Secondary / Auxiliary Fuel Pump Off',
     CoolFanOn:'Cooling Fan On', CoolFanOff:'Cooling Fan Off',
     BleedOpen:'Bleed Valve Open', BleedClose:'Bleed Valve Close',
     AirstarterOn:'Air Starter Valve Open', AirstarterOff:'Air Starter Valve Close',
@@ -622,14 +636,16 @@ function abTriggerWorkflowCard() {
   const abt = cfg.ab_trigger || {};
   const source = Number(abt.source || 0);
   const sourceLabel = ['Manual / browser command','Throttle threshold','Physical trigger switch','Analog or RC command input'][source] || 'Unknown source';
-  const usesDiArm = hardwareHasDiRole('ab_arm');
-  const profileFireInput = pcbProfileActive() && registryHasPurpose('input','ab_fire');
-  const profileCommandInput = pcbProfileActive() && registryHasPurpose('input','ab_command');
+  const registryArmInput = registryHasPurpose('input','ab_arm');
+  const usesDiArm = hardwareHasDiRole('ab_arm') || registryArmInput;
+  const profileFireInput = registryHasPurpose('input','ab_fire');
+  const profileCommandInput = registryHasPurpose('input','ab_command');
   const armDetail = source !== 0 && abt.requires_arm
     ? (usesDiArm ? ' · armed by an AB Arm inventory switch' : ` · arm GPIO ${Number(abt.arm_pin ?? -1) >= 0 ? abt.arm_pin : 'not set'}`)
     : '';
   const sourcePin = source === 2 ? Number(abt.switch_pin ?? -1) : source === 3 ? Number(abt.input_pin ?? -1) : 0;
-  const pinRequired = !pcbProfileActive() && (source === 2 || source === 3);
+  const pinRequired = (source === 2 && !profileFireInput) ||
+                      (source === 3 && !profileCommandInput);
   const profileInputMissing = (source === 2 && pcbProfileActive() && !profileFireInput) ||
                               (source === 3 && pcbProfileActive() && !profileCommandInput);
   const armMissing = source !== 0 && abt.requires_arm && !usesDiArm &&
@@ -645,8 +661,8 @@ function abTriggerWorkflowCard() {
     : (rawThreshold * 3.3 / 4095).toFixed(2);
   const editor = editing ? `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
     <div class="hw-field"><span class="hw-label">Trigger source</span><span class="hw-desc">Choose what physically requests afterburner. For throttle mode, set Throttle Trigger % in Config - Afterburner.</span><select class="${fieldClass('source')}" data-ab-trigger-field="source" onchange="setAbTrigSrc(+this.value);renderHardwareWorkflowSummaries()"><option value="0"${source===0?' selected':''}>Manual / browser command</option><option value="1"${source===1?' selected':''}>Throttle threshold</option><option value="2"${source===2?' selected':''}>Physical switch</option><option value="3"${source===3?' selected':''}>Analog or RC command input</option></select></div>
-    ${source===2 ? (pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical command input</span><span class="hw-desc">${profileFireInput?'Uses the fitted Afterburner command switch from Inputs.':'Add an Afterburner command switch under Inputs and choose its named PCB connection.'}</span></div>` : `<div class="hw-field"><span class="hw-label">Trigger-switch GPIO</span><select class="${fieldClass('switch_pin')}" data-ab-trigger-field="switch_pin" onchange="setAbTrig('switch_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.switch_pin,'in')}</select></div><div class="hw-field"><span class="hw-label">Switch polarity</span><label class="hw-toggle"><input class="${fieldClass('switch_active_h')}" data-ab-trigger-field="switch_active_h" type="checkbox" ${abt.switch_active_h?'checked':''} onchange="setAbTrigBool('switch_active_h',this.checked);renderHardwareWorkflowSummaries()"><span></span> Active high</label></div>`) : ''}
-    ${source===3 ? (pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Command input</span><span class="hw-desc">${profileCommandInput?'Uses the fitted Afterburner analog / RC command from Inputs. Its signal type and calibration live on that input card.':'Add an Afterburner analog / RC command under Inputs and choose its named PCB connection.'}</span></div><div class="hw-field"><span class="hw-label">Trigger threshold (%)</span><span class="hw-desc">Afterburner is requested when the normalized command rises above this percentage.</span><input class="${fieldClass('input_threshold')}" type="number" min="0" max="100" step="1" value="${Math.round(rawThreshold*100/4095)}" onchange="setAbProfileThreshold(this.value)"></div>` : `<div class="hw-field"><span class="hw-label">Command signal</span><select class="${fieldClass('input_rc_pwm')}" data-ab-trigger-field="input_rc_pwm" onchange="setAbInputType(this.value==='rc');renderHardwareWorkflowSummaries()"><option value="analog"${!abt.input_rc_pwm?' selected':''}>Analog 0-3.3 V</option><option value="rc"${abt.input_rc_pwm?' selected':''}>RC servo pulse</option></select></div><div class="hw-field"><span class="hw-label">Command-input GPIO</span><select class="${fieldClass('input_pin')}" data-ab-trigger-field="input_pin" onchange="setAbTrig('input_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.input_pin,pinMode)}</select></div><div class="hw-field"><span class="hw-label">Trigger threshold (${abt.input_rc_pwm?'%':'V'})</span><span class="hw-desc">Afterburner is requested when this command input rises above the threshold.</span><input class="${fieldClass('input_threshold')}" data-ab-trigger-field="input_threshold" type="number" min="0" max="${abt.input_rc_pwm?'100':'3.3'}" step="${abt.input_rc_pwm?'1':'0.01'}" value="${thresholdValue}" onchange="setAbWorkflowThreshold(this.value)"></div>${abt.input_rc_pwm?`<div class="hw-field"><span class="hw-label">RC pulse range (us)</span><span class="hw-desc">Pulse widths representing 0% and 100% command.</span><div style="display:flex;gap:.35rem"><input class="${fieldClass('input_min_us')}" data-ab-trigger-field="input_min_us" aria-label="RC pulse minimum" type="number" min="500" max="2500" value="${Number(abt.input_min_us ?? 1000)}" onchange="setAbTrigBool('input_min_us',+this.value)"><input class="${fieldClass('input_max_us')}" data-ab-trigger-field="input_max_us" aria-label="RC pulse maximum" type="number" min="500" max="2500" value="${Number(abt.input_max_us ?? 2000)}" onchange="setAbTrigBool('input_max_us',+this.value)"></div></div>`:''}`) : ''}
+    ${source===2 ? ((pcbProfileActive() || profileFireInput) ? `<div class="hw-field"><span class="hw-label">Physical command input</span><span class="hw-desc">${profileFireInput?'Uses the fitted Afterburner command switch from Inputs.':'Add an Afterburner command switch under Inputs and choose its named PCB connection.'}</span></div>` : `<div class="hw-field"><span class="hw-label">Trigger-switch GPIO</span><select class="${fieldClass('switch_pin')}" data-ab-trigger-field="switch_pin" onchange="setAbTrig('switch_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.switch_pin,'in')}</select></div><div class="hw-field"><span class="hw-label">Switch polarity</span><label class="hw-toggle"><input class="${fieldClass('switch_active_h')}" data-ab-trigger-field="switch_active_h" type="checkbox" ${abt.switch_active_h?'checked':''} onchange="setAbTrigBool('switch_active_h',this.checked);renderHardwareWorkflowSummaries()"><span></span> Active high</label></div>`) : ''}
+    ${source===3 ? ((pcbProfileActive() || profileCommandInput) ? `<div class="hw-field"><span class="hw-label">Command input</span><span class="hw-desc">${profileCommandInput?'Uses the fitted Afterburner analog / RC command from Inputs. Its signal type and calibration live on that input card.':'Add an Afterburner analog / RC command under Inputs and choose its named PCB connection.'}</span></div><div class="hw-field"><span class="hw-label">Trigger threshold (%)</span><span class="hw-desc">Afterburner is requested when the normalized command rises above this percentage.</span><input class="${fieldClass('input_threshold')}" type="number" min="0" max="100" step="1" value="${Math.round(rawThreshold*100/4095)}" onchange="setAbProfileThreshold(this.value)"></div>` : `<div class="hw-field"><span class="hw-label">Command signal</span><select class="${fieldClass('input_rc_pwm')}" data-ab-trigger-field="input_rc_pwm" onchange="setAbInputType(this.value==='rc');renderHardwareWorkflowSummaries()"><option value="analog"${!abt.input_rc_pwm?' selected':''}>Analog 0-3.3 V</option><option value="rc"${abt.input_rc_pwm?' selected':''}>RC servo pulse</option></select></div><div class="hw-field"><span class="hw-label">Command-input GPIO</span><select class="${fieldClass('input_pin')}" data-ab-trigger-field="input_pin" onchange="setAbTrig('input_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.input_pin,pinMode)}</select></div><div class="hw-field"><span class="hw-label">Trigger threshold (${abt.input_rc_pwm?'%':'V'})</span><span class="hw-desc">Afterburner is requested when this command input rises above the threshold.</span><input class="${fieldClass('input_threshold')}" data-ab-trigger-field="input_threshold" type="number" min="0" max="${abt.input_rc_pwm?'100':'3.3'}" step="${abt.input_rc_pwm?'1':'0.01'}" value="${thresholdValue}" onchange="setAbWorkflowThreshold(this.value)"></div>${abt.input_rc_pwm?`<div class="hw-field"><span class="hw-label">RC pulse range (us)</span><span class="hw-desc">Pulse widths representing 0% and 100% command.</span><div style="display:flex;gap:.35rem"><input class="${fieldClass('input_min_us')}" data-ab-trigger-field="input_min_us" aria-label="RC pulse minimum" type="number" min="500" max="2500" value="${Number(abt.input_min_us ?? 1000)}" onchange="setAbTrigBool('input_min_us',+this.value)"><input class="${fieldClass('input_max_us')}" data-ab-trigger-field="input_max_us" aria-label="RC pulse maximum" type="number" min="500" max="2500" value="${Number(abt.input_max_us ?? 2000)}" onchange="setAbTrigBool('input_max_us',+this.value)"></div></div>`:''}`) : ''}
     ${source!==0 ? `<div class="hw-field"><span class="hw-label">Arming interlock</span><label class="hw-toggle"><input class="${fieldClass('requires_arm')}" data-ab-trigger-field="requires_arm" type="checkbox" ${abt.requires_arm?'checked':''} onchange="setAbTrigBool('requires_arm',this.checked);renderHardwareWorkflowSummaries()"><span></span> Require a separate arm switch</label></div>${abt.requires_arm&&!usesDiArm?(pcbProfileActive()?`<div class="hw-field"><span class="hw-label">Arm switch</span><span class="hw-desc">Add an Afterburner arm switch under Inputs and choose its named PCB connection.</span></div>`:`<div class="hw-field"><span class="hw-label">Arm-switch GPIO</span><select class="${fieldClass('arm_pin')}" data-ab-trigger-field="arm_pin" onchange="setAbTrig('arm_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.arm_pin,'in')}</select></div><div class="hw-field"><span class="hw-label">Arm polarity</span><label class="hw-toggle"><input class="${fieldClass('arm_active_h')}" data-ab-trigger-field="arm_active_h" type="checkbox" ${abt.arm_active_h?'checked':''} onchange="setAbTrigBool('arm_active_h',this.checked);renderHardwareWorkflowSummaries()"><span></span> Active high</label></div>`):''}` : ''}
   </div></div>` : '';
   return `<div class="hw-item-card ${editing?'registry-card-open':''} ${triggerChanged?'field-change-parent field-changed':''}" data-workflow-key="ab_trigger"><div class="registry-card-summary"><div><strong>Afterburner trigger and arm</strong><div class="hw-desc">${escapeHtmlText(sourceLabel + armDetail)}</div></div><div class="registry-card-actions"><span class="registry-status ${status==='Ready'?'registry-status-ok':'registry-status-error'}">${status}</span><button type="button" onclick="toggleWorkflowEditor('ab_trigger')">${editing?'Done':'Edit'}</button></div></div>${editor}</div>`;
@@ -765,25 +781,103 @@ function controllerLabel(key) {
     governor: 'automatic N2 speed control'
   })[key] || key;
 }
+function oilLoopChannels(direction, purpose) {
+  return (registryRoot()[direction + 's'] || []).filter(c => c && c.installed !== false &&
+    (registryDerivedPurpose(direction, c) === purpose ||
+     (direction === 'output' && purpose === 'oil_pump' && c.role === 'oil_pump')));
+}
+function ensureOilLoops() {
+  if (!Array.isArray(cfg.oil_loops)) cfg.oil_loops = [];
+  if (!cfg.oil_loops.length) {
+    const pressure = oilLoopChannels('input', 'oil_pressure')[0];
+    const pump = oilLoopChannels('output', 'oil_pump')[0];
+    if (pressure && pump) cfg.oil_loops.push({enabled:true,id:'main',pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,min_pct:18,max_pct:100});
+  }
+  return cfg.oil_loops;
+}
+function updateOilLoop(index, key, value) {
+  const loop = ensureOilLoops()[index];
+  if (!loop) return;
+  loop[key] = value;
+  dirty();
+  renderHardwareWorkflowSummaries();
+}
+function addOilLoop() {
+  const loops = ensureOilLoops();
+  if (loops.length >= 2) return;
+  const used = new Set(loops.map(l => l.pump_output));
+  const pressure = oilLoopChannels('input', 'oil_pressure')[0];
+  const pump = oilLoopChannels('output', 'oil_pump').find(c => !used.has(c.id));
+  if (!pressure || !pump) return;
+  loops.push({enabled:true,id:`oil${loops.length+1}`,pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,min_pct:18,max_pct:100});
+  dirty();
+  renderHardwareWorkflowSummaries();
+}
+function removeOilLoop(index) {
+  ensureOilLoops().splice(index, 1);
+  dirty();
+  renderHardwareWorkflowSummaries();
+}
+function oilLoopInlineEditor() {
+  const loops = ensureOilLoops();
+  const pressures = oilLoopChannels('input', 'oil_pressure');
+  const pumps = oilLoopChannels('output', 'oil_pump');
+  const hasN1 = registryHasPurpose('input','n1_speed');
+  const hasN2 = registryHasPurpose('input','n2_speed');
+  const options = (rows, selected) => rows.map(c => `<option value="${escapeHtmlText(c.id)}"${c.id===selected?' selected':''}>${escapeHtmlText(c.name||c.id)}</option>`).join('');
+  const num = (i,key,label,value,step,min=0,max='') => `<label class="hw-field"><span class="hw-label">${label}</span><input type="number" min="${min}" ${max!==''?`max="${max}"`:''} step="${step}" value="${Number(value)}" onchange="updateOilLoop(${i},'${key}',+this.value)"></label>`;
+  const cards = loops.map((loop,i) => {
+    const source = Number(loop.target_source || 0);
+    const pump = pumps.find(c => c.id === loop.pump_output);
+    const binary = pump && outputDriverIsOnOff(pump.driver);
+    const loopWarnings = [];
+    const lowTarget = Number(loop.target_bar ?? 2.5);
+    const highTarget = Number(loop.target_high_bar ?? lowTarget);
+    const runningMinimum = Number(settingsCfg?.oil?.running_min || 0);
+    if (source !== 0 && highTarget < lowTarget) loopWarnings.push('Pressure decreases as fuel/speed increases. Keep this only if intentional.');
+    if (runningMinimum > 0 && Math.min(lowTarget, source === 0 ? lowTarget : highTarget) < runningMinimum)
+      loopWarnings.push(`A target is below the running low-oil fault threshold (${runningMinimum} bar).`);
+    return `<div class="hw-item-card" style="grid-column:1/-1"><div class="registry-card-summary"><div><strong>Oil pressure loop ${i+1}</strong><div class="hw-desc">${binary?'On/off oil-pressure control. Requires a suitable accumulator or relief arrangement.':'Proportional oil-pump pressure control.'}</div></div>${loops.length>1?`<button class="btn-sm danger" onclick="removeOilLoop(${i})">Remove</button>`:''}</div><div class="registry-card-editor" style="display:grid">
+      ${pressures.length>1?`<label class="hw-field"><span class="hw-label">Pressure input</span><select onchange="updateOilLoop(${i},'pressure_input',this.value)">${options(pressures,loop.pressure_input)}</select></label>`:''}
+      ${pumps.length>1?`<label class="hw-field"><span class="hw-label">Pump output</span><select onchange="updateOilLoop(${i},'pump_output',this.value)">${options(pumps,loop.pump_output)}</select></label>`:''}
+      <label class="hw-field"><span class="hw-label">Pressure target source</span><select onchange="updateOilLoop(${i},'target_source',+this.value)"><option value="0"${source===0?' selected':''}>Fixed pressure</option><option value="1"${source===1?' selected':''}>Effective core-fuel demand</option>${hasN1?`<option value="2"${source===2?' selected':''}>N1 shaft speed</option>`:''}${hasN2?`<option value="3"${source===3?' selected':''}>N2 shaft speed</option>`:''}</select></label>
+      ${num(i,'target_bar',source===0?'Pressure target (bar)':'Low pressure target (bar)',loop.target_bar??2.5,.01)}
+      ${source!==0?num(i,'target_high_bar','High pressure target (bar)',loop.target_high_bar??loop.target_bar??2.5,.01):''}
+      ${source>=2?num(i,'speed_min_rpm','Low shaft speed (RPM)',loop.speed_min_rpm??0,100):''}
+      ${source>=2?num(i,'speed_max_rpm','High shaft speed (RPM)',loop.speed_max_rpm??20000,100):''}
+      ${num(i,'deadband_bar','Pressure deadband (bar)',loop.deadband_bar??.2,.01)}
+      ${binary?'':`<label class="hw-field"><span class="hw-label">Minimum pump output (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.min_demand??.18)*100)}" onchange="updateOilLoop(${i},'min_demand',+this.value/100)"></label>`}
+      ${binary?'':`<label class="hw-field"><span class="hw-label">Maximum pump output (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.max_demand??1)*100)}" onchange="updateOilLoop(${i},'max_demand',+this.value/100)"></label>`}
+      ${loopWarnings.length?`<div class="workflow-prerequisite" style="grid-column:1/-1">Warning: ${escapeHtmlText(loopWarnings.join(' '))}</div>`:''}
+    </div></div>`;
+  }).join('');
+  const canAdd = loops.length < 2 && pumps.some(p => !loops.some(l => l.pump_output === p.id));
+  return `<div class="registry-card-editor" style="display:grid">${cards}${canAdd?'<button class="btn-sm" onclick="addOilLoop()">Add another oil system</button>':''}</div>`;
+}
 function controllerAvailability(key) {
   const hasN1 = registryHasPurpose('input','n1_speed');
   const hasN2 = registryHasPurpose('input','n2_speed');
   const hasIdleFeedback = hasN1 || hasN2 || registryHasPurpose('input','p1_pressure') || registryHasPurpose('input','p2_pressure');
-  const hasThrottle = registryHasPurpose('output','main_fuel');
+  const throttle = oilLoopChannels('output','main_fuel')[0];
+  const hasThrottle = !!throttle;
+  const hasMeteringThrottle = !!throttle && outputDriverIsProportional(throttle.driver);
   const hasOilPressure = registryHasPurpose('input','oil_pressure');
   const hasOilPump = registryHasPurpose('output','oil_pump');
-  const hasPropPitch = registryHasPurpose('output','prop_pitch');
+  const propPitch = oilLoopChannels('output','prop_pitch')[0];
+  const hasPropPitch = !!propPitch && (outputDriverIsOnOff(propPitch.driver) || outputDriverIsProportional(propPitch.driver));
   const map = {
     oil_loop: [hasOilPressure && hasOilPump, 'Requires oil-pressure input and oil-pump output.'],
-    dynamic_idle: [hasThrottle && hasIdleFeedback, 'Requires main fuel output and N1, N2, P1, or P2 feedback input.'],
-    governor: [hasN2 && (hasThrottle || hasPropPitch), 'Requires N2 speed input plus throttle or proportional prop-pitch output.']
+    dynamic_idle: [hasMeteringThrottle && hasIdleFeedback, 'Requires proportional main-fuel output and N1, N2, P1, or P2 feedback input.'],
+    governor: [hasN2 && (hasMeteringThrottle || hasPropPitch), 'Requires N2 speed input plus proportional main fuel or a supported proportional/relay prop-pitch output.']
   };
   const [ok, reason] = map[key] || [true, ''];
   return {ok, reason};
 }
 function controllerInlineEditor() {
   const c = cfg.controllers || {};
-  const hasThrottle = registryHasPurpose('output','main_fuel');
+  const throttle = oilLoopChannels('output','main_fuel')[0];
+  const hasThrottle = !!throttle;
+  const hasMeteringThrottle = !!throttle && outputDriverIsProportional(throttle.driver);
   const cb = (key, label, desc, checked, handler) => {
     const availability = controllerAvailability(key);
     const enabled = availability.ok;
@@ -799,9 +893,10 @@ function controllerInlineEditor() {
   };
   return `<div class="registry-card-editor" style="display:block">
     ${cb('oil_loop', 'Oil pressure loop', 'Closed-loop oil pressure control. Requires oil pressure input and oil pump output.', !!c.oil_loop, "setController('oil_loop',this.checked)")}
+    ${c.oil_loop ? oilLoopInlineEditor() : ''}
     ${hasThrottle ? `<div class="hw-item-card" style="grid-column:1/-1"><div class="registry-card-summary"><div><strong>Fuel response &amp; limit protection</strong><div class="hw-desc">Automatic with Main Fuel. Configure normal opening/closing response and N1, N2, temperature, P1, P2 or torque protection in <a href="/config.html#engine-limits">Config → Engine Limits &amp; Protection</a>.</div></div><span class="registry-status registry-status-ok">Ready</span></div></div>` : ''}
     ${cb('dynamic_idle', 'Automatic idle control', 'Commands the main fuel output to hold N1 or N2 speed (normal proven methods), or experimental P1/P2 pressure. Choose the feedback source and tune it in Config > Start, Run & Recovery.', !!c.dynamic_idle, "setController('dynamic_idle',this.checked)")}
-    ${cb('governor', 'Automatic N2 speed control', 'Generator/turboshaft: with main fuel only, N2 commands fuel. Turboprop: a proportional Prop Pitch output makes pitch primary and fuel the fallback. Set N2 target and response in Config > Power System.', !!c.governor, "setController('governor',this.checked)")}
+    ${cb('governor', 'Automatic N2 speed control', 'Generator/turboshaft: proportional main fuel controls N2. Prop Pitch uses proportional control or deliberate relay fine/coarse control. Set N2 target and response in Config > Power System.', !!c.governor, "setController('governor',this.checked)")}
   </div>`;
 }
 function renderControllerSummary() {
@@ -1145,6 +1240,7 @@ function renderRegistryInventory() {
            ${pcbProfileActive() ? '' : registryInvertEditor(direction, c, i)}
           ${registryPulseScaleEditor(direction, c, i)}
           ${registryAnalogScaleEditor(direction, c, i)}
+          ${registryAnalogCurveEditor(direction, c, i)}
            ${!(direction==='input' && registryTemperatureIsSpi(c)) ? registryRangeEditor(direction, c, i) : ''}
            ${registryOutputSubcards(direction, c, i)}
            ${direction==='output' ? `<details style="grid-column:1/-1"><summary>Advanced output settings</summary><div class="hw-grid" style="margin-top:.65rem">${registryPwmTimingEditor(c, i)}${pcbProfileActive()?'':registryDemandEditor(c, i)}${registryFaultSafeEditor(c, i)}</div></details>` : ''}

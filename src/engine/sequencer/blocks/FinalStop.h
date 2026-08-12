@@ -17,6 +17,7 @@ public:
         _entryMs    = millis();
         _stoppedMs  = 0;
         _phase      = 0;
+        _timedOut   = false;
     }
 
     BlockResult tick() override {
@@ -32,7 +33,8 @@ public:
             bool stopped = HardwareConfig::hasN1Rpm
                          && ed.n1Healthy
                          && (ed.n1Rpm <= rpmZeroThreshold);
-            if (stopped || (now - _entryMs) > timeoutMs) {
+            _timedOut = !stopped && (now - _entryMs) > timeoutMs;
+            if (stopped || _timedOut) {
                 // Cut main oil pump
                 ed.oilTargetBar    = 0;
                 ed.oilPumpPct = 0;
@@ -43,7 +45,7 @@ public:
                     _phase     = 1;
                 } else {
                     clearWaitReason();
-                    return BlockResult::Complete;
+                    return _timedOut ? BlockResult::TimeoutContinue : BlockResult::Complete;
                 }
             } else {
                 char _buf[80];
@@ -59,7 +61,7 @@ public:
         if (_phase == 1) {
             if ((now - _stoppedMs) >= oilScavengeMs) {
                 clearWaitReason();
-                return BlockResult::Complete;
+                return _timedOut ? BlockResult::TimeoutContinue : BlockResult::Complete;
             }
             char _buf[80];
             snprintf(_buf, sizeof(_buf), "Scavenge: %lu ms remaining", oilScavengeMs - (now - _stoppedMs));
@@ -79,4 +81,5 @@ private:
     unsigned long _entryMs   = 0;
     unsigned long _stoppedMs = 0;
     int           _phase     = 0;
+    bool          _timedOut  = false;
 };

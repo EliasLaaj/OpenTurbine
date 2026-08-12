@@ -11,7 +11,6 @@ public:
     void onEnter() override {
         auto& ed = EngineData::instance();
         ed.fuelSolOpen    = true;
-        ed.fuelEverOpened = true;   // marks that combustion was attempted this run
     }
 
     BlockResult tick() override {

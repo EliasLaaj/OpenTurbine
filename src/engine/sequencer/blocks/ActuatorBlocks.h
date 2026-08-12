@@ -158,7 +158,7 @@ class ABPumpOn : public IBlock {
 public:
     float demandPct = 80.0f;
     const char* name() override { return "ABPumpOn"; }
-    void onEnter() override { EngineData::instance().abPumpDemand = demandPct / 100.0f; }
+    void onEnter() override { auto& ed = EngineData::instance(); ed.abPumpDemand = demandPct / 100.0f; if (!ed.abFirstFuelMs) ed.abFirstFuelMs = millis(); }
     BlockResult tick() override { return BlockResult::Complete; }
     void onExit() override {}
 };
@@ -174,7 +174,7 @@ public:
 class ABIgnOn : public IBlock {
 public:
     const char* name() override { return "ABIgnOn"; }
-    void onEnter() override { EngineData::instance().igniter2On = true; }
+    void onEnter() override { auto& ed = EngineData::instance(); ed.igniter2On = true; if (!ed.abFirstIgnitionMs) ed.abFirstIgnitionMs = millis(); }
     BlockResult tick() override { return BlockResult::Complete; }
     void onExit() override {}
 };
@@ -190,7 +190,7 @@ public:
 class ABSolOpen : public IBlock {
 public:
     const char* name() override { return "ABSolOpen"; }
-    void onEnter() override { EngineData::instance().abSolOpen = true; }
+    void onEnter() override { auto& ed = EngineData::instance(); ed.abSolOpen = true; if (!ed.abFirstFuelMs) ed.abFirstFuelMs = millis(); }
     BlockResult tick() override { return BlockResult::Complete; }
     void onExit() override {}
 };

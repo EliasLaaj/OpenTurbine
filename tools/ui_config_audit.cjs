@@ -363,6 +363,7 @@ async function goto(page, route, waitSelector) {
       ab_flame: { enabled: false },
       ab_trigger: { source: 0, switch_pin: -1, input_pin: 4 }
     });
+    await patchData(page, { mode:'STANDBY', config_locked:false });
     await goto(page, 'config.html', '#cf-tot_limit');
     assert.equal(await page.locator('.config-group').count(), 6,
       'Config workspace should render the canonical grouped navigation');
@@ -487,6 +488,7 @@ async function goto(page, route, waitSelector) {
         inputs: noThrottleInputHardware.channel_registry.inputs.filter(channel => channel.purpose !== 'throttle')
       }
     });
+    await patchData(page, { mode:'STANDBY', config_locked:false });
     await goto(page, 'config.html', '#cf-th_ex');
     assert.equal(await disabled(page, '#cf-th_ex'), true,
       'Throttle Expo must lock when the main fuel output exists but no physical throttle input is fitted');
@@ -497,6 +499,7 @@ async function goto(page, route, waitSelector) {
     results.push('Throttle Expo locks when no physical throttle input can consume it');
 
     await reset(page);
+    await patchData(page, { mode:'STANDBY', config_locked:false });
     const beforePresetConfig = await (await page.request.get(`${base}/api/config`)).json();
     const beforePresetSequence = JSON.parse(JSON.stringify(beforePresetConfig.sequence));
     await goto(page, 'config.html', '#preset-sel');
@@ -636,6 +639,47 @@ async function goto(page, route, waitSelector) {
     assert.equal(await disabled(page, '#session-save-btn'), true);
     assert.equal(await shown(page, '#session-lock-msg'), true);
     results.push('log session settings respect the saved-config lock state');
+
+    await reset(page);
+    await patchData(page, { mode:'STARTUP', dev_mode:true, config_locked:true });
+    await goto(page, 'config.html', '#cf-th_ru');
+    await page.waitForFunction(() => document.querySelector('#cfg-lock-badge')?.textContent.includes('Read-only'));
+    assert.equal(await disabled(page, '#cf-th_ru'), true);
+    assert.equal(await disabled(page, '#cf-rpm_limit'), true);
+    assert.equal(await disabled(page, '#preset-sel'), true);
+    await patchData(page, { mode:'SHUTDOWN', dev_mode:true, config_locked:true });
+    await page.waitForFunction(() => document.querySelector('#cfg-lock-badge')?.textContent.includes('Read-only'));
+    assert.equal(await disabled(page, '#cf-th_ru'), true);
+    await patchData(page, { mode:'RUNNING', dev_mode:true, config_locked:true });
+    await page.waitForFunction(() => document.querySelector('#cfg-lock-badge')?.textContent.includes('Limited live'));
+    assert.equal(await disabled(page, '#cf-th_ru'), false);
+    assert.equal(await disabled(page, '#cf-rpm_limit'), true);
+    assert.equal(await disabled(page, '#preset-sel'), true);
+    results.push('STARTUP and SHUTDOWN stay read-only while RUNNING Developer Mode exposes only live-safe fields');
+
+    const stalePage = await browser.newPage();
+    await stalePage.goto(`${base}/config.html`);
+    await stalePage.waitForSelector('#cf-th_rd');
+    await page.locator('#cf-th_ru').fill('1700');
+    await page.locator('#btn-save').click();
+    if (await page.locator('#ot-app-dialog.show').isVisible()) await page.locator('#ot-dialog-confirm').click();
+    await page.waitForSelector('#save-recap-modal', {state:'visible'});
+    await page.locator('#save-recap-confirm-btn').click();
+    await page.waitForFunction(() => /Saved|Applied live/.test(document.querySelector('#save-msg')?.textContent || ''));
+    let simState = await (await page.request.get(`${base}/__sim/state`)).json();
+    assert.deepEqual(simState.last_config_patch, { throttle:{ ramp_up_ms:1700 } });
+    await stalePage.locator('#cf-th_rd').fill('1800');
+    await stalePage.locator('#btn-save').click();
+    if (await stalePage.locator('#ot-app-dialog.show').isVisible()) await stalePage.locator('#ot-dialog-confirm').click();
+    await stalePage.waitForSelector('#save-recap-modal', {state:'visible'});
+    await stalePage.locator('#save-recap-confirm-btn').click();
+    await stalePage.waitForFunction(() => /Saved|Applied live/.test(document.querySelector('#save-msg')?.textContent || ''));
+    simState = await (await page.request.get(`${base}/__sim/state`)).json();
+    assert.deepEqual(simState.last_config_patch, { throttle:{ ramp_down_ms:1800 } });
+    assert.equal(simState.settings.throttle.ramp_up_ms, 1700);
+    assert.equal(simState.settings.throttle.ramp_down_ms, 1800);
+    await stalePage.close();
+    results.push('live saves PATCH only changed fields and preserve edits from another stale browser');
 
     await reset(page);
     await goto(page, 'tools.html', '#tool-area');

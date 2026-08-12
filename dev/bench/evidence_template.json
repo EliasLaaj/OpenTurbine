@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "review": {
+    "release_candidate": "",
+    "primary_operator": "",
+    "independent_reviewer": "",
+    "notes": ""
+  },
+  "gates": {
+    "Q00_fixture_safety": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q01_flash_and_filesystem_readback": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q10_boot_reset_brownout_scope": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q20_input_transport_matrix": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q30_output_waveform_and_loads": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q40_commissioning_ui": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q50_sequencer_matrix": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q60_rules_matrix": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q70_controller_source_matrix": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q80_ignition_relight_afterburner": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q90_stop_and_fault_timing": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q100_update_and_recovery": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q110_endurance_review": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q120_cross_platform_review": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q130_powered_actuators": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "Q130_cold_spin": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""},
+    "independent_release_review": {"passed": false, "reviewer": "", "method": "", "acceptance": "", "result": "", "files": [], "notes": ""}
+  }
+}

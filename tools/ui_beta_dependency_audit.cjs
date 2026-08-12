@@ -189,10 +189,24 @@ async function optionDisabled(page, selector, value) {
     }));
     assert.deepEqual(typeMatrix, {
       mainFuel:[5,6], starter:[4,5,6,11], oilPump:[4,5,6,11], igniter:[4,5,11],
-      abPump:[4,5,6,11], propPitch:[5,6], tot:[1,9], torque:[1,10],
+      abPump:[4,5,6,11], propPitch:[4,5,6,11], tot:[1,9], torque:[1,9,10],
       abFlame:[0,1,8,9], throttle:[1,3,2,7,9]
     });
     results.push('hardware editor type selectors include only compatible native and shared-I2C signal types');
+
+    const igniterCapabilityUx = await page.evaluate(() => {
+      cfg.actuators = cfg.actuators || {};
+      cfg.actuators.igniter = {...(cfg.actuators.igniter || {}), pwm:true, coil:true};
+      const relay = registryIgniterSubcards({driver:11}, 0, 'igniter');
+      const pwm = registryIgniterSubcards({driver:5}, 0, 'igniter');
+      return {
+        relaySimple: relay.includes('Relay-style outputs use Simple on/off') &&
+          !relay.includes('value="coil"') && !relay.includes('value="pwm"'),
+        pwmAdvanced: pwm.includes('value="coil"') && pwm.includes('value="pwm"')
+      };
+    });
+    assert.deepEqual(igniterCapabilityUx, {relaySimple:true, pwmAdvanced:true});
+    results.push('igniter modes follow the selected output driver capability');
 
     const sensorInterfaceUx = await page.evaluate(() => {
       const base = {role:'temperature', driver:1, pin:4, min:0, max:4095};
@@ -276,6 +290,7 @@ async function optionDisabled(page, selector, value) {
       ab_flame: { enabled: false },
       ab_trigger: { input_pin: -1 }
     });
+    await patchData(page, { mode:'STANDBY', config_locked:false });
     await goto(page, 'config.html', '#cf-oil_rm');
     const configGhosts = {
       oilSp: await shown(page, '#cf-oil_rm'),
@@ -341,6 +356,7 @@ async function optionDisabled(page, selector, value) {
       sensors: { oil_press: { enabled: false }, tot: { enabled: false }, tit: { enabled: false }, n1_rpm: { enabled: true } },
       cluster_serial: { enabled: true }
     });
+    await patchData(page, { mode:'STANDBY', config_locked:false });
     await goto(page, 'config.html', '#cf-cl_n1');
     await page.locator('#btn-view-expert').click();
     assert.equal(await page.locator('#cf-cl_en').count(), 0, 'cluster has no redundant Config enable');
@@ -391,6 +407,7 @@ async function optionDisabled(page, selector, value) {
       cluster_serial: { enabled: true },
       ab_flame: { enabled: false }
     });
+    await patchData(page, { mode:'STANDBY', config_locked:false });
     await goto(page, 'config.html', '#cf-sf_fs');
     await page.locator('#btn-view-expert').click();
     assert.equal(await shown(page, '#rc-pwm-section'), false, 'RC PWM section must stay hidden in Advanced view without servo inputs');
@@ -427,6 +444,7 @@ async function optionDisabled(page, selector, value) {
       sensors: { n1_rpm: { enabled: false }, n2_rpm: { enabled: true } },
       actuators: { oil_pump: { enabled: true } }
     });
+    await patchData(page, { mode:'STANDBY', config_locked:false });
     await goto(page, 'config.html', '#cf-so_src');
     assert.equal(await disabled(page, '#cf-so_src'), false);
     assert.equal(await optionDisabled(page, '#cf-so_src', '0'), true);
@@ -475,6 +493,7 @@ async function optionDisabled(page, selector, value) {
       ab_flame: { enabled: false },
       ab_trigger: { input_pin: -1 }
     });
+    await patchData(page, { mode:'STANDBY', config_locked:false });
     await goto(page, 'config.html', '#cf-eg_src');
     assert.equal(await optionDisabled(page, '#cf-eg_src', '1'), true);
     assert.equal(await optionDisabled(page, '#cf-eg_src', '2'), false);

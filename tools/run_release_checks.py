@@ -14,6 +14,9 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
+
+from run_native_behavior_tests import compiler_command, run_fresh_executable
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +67,16 @@ def main() -> int:
     run("safety regression audit", [node, "tools/safety_regression_audit.cjs"])
     run("turbine setup matrix", [node, "tools/turbine_setup_matrix_test.cjs"])
     run("I2C and load-cell audit", [node, "tools/i2c_support_audit.cjs"])
+    run("real native command/state behavior", [python, "tools/run_native_behavior_tests.py"])
+    host_tmp = ROOT / "artifacts" if os.name == "nt" else None
+    if host_tmp is not None:
+        host_tmp.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="ot-sensor-vectors-", dir=host_tmp) as tmp:
+        compiler = compiler_command()
+        sensor_exe = str(Path(tmp) / ("sensor_vectors.exe" if os.name == "nt" else "sensor_vectors"))
+        run("extended real sensor protocol vectors", compiler + ["-std=c++17", "tools/sensor_protocol_vectors.cpp", "-o", sensor_exe])
+        print("\n=== execute extended sensor protocol vectors ===", flush=True)
+        run_fresh_executable([sensor_exe], cwd=ROOT, label="sensor vectors")
     run(
         "Python release-tool and bench tests",
         [
@@ -72,8 +85,12 @@ def main() -> int:
             "unittest",
             "tools/test_build_setup_package.py",
             "tools/test_pcb_profile.py",
-            "dev/bench/harness/test_verify_wiring.py",
+            "tools/test_run_native_behavior_tests.py",
         ],
+    )
+    run(
+        "HIL harness and qualification-contract tests",
+        [python, "-m", "unittest", "discover", "-s", "dev/bench/harness", "-p", "test_*.py"],
     )
     run("setup-tool Go tests", [go, "test", "./..."], ROOT / "tools" / "setup_tool")
 
@@ -99,6 +116,8 @@ def main() -> int:
                 f".pio3/{env}/firmware.bin",
                 "--filesystem",
                 f".pio3/{env}/littlefs.bin",
+                "--filesystem-source",
+                "data",
                 "--map",
                 f".pio3/{env}/firmware.map",
                 "--minimum-dram-headroom",

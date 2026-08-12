@@ -7,10 +7,104 @@ let settingsCfg = {};
 let pcbProfile = {state:'absent', ports:[]};
 let engineMode = 'STANDBY';
 let _loadedProfileId = 'OpenTurbine';
+let _loadedHardwareCfg = {};
+let _loadedSettingsCfg = {};
+
+function cloneHardwareJson(value) {
+  return JSON.parse(JSON.stringify(value ?? {}));
+}
+
+function hardwarePlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Registry rows have stable IDs, so merge them as records rather than treating
+// the entire array as one stale replacement. This preserves a newer
+// Calibration-page edit to an untouched field/card while Hardware is open.
+function mergeHardwareRegistryRows(baseline, edited, fresh) {
+  const baseRows = Array.isArray(baseline) ? baseline : [];
+  const editRows = Array.isArray(edited) ? edited : [];
+  const freshRows = Array.isArray(fresh) ? fresh : [];
+  const baseById = new Map(baseRows.filter(row => row?.id).map(row => [String(row.id), row]));
+  const editById = new Map(editRows.filter(row => row?.id).map(row => [String(row.id), row]));
+  const freshById = new Map(freshRows.filter(row => row?.id).map(row => [String(row.id), row]));
+
+  // A row deliberately removed in Hardware stays removed even if another page
+  // changed one of its fields meanwhile.
+  for (const id of baseById.keys()) if (!editById.has(id)) freshById.delete(id);
+
+  for (const [id, editRow] of editById) {
+    const baseRow = baseById.get(id);
+    if (!baseRow) freshById.set(id, cloneHardwareJson(editRow));
+    else freshById.set(id, mergeHardwareEdits(baseRow, editRow, freshById.get(id) || baseRow));
+  }
+
+  // Retain the Hardware ordering, then append any card added concurrently.
+  const merged = [];
+  const used = new Set();
+  for (const row of editRows) {
+    const id = String(row?.id || '');
+    if (!id || used.has(id) || !freshById.has(id)) continue;
+    merged.push(freshById.get(id)); used.add(id);
+  }
+  for (const row of freshRows) {
+    const id = String(row?.id || '');
+    if (!id || used.has(id) || !freshById.has(id)) continue;
+    merged.push(freshById.get(id)); used.add(id);
+  }
+  return merged;
+}
+
+// Apply only Hardware-page edits to the latest committed hardware document.
+// Most arrays are intentional replacement units. Registry input/output arrays
+// are ID-keyed records and merge per field so concurrent calibration survives.
+function mergeHardwareEdits(baseline, edited, fresh) {
+  const base = hardwarePlainObject(baseline) ? baseline : {};
+  const edit = hardwarePlainObject(edited) ? edited : {};
+  const out = hardwarePlainObject(fresh) ? cloneHardwareJson(fresh) : {};
+  const keys = new Set([...Object.keys(base), ...Object.keys(edit)]);
+  for (const key of keys) {
+    const hasEdit = Object.prototype.hasOwnProperty.call(edit, key);
+    const before = base[key];
+    const after = edit[key];
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    if (!hasEdit) delete out[key];
+    else if ((key === 'inputs' || key === 'outputs') &&
+             Array.isArray(before) && Array.isArray(after) && Array.isArray(out[key]))
+      out[key] = mergeHardwareRegistryRows(before, after, out[key]);
+    else if (hardwarePlainObject(before) && hardwarePlainObject(after))
+      out[key] = mergeHardwareEdits(before, after, out[key]);
+    else out[key] = cloneHardwareJson(after);
+  }
+  return out;
+}
+
+function mergeHardwareSettingsCleanup(baseline, edited, fresh) {
+  const out = cloneHardwareJson(fresh);
+  const beforeUnderflow = baseline?.oil_advanced?.shutdown_on_underflow;
+  const afterUnderflow = edited?.oil_advanced?.shutdown_on_underflow;
+  if (beforeUnderflow !== afterUnderflow) {
+    out.oil_advanced ||= {};
+    out.oil_advanced.shutdown_on_underflow = !!afterUnderflow;
+  }
+  // Hardware only removes rules that reference a removed channel. Apply those
+  // exact removals to the fresh array so concurrent rule additions/edits are
+  // preserved rather than replacing the entire array from a stale tab.
+  const editedRuleKeys = new Set((edited?.rules || []).map(rule => JSON.stringify(rule)));
+  const removedRuleKeys = new Set((baseline?.rules || [])
+    .map(rule => JSON.stringify(rule)).filter(key => !editedRuleKeys.has(key)));
+  if (removedRuleKeys.size && Array.isArray(out.rules))
+    out.rules = out.rules.filter(rule => !removedRuleKeys.has(JSON.stringify(rule)));
+  return out;
+}
+
+function outputDriverIsOnOff(driver) { return [4,11].includes(Number(driver)); }
+function outputDriverIsProportional(driver) { return [5,6].includes(Number(driver)); }
 
 let ws;
 let wsPullTimer = null;
 let statusPollTimer = null;
+let hardwareStatusInFlight = false;
 let wsClosingForNavigation = false;
 function requestHardwareTelemetry() {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send('p');
@@ -51,22 +145,21 @@ function connectWs() {
   };
   ws.onerror = () => { try { ws.close(); } catch(_) {} };
   ws.onmessage = (e) => {
-    try {
-      const d = JSON.parse(e.data);
-      engineMode = d.mode || 'STANDBY';
-      updateSaveButton();
-      // Update DI live state dots
-      if (d.di_channels) {
-        d.di_channels.forEach((ch, i) => {
-          const dot = document.getElementById('di-live-' + i);
-          if (dot) {
-            dot.className = 'dot ' + (ch.state ? 'green' : '');
-            dot.title = ch.state ? 'ACTIVE' : 'inactive';
-          }
-        });
-      }
-    } catch(_) {}
+    try { applyHardwareTelemetry(JSON.parse(e.data)); } catch(_) {}
   };
+}
+function applyHardwareTelemetry(d) {
+  engineMode = d.mode || 'STANDBY';
+  updateSaveButton();
+  if (d.di_channels) {
+    d.di_channels.forEach((ch, i) => {
+      const dot = document.getElementById('di-live-' + i);
+      if (dot) {
+        dot.className = 'dot ' + (ch.state ? 'green' : '');
+        dot.title = ch.state ? 'ACTIVE' : 'inactive';
+      }
+    });
+  }
 }
 window.addEventListener('pagehide', stopHardwareTelemetry);
 window.addEventListener('beforeunload', stopHardwareTelemetry);
@@ -74,8 +167,8 @@ window.addEventListener('ot:navigation-start', stopHardwareTelemetry);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
   wsClosingForNavigation = false;
-  startStatusPoll();
-  connectWs();
+  if (cfg?.platform === 'esp32') startStatusPoll();
+  else connectWs();
 });
 function setConn(ok, text) {
   const dot = document.getElementById('conn');
@@ -84,17 +177,25 @@ function setConn(ok, text) {
   if (lbl) lbl.textContent = text || (ok ? 'Connected' : 'Disconnected');
 }
 async function refreshHardwareStatus() {
+  if (hardwareStatusInFlight) return;
+  hardwareStatusInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1800);
   try {
-    const r = await fetch('/api/status', { cache:'no-store' });
+    const r = await fetch('/api/telemetry', { cache:'no-store', signal:controller.signal });
     setConn(r.ok, r.ok ? 'Connected' : 'Disconnected');
+    if (r.ok) applyHardwareTelemetry(await r.json());
   } catch (_) {
     setConn(false, 'Disconnected');
+  } finally {
+    clearTimeout(timeout);
+    hardwareStatusInFlight = false;
   }
 }
 function startStatusPoll() {
   if (statusPollTimer) return;
   refreshHardwareStatus();
-  statusPollTimer = setInterval(refreshHardwareStatus, 3000);
+  statusPollTimer = setInterval(refreshHardwareStatus, 1000);
 }
 function stopStatusPoll() {
   if (!statusPollTimer) return;
@@ -124,6 +225,11 @@ async function loadHardware() {
   document.getElementById('save-msg').textContent = 'Loading…';
   try {
     cfg = await fetchHardwareJson('/api/hardware');
+    // Live bus state has its own small endpoint; keep it out of the large,
+    // mostly-static editor document and fetch it only after that response has
+    // completed.
+    try { cfg._i2c_discovery = await fetchHardwareJson('/api/i2c_discovery', 2); }
+    catch (_) { cfg._i2c_discovery = {}; }
     pcbProfile = cfg._pcb_profile || {state:'absent', ports:[]};
     if (pcbProfile.state === 'valid') {
       const ports = [];
@@ -135,8 +241,10 @@ async function loadHardware() {
       pcbProfile.ports = ports;
     }
     try {
-      const full = await (await fetch('/api/ecu_config', {cache:'no-store'})).json();
-      settingsCfg = full.settings || {};
+      // Hardware only needs the settings section for dependency cleanup. Do
+      // not fetch the much larger combined ECU document while the hardware
+      // response and PCB catalog pages may still be leaving the TCP stack.
+      settingsCfg = await fetchHardwareJson('/api/config');
     } catch (_) {
       settingsCfg = {};
     }
@@ -148,6 +256,9 @@ async function loadHardware() {
     // Render them once more against the completed snapshot so unchanged
     // Start/Stop cards do not retain a stale yellow "changed" border.
     renderHardwareWorkflowSummaries();
+    _loadedHardwareCfg = cloneHardwareJson(cfg);
+    delete _loadedHardwareCfg._i2c_discovery;
+    _loadedSettingsCfg = cloneHardwareJson(settingsCfg);
     _hwDirty = false;
     document.querySelector('.save-bar')?.classList.remove('is-dirty');
     document.getElementById('save-msg').textContent = 'Loaded — no unsaved changes';
@@ -155,8 +266,10 @@ async function loadHardware() {
     document.getElementById('hw-profile-badge').textContent = cfg.profile_id || 'OpenTurbine';
     updateSaveButton();
     startI2cDiscoveryPoll();
+    return true;
   } catch(e) {
     document.getElementById('save-msg').textContent = 'Load failed: ' + e;
+    return false;
   }
 }
 
@@ -165,8 +278,8 @@ function startI2cDiscoveryPoll() {
   if (i2cDiscoveryTimer) return;
   i2cDiscoveryTimer = setInterval(async () => {
     try {
-      const latest = await (await fetch('/api/hardware', {cache:'no-store'})).json();
-      cfg._i2c_discovery = latest._i2c_discovery || {};
+      const latest = await fetchHardwareJson('/api/i2c_discovery', 2);
+      cfg._i2c_discovery = latest || {};
       renderI2cDiscovery();
     } catch (_) {}
   }, 5000);
@@ -342,9 +455,8 @@ function pcbModeCompatible(direction, purpose, role, mode) {
         ![...analog,...digital].includes(adapter)) return false;
     if (['tot','tit','oil_temperature','coolant_temp','intake_temperature'].includes(purpose) &&
         ![...analog,'spi_thermocouple','onewire_temperature'].includes(adapter)) return false;
-    if (purpose === 'generic' && digital.includes(adapter)) return false;
   }
-  if (adapter === 'spi_thermocouple' && !['tot','tit','oil_temperature','coolant_temp','intake_temperature'].includes(purpose)) return false;
+  if (adapter === 'spi_thermocouple' && !['tot','tit','oil_temperature'].includes(purpose)) return false;
   if (adapter === 'onewire_temperature' && !['oil_temperature','coolant_temp','intake_temperature'].includes(purpose)) return false;
   if (adapter === 'i2c_load_cell' && !['torque','thrust'].includes(purpose)) return false;
   return true;
@@ -434,7 +546,11 @@ function renderI2cDiscovery() {
       : d.type === 'NAU7802' ? '2-channel bridge/load-cell ADC for thrust or torque' : 'recognized response';
     const remove = !d.present && assigned
       ? `<button type="button" class="danger" onclick="removeDisconnectedI2cDevice(${Number(d.address)},'${escapeHtmlText(d.type)}')">Remove device and assignments</button>` : '';
-    return `<div class="hw-item-card" style="margin-top:.55rem"><div class="registry-card-summary"><div><strong>${escapeHtmlText(d.type)} at ${address}</strong><div class="hw-desc">${help} · ${assigned} assigned channel${assigned===1?'':'s'}</div></div><div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap"><span class="registry-status registry-status-${d.present?'ok':'error'}">${d.present?'Connected':'Disconnected'}</span>${remove}</div></div></div>`;
+    const state = d.present ? 'Connected'
+      : d.rechecking || d.state === 'rechecking' ? 'Unavailable — rechecking'
+      : 'Faulted';
+    const stateClass = d.present ? 'ok' : (state === 'Faulted' ? 'error' : 'warning');
+    return `<div class="hw-item-card" style="margin-top:.55rem"><div class="registry-card-summary"><div><strong>${escapeHtmlText(d.type)} at ${address}</strong><div class="hw-desc">${help} · ${assigned} assigned channel${assigned===1?'':'s'}</div></div><div style="display:flex;gap:.45rem;align-items:center;flex-wrap:wrap"><span class="registry-status registry-status-${stateClass}">${state}</span>${remove}</div></div></div>`;
   }).join('');
 }
 
@@ -610,15 +726,15 @@ const ACT_DEPENDENCIES = {
   starter: { name:'Starter', rules:[5], blocks:['StarterSpin','StarterOff'], functions:['Starter sequence blocks','starter side-actions','rules driving starter'] },
   throttle: { name:'Main fuel pump / metering ESC', controllers:['dynamic_idle','governor'], logs:['throttle'], rules:[4],
               blocks:['FuelPumpIdle','ModifiedIdle','Spool','ThrottleSet'], functions:['Fuel sequence blocks','automatic idle/N2 speed-control output','fuel/throttle logging','rules driving throttle'] },
-  fuel_pump2: { name:'Pilot / auxiliary fuel pump', logs:['fp2'], rules:[2], blocks:['FuelPumpRamp','FuelPump2Set','FuelPump2On','FuelPump2Off'],
-                functions:['Pilot / auxiliary fuel pump sequence blocks','pilot / auxiliary fuel logging','rules driving pilot / auxiliary fuel'] },
+  fuel_pump2: { name:'Secondary / auxiliary fuel pump', logs:['fp2'], rules:[2], blocks:['FuelPumpRamp','FuelPump2Set','FuelPump2On','FuelPump2Off'],
+                functions:['Secondary / auxiliary fuel pump sequence blocks','secondary / auxiliary fuel logging','rules driving secondary / auxiliary fuel'] },
   glow_plug: { name:'Glow plug', logs:['glow'], rules:[16], blocks:['GlowPreheat'], functions:['GlowPreheat block','glow logging','rules driving glow plug'] },
   prop_pitch: { name:'Prop pitch', controllers:['governor'], logs:['prop'], rules:[17], functions:['Governor prop-pitch output','prop pitch logging','rules driving prop pitch'] },
   cool_fan: { name:'Cooling fan', rules:[0], blocks:['CoolFanOn','CoolFanOff'], functions:['Cooling fan sequence blocks','rules driving cooling fan'] },
   bleed_valve: { name:'Bleed valve', rules:[1], blocks:['BleedOpen','BleedClose'], functions:['Bleed valve sequence blocks','rules driving bleed valve'] },
   fuel_sol: { name:'Main fuel shutoff', rules:[8], blocks:['FuelOpen','FuelSolClose','FuelPulse'], functions:['Main fuel shutoff sequence blocks','rules driving the main fuel shutoff'] },
   igniter: { name:'Igniter 1', rules:[9], blocks:['IgniterOn','IgniterOff','PreIgnSpark','PreHeat'], functions:['Ignition sequence blocks','rules driving igniter'] },
-  igniter2: { name:'AB / pilot igniter', rules:[10], blocks:['ABIgnOn','ABIgnOff'], functions:['AB / pilot ignition blocks','rules driving AB / pilot igniter'] },
+  igniter2: { name:'secondary igniter', rules:[10], blocks:['ABIgnOn','ABIgnOff'], functions:['secondary ignition blocks','rules driving secondary igniter'] },
   ab_sol: { name:'Afterburner fuel valve', rules:[11], blocks:['ABSolOpen','ABSolClose'], functions:['afterburner fuel-valve sequence blocks','rules driving the afterburner fuel valve'] },
   ab_pump: { name:'Afterburner fuel pump', logs:['ab'], rules:[12], blocks:['ABPumpOn','ABPumpOff'], functions:['afterburner fuel-pump sequence blocks','afterburner logging','rules driving the afterburner fuel pump'] },
   airstarter_sol: { name:'Air starter valve', rules:[15], blocks:['AirstarterOn','AirstarterOff'], functions:['Air starter valve sequence blocks','rules driving the air starter valve'] },
@@ -670,7 +786,6 @@ const HW_ENABLE_DEP_KEYS = {
   'en-statusled': ['actuator', 'status_led'],
   'en-oilpumpcurrent': ['special', 'oil_pump_current'],
   'en-glowcurrent': ['special', 'glow_current'],
-  'en-ab-flame': ['special', 'ab_flame'],
   'en-buzzer': ['special', 'buzzer'],
   'en-cluster': ['special', 'cluster'],
   'en-mavlink': ['special', 'mavlink']

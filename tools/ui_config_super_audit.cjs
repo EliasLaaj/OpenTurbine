@@ -66,6 +66,10 @@ async function patchConfig(page, patch) {
 }
 
 async function gotoConfig(page) {
+  const stateResponse = await page.request.post(`${base}/__sim/data`, {
+    data: { mode:'STANDBY', config_locked:false }
+  });
+  assert.equal(stateResponse.ok(), true);
   await page.goto(`${base}/config.html`);
   await page.waitForSelector('#cf-eg_src', { state: 'attached' });
   await page.evaluate(() => document.querySelectorAll('.config-group').forEach(group => { group.open = true; }));

@@ -50,6 +50,10 @@ The normal Windows installation does not require Git, PlatformIO, or source-code
 4. For a clean install, choose **Development board**, a compatible bundled **Official OpenTurbine PCB**, or a chip-matched **Custom PCB profile** supplied with the PCB design.
 5. Follow the Setup Tool, then join the board Wi-Fi and open the address it shows (normally `http://192.168.4.1`).
 
+Keep only one OpenTurbine browser tab open at a time. This applies to both
+Classic ESP32 and ESP32-S3 ECUs; close an old dashboard tab before opening the
+panel in another tab, window, browser, phone, or computer.
+
 If Windows warns about the Setup Tool, confirm the file came from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases) page, read the current release notes, and verify the published checksum before continuing.
 
 ## Supported targets

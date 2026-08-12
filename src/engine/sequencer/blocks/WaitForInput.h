@@ -10,13 +10,13 @@
 //
 //  channelIdx   : index into HardwareConfig::diCh[] (0–3)
 //  expectedState: true = wait until active, false = wait until inactive
-//  timeoutMs    : max wait (0 = wait forever); on timeout returns Abort
+//  timeoutMs    : finite max wait; zero uses the 30 s defensive fallback
 // ============================================================
 class WaitForInput : public IBlock {
 public:
     int           channelIdx    = 0;
     bool          expectedState = true;
-    unsigned long timeoutMs     = 0;
+    unsigned long timeoutMs     = 30000;
 
     const char* name() override { return "WaitForInput"; }
 
@@ -51,8 +51,9 @@ public:
             Serial.printf("[WaitForInput] ch%d condition met\n", channelIdx);
             return BlockResult::Complete;
         }
-        if (timeoutMs > 0 && (millis() - _entryMs) >= timeoutMs) {
-            Serial.printf("[WaitForInput] ch%d timeout after %lums\n", channelIdx, timeoutMs);
+        const unsigned long finiteTimeout = timeoutMs ? timeoutMs : 30000UL;
+        if ((millis() - _entryMs) >= finiteTimeout) {
+            Serial.printf("[WaitForInput] ch%d timeout after %lums\n", channelIdx, finiteTimeout);
             return BlockResult::Abort;
         }
         return BlockResult::Running;

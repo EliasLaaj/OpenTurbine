@@ -31,3 +31,4 @@ dc.set_sequence(startup=["OilPumpOn", "TimedDelay", "IgniterOn", "FuelPumpIdle",
 
 rig.summary("Run B (LOW_OIL)")
 rig.close()
+raise SystemExit(0 if rig.rows and all(row[1] for row in rig.rows) else 1)

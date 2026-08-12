@@ -163,10 +163,10 @@ public:
     static bool hasFuelPump2;        // second variable fuel pump (independent of throttle ESC)
     static bool hasBleedValve;       // compressor bleed valve (surge prevention / unloaded start)
     static bool hasPropPitch;        // variable pitch propeller servo (turboprop)
-    static bool hasGlowPlug;         // glow plug / pilot-flame element
+    static bool hasGlowPlug;         // glow plug / flame element
     static bool hasGlowCurrentSensor;       // current sensor on glow plug output
     static bool hasIgniterCurrentSensor;   // current sensor on igniter 1 coil output
-    static bool hasIgniter2CurrentSensor;  // current sensor on AB / pilot igniter coil output
+    static bool hasIgniter2CurrentSensor;  // current sensor on secondary igniter coil output
     static bool hasOilPumpCurrentSensor;   // current sensor on oil pump output (overcurrent detection)
     static bool hasGovernor;         // N2 power turbine speed governor (turboshaft/APU)
     static bool hasMAVLink;          // MAVLink UART telemetry output
@@ -231,7 +231,7 @@ public:
     static int   igniter2RestMs;
     static bool  igniter2Coil;             // true = active coil switching (fires repeatedly)
     static float igniter2CoilSatAmps;      // saturation threshold (coil + current mode)
-    static int   igniter2CurrentPin;       // ADC pin for AB / pilot igniter current sensor (-1 = none)
+    static int   igniter2CurrentPin;       // ADC pin for secondary igniter current sensor (-1 = none)
     static float igniter2CurrentMvPerA;    // sensor sensitivity mV/A (e.g. 100 for ACS712-20A)
     static float igniter2CurrentZeroV;     // output voltage at 0A (default 1.65V)
 
@@ -288,7 +288,7 @@ public:
     static float fuelPump2PwmMinPct;
     static float fuelPump2PwmMaxPct;
 
-    // bleedValveType: 0=on-off (relay/solenoid), 1=servo, 2=ledc_pwm
+    // Canonical variable-output driver: 0=servo, 1=ledc_pwm, 2=on-off.
     static int   bleedValveType;
     static int   bleedValvePin;
     static bool  bleedValveActiveH;    // false = active-low relay / MOSFET
@@ -316,7 +316,7 @@ public:
     static int   glowPlugType;
     static int   glowPlugOutputType;
     static bool  glowPlugActiveH;       // relay/on-off mode polarity
-    static int   glowPlugPin;           // output to glow plug / pilot element
+    static int   glowPlugPin;           // output to glow plug / ignition element
     static int   glowPlugFreqHz;       // PWM frequency (e.g. 1000 Hz)
     static int   glowPlugResBits;      // PWM resolution (default 8)
     static float glowPlugPwmMinPct;
@@ -373,7 +373,11 @@ public:
         char  id[16] = {};
         uint8_t pressureInputIndex = 255;
         uint8_t pumpOutputIndex = 255;
+        uint8_t targetSource = 0; // 0=fixed, 1=effective core fuel, 2=N1, 3=N2
         uint16_t targetCentiBar = 250;
+        uint16_t targetHighCentiBar = 250;
+        uint16_t speedMinHundredRpm = 0;
+        uint16_t speedMaxHundredRpm = 200;
         uint16_t deadbandCentiBar = 20;
         uint8_t minDemandPct = 18;
         uint8_t maxDemandPct = 100;
@@ -389,7 +393,6 @@ public:
     static bool safetyOilZero;
     static bool safetyFlameout;
     static bool safetyHotStart;   // reject START if selected EGT is above preStartEgtLimitC
-    static bool safetyTitOvertemp;  // TIT (turbine inlet temp) overtemp shutdown
     static bool safetyOilTempHigh;  // oil temperature overtemp shutdown
     static bool safetyFuelPressLow; // fuel pressure below minimum shutdown
     static bool safetyBattLow;      // battery undervoltage warning/shutdown
@@ -411,8 +414,6 @@ public:
 
     // AB flame sensor (optional, dedicated — separate from main flame sensor)
     static bool  hasAbFlame;
-    static int   abFlamePin;
-    static int   abFlameThreshold;
 
     // ── Channel display labels (user-defined, shown in UI instead of technical names) ──
     static char labelTot[32];        // default "TOT"
@@ -468,7 +469,7 @@ public:
         char     desc[96] = {};
         uint8_t  type = 0;           // 0 = action, 1 = wait, 2 = while
         uint32_t durationMs = 1000;  // wait type
-        uint32_t timeoutMs = 10000;  // while type, 0 = no timeout
+        uint32_t timeoutMs = 10000;  // while type; runtime always applies a finite fallback
         uint8_t  timeoutAction = 0;  // 0 = abort, 1 = fault, 2 = continue
         uint8_t  sensor = 255;
         uint8_t  op = 0;
@@ -525,10 +526,15 @@ public:
     // Serialize to / from JSON
     static size_t toJson(char* buf, size_t len, bool redactPassword = false);
     static void   toJson(JsonDocument& doc, bool redactPassword = false);
+    static void   toJson(JsonObject doc, bool redactPassword = false);
     static bool   validateJson(const char* json, size_t len);
     static bool   validateJson(const JsonDocument& doc, ChannelRegistry* registryWorkspace = nullptr);
     static const char* lastValidationError();
-    static bool   fromJson(const char* json, size_t len,
+    // The mutable input overload lets ArduinoJson keep strings in the web
+    // receive buffer instead of duplicating every key/value on the heap.  This
+    // is important on Classic ESP32 for a complete, otherwise-valid hardware
+    // map.  Callers must treat the buffer as consumed after this call.
+    static bool   fromJson(char* json, size_t len,
                            ChannelRegistry* validationWorkspace = nullptr);
     // Apply a document already accepted by validateJson(), without writing
     // storage. The full-engine restore path uses this to avoid a second large

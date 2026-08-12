@@ -7,7 +7,7 @@
   "board": {
     "id": "otbench-s3-harness",
     "name": "OTBench ESP32-S3 Harness",
-    "revision": "A",
+    "revision": "B",
     "manufacturer": "OpenTurbine development bench",
     "description": "Custom dry-bench profile for the ESP32-S3 DUT wired to the classic ESP32 OTBench tester."
   },
@@ -15,8 +15,22 @@
     "chip": "esp32-s3",
     "minimum_flash_mb": 8
   },
-  "buses": [],
-  "devices": [],
+  "buses": [
+    {
+      "id": "tot_spi",
+      "kind": "spi",
+      "pins": {"sck": 36, "miso": 37, "mosi": -1}
+    }
+  ],
+  "devices": [
+    {
+      "id": "tot_emulator",
+      "driver": "max6675",
+      "bus": "tot_spi",
+      "select": {"gpio": 18},
+      "expected": true
+    }
+  ],
   "fixed_functions": {
     "status_led": {
       "gpio": 48,
@@ -186,6 +200,19 @@
             "gpio": 5
           },
           "pull": "down"
+        }
+      ]
+    },
+    {
+      "id": "tot_input",
+      "label": "TOT thermocouple emulator",
+      "connector": "DUT36/18/37-T34/35/16",
+      "description": "Dedicated MAX6675-compatible thermocouple emulator used by OTBench.",
+      "modes": [
+        {
+          "id": "temperature",
+          "adapter": "spi_thermocouple",
+          "device": "tot_emulator"
         }
       ]
     },

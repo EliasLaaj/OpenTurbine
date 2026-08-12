@@ -40,6 +40,94 @@ ADAPTERS = {
     "i2c_digital_output",
 }
 
+ANALOG_INPUTS = {"analog_input", "i2c_adc_input"}
+DIGITAL_INPUTS = {"digital_input", "i2c_digital_input", "i2c_adc_digital_input"}
+GENERAL_OUTPUTS = {"digital_output", "relay_output", "pwm_output", "servo_output", "i2c_digital_output"}
+
+
+def _default_compatible(adapter: str, purpose: str, role: str) -> bool:
+    """Mirror the firmware's purpose/role/electrical capability contract."""
+    if purpose == "generic":
+        if role == "generic":
+            allowed = ({"digital_input", "analog_input", "pcnt_input", "rc_pwm_input",
+                        "pwm_duty_input", "i2c_digital_input", "i2c_adc_input"}
+                       if not adapter.endswith("_output") else GENERAL_OUTPUTS)
+            return adapter in allowed
+        representatives = {
+            "speed": "shaft_speed", "pressure": "coolant_pressure", "temperature": "coolant_temp",
+            "flame": "flame", "flow": "oil_flow", "torque": "torque", "thrust": "thrust",
+            "voltage": "battery_voltage", "operator": "idle", "digital_switch": "digital_switch",
+            "fault": "fault", "estop": "estop", "inhibit_start": "inhibit_start",
+            "low_oil_switch": "low_oil_switch", "oil_zero_switch": "oil_zero_switch",
+            "sequence_gate": "sequence_gate", "ab_arm": "ab_arm", "ab_fire": "ab_fire",
+            "limp_mode": "limp_mode", "fuel": "main_fuel", "fuel_shutoff": "fuel_shutoff",
+            "starter": "starter", "starter_en": "starter_enable", "oil_pump": "oil_pump",
+            "coolant_pump": "coolant_pump", "scavenge_pump": "scavenge_pump",
+            "cooling_fan": "cooling_fan", "valve": "valve", "igniter": "igniter",
+            "ab_igniter": "ab_igniter", "glow_plug": "glow_plug", "fuel_pump": "fuel_pump",
+            "ab_pump": "ab_pump", "prop_pitch": "prop_pitch", "indicator": "warning_indicator",
+        }
+        representative = representatives.get(role)
+        return bool(representative and _default_compatible(adapter, representative, role))
+
+    input_groups = {
+        "speed": ({"n1_speed", "n2_speed", "shaft_speed"},
+                  ANALOG_INPUTS | {"pcnt_input"}),
+        "flow": ({"fuel_flow", "oil_flow", "scavenge_flow"},
+                 ANALOG_INPUTS | {"pcnt_input"}),
+        "pressure": ({"oil_pressure", "fuel_pressure", "p1_pressure", "p2_pressure", "coolant_pressure"},
+                     ANALOG_INPUTS),
+        "flame": ({"flame", "ab_flame"}, ANALOG_INPUTS | DIGITAL_INPUTS),
+        "torque": ({"torque"}, ANALOG_INPUTS | {"i2c_load_cell"}),
+        "thrust": ({"thrust"}, ANALOG_INPUTS | {"i2c_load_cell"}),
+        "voltage": ({"battery_voltage"}, ANALOG_INPUTS),
+    }
+    for expected_role, (purposes, adapters) in input_groups.items():
+        if purpose in purposes:
+            return role == expected_role and adapter in adapters
+    if purpose in {"tot", "tit"}:
+        return role == "temperature" and adapter in ANALOG_INPUTS | {"spi_thermocouple"}
+    if purpose == "oil_temperature":
+        return role == "temperature" and adapter in ANALOG_INPUTS | {"spi_thermocouple", "onewire_temperature"}
+    if purpose in {"coolant_temp", "intake_temperature"}:
+        return role == "temperature" and adapter in ANALOG_INPUTS | {"onewire_temperature"}
+    if purpose == "throttle":
+        return role == "operator" and adapter in ANALOG_INPUTS | {"pcnt_input", "rc_pwm_input", "pwm_duty_input"}
+    if purpose == "idle":
+        return role == "operator" and adapter in ANALOG_INPUTS | DIGITAL_INPUTS | {"pcnt_input", "rc_pwm_input", "pwm_duty_input"}
+    if purpose == "ab_command":
+        return role == "operator" and adapter in ANALOG_INPUTS | {"rc_pwm_input", "pwm_duty_input"}
+
+    switch_roles = {
+        "start_switch": "digital_switch", "stop_switch": "digital_switch",
+        "digital_switch": "digital_switch", "inhibit_start": "inhibit_start",
+        "estop": "estop", "fault": "fault", "low_oil_switch": "low_oil_switch",
+        "oil_zero_switch": "oil_zero_switch", "sequence_gate": "sequence_gate",
+        "ab_arm": "ab_arm", "ab_fire": "ab_fire", "limp_mode": "limp_mode",
+    }
+    if purpose in switch_roles:
+        return role == switch_roles[purpose] and adapter in DIGITAL_INPUTS
+
+    output_roles = {
+        "main_fuel": ("fuel", {"pwm_output", "servo_output"}),
+        "fuel_shutoff": ("fuel_shutoff", {"digital_output", "relay_output", "i2c_digital_output"}),
+        "starter": ("starter", GENERAL_OUTPUTS), "starter_enable": ("starter_en", GENERAL_OUTPUTS),
+        "oil_pump": ("oil_pump", GENERAL_OUTPUTS), "coolant_pump": ("coolant_pump", GENERAL_OUTPUTS),
+        "scavenge_pump": ("scavenge_pump", GENERAL_OUTPUTS), "cooling_fan": ("cooling_fan", GENERAL_OUTPUTS),
+        "fuel_pump": ("fuel_pump", GENERAL_OUTPUTS),
+        "igniter": ("igniter", {"digital_output", "relay_output", "pwm_output", "i2c_digital_output"}),
+        "ab_igniter": ("ab_igniter", {"digital_output", "relay_output", "pwm_output", "i2c_digital_output"}),
+        "glow_plug": ("glow_plug", {"digital_output", "relay_output", "pwm_output", "i2c_digital_output"}),
+        "valve": ("valve", GENERAL_OUTPUTS), "ab_valve": ("valve", {"digital_output", "relay_output", "i2c_digital_output"}),
+        "air_starter": ("starter", GENERAL_OUTPUTS), "pilot_fuel": ("valve", GENERAL_OUTPUTS),
+        "purge_valve": ("valve", GENERAL_OUTPUTS), "drain_valve": ("valve", GENERAL_OUTPUTS),
+        "nozzle_actuator": ("prop_pitch", {"pwm_output", "servo_output"}),
+        "ab_pump": ("ab_pump", GENERAL_OUTPUTS), "prop_pitch": ("prop_pitch", GENERAL_OUTPUTS),
+        "warning_indicator": ("indicator", {"digital_output", "relay_output", "pwm_output", "i2c_digital_output"}),
+    }
+    expected = output_roles.get(purpose)
+    return bool(expected and role == expected[0] and adapter in expected[1])
+
 
 class ProfileError(ValueError):
     pass
@@ -279,8 +367,11 @@ def validate_profile(profile: dict, *, strict: bool = False) -> list[str]:
                          0 < len(default["role"]) <= 17,
                          f"port {port_id}/{mode_id} default role must be 1..17 characters")
                 _require(isinstance(default.get("purpose"), str) and
-                         0 < len(default["purpose"]) <= 19,
-                         f"port {port_id}/{mode_id} default purpose must be 1..19 characters")
+                          0 < len(default["purpose"]) <= 19,
+                          f"port {port_id}/{mode_id} default purpose must be 1..19 characters")
+                _require(adapter in ADAPTERS and
+                         _default_compatible(adapter, default["purpose"], default["role"]),
+                         f"port {port_id}/{mode_id} default is incompatible with adapter {adapter}")
             if adapter not in ADAPTERS:
                 warnings.append(f"port {port_id}/{mode_id} uses adapter {adapter!r} not supported by this firmware")
             if "device" in mode:

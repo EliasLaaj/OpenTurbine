@@ -182,7 +182,7 @@ function collectPinUsage() {
     add(ch.pin, label);
     const actuatorKey = registryCoreActuatorKey(ch);
     const dedicated = actuatorKey ? cfg.actuators?.[actuatorKey] : null;
-    if (actuatorKey === 'glow_plug' && Number(dedicated?.type || 0) === 2) add(dedicated?.fuel_pin, 'Wet glow pilot fuel');
+    if (actuatorKey === 'glow_plug' && Number(dedicated?.type || 0) === 2) add(dedicated?.fuel_pin, 'Wet glow start fuel');
     const currentEnabled = dedicated ? !!dedicated.has_current : !!ch.has_current;
     const currentPin = dedicated ? dedicated.current_pin : ch.current_pin;
     if (currentEnabled) add(currentPin, `${label} current`);
@@ -264,7 +264,6 @@ function refreshAllPins() {
   const c = cfg.controls  || {};
   const cl = cfg.cluster_serial || {};
   const abt = cfg.ab_trigger || {};
-  const abfl = cfg.ab_flame || {};
 
   refreshPinSel('f-stop-pin',       'in',  c.stop_pin);
   refreshPinSel('f-start-pin',      'in',  c.start_pin);
@@ -314,7 +313,6 @@ function refreshAllPins() {
   refreshPinSel('f-ab-sw-pin',      'in',  abt.switch_pin);
   refreshPinSel('f-ab-inp-pin',     abt.input_rc_pwm ? 'in' : 'adc', abt.input_pin);
   refreshPinSel('f-ab-arm-pin',     'in',  abt.arm_pin);
-  refreshPinSel('f-ab-fl-pin',      'adc', abfl.pin);
 
   // New sensors
   const ot = s.oil_temp || {};
@@ -425,7 +423,7 @@ function escapeHtmlText(value) {
     .replace(/'/g, '&#39;');
 }
 
-// Wet-glow pilot-fuel subfields are mode-specific, like the other actuator
+// Wet-glow start-fuel subfields are mode-specific, like the other actuator
 // cards: relay mode shows polarity; PWM shows freq/bits + duty range;
 // servo/ESC shows pulse endpoints; demand applies to PWM and servo.
 function updateWetGlowModeUI() {

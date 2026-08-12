@@ -42,7 +42,6 @@ public:
         float topPct = constrain(maxPct, minPct, 100.0f);
         float pct  = minPct + norm * (topPct - minPct);
         ed.throttleDemand = constrain(pct / 100.0f, 0.0f, 1.0f);
-        if (Config::applyFuelPumpMinimum(ed.throttleDemand) > 0.001f) ed.fuelEverOpened = true;
     }
 
     BlockResult tick() override {

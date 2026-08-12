@@ -70,9 +70,11 @@ def main() -> int:
     parser.add_argument(
         "--minimum-filesystem",
         type=number,
-        default=0xB0000,
+        default=0x90000,
         help="minimum LittleFS partition size (default matches the supported 4 MB layout)",
     )
+    parser.add_argument("--filesystem-source", type=Path, help="source directory used to build LittleFS")
+    parser.add_argument("--minimum-filesystem-free", type=number, default=0x28000)
     parser.add_argument("--minimum-dram-headroom", type=number, default=0x100)
     parser.add_argument("--minimum-iram-headroom", type=number, default=0x8000)
     parser.add_argument("--minimum-rtc-headroom", type=number, default=0x60)
@@ -111,11 +113,23 @@ def main() -> int:
             raise SystemExit(
                 f"filesystem image {filesystem_size} exceeds partition {littlefs[1]}"
             )
+    if args.filesystem_source:
+        payload_bytes = sum(
+            path.stat().st_size for path in args.filesystem_source.rglob("*") if path.is_file()
+        )
+        payload_headroom = littlefs[1] - payload_bytes
+        if payload_headroom < args.minimum_filesystem_free:
+            raise SystemExit(
+                f"LittleFS source payload {payload_bytes} leaves only {payload_headroom} bytes; "
+                f"required working/log reserve is {args.minimum_filesystem_free}"
+            )
 
     summary = (
         f"OK: firmware={firmware_size}, OTA slot={app0[1]}, headroom={headroom}, "
         f"LittleFS={littlefs[1]}"
     )
+    if args.filesystem_source:
+        summary += f", source payload={payload_bytes} ({payload_headroom} free before filesystem overhead)"
     if args.map:
         minimums = {
             "static DRAM": args.minimum_dram_headroom,

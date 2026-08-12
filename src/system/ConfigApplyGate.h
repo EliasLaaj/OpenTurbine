@@ -1,11 +1,13 @@
 #pragma once
 
+#include <Arduino.h>
 #include <atomic>
+#include <stddef.h>
 #include <stdint.h>
 
 // Serialises live configuration replacement against the final START
-// transition. The web task writes Config statics on Core 0; the ECU task
-// consumes and applies them on Core 1. A single atomic state closes both
+// transition. The web task stages a serialized candidate on Core 0; the ECU
+// task validates and applies it to Config statics on Core 1. A single atomic state closes both
 // directions of the old STANDBY-check/START race.
 class ConfigApplyGate {
 public:
@@ -20,7 +22,60 @@ public:
         _state.store(ReadyForCore, std::memory_order_release);
     }
 
+    // Called only by the web writer while it owns WebWriting. Ownership of
+    // the heap buffer transfers to the ECU core.
+    static uint32_t publishCandidate(char* data, size_t length, uint32_t settleMs = 0) {
+        _pendingData = data;
+        _pendingLength = length;
+        const uint32_t generation = _nextGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+        _pendingGeneration.store(generation, std::memory_order_release);
+        _readyAfterMs.store(millis() + settleMs, std::memory_order_release);
+        markReadyForCore();
+        return generation;
+    }
+
+    // Called only after the ECU core has changed ReadyForCore to CoreApplying.
+    static char* takeCandidate(size_t& length) {
+        char* data = _pendingData;
+        length = _pendingLength;
+        _pendingData = nullptr;
+        _pendingLength = 0;
+        return data;
+    }
+
+    // A Classic streamed parse may temporarily overlap another small HTTP
+    // response. Keep the exact persisted generation staged and retry later;
+    // the gate remains non-idle, so START and subsequent writes stay blocked.
+    static void retryStagedCandidate(size_t length, uint32_t settleMs) {
+        _pendingData = nullptr;
+        _pendingLength = length;
+        _readyAfterMs.store(millis() + settleMs, std::memory_order_release);
+        _state.store(ReadyForCore, std::memory_order_release);
+    }
+
+    static uint32_t pendingGeneration() {
+        return _pendingGeneration.load(std::memory_order_acquire);
+    }
+
+    // Completes a published settings transaction. The result is recorded
+    // before releasing the gate so the web core can acknowledge the exact
+    // generation rather than racing a subsequent GET against stale statics.
+    static void completeCoreApply(uint32_t generation, bool succeeded) {
+        _completedSucceeded.store(succeeded, std::memory_order_relaxed);
+        _completedGeneration.store(generation, std::memory_order_release);
+        release();
+    }
+
+    static bool completion(uint32_t generation, bool& succeeded) {
+        if (!generation || _completedGeneration.load(std::memory_order_acquire) != generation)
+            return false;
+        succeeded = _completedSucceeded.load(std::memory_order_relaxed);
+        return true;
+    }
+
     static bool tryBeginCoreApply() {
+        const uint32_t ready = _readyAfterMs.load(std::memory_order_acquire);
+        if (static_cast<int32_t>(millis() - ready) < 0) return false;
         uint8_t expected = ReadyForCore;
         return _state.compare_exchange_strong(expected, CoreApplying, std::memory_order_acq_rel);
     }
@@ -43,4 +98,11 @@ public:
 
 private:
     static inline std::atomic<uint8_t> _state{Idle};
+    static inline std::atomic<uint32_t> _nextGeneration{0};
+    static inline std::atomic<uint32_t> _pendingGeneration{0};
+    static inline std::atomic<uint32_t> _readyAfterMs{0};
+    static inline std::atomic<uint32_t> _completedGeneration{0};
+    static inline std::atomic<bool> _completedSucceeded{false};
+    static inline char* _pendingData = nullptr;
+    static inline size_t _pendingLength = 0;
 };

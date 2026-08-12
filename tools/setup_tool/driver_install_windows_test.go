@@ -5,10 +5,8 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestDriverKindForHardwareIDs(t *testing.T) {
@@ -71,9 +69,9 @@ func TestBootloaderFailureKeepsMatchingDriverForBridgeWithoutCOM(t *testing.T) {
 	}
 }
 
-func TestBootloaderFailureKeepsDriverRepairForBridgeWithCOM(t *testing.T) {
+func TestBootloaderFailureKeepsOfficialDriverPageForBridgeWithCOM(t *testing.T) {
 	recommendation := driverRecommendation{
-		Choices: []driverChoice{{Kind: driverWCH, Label: "Install WCH"}},
+		Choices: []driverChoice{{Kind: driverWCH, Label: "Official WCH driver"}},
 		Device: usbBridgeDevice{
 			InstanceID: `USB\VID_1A86&PID_7523\0001`,
 			PortName:   "COM8",
@@ -82,136 +80,13 @@ func TestBootloaderFailureKeepsDriverRepairForBridgeWithCOM(t *testing.T) {
 	}
 	got := bootloaderFailureDriverRecommendation(recommendation)
 	if len(got.Choices) != 1 || got.Choices[0].Kind != driverWCH {
-		t.Fatalf("missing WCH repair choice for bridge already on COM8: %+v", got)
+		t.Fatalf("missing official WCH page choice for bridge already on COM8: %+v", got)
 	}
 	if !strings.Contains(got.Message, "Hold BOOT") {
 		t.Fatalf("missing boot-mode advice: %q", got.Message)
 	}
-	if !strings.Contains(got.Message, "repair") {
-		t.Fatalf("missing driver-repair advice: %q", got.Message)
-	}
-}
-
-func TestValidateDriverINFRootRejectsIncompletePackages(t *testing.T) {
-	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "driver.inf"), "inf")
-	if err := validateDriverINFRoot(root); err == nil || !strings.Contains(err.Error(), "CAT") {
-		t.Fatalf("expected missing CAT error, got %v", err)
-	}
-	writeTestFile(t, filepath.Join(root, "driver.cat"), "cat")
-	if err := validateDriverINFRoot(root); err == nil || !strings.Contains(err.Error(), "SYS") {
-		t.Fatalf("expected missing SYS error, got %v", err)
-	}
-	writeTestFile(t, filepath.Join(root, "driver.sys"), "sys")
-	if err := validateDriverINFRoot(root); err != nil {
-		t.Fatalf("complete INF root rejected: %v", err)
-	}
-}
-
-func TestBuildINFHelperArgsUsesExplicitAbsolutePaths(t *testing.T) {
-	root := t.TempDir()
-	req, err := buildDriverInstallRequest(&App{workDir: t.TempDir()}, driverCP210x, completeDriverRoot(t, root), usbBridgeDevice{
-		InstanceID:  `USB\VID_10C4&PID_EA60\0001`,
-		HardwareIDs: []string{`USB\VID_10C4&PID_EA60`},
-		DriverKind:  driverCP210x,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := buildINFHelperArgs(req)
-	joined := strings.Join(args, "\n")
-	for _, want := range []string{"--driver-kind", "cp210x", "--driver-root", "--device-instance-id", "--result", "--log"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("helper args missing %q: %#v", want, args)
-		}
-	}
-	if !filepath.IsAbs(req.DriverRoot) || !filepath.IsAbs(req.ResultPath) || !filepath.IsAbs(req.LogPath) {
-		t.Fatalf("request paths must be absolute: %+v", req)
-	}
-}
-
-func TestInstallINFDriverPackageUsesPnPUtilSubdirsScanAndMatchingCOM(t *testing.T) {
-	oldRunner := driverCommandRunner
-	oldTimeout := driverCOMWaitTimeout
-	defer func() {
-		driverCommandRunner = oldRunner
-		driverCOMWaitTimeout = oldTimeout
-	}()
-	driverCOMWaitTimeout = 10 * time.Millisecond
-	root := completeDriverRoot(t, t.TempDir())
-	var calls [][]string
-	driverCommandRunner = func(name string, args ...string) driverCommandResult {
-		call := append([]string{name}, args...)
-		calls = append(calls, call)
-		if strings.EqualFold(name, "reg") {
-			return driverCommandResult{Output: `PortName    REG_SZ    COM7`}
-		}
-		if len(args) > 0 && args[0] == "/scan-devices" {
-			return driverCommandResult{ExitCode: 0, Output: "scan complete"}
-		}
-		return driverCommandResult{ExitCode: 0, Output: "Microsoft PnP Utility\r\nDriver package added successfully"}
-	}
-
-	result := installINFDriverPackage(driverInstallRequest{
-		Kind:             driverCP210x,
-		DriverRoot:       root,
-		DeviceInstanceID: `USB\VID_10C4&PID_EA60\0001`,
-	})
-	if err := driverInstallError(result); err != nil {
-		t.Fatalf("install should be successful: result=%+v err=%v", result, err)
-	}
-	if result.COMPort != "COM7" {
-		t.Fatalf("got COM port %q, want COM7", result.COMPort)
-	}
-	wantAddArgs := []string{"/add-driver", filepath.Join(root, "*.inf"), "/subdirs", "/install"}
-	if filepath.Base(calls[0][0]) != "pnputil.exe" || !reflect.DeepEqual(calls[0][1:], wantAddArgs) {
-		t.Fatalf("first command=%#v, want pnputil.exe %#v", calls[0], wantAddArgs)
-	}
-	if len(calls) < 2 || calls[1][1] != "/scan-devices" {
-		t.Fatalf("scan-devices was not called: %#v", calls)
-	}
-}
-
-func TestInstallINFDriverPackageRequiresMatchingCOM(t *testing.T) {
-	oldRunner := driverCommandRunner
-	oldTimeout := driverCOMWaitTimeout
-	defer func() {
-		driverCommandRunner = oldRunner
-		driverCOMWaitTimeout = oldTimeout
-	}()
-	driverCOMWaitTimeout = time.Millisecond
-	driverCommandRunner = func(name string, args ...string) driverCommandResult {
-		if strings.EqualFold(name, "reg") {
-			return driverCommandResult{ExitCode: 1}
-		}
-		return driverCommandResult{ExitCode: 0, Output: "ok"}
-	}
-	result := installINFDriverPackage(driverInstallRequest{
-		Kind:             driverWCH,
-		DriverRoot:       completeDriverRoot(t, t.TempDir()),
-		DeviceInstanceID: `USB\VID_1A86&PID_7523\0001`,
-	})
-	if err := driverInstallError(result); err == nil || !strings.Contains(err.Error(), "matching COM port") {
-		t.Fatalf("expected matching COM port error, result=%+v err=%v", result, err)
-	}
-}
-
-func TestInstallINFDriverPackagePreservesRebootRequired(t *testing.T) {
-	oldRunner := driverCommandRunner
-	defer func() { driverCommandRunner = oldRunner }()
-	driverCommandRunner = func(name string, args ...string) driverCommandResult {
-		return driverCommandResult{ExitCode: errorSuccessRebootRequired, Output: "restart required"}
-	}
-	result := installINFDriverPackage(driverInstallRequest{
-		Kind:             driverCP210x,
-		DriverRoot:       completeDriverRoot(t, t.TempDir()),
-		DeviceInstanceID: `USB\VID_10C4&PID_EA60\0001`,
-	})
-	if !result.RebootRequired {
-		t.Fatalf("expected reboot required: %+v", result)
-	}
-	if err := driverInstallError(result); err != nil {
-		t.Fatalf("3010 should be successful with reboot-required status: %v", err)
+	if !strings.Contains(got.Message, "official driver page") {
+		t.Fatalf("missing official driver-page advice: %q", got.Message)
 	}
 }
 
@@ -225,7 +100,7 @@ func TestLoadPackageRejectsSchemaMismatch(t *testing.T) {
 
 func TestLoadPackageRejectsMissingMinimumToolVersion(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "manifest.json"), `{"project":"OpenTurbine","version":"2.0.0","package_schema":3,"setup_tool_version":"0.6.0"}`)
+	writeTestFile(t, filepath.Join(root, "manifest.json"), `{"project":"OpenTurbine","version":"2.0.0","package_schema":4,"setup_tool_version":"0.7.0"}`)
 	if _, err := loadPackageFromDir(root); err == nil || !strings.Contains(err.Error(), "minimum compatible") {
 		t.Fatalf("expected missing minimum-tool-version error, got %v", err)
 	}

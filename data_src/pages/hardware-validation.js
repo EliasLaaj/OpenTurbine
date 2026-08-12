@@ -35,7 +35,7 @@ const PIN_SELECT_LABELS = {
   'f-fuelpress-pin':  'Fuel Pressure',
   'f-glowcur-pin':      'Glow Current',
   'f-igncur-pin':       'Igniter 1 Current',
-  'f-ign2cur-pin':      'AB / Pilot Igniter Current',
+  'f-ign2cur-pin':      'Secondary Igniter Current',
   'f-oilpumpcur-pin':   'Oil Pump Current',
   'f-thr-pin':        'Main Fuel Pump / Metering Output',
   'f-str-pin':        'Starter ESC',
@@ -43,13 +43,13 @@ const PIN_SELECT_LABELS = {
   'f-oscav-pin':      'Oil Scavenge Pump',
   'f-fsol-pin':       'Main Fuel Shutoff',
   'f-ign-pin':        'Igniter',
-  'f-ign2-pin':       'AB / Pilot Igniter',
+  'f-ign2-pin':       'Secondary Igniter',
   'f-sen-pin':        'Starter Enable Output',
   'f-abs-pin':        'Afterburner Fuel Valve',
   'f-abp-pin':        'AB Fuel Pump',
   'f-airs-pin':       'Air Starter Valve',
   'f-fan-pin':        'Cooling Fan',
-  'f-fp2-pin':        'Pilot / Auxiliary Fuel Pump',
+  'f-fp2-pin':        'Secondary / Auxiliary Fuel Pump',
   'f-bleed-pin':      'Bleed Valve',
   'f-pp-pin':         'Prop Pitch',
   'f-glow-pin':       'Glow Plug',
@@ -62,7 +62,6 @@ const PIN_SELECT_LABELS = {
   'f-ab-sw-pin':      'AB Switch',
   'f-ab-inp-pin':     'AB Input',
   'f-ab-arm-pin':     'AB Arm Switch',
-  'f-ab-fl-pin':      'AB Flame Sensor',
 };
 
 let _pinConflictBlocking = false;
@@ -227,17 +226,11 @@ function updateSaveButton() {
 }
 
 function ensureAbTrig() { if (!cfg.ab_trigger) cfg.ab_trigger = {}; return cfg.ab_trigger; }
-function ensureAbFlame() { if (!cfg.ab_flame) cfg.ab_flame = {}; return cfg.ab_flame; }
 async function setAbTrig(key, val)     {
   if (isPinField(key) && !await acceptPinChange(val)) { refreshAllPins(); return; }
   ensureAbTrig()[key] = val; refreshAllPins(); dirty();
 }
 function setAbTrigBool(key, val) { ensureAbTrig()[key] = val; dirty(); }
-async function setAbFlame(key, val)    {
-  if (isPinField(key) && !await acceptPinChange(val)) { refreshAllPins(); return; }
-  ensureAbFlame()[key] = val; refreshAllPins(); dirty();
-}
-function setAbFlameBool(key, val){ ensureAbFlame()[key] = val; dirty(); }
 
 function updateFuelFlowTypeUI() {
   const type = +(document.getElementById('f-fuelflow-type')?.value || 0);
@@ -337,12 +330,6 @@ function updateAbArmUI(checked) {
   const pins = document.getElementById('grp-ab-arm-pins');
   if (pins) pins.style.display = checked ? '' : 'none';
 }
-function updateAbFlameUI(checked) {
-  const grp = document.getElementById('grp-ab-flame');
-  if (grp) grp.style.display = checked ? '' : 'none';
-}
-
-
 function updateFeaturesUI() {
   const hasAB  = hardwareHasAfterburner();
   const has2sh = registryHasPurpose('input','n2_speed');
@@ -352,10 +339,10 @@ function updateFeaturesUI() {
   // AB actuator block
   const abActSec = document.getElementById('section-ab-actuators');
   if (abActSec) abActSec.style.display = hasAB ? '' : 'none';
-  // Labels: AB / pilot igniter
+  // Labels: secondary igniter
   const lblIgn2 = document.getElementById('lbl-igniter2');
-  if (lblIgn2) lblIgn2.textContent = hasAB ? 'Afterburner Igniter' : 'AB / Pilot Igniter';
+  if (lblIgn2) lblIgn2.textContent = hasAB ? 'Afterburner Igniter' : 'Secondary Igniter';
   // Labels: AB Fuel Pump / auxiliary fuel pump output
   const lblAbp = document.getElementById('lbl-abpump');
-  if (lblAbp) lblAbp.textContent = hasAB ? 'Afterburner Fuel Pump Motor / ESC' : 'Pilot / Auxiliary Fuel Pump Motor / ESC';
+  if (lblAbp) lblAbp.textContent = hasAB ? 'Afterburner Fuel Pump Motor / ESC' : 'Secondary / Auxiliary Fuel Pump Motor / ESC';
 }

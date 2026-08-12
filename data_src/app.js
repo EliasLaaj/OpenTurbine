@@ -14,10 +14,10 @@ function plainRegistryName(raw, fallback = '') {
   const direct = {
     user_throttle:'Throttle Input', operator_throttle:'Throttle Input', operator_thrott:'Throttle Input', throttle_input:'Throttle Input',
     user_idle:'Idle Input', operator_idle:'Idle Input', idle_input:'Idle Input',
-    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Pilot / Auxiliary Fuel Pump', main_fuel:'Main Fuel Pump',
+    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Secondary / Auxiliary Fuel Pump', main_fuel:'Main Fuel Pump',
     fuel_shutoff:'Main Fuel Shutoff', fuel_sol:'Main Fuel Shutoff', flame:'Flame Sensor', flame_main:'Flame Sensor',
     coolant_pump:'Coolant Pump', coolant_temperature:'Coolant Temperature',
-    pilot_fuel:'Pilot Gas', purge_valve:'Purge Valve', air_starter:'Air Starter',
+    pilot_fuel:'Start Fuel', purge_valve:'Purge Valve', air_starter:'Air Starter',
     ab_pump:'Afterburner Fuel Pump', ab_solenoid:'Afterburner Fuel Valve', ab_igniter:'Afterburner Igniter',
     prop_pitch:'Prop Pitch', nozzle_actuator:'Nozzle Actuator'
   };
@@ -59,8 +59,8 @@ const SEQUENCE_BLOCK_LABELS = {
   ABCheckReady:'Check Afterburner Entry Conditions', ABIgnite:'Ignite Afterburner',
   ABFlameConfirm:'Confirm Afterburner Flame', ABStabilize:'Stabilize Afterburner',
   BleedOpen:'Bleed Valve Open', BleedClose:'Bleed Valve Close', GlowPreheat:'Glow Preheat',
-  FuelPumpRamp:'Pilot / Auxiliary Fuel Pump Ramp', FuelPump2Set:'Pilot / Auxiliary Fuel Pump Set',
-  FuelPump2On:'Pilot / Auxiliary Fuel Pump On', FuelPump2Off:'Pilot / Auxiliary Fuel Pump Off',
+  FuelPumpRamp:'Secondary / Auxiliary Fuel Pump Ramp', FuelPump2Set:'Secondary / Auxiliary Fuel Pump Set',
+  FuelPump2On:'Secondary / Auxiliary Fuel Pump On', FuelPump2Off:'Secondary / Auxiliary Fuel Pump Off',
   GovernorHold:'Verify Power-Turbine Governor'
 };
 function sequenceBlockLabel(id) { return SEQUENCE_BLOCK_LABELS[id] || id || '—'; }
@@ -254,6 +254,11 @@ function drawSparkline(canvasId, data, color) {
 // setInterval at 333 ms is reliable for a visible foreground tab; if the tab
 // is backgrounded the rate drops to ~1 s which is acceptable for monitoring.
 let ws = null;
+// Classic ESP32 uses compact HTTP telemetry polling. Repeated full-page
+// navigation necessarily replaces WebSocket transports and can eventually
+// exhaust the older chip's small lwIP connection pool. S3 keeps WebSockets;
+// both paths feed the same applyData() UI and expose the same controls.
+let _useWebSocketTelemetry = null;
 let _lastMsgMs = 0;
 let _lastConnectMs = 0;
 let _pullTimer = null;
@@ -328,24 +333,35 @@ function requestTelemetryNow() {
 
 async function restTelemetryFallbackNow() {
   if (!isLiveTelemetryPage() || document.hidden || _restFallbackInFlight) return;
-  if (_lastMsgMs && Date.now() - _lastMsgMs < 2500) return;
+  const freshForMs = _useWebSocketTelemetry === false
+    ? Math.max(250, Math.floor(desiredPullPeriodMs() * 0.8))
+    : 2500;
+  if (_lastMsgMs && Date.now() - _lastMsgMs < freshForMs) return;
   _restFallbackInFlight = true;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1800);
   try {
-    const r = await fetch('/api/telemetry', { cache: 'no-store' });
+    const r = await fetch('/api/telemetry', { cache: 'no-store', signal: controller.signal });
     if (r.ok) {
       const d = await r.json();
       _lastMsgMs = Date.now();
+      setConnectionState(true, 'Connected');
       applyData(d);
     }
   } catch (_) {
+    setConnectionState(false, 'Disconnected');
   } finally {
+    clearTimeout(timeout);
     _restFallbackInFlight = false;
   }
 }
 
 function startRestFallbackTimer() {
   if (_restFallbackTimer || !isLiveTelemetryPage()) return;
-  _restFallbackTimer = setInterval(restTelemetryFallbackNow, 1500);
+  const period = _useWebSocketTelemetry === false
+    ? Math.max(500, desiredPullPeriodMs())
+    : 1500;
+  _restFallbackTimer = setInterval(restTelemetryFallbackNow, period);
 }
 
 function stopGlobalTelemetry() {
@@ -610,10 +626,21 @@ function applyData(d) {
   if (diWrap) {
     const showDi = d.dynamic_idle_enabled && d.mode === 'RUNNING';
     diWrap.style.display = showDi ? '' : 'none';
-    if (showDi && d.idle_target_rpm !== undefined) {
-      setText('throttle-di-rpm', fmtInt(d.idle_target_rpm));
+    if (showDi && d.idle_target !== undefined) {
+      setText('throttle-di-rpm', d.idle_target_unit === 'bar' ? Number(d.idle_target).toFixed(2) : fmtInt(d.idle_target));
+      setText('throttle-di-unit', d.idle_target_unit || 'rpm');
+      setText('throttle-di-state', d.idle_controller_state || 'Off');
     }
   }
+  const throttleCard = document.getElementById('throttle-output-card');
+  if (throttleCard && d.throttle_command_owner)
+    throttleCard.title = `Final command owner: ${d.throttle_command_owner}. Actual fuel output remains subject to protection and calibrated hardware limits.`;
+  const oilOwnerCard = document.getElementById('oil-card');
+  if (oilOwnerCard && d.oil_command_owner)
+    oilOwnerCard.title = `Final command owner: ${d.oil_command_owner}. Bearing oil pressure and configured fault protection remain authoritative.`;
+  const pitchStatus = document.getElementById('adv-pitch');
+  if (pitchStatus && d.prop_pitch_command_owner)
+    pitchStatus.title = `Final command owner: ${d.prop_pitch_command_owner}. 0% is fine/minimum load; 100% is coarse/maximum load.`;
 
   // Relight status — hide card entirely when relight is disabled in config
   const relightCard = document.getElementById('relight-card');
@@ -778,6 +805,14 @@ function applyData(d) {
     }
   }
   const storageBanner = document.getElementById('config-storage-banner');
+  const loggingHealthBanner = document.getElementById('logging-health-banner');
+  if (loggingHealthBanner) {
+    const degraded = d.session_logger_healthy === false || d.event_recorder_healthy === false || d.runtime_stats_healthy === false;
+    loggingHealthBanner.style.display = degraded ? '' : 'none';
+    if (degraded) loggingHealthBanner.textContent =
+      'Run logging is degraded' + (d.session_log_path ? ' (' + d.session_log_path + ')' : '') +
+      '. Engine control is unaffected. See Log for details.';
+  }
   if (storageBanner) storageBanner.style.display = d.config_storage_fault ? '' : 'none';
   // Boot-config load warning (full frames: config_load_warning = string|null).
   // Dismiss hides it for this page load only; reappears on reload while it persists.
@@ -841,13 +876,14 @@ function applyData(d) {
   const seqSection = document.getElementById('seq-progress-section');
   if (seqSection) {
     const abSeqActive = d.mode === 'RUNNING' && (d.ab_mode === 'Igniting' || d.ab_mode === 'ShuttingDown');
-    const inSeq = (d.mode === 'STARTUP' || d.mode === 'SHUTDOWN' || abSeqActive) && d.seq_block_total > 0;
+    const showingAB = abSeqActive && d.ab_seq_block_total > 0;
+    const inSeq = showingAB || ((d.mode === 'STARTUP' || d.mode === 'SHUTDOWN') && d.seq_block_total > 0);
     seqSection.style.display = inSeq ? '' : 'none';
     if (inSeq) {
-      setText('seq-block-name', sequenceBlockLabel(d.current_block));
-      setText('seq-wait-reason', d.seq_wait_reason || '');
-      const step = (d.seq_block_idx || 0) + 1;
-      const total = d.seq_block_total || 1;
+      setText('seq-block-name', sequenceBlockLabel(showingAB ? d.ab_current_block : d.current_block));
+      setText('seq-wait-reason', (showingAB ? d.ab_seq_wait_reason : d.seq_wait_reason) || '');
+      const step = (showingAB ? (d.ab_seq_block_idx || 0) : (d.seq_block_idx || 0)) + 1;
+      const total = (showingAB ? d.ab_seq_block_total : d.seq_block_total) || 1;
       setText('seq-step-text', step + ' / ' + total);
       const pct = Math.round((step / total) * 100);
       const bar = document.getElementById('seq-progress-bar');
@@ -1201,7 +1237,7 @@ function applyData(d) {
     }
   }
 
-  // AB / pilot igniter coil current card
+  // secondary igniter coil current card
   const ign2CurCard = document.getElementById('igniter2-current-card');
   if (ign2CurCard) {
     ign2CurCard.style.display = d.has_igniter2_current ? '' : 'none';
@@ -1265,11 +1301,13 @@ function applyData(d) {
     if (d.has_governor) {
       setText('gov-target-rpm', d.governor_target_rpm !== undefined ? fmtInt(d.governor_target_rpm) : '—');
       setText('gov-n2-actual',  d.n2 !== undefined ? fmtInt(d.n2) : '—');
+      setText('gov-state', d.governor_controller_state || 'Off');
       const govMode = document.getElementById('gov-mode');
       if (govMode) {
         if (d.governor_mode) {
-          govMode.textContent = d.governor_mode === 'pitch' ? 'PROPELLER-PITCH CONTROL' : 'FUEL CONTROL';
-          govMode.title = d.governor_mode === 'pitch'
+          govMode.textContent = d.governor_mode === 'pitch' ? 'PROPELLER-PITCH CONTROL' :
+            d.governor_mode === 'two_position_pitch' ? 'FINE / COARSE PITCH CONTROL' : 'FUEL CONTROL';
+          govMode.title = d.governor_mode === 'pitch' || d.governor_mode === 'two_position_pitch'
             ? 'Holds N2 by adjusting propeller pitch/load — you set power with the throttle.'
             : 'Holds N2 by winding fuel/throttle directly — the governor owns the throttle.';
           govMode.style.display = '';
@@ -1280,7 +1318,7 @@ function applyData(d) {
     }
   }
 
-  // ── Advanced actuators section (glow, bleed, prop pitch, pilot / auxiliary fuel pump, fan, airstarter, scavenge)
+  // ── Advanced actuators section (glow, bleed, prop pitch, secondary / auxiliary fuel pump, fan, airstarter, scavenge)
   const advActSection = document.getElementById('adv-act-section');
   if (advActSection) {
     const anyAdv = d.has_starter   || d.has_starter_en || d.has_fuel_sol  || d.has_igniter
@@ -1432,6 +1470,13 @@ function applyData(d) {
       const abOffsetRow = document.getElementById('ab-fuel-offset-row');
       if (abOffsetRow) abOffsetRow.style.display = Math.abs(abOffset) > 0.001 ? '' : 'none';
       setText('ab-fuel-offset', Math.round(abOffset * 100));
+      const abReason = document.getElementById('ab-state-reason');
+      if (abReason) {
+        const reason = abMode === 'Fault' ? d.ab_fault_reason :
+          (abMode === 'Arming' ? d.ab_inhibit_reason : '');
+        abReason.style.display = reason ? '' : 'none';
+        abReason.textContent = reason || '';
+      }
 
       // Manual FIRE is only meaningful when Hardware trigger source is Manual command only.
       const manualAb = Number(d.ab_trigger_source ?? 0) === 0;
@@ -1743,7 +1788,11 @@ window.addEventListener('pageshow', (e) => {
   // startTelemetryBoot() below.
   if (!e.persisted) return;
   if (usesGlobalTelemetry()) {
-    if (!ws) {
+    if (_useWebSocketTelemetry === false) {
+      startStaleMonitor();
+      startRestFallbackTimer();
+      restTelemetryFallbackNow();
+    } else if (!ws) {
       setConnectionState(false, 'Reconnecting - values retained');
       connect();
       startRestFallbackTimer();
@@ -1759,25 +1808,40 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('pagehide', stopGlobalTelemetry);
 window.addEventListener('beforeunload', stopGlobalTelemetry);
 window.addEventListener('ot:navigation-start', stopGlobalTelemetry);
-function startTelemetryBoot() {
+async function startTelemetryBoot() {
   if (!usesGlobalTelemetry()) {
     if (!hasPageLocalTelemetry()) startStatusHeartbeat();
     return;
   }
-  connect();
+  if (_useWebSocketTelemetry === null) {
+    try {
+      const response = await fetch('/api/device_info', { cache: 'no-store' });
+      const info = response.ok ? await response.json() : null;
+      _useWebSocketTelemetry = info?.target !== 'esp32dev';
+    } catch (_) {
+      // Preserve the S3/current behavior if identity cannot be read.
+      _useWebSocketTelemetry = true;
+    }
+  }
+  if (_useWebSocketTelemetry) connect();
+  else {
+    startStaleMonitor();
+    await restTelemetryFallbackNow();
+  }
   startRestFallbackTimer();
   if (isDashboardPage()) {
     // Live values arrive immediately over WS. Delay the much larger full
     // snapshot until the user has actually remained on Dashboard; otherwise a
     // quick menu click can abandon this Classic ESP32 transfer behind the next
     // page request. The navigation teardown cancels this timer.
+    const delay = _useWebSocketTelemetry ? 2500 : 0;
     _dashboardBootstrapTimer = setTimeout(() => {
       _dashboardBootstrapTimer = null;
       fetch('/api/data', { cache: 'no-store' })
         .then(r => r.json())
         .then(d => { try { applyData(d); } catch(e) {} })
         .catch(() => {});
-    }, 2500);
+    }, delay);
   }
 }
 

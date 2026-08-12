@@ -40,12 +40,31 @@ bool adapterKnown(const char* value) {
     static const char* const names[] = {
         "digital_input", "analog_input", "pcnt_input", "rc_pwm_input",
         "pwm_duty_input", "spi_thermocouple", "onewire_temperature",
-        "i2c_digital_input", "i2c_adc_input", "i2c_load_cell",
+        "i2c_digital_input", "i2c_adc_input", "i2c_adc_digital_input", "i2c_load_cell",
         "digital_output", "relay_output", "pwm_output", "servo_output",
         "i2c_digital_output"
     };
     for (const char* name : names) if (!strcmp(name, value)) return true;
     return false;
+}
+
+bool adapterDriver(const char* adapter, ChannelRegistry::Driver& driver) {
+    using Driver = ChannelRegistry::Driver;
+    if (!strcmp(adapter, "digital_input")) driver = Driver::Digital;
+    else if (!strcmp(adapter, "analog_input") || !strcmp(adapter, "spi_thermocouple") ||
+             !strcmp(adapter, "onewire_temperature")) driver = Driver::Analog;
+    else if (!strcmp(adapter, "pcnt_input")) driver = Driver::Pulse;
+    else if (!strcmp(adapter, "rc_pwm_input")) driver = Driver::RcPwm;
+    else if (!strcmp(adapter, "pwm_duty_input")) driver = Driver::PwmDuty;
+    else if (!strcmp(adapter, "i2c_digital_input")) driver = Driver::I2cDigital;
+    else if (!strcmp(adapter, "i2c_adc_input") || !strcmp(adapter, "i2c_adc_digital_input")) driver = Driver::I2cAnalog;
+    else if (!strcmp(adapter, "i2c_load_cell")) driver = Driver::I2cLoadCell;
+    else if (!strcmp(adapter, "digital_output") || !strcmp(adapter, "relay_output")) driver = Driver::Relay;
+    else if (!strcmp(adapter, "pwm_output")) driver = Driver::Pwm;
+    else if (!strcmp(adapter, "servo_output")) driver = Driver::Servo;
+    else if (!strcmp(adapter, "i2c_digital_output")) driver = Driver::I2cRelay;
+    else return false;
+    return true;
 }
 
 int jsonPin(JsonObjectConst pins, const char* key) {
@@ -520,10 +539,21 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
             const bool output = strstr(mode.adapter, "output") != nullptr;
             if (hasDefault) {
                 const auto direction = output ? ChannelRegistry::Output : ChannelRegistry::Input;
+                ChannelRegistry::Driver driver;
                 if (!ChannelRegistry::roleValid(direction, mode.defaultRole) ||
-                    !ChannelRegistry::purposeValid(direction, mode.defaultPurpose)) {
+                    !ChannelRegistry::purposeValid(direction, mode.defaultPurpose) ||
+                    !adapterDriver(mode.adapter, driver) ||
+                    !ChannelRegistry::purposeRoleDriverValid(direction, mode.defaultPurpose,
+                                                             mode.defaultRole, driver) ||
+                    (!strcmp(mode.adapter, "spi_thermocouple") &&
+                     strcmp(mode.defaultPurpose, "tot") && strcmp(mode.defaultPurpose, "tit") &&
+                     strcmp(mode.defaultPurpose, "oil_temperature")) ||
+                    (!strcmp(mode.adapter, "onewire_temperature") &&
+                     strcmp(mode.defaultPurpose, "oil_temperature") &&
+                     strcmp(mode.defaultPurpose, "coolant_temp") &&
+                     strcmp(mode.defaultPurpose, "intake_temperature"))) {
                     delete catalog;
-                    strlcpy(_fault, "PCB port mode default has an invalid role or purpose",
+                    strlcpy(_fault, "PCB port mode default is incompatible with its electrical adapter",
                             sizeof(_fault));
                     return false;
                 }

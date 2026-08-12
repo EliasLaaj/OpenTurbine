@@ -5,8 +5,8 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Hardware</title>
-<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
-<script src="/theme.js?v=20260731a" data-ot-version="20260731a"></script>
+<script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body>
 <nav>
@@ -82,16 +82,16 @@
     <div class="hw-item-card">
       <div class="hw-grid profile-grid">
         <div class="hw-field">
-          <span class="hw-label">Engine name / Wi-Fi network name</span>
+          <label class="hw-label" for="f-profile-id">Engine name / Wi-Fi network name</label>
           <span class="hw-desc">Identifies this engine and its saved setup. It is also used as the ECU Wi-Fi network name. Default: OpenTurbine.</span>
           <input type="text" id="f-profile-id" maxlength="63" placeholder="OpenTurbine" oninput="setProfileId(this.value)">
           <span id="profile-id-warn" style="display:none;font-size:.68rem;color:var(--yellow)">⚠ Longer than 32 bytes — Wi-Fi limits SSIDs to 32 bytes, so the broadcast AP name will be truncated (the full ID is still used everywhere else).</span>
         </div>
         <div class="hw-field">
-          <span class="hw-label">Wi-Fi AP Password</span>
+          <label class="hw-label" for="f-wifi-password">Wi-Fi AP Password</label>
           <span class="hw-desc">Optional password for the Wi-Fi access point. A saved password is retained unless you enter a replacement; blank selects an open network. ⚠ On an open network, anyone who joins the AP can send engine commands — set a password for anything beyond bench use.</span>
           <div style="display:flex;gap:.35rem;align-items:center">
-            <input type="password" id="f-wifi-password" maxlength="63" placeholder="(open network)"
+            <input type="password" id="f-wifi-password" maxlength="63" placeholder="(open network)" autocomplete="new-password"
               oninput="set('wifi_password',this.value)" style="flex:1">
             <button type="button" id="btn-wifi-pw-toggle" onclick="toggleWifiPassword()"
               title="Show/hide password"
@@ -206,7 +206,7 @@
         </div>
         <div class="control-setup-card">
           <strong>Turboprop with automatic pitch</strong>
-          <span>Fit Main Fuel, N2 Speed, and a proportional Prop Pitch output, then enable <b>Automatic N2 speed control</b>. A nonzero pitch response makes pitch primary; fuel is the fallback at pitch limits.</span>
+          <span>Fit Main Fuel, N2 Speed, and a proportional Prop Pitch output, then enable <b>Automatic N2 speed control</b>. A nonzero pitch response makes pitch primary. At a pitch endpoint, main fuel remains operator-controlled; the separate N2 pullback may still reduce it.</span>
           <a href="/config.html#governor-cfg-section">Open turboprop governor settings →</a>
         </div>
         <div class="control-setup-card">

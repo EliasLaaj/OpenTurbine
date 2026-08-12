@@ -51,8 +51,11 @@ public:
         _lastCheckMs      = 0;
         _flameoutMs       = 0;
         _relightStartMs   = 0;
+        _relightWindowActive = false;
         _relightStartEgt  = 0.0f;
         _startupSpooled   = false;
+        _startupSpoolSinceMs = 0;
+        _startupUnderSpeedSinceMs = 0;
         _overspeedPending = false;
         _n2OverspeedPending = false;
         _resetDwellConfirmations();
@@ -78,6 +81,7 @@ public:
         if (!inOp) {
             _flameoutMs     = 0;
             _relightStartMs = 0;
+            _relightWindowActive = false;
             _relightStartEgt = 0.0f;
             _overspeedPending = false;
             _n2OverspeedPending = false;
@@ -93,6 +97,8 @@ public:
                 _n1BufIdx      = 0;
                 _n1BufCount    = 0;
                 _startupSpooled = false;  // reset for next startup
+                _startupSpoolSinceMs = 0;
+                _startupUnderSpeedSinceMs = 0;
             }
             ed.surgeDetected = false;
             _resetSurge();
@@ -219,6 +225,7 @@ public:
             ed.totRiseRate   = 0.0f;
             _flameoutMs      = 0;
             _relightStartMs  = 0;
+            _relightWindowActive = false;
             _relightStartEgt = 0.0f;
         }
         _lastCheckMs = now;
@@ -291,18 +298,22 @@ public:
                         case 2: relightIgnitionOk = HardwareConfig::hasGlowPlug; break;
                         default: relightIgnitionOk = HardwareConfig::hasIgniter; break;
                     }
-                    if (Config::relightEnabled && ed.relightArmed && relightIgnitionOk && n1Ok && _relight) {
-                        if (_relightStartMs == 0) {
+                    if (Config::relightEnabled && ed.relightArmed && relightIgnitionOk && n1Ok &&
+                        ed.relightAttempts < MAX_RELIGHT_ATTEMPTS && _relight) {
+                        if (!_relightWindowActive) {
                             // First trigger — start continuous ignition
                             _relight();
                             _relightStartMs = now;
+                            _relightWindowActive = true;
                             _relightStartEgt = Config::primaryEgtC(ed);
                         } else {
                             // Relight window: check N1 still viable and timeout not expired
                             bool stillViable = HardwareConfig::hasN1Rpm && ed.n1Healthy
                                             && ed.n1Rpm >= Config::effectiveRelightMinRpm();
-                            bool timedOut    = Config::relightTimeoutMs > 0
-                                           && (now - _relightStartMs) > (unsigned long)Config::relightTimeoutMs;
+                            const unsigned long configuredMs = Config::relightTimeoutMs > 0
+                                ? (unsigned long)Config::relightTimeoutMs : RELIGHT_HARD_LIMIT_MS;
+                            const unsigned long effectiveMs = min(configuredMs, RELIGHT_HARD_LIMIT_MS);
+                            bool timedOut = (now - _relightStartMs) >= effectiveMs;
                             if (!stillViable || timedOut) {
                                 _trigger("FLAMEOUT");
                                 return;
@@ -318,6 +329,7 @@ public:
                 _flameoutMs     = 0;
                 _relightStartEgt = 0.0f;
                 _relightStartMs = 0;  // flame returned — reset relight state
+                _relightWindowActive = false;
             }
         }
 
@@ -424,29 +436,20 @@ public:
             }
         }
 
-        // If an enabled hard protection loses its sensor, do not silently
-        // remove that protection. ThrottleSlew freezes fuel increases at once;
-        // confirmation prevents one quantised JUMP sample from latching the
-        // persistent Reduced-Power Mode.
-        if ((m == SysMode::STARTUP || m == SysMode::RUNNING) &&
-            ed.limpOverrideSensor != FeedbackRequirements::NONE) {
-            const uint32_t observedFailure =
-                m == SysMode::STARTUP
-                    ? FeedbackRequirements::requiredStartFailureMask(ed, millis())
-                    : FeedbackRequirements::protectionFailureMask(ed, millis());
-            const uint32_t additionalFailure =
-                observedFailure & ~ed.limpOverrideSensor;
-            if (additionalFailure != FeedbackRequirements::NONE) {
-                snprintf(ed.faultDescription, sizeof(ed.faultDescription),
-                         "Reduced-power operation stopped: %s feedback also failed while %s was overridden.",
-                         FeedbackRequirements::sensorName(additionalFailure & (~additionalFailure + 1UL)),
-                         FeedbackRequirements::sensorName(ed.limpOverrideSensor));
-                _trigger("MULTIPLE_SENSOR_FAILURE");
-                return;
-            }
-        }
+        // Ordinary feedback loss is an availability event, not a reason to
+        // abandon an already fuel-capped engine. Keep the complete mask for
+        // diagnostics and latch ECU-imposed limp until STANDBY. Critical
+        // control-path loss is handled separately and still shuts down.
+        const uint32_t observedFailure =
+            m == SysMode::STARTUP
+                ? FeedbackRequirements::requiredStartFailureMask(ed, millis())
+                : m == SysMode::RUNNING
+                    ? FeedbackRequirements::protectionFailureMask(ed, millis())
+                    : FeedbackRequirements::NONE;
+        if (m == SysMode::STARTUP || m == SysMode::RUNNING)
+            ed.limpFailureMask |= observedFailure;
 
-        if (m == SysMode::RUNNING && !ed.limpMode) {
+        if (m == SysMode::RUNNING && !ed.automaticLimpLatched) {
             const bool n1Blind = HardwareConfig::hasN1Rpm &&
                 FeedbackRequirements::n1ForProtectionOrControl() && !ed.n1Healthy;
             const bool n2Blind = HardwareConfig::hasN2Rpm &&
@@ -474,6 +477,7 @@ public:
             const bool feedbackBlind = n1Blind || n2Blind || protectionBlind;
             if (_confirmed(feedbackBlind, millis(), FEEDBACK_LOSS_CONFIRM_MS,
                            _feedbackBlindSinceMs)) {
+                ed.automaticLimpLatched = true;
                 ed.limpMode = true;
                 const char* reason = n1Blind ? "LIMP: N1 feedback lost"
                     : n2Blind ? "LIMP: N2 feedback lost"
@@ -481,14 +485,24 @@ public:
                 strncpy(ed.lastEvent, reason, sizeof(ed.lastEvent) - 1);
                 ed.lastEvent[sizeof(ed.lastEvent) - 1] = '\0';
             }
-        } else if (m != SysMode::RUNNING || ed.limpMode) {
+        } else if (m != SysMode::RUNNING || ed.automaticLimpLatched) {
             _feedbackBlindSinceMs = 0;
         }
         if (HardwareConfig::hasN1Rpm && minRpm > 0.0f && m == SysMode::STARTUP && ed.n1Healthy) {
-            // Track once N1 reaches minRpm so we know the engine has spooled through
-            if (ed.n1Rpm >= minRpm) _startupSpooled = true;
-            // Only fault if we already spooled past minRpm and now dropped below it
-            if (_startupSpooled && ed.n1Rpm < minRpm) {
+            // Do not arm startup underspeed from one pickup glitch. A real
+            // spool must remain over the running floor for several fresh RPM
+            // samples before a later fall can represent a genuine rollback.
+            if (!_startupSpooled &&
+                _confirmed(ed.n1Rpm >= minRpm, now, STARTUP_RPM_CONFIRM_MS,
+                           _startupSpoolSinceMs)) {
+                _startupSpooled = true;
+                _startupUnderSpeedSinceMs = 0;
+            }
+            // Likewise, reject a single short missing/late period after the
+            // threshold has armed. Persistent rollback still cuts promptly.
+            if (_startupSpooled &&
+                _confirmed(ed.n1Rpm < minRpm, now, STARTUP_RPM_CONFIRM_MS,
+                           _startupUnderSpeedSinceMs)) {
                 _trigger("UNDERSPEED");
                 return;
             }
@@ -499,11 +513,14 @@ public:
 
 private:
     static constexpr uint8_t SURGE_BUF = 10; // ~1 s of N1 samples at 100 ms interval
+    static constexpr uint32_t STARTUP_RPM_CONFIRM_MS = 250;
     // ≥2 (typically 3) fresh 100 ms RPM sensor samples must confirm overspeed.
     static constexpr unsigned long OVERSPEED_CONFIRM_MS = 250;
     // Fuel increases are blocked immediately; only the persistent degraded
     // mode latch is delayed to reject isolated unhealthy samples.
     static constexpr unsigned long FEEDBACK_LOSS_CONFIRM_MS = 500;
+    static constexpr unsigned long RELIGHT_HARD_LIMIT_MS = 30000;
+    static constexpr uint8_t MAX_RELIGHT_ATTEMPTS = 3;
     // A hole in monitoring longer than this (skip-safety toggle, stall)
     // invalidates EGT rate history and any in-progress detection timestamps.
     static constexpr unsigned long CHECK_GAP_RESET_MS = 1500;
@@ -513,7 +530,8 @@ private:
     RelightFn     _relight;
     unsigned long _lastCheckMs    = 0;
     unsigned long _flameoutMs     = 0;
-    unsigned long _relightStartMs = 0;   // millis() when relight was first triggered; 0 = not active
+    unsigned long _relightStartMs = 0;   // millis() when relight was first triggered
+    bool          _relightWindowActive = false;
     float         _relightStartEgt = 0.0f;
     const char*   _lastFault      = nullptr;
     float         _lastEgt        = -1.0f;   // for dEGT/dt calculation
@@ -525,8 +543,8 @@ private:
     unsigned long _n2OverspeedSinceMs = 0;
     unsigned long _oilOvercurrentSinceMs = 0;
     unsigned long _registryOvercurrentSinceMs[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
-    unsigned long _oilUnderflowSinceMs[2] = {};
-    bool          _oilUnderflowWarned[2] = {};
+    unsigned long _oilUnderflowSinceMs[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
+    bool          _oilUnderflowWarned[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     unsigned long _lowOilSinceMs = 0;
     unsigned long _oilZeroSinceMs = 0;
     unsigned long _oilTempSinceMs = 0;
@@ -537,6 +555,8 @@ private:
     unsigned long _torqueTripSinceMs = 0;
     unsigned long _feedbackBlindSinceMs = 0;
     bool          _startupSpooled = false;   // true once N1 ≥ minRpm during STARTUP
+    unsigned long _startupSpoolSinceMs = 0;
+    unsigned long _startupUnderSpeedSinceMs = 0;
     float         _n1Buf[SURGE_BUF] = {};   // circular buffer for surge detection
     uint8_t       _n1BufIdx       = 0;
     uint8_t       _n1BufCount     = 0;
@@ -561,38 +581,52 @@ private:
         bool anyUnderflow = false;
         for (uint8_t i = 0; i < reg.outputCount; ++i) {
             const auto& c = reg.outputs[i];
-            const int8_t slot = !strcmp(c.purpose, "oil_pump") ? 0
-                                : !strcmp(c.purpose, "scavenge_pump") ? 1 : -1;
-            if (slot < 0) continue;
-            const char* inputPurpose = slot == 0 ? "oil_flow" : "scavenge_flow";
+            const bool mainPump = !strcmp(c.purpose, "oil_pump") || !strcmp(c.role, "oil_pump");
+            const bool scavengePump = !strcmp(c.purpose, "scavenge_pump");
+            if (!mainPump && !scavengePump) continue;
+            const char* inputPurpose = mainPump ? "oil_flow" : "scavenge_flow";
             bool underflow = false;
+            float effectiveDemand = ed.registryOutputDemand[i];
+            bool primaryLoopPump = false;
+            for (uint8_t loopIdx = 0; HardwareConfig::hasOilLoop && loopIdx < HardwareConfig::oilLoopCount; ++loopIdx) {
+                const auto& loop = HardwareConfig::oilLoops[loopIdx];
+                if (!loop.enabled) continue;
+                primaryLoopPump = loop.pumpOutputIndex == i;
+                break;
+            }
+            if (reg.ownsCoreOutput(c) || primaryLoopPump)
+                effectiveDemand = mainPump ? ed.oilPumpPct / 100.0f
+                                           : ed.oilScavengeDemand;
             if (c.installed && c.hasFlowMonitor && c.minimumFlow > 0.0f &&
-                ed.registryOutputDemand[i] > 0.001f) {
+                effectiveDemand > 0.001f) {
                 int8_t inputIndex = -1;
-                for (uint8_t j = 0; j < reg.inputCount; ++j)
-                    if (reg.inputs[j].installed && !strcmp(reg.inputs[j].purpose, inputPurpose)) {
+                for (uint8_t j = 0; j < reg.inputCount; ++j) {
+                    if (!reg.inputs[j].installed || strcmp(reg.inputs[j].purpose, inputPurpose))
+                        continue;
+                    if (!c.flowInputId[0] || !strcmp(reg.inputs[j].id, c.flowInputId)) {
                         inputIndex = (int8_t)j;
                         break;
                     }
+                }
                 underflow = inputIndex < 0 ||
                             !ed.registryInputHealthy[(uint8_t)inputIndex] ||
                             ed.registryInputValue[(uint8_t)inputIndex] < c.minimumFlow;
             }
             anyUnderflow = anyUnderflow || underflow;
             if (!underflow) {
-                _oilUnderflowSinceMs[(uint8_t)slot] = 0;
-                _oilUnderflowWarned[(uint8_t)slot] = false;
+                _oilUnderflowSinceMs[i] = 0;
+                _oilUnderflowWarned[i] = false;
                 continue;
             }
-            if (_oilUnderflowSinceMs[(uint8_t)slot] == 0) {
-                _oilUnderflowSinceMs[(uint8_t)slot] = now;
+            if (_oilUnderflowSinceMs[i] == 0) {
+                _oilUnderflowSinceMs[i] = now;
                 snprintf(ed.lastEvent, sizeof(ed.lastEvent), "WARNING: %s low/no flow",
                          c.name[0] ? c.name : c.id);
-            } else if (now - _oilUnderflowSinceMs[(uint8_t)slot] >= Config::oilPumpUnderflowDelayMs) {
-                if (!_oilUnderflowWarned[(uint8_t)slot]) {
+            } else if (now - _oilUnderflowSinceMs[i] >= Config::oilPumpUnderflowDelayMs) {
+                if (!_oilUnderflowWarned[i]) {
                     snprintf(ed.lastEvent, sizeof(ed.lastEvent), "WARNING: %s flow fault",
                              c.name[0] ? c.name : c.id);
-                    _oilUnderflowWarned[(uint8_t)slot] = true;
+                    _oilUnderflowWarned[i] = true;
                 }
                 if (Config::shutdownOnOilUnderflow &&
                     (mode == SysMode::STARTUP || mode == SysMode::RUNNING)) {

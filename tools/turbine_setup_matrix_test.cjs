@@ -180,12 +180,12 @@ const setups = [
     commands: [{ cmd: 'AB_PUMP_TEST', fParam: 0.4 }, { cmd: 'IGN2_TEST' }]
   },
   {
-    id: 'air_start_pilot_purge',
-    title: 'Air start with pilot gas and purge valves',
+    id: 'air_start_start_fuel_purge',
+    title: 'Air start with start fuel and purge valves',
     hardware: {
       actuators: { airstarter_sol: { enabled: true }, starter: { enabled: false }, fuel_sol: { enabled: true }, glow_plug: { enabled: true, has_current: true } },
       channel_registry: merge(clone(baseRegistry), {
-        outputs: [regOut('air_starter', 'Air Starter', 'air_starter', 'starter', 4, 26), regOut('pilot_fuel', 'Pilot Gas', 'pilot_fuel', 'valve', 4, 27), regOut('purge_valve', 'Purge Valve', 'purge_valve', 'valve', 4, 14)]
+        outputs: [regOut('air_starter', 'Air Starter', 'air_starter', 'starter', 4, 26), regOut('pilot_fuel', 'Start Fuel', 'pilot_fuel', 'valve', 4, 27), regOut('purge_valve', 'Purge Valve', 'purge_valve', 'valve', 4, 14)]
       })
     },
     config: { glow_plug: { preheat_ms: 2200, preheat_max_pct: 65, hold_pct: 25 }, sequence: { startup: { preheat_ms: 2200 } } },
@@ -480,7 +480,8 @@ const setups = [
         assert.match(hwText, /Throttle Input/, 'internal throttle ID should render as plain label');
         assert.match(hwText, /PWM Duty Input/, 'generic PWM input should render as plain label');
         assert.match(hwText, /Telemetry Fan/, 'generic output should render its user-facing name');
-        assert.match(hwText, /Used by: .*Control rules|Not used yet/, 'registry cards should show actual current use or not-used state');
+        assert.match(hwText, /Used by: .*Control rules|Monitoring only|Available to rules and sequences/, 'registry cards should show actual current use or a truthful available/monitoring state');
+        assert.doesNotMatch(hwText, /Not used yet/, 'fitted channels must not be described as unused when they remain observable or addressable');
         assert.doesNotMatch(hwText, /Available to:/, 'hardware cards should not imply availability is actual usage');
         assert.doesNotMatch(hwText, /Used by \/ available to/, 'hardware cards should not use mixed dependency wording');
         assert.doesNotMatch(hwText, /operator_throttle|generic_pwm_duty_input|generic_pwm_output/, 'hardware cards should not expose internal IDs in primary card text');
@@ -502,6 +503,7 @@ const setups = [
         assert.match(combined, /Drain Valve/);
         assert.match(combined, /Flow sensing & monitoring/);
       }
+      await api('POST', '/__sim/data', {mode:'STANDBY', config_locked:false});
       await page.goto(`${base}/config.html#${setup.id}`);
       await page.waitForSelector('#btn-save');
       await assertVisibleTextClean(page, `${setup.id} config`);
@@ -571,11 +573,50 @@ const setups = [
       await page.goto(`${base}/sequence.html#${setup.id}`);
       await page.waitForSelector('#rules-list', { state: 'attached' });
       await assertVisibleTextClean(page, `${setup.id} sequence`);
+      if (setup.id === 'minimal_timer_turbojet') {
+        const merged = await page.evaluate(() => mergeSequenceEdits(
+          {startup_seq:['Old'],controllers:{governor:false},identity:{name:'A'}},
+          {startup_seq:['New'],controllers:{governor:false},identity:{name:'A'}},
+          {startup_seq:['Old'],controllers:{governor:true},identity:{name:'B'}}));
+        assert.deepEqual(merged, {
+          startup_seq:['New'], controllers:{governor:true}, identity:{name:'B'}
+        }, 'Sequence atomic save must overlay its array edit without restoring unrelated fresh fields');
+      }
       if (setup.id === 'dry_sump_flow_monitored_turbine') {
         const startupOptions = await page.locator('#add-startup-sel').textContent();
         const shutdownOptions = await page.locator('#add-shutdown-sel').textContent();
         assert.match(startupOptions, /Open Drain Valve/);
         assert.match(shutdownOptions, /Close Drain Valve/);
+        const sharedChannels = await page.evaluate(() => ({
+          sensors: getEnabledSensors().map(item => item.key),
+          actuators: getEnabledActuators().map(item => item.key),
+          ruleSensors: ruleSensors().filter(item => item.ok()).map(item => item.id),
+          ruleOutputs: ruleOutputs().filter(item => item.ok()).map(item => item.id)
+        }));
+        assert.ok(sharedChannels.sensors.includes('scavenge_flow'),
+          'custom blocks must expose an addressable I2C analog input without a local GPIO');
+        assert.ok(sharedChannels.actuators.includes('drain_valve'),
+          'custom blocks must expose an addressable I2C relay without a local GPIO');
+        assert.ok(sharedChannels.ruleSensors.includes('scavenge_flow'),
+          'control rules must expose an addressable I2C analog input');
+        assert.ok(sharedChannels.ruleOutputs.includes('drain_valve'),
+          'control rules must expose an addressable I2C relay');
+        const renamedOwnership = await page.evaluate(() => {
+          const original = hwCfg;
+          const primary = {installed:true,id:'renamed_oil_pressure',purpose:'oil_pressure',role:'pressure',driver:1,pin:32};
+          const secondary = {installed:true,id:'bearing_b_pressure',purpose:'oil_pressure',role:'pressure',driver:9,pin:-1,i2c_address:16,device_channel:2};
+          const pump = {installed:true,id:'renamed_main_pump',purpose:'oil_pump',role:'oil_pump',driver:5,pin:23};
+          const secondPump = {installed:true,id:'bearing_b_pump',purpose:'oil_pump',role:'oil_pump',driver:11,pin:-1,i2c_address:32,device_channel:2};
+          hwCfg = {channel_registry:{inputs:[primary,secondary],outputs:[pump,secondPump],bindings:[]}};
+          const result = {
+            primary: registryInputCoreBound(primary), secondary: registryInputCoreBound(secondary),
+            pump: registryOutputCoreBound(pump), secondPump: registryOutputCoreBound(secondPump)
+          };
+          hwCfg = original;
+          return result;
+        });
+        assert.deepEqual(renamedOwnership, {primary:true, secondary:false, pump:true, secondPump:false},
+          'renamed canonical owners must stay core-bound while additional oil circuits remain selectable');
       }
       if (setup.id === 'rc_pwm_generic_rules') {
         await page.evaluate(() => switchTab('rules'));

@@ -163,35 +163,6 @@ func TestTargetFromIdentity(t *testing.T) {
 	}
 }
 
-func TestFindDriverINFRootAcceptsNestedWCHPackages(t *testing.T) {
-	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, "drivers", "wch", "ch341ser", "CH341SER.INF"), "inf")
-	writeTestFile(t, filepath.Join(root, "drivers", "wch", "ch341ser", "CH341SER.CAT"), "cat")
-	writeTestFile(t, filepath.Join(root, "drivers", "wch", "ch341ser", "CH341S64.SYS"), "sys")
-	writeTestFile(t, filepath.Join(root, "drivers", "wch", "ch343ser", "CH343SER.INF"), "inf")
-	writeTestFile(t, filepath.Join(root, "drivers", "wch", "ch343ser", "CH343SER.CAT"), "cat")
-	writeTestFile(t, filepath.Join(root, "drivers", "wch", "ch343ser", "CH343S64.SYS"), "sys")
-
-	got, err := findDriverINFRoot(&Package{Root: root}, driverWCH)
-	want := filepath.Join(root, "drivers", "wch")
-	if err != nil || got != want {
-		t.Fatalf("got %q err=%v, want %q", got, err, want)
-	}
-}
-
-func TestFindCP210xINFRootFindsNestedUniversalDriver(t *testing.T) {
-	root := t.TempDir()
-	driverRoot := filepath.Join(root, "drivers", "cp210x")
-	writeTestFile(t, filepath.Join(driverRoot, "silabser.inf"), "inf")
-	writeTestFile(t, filepath.Join(driverRoot, "silabser.cat"), "cat")
-	writeTestFile(t, filepath.Join(driverRoot, "x64", "silabser.sys"), "sys")
-
-	got, err := findDriverINFRoot(&Package{Root: root}, driverCP210x)
-	if err != nil || got != driverRoot {
-		t.Fatalf("got %q err=%v, want %q", got, err, driverRoot)
-	}
-}
-
 func TestConfirmationBadgeOnlyAppearsAtDecisionGates(t *testing.T) {
 	if !requiresConfirmationBadge("My engine is safe — continue update") {
 		t.Fatal("a safety decision must show the confirmation badge")
@@ -226,7 +197,7 @@ func TestManifestCompatibilityUsesMinimumToolVersion(t *testing.T) {
 	if err := validateManifestCompatibility(base); err != nil {
 		t.Fatalf("newer client must accept an older compatible baseline: %v", err)
 	}
-	base.MinimumSetupToolVersion = "0.6.3"
+	base.MinimumSetupToolVersion = "0.7.1"
 	if err := validateManifestCompatibility(base); err == nil {
 		t.Fatal("client must reject a package that requires a newer setup tool")
 	}

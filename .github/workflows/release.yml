@@ -15,18 +15,16 @@ jobs:
     env:
       WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
       WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
-      DRIVER_BOOTSTRAP_URL: https://github.com/elia179/OpenTurbine/releases/download/setup-tool-v0.5.24/OpenTurbine_Recommended.zip
-      DRIVER_BOOTSTRAP_SHA256: 802fb3ae7dbeb2400e6849c5c69f5f4acd1a387dee41ea2296510f41ba2a4642
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
           cache: npm
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: tools/setup_tool/go.mod
           cache-dependency-path: tools/setup_tool/go.mod
@@ -44,55 +42,19 @@ jobs:
             throw "Release tag $env:GITHUB_REF_NAME does not match firmware $expected"
           }
 
-      - name: Run web-interface audits
-        shell: pwsh
-        run: |
-          npm.cmd ci
-          npx.cmd playwright install chromium
-          python tools/gzip_data.py
-          git diff --exit-code -- data
-          node tools/generate_site_config_reference.cjs
-          git diff --exit-code -- site/_includes/generated-config-fields.html
-          python tools/validate_public_content.py
-          npm.cmd run audit:ui
-          node tools/safety_regression_audit.cjs
-          node tools/turbine_setup_matrix_test.cjs
-          node tools/i2c_support_audit.cjs
-
-      - name: Build and check both firmware targets
+      - name: Install canonical gate dependencies
         shell: pwsh
         run: |
           python -m pip install platformio==6.1.19
-          pio run -e esp32dev
-          pio run -e esp32dev -t buildfs
-          python tools/check_firmware_budget.py --partitions partitions.csv --firmware .pio3/esp32dev/firmware.bin --filesystem .pio3/esp32dev/littlefs.bin --map .pio3/esp32dev/firmware.map --minimum-dram-headroom 16384
-          pio run -e esp32s3dev
-          pio run -e esp32s3dev -t buildfs
-          python tools/check_firmware_budget.py --partitions partitions_8mb.csv --firmware .pio3/esp32s3dev/firmware.bin --filesystem .pio3/esp32s3dev/littlefs.bin --map .pio3/esp32s3dev/firmware.map --minimum-dram-headroom 65536
+          npm.cmd ci
+          npx.cmd playwright install chromium firefox webkit
 
-      - name: Run setup-tool and package tests
+      - name: Run canonical required safety gate
         shell: pwsh
-        run: |
-          python -m unittest tools/test_build_setup_package.py
-          Push-Location tools/setup_tool
-          go test ./...
-          $files = Get-ChildItem -Filter *.go | ForEach-Object { $_.FullName }
-          gofmt -w $files
-          Pop-Location
-          git diff --exit-code -- tools/setup_tool
+        run: python tools/run_release_checks.py
 
-      - name: Download pinned signed-driver bootstrap
-        shell: pwsh
-        run: |
-          $zip = Join-Path $env:RUNNER_TEMP "driver-bootstrap.zip"
-          Invoke-WebRequest -Uri $env:DRIVER_BOOTSTRAP_URL -OutFile $zip
-          $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -ne $env:DRIVER_BOOTSTRAP_SHA256) {
-            throw "Driver bootstrap checksum mismatch: $actual"
-          }
-          $root = Join-Path $env:RUNNER_TEMP "driver-bootstrap"
-          Expand-Archive -LiteralPath $zip -DestinationPath $root
-          "BOOTSTRAP_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Require generated assets to be committed
+        run: git diff --exit-code -- data site/_includes/generated-config-fields.html
 
       - name: Build Windows setup tool
         working-directory: tools/setup_tool
@@ -119,10 +81,20 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist\release | Out-Null
+          $esptoolArchive = Join-Path $env:RUNNER_TEMP "esptool-v5.3.0-windows-amd64.zip"
+          Invoke-WebRequest -Uri "https://github.com/espressif/esptool/releases/download/v5.3.0/esptool-v5.3.0-windows-amd64.zip" -OutFile $esptoolArchive
+          $actual = (Get-FileHash $esptoolArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = "c86e30586e559f0ae5b41a828f21b4c69a7fc11a194e09391f5a2e31952b2471"
+          if ($actual -ne $expected) { throw "Official esptool archive checksum mismatch" }
+          $esptoolDir = Join-Path $env:RUNNER_TEMP "esptool-v5.3.0"
+          Expand-Archive -LiteralPath $esptoolArchive -DestinationPath $esptoolDir
+          $esptool = Join-Path $esptoolDir "esptool-windows-amd64\esptool.exe"
+          $esptoolLicense = Join-Path $esptoolDir "esptool-windows-amd64\LICENSE"
+          & $esptool version
+          if ($LASTEXITCODE -ne 0) { throw "Official standalone esptool failed its self-check" }
           python tools/build_setup_package.py `
-            --esptool "$env:BOOTSTRAP_ROOT\tools\esptool.exe" `
-            --cp210x-driver "$env:BOOTSTRAP_ROOT\drivers\cp210x" `
-            --ch340-driver "$env:BOOTSTRAP_ROOT\drivers\wch" `
+            --esptool $esptool `
+            --esptool-license $esptoolLicense `
             --output "dist\release\OpenTurbine_Recommended.zip"
           Copy-Item tools\setup_tool\OpenTurbineSetupTool.exe dist\release\OpenTurbineSetupTool.exe
 
@@ -146,7 +118,7 @@ jobs:
           }
 
       - name: Upload matched release bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: OpenTurbine-release-${{ github.ref_name }}
           path: dist/release/*

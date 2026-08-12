@@ -59,6 +59,12 @@ class I2cQualification:
             raise RuntimeError("OTBench did not return after I2C emulator reset")
 
     def bus_profile(self, hw):
+        profile = hw.get("_pcb_profile", {})
+        if profile.get("state") == "valid":
+            raise RuntimeError(
+                "The shared-wire I2C fixture requires generic hardware mode; "
+                "back up and temporarily clear the pcbprof partition first"
+            )
         # The hardware schema intentionally requires dedicated physical
         # START/STOP inputs. Park them on otherwise-unused harness pins while
         # their normal jumpers carry the temporary I2C bus.
@@ -69,7 +75,9 @@ class I2cQualification:
     def wait_device(self, address, type_name, present=True, timeout=12):
         deadline, last = time.time() + timeout, {}
         while time.time() < deadline:
-            last = self.dut.hardware().get("_i2c_discovery", {})
+            # Discovery is intentionally a small live endpoint. GET hardware
+            # is the saved topology and no longer carries changing scan state.
+            last = self.dut._get("/api/i2c_discovery")
             found = next((d for d in last.get("devices", [])
                           if int(d.get("address", -1)) == address and
                           d.get("type") == type_name), None)
@@ -100,7 +108,6 @@ class I2cQualification:
         if code == 200:
             if not self.r.wait_dut_ready_after_hardware_save(previous_boot_count=previous_boot):
                 raise RuntimeError("DUT did not return after I2C registry save")
-            self.r.reconnect_wifi()
             applied = self.dut.hardware()
             print("  applied I2C=", applied.get("i2c"),
                   "inputs=", [c.get("id") for c in applied.get("channel_registry", {}).get("inputs", [])],
@@ -148,7 +155,7 @@ class I2cQualification:
             samples.append({
                 "torque": self.registry_value(data, "torque_main"),
                 "thrust": self.registry_value(data, "thrust_main"),
-                "discovery": self.dut.hardware().get("_i2c_discovery", {}),
+                "discovery": self.dut._get("/api/i2c_discovery"),
                 "emulator": self.t.raw("I2CEMU STATUS"),
             })
             if (samples[-1]["torque"].get("healthy") and
@@ -174,6 +181,7 @@ class I2cQualification:
                               "build": self.bus_profile})
 
         # TCA9554: discovery, binary input, generic output test and heartbeat loss.
+        self.reset_i2c_tester()
         self.t.raw("I2CEMU TCA9554 1")
         found, detail = self.wait_device(0x20, "TCA9554")
         self.record("TCA9554_DISCOVERED", found, discovery=detail)
@@ -329,7 +337,9 @@ def main():
     passed = sum(1 for row in q.rows if row["ok"])
     print(f"RESULT: {passed}/{len(q.rows)} I2C checks passed; restored={restored}; error={error}")
     print("Results:", os.path.abspath(path))
-    return 0 if passed == len(q.rows) and restored and not error else 1
+    # The full campaign has thirteen independently recorded checks. Keep this
+    # exact so adding/removing a check requires intentionally updating the gate.
+    return 0 if len(q.rows) == 13 and passed == len(q.rows) and restored and not error else 1
 
 
 if __name__ == "__main__":

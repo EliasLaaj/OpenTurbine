@@ -1,0 +1,30 @@
+{
+  "$comment": "Baseline role-reversed fixture: Classic OpenTurbine DUT and S3 OTBench tester. This intentionally records only the presently wired transports. Release qualification remains incomplete until external analogue stimulus and the remaining required transports are added to a new fixture revision/pin map.",
+  "meta": {
+    "dut_target": "classic",
+    "dut_board": "esp32dev (classic)",
+    "tester_board": "esp32-s3-devkitc-1",
+    "dut_ip": "192.168.4.1",
+    "tester_baud": 115200,
+    "logic_level_v": 3.3,
+    "adc_full_scale_counts": 4095,
+    "fixture_limitations": [
+      "The S3 tester has no DAC; intermediate analogue calibration and threshold sweeps require the planned external DAC fixture.",
+      "The known-dead starter GPIO17-to-GPIO19 jumper is omitted; closed-loop plant HIL re-purposes the captured oil-PWM channel for starter demand.",
+      "This baseline file is development-only and cannot by itself satisfy the release transport matrix."
+    ]
+  },
+  "signals": [
+    {"name":"START","dir":"dut_in","ot_signal":"start switch","signal_type":"digital_active_low","dut_gpio":13,"tester_gpio":13,"tester_kind":"digital_out_al","telemetry_key":"start_switch_active"},
+    {"name":"STOP","dir":"dut_in","ot_signal":"stop switch","signal_type":"digital_active_low","dut_gpio":14,"tester_gpio":15,"tester_kind":"digital_out_al","telemetry_key":"stop_switch_active"},
+    {"name":"N1","dir":"dut_in","ot_signal":"N1 shaft RPM","signal_type":"pulse","dut_gpio":4,"tester_gpio":14,"tester_kind":"freq_out","telemetry_key":"n1","ppr":1.0},
+    {"name":"N2","dir":"dut_in","ot_signal":"N2 shaft RPM","signal_type":"pulse","dut_gpio":18,"tester_gpio":8,"tester_kind":"freq_out","telemetry_key":"n2","ppr":1.0,"optional":true},
+    {"name":"FLAME","dir":"dut_in","ot_signal":"flame threshold","signal_type":"digital","dut_gpio":27,"tester_gpio":2,"tester_kind":"digital_out","telemetry_key":"flame"},
+    {"name":"IDLE_IN","dir":"dut_in","ot_signal":"RC operator input","signal_type":"servo","dut_gpio":32,"tester_gpio":5,"tester_kind":"servo_out","telemetry_key":"throttle_input_raw"},
+    {"name":"THROTTLE_OUT","dir":"dut_out","ot_signal":"main fuel servo","signal_type":"servo_pwm","dut_gpio":17,"tester_gpio":40,"tester_kind":"pwm_in_servo","telemetry_key":"throttle_effective"},
+    {"name":"OILPUMP_OUT","dir":"dut_out","ot_signal":"oil pump or re-purposed variable output","signal_type":"ledc_pwm","dut_gpio":21,"tester_gpio":11,"tester_kind":"pwm_in_ledc","telemetry_key":"oil_pct"},
+    {"name":"FUEL_SOL","dir":"dut_out","ot_signal":"fuel shutoff","signal_type":"digital","dut_gpio":22,"tester_gpio":12,"tester_kind":"digital_in","telemetry_key":"fuel_sol_open","active_high":true},
+    {"name":"IGNITER","dir":"dut_out","ot_signal":"ignition","signal_type":"digital","dut_gpio":23,"tester_gpio":21,"tester_kind":"digital_in","telemetry_key":"igniter_on","active_high":true},
+    {"name":"STARTER_EN","dir":"dut_out","ot_signal":"starter enable or re-purposed relay output","signal_type":"digital","dut_gpio":33,"tester_gpio":39,"tester_kind":"digital_in","telemetry_key":"starter_enabled","active_high":true}
+  ]
+}

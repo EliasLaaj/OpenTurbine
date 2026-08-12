@@ -5,14 +5,27 @@ function clearUnusedTcaInterrupt() {
 
 function pumpFlowPurpose(output) {
   const purpose = registryDerivedPurpose('output', output);
-  return purpose === 'oil_pump' ? 'oil_flow' : purpose === 'scavenge_pump' ? 'scavenge_flow' : '';
+  return purpose === 'oil_pump' || output?.role === 'oil_pump' ? 'oil_flow' : purpose === 'scavenge_pump' ? 'scavenge_flow' : '';
 }
 
 function pumpFlowInput(output) {
   const purpose = pumpFlowPurpose(output);
   if (!purpose) return {channel:null, index:-1};
-  const inputs = registryRoot().inputs || [];
-  const index = inputs.findIndex(row => registryDerivedPurpose('input', row) === purpose);
+  const r = registryRoot();
+  const inputs = r.inputs || [];
+  let index = output?.flow_input
+    ? inputs.findIndex(row => row.id === output.flow_input && registryDerivedPurpose('input', row) === purpose)
+    : -1;
+  if (index < 0 && !output?.flow_input) {
+    // Old single-pump configs had no explicit link. Keep that sensor attached
+    // to the first matching pump only; auxiliary pumps must never silently
+    // share its monitor and will receive their own linked input when enabled.
+    const pumps = (r.outputs || []).filter(row => pumpFlowPurpose(row) === purpose);
+    if (pumps[0] === output) {
+      const claimed = new Set(pumps.map(row => row.flow_input).filter(Boolean));
+      index = inputs.findIndex(row => registryDerivedPurpose('input', row) === purpose && !claimed.has(row.id));
+    }
+  }
   return {channel:index >= 0 ? inputs[index] : null, index};
 }
 
@@ -20,6 +33,7 @@ function removePumpFlowInput(output) {
   const {channel, index} = pumpFlowInput(output);
   if (!channel || index < 0) return;
   cleanupRegistryReferences('input', channel.id);
+  shiftRegistryNumericHandlesAfterRemoval('input', index, registryRoot().inputs.length);
   registryRoot().inputs.splice(index, 1);
   _registryEditOpen.clear();
 }
@@ -41,8 +55,13 @@ function setPumpFlowSensorEnabled(outputIndex, enabled) {
       return;
     }
     const main = purpose === 'oil_flow';
+    const baseId = registryUniqueId(`${purpose}_${String(output.id || 'pump').replace(/[^a-zA-Z0-9_-]/g,'_')}`);
+    if (!baseId) {
+      alert('Could not create a unique flow-sensor reference. Rename the pump card and try again.');
+      return;
+    }
     channel = {
-      id:purpose, name:main ? 'Oil Flow' : 'Scavenge Flow', purpose, role:'flow',
+      id:baseId, name:main ? 'Oil Flow' : 'Scavenge Flow', purpose, role:'flow',
       driver:2, pin:-1, min:0, max:1, invert:false, active_high:true,
       pullup:false, pulldown:false, pulses_per_unit:1000
     };
@@ -50,7 +69,9 @@ function setPumpFlowSensorEnabled(outputIndex, enabled) {
   } else if (!enabled && channel) {
     removePumpFlowInput(output);
   }
+  if (enabled && channel) output.flow_input = channel.id;
   output.has_flow_monitor = !!enabled;
+  if (!enabled) delete output.flow_input;
   if (enabled && !(Number(output.minimum_flow_l_min) > 0)) output.minimum_flow_l_min = 0.1;
   cleanupOilFlowShutdownDependency();
   refreshAllPins(); dirty(); updateSaveButton(); renderRegistryInventory();
@@ -81,6 +102,7 @@ function updateRegistryChannel(direction, index, key, value) {
     const range = registryDefaultRange(direction, value, c.role);
     c.min = range.min;
     c.max = range.max;
+    if (direction === 'input' && ![1,9].includes(Number(value))) c.calibration_points = [];
      c[key] = value;
      if (direction === 'input') clearUnusedTcaInterrupt();
      if (value >= 8) {
@@ -123,6 +145,7 @@ function updateRegistryChannel(direction, index, key, value) {
     const oldPurpose = registryDerivedPurpose(direction,c);
     c.purpose = def.value;
     c.role = def.role;
+    c.calibration_points = [];
     if (direction === 'output' && ['oil_pump','scavenge_pump'].includes(oldPurpose) && oldPurpose !== def.value) {
       removePumpFlowInput({...c, purpose:oldPurpose});
       c.has_flow_monitor = false;
@@ -147,7 +170,7 @@ function updateRegistryChannel(direction, index, key, value) {
       if (direction === 'output' && value === 4) c.min_run_demand = 0;
     }
     const bindingForPurpose = {
-      n1_speed:'primary_n1', n2_speed:'primary_n2', tot:'primary_egt', throttle:'operator_throttle',
+      n1_speed:'primary_n1', n2_speed:'primary_n2', tot:'primary_egt', throttle:'operator_throttle', idle:'operator_idle',
       main_fuel:'main_fuel_output', fuel_shutoff:'main_fuel_shutoff', starter:'main_starter'
     };
     const managedKeys = new Set(Object.values(bindingForPurpose));
@@ -155,8 +178,16 @@ function updateRegistryChannel(direction, index, key, value) {
     const bindingKey = bindingForPurpose[def.value];
     if (bindingKey) {
       const existing = registryRoot().bindings.find(b => String(b.key||'') === bindingKey);
-      if (existing) existing.channel = c.id;
-      else if (registryRoot().bindings.length < 8) registryRoot().bindings.push({key:bindingKey,channel:c.id});
+      const otherOwner = (registryRoot()[direction + 's'] || []).some(row =>
+        row !== c && registryDerivedPurpose(direction, row) === def.value);
+      // Re-purposing a spare output must not silently steal a running
+      // controller from an established card. Existing ownership changes only
+      // through the explicit Advanced binding control. For the first card,
+      // create the convenience binding as before.
+      if (!otherOwner) {
+        if (existing) existing.channel = c.id;
+        else if (registryRoot().bindings.length < 8) registryRoot().bindings.push({key:bindingKey,channel:c.id});
+      }
     }
     if ((!c.name || !String(c.name).trim()) && oldPurpose !== def.value) c.name = def.label.slice(0,15);
     dirty(); updateSaveButton(); renderRegistryInventory(); return;
@@ -165,6 +196,7 @@ function updateRegistryChannel(direction, index, key, value) {
     const allowed = (direction === 'input' ? REGISTRY_INPUT_ROLES : REGISTRY_OUTPUT_ROLES).some(([r]) => r === value);
     if (!allowed) return;
     c.role = value;
+    c.calibration_points = [];
     if (!registryAllowedDrivers(direction, value, registryDerivedPurpose(direction,c)).includes(Number(c.driver))) {
       c.driver = registryAllowedDrivers(direction, value, registryDerivedPurpose(direction,c))[0];
       const range = registryDefaultRange(direction, c.driver, value);
@@ -204,6 +236,7 @@ function updateRegistryChannel(direction, index, key, value) {
   if (key === 'torque_interface') {
     value = Number(value) === 1 ? 1 : 0;
     c.driver = 1; c.min = 0; c.max = 4095; c.torque_interface = value;
+    if (value === 1) c.calibration_points = [];
     if (value === 1) {
       c.hx711_clk ??= -1; c.hx711_scale ??= 1; c.hx711_zero ??= 0;
     } else if ((c.pin ?? -1) >= 0 && !GPIO_DB?.[c.pin]?.adc1) {
@@ -221,6 +254,7 @@ function updateRegistryChannel(direction, index, key, value) {
       return;
     }
     c[key] = value;
+    if (![0,4].includes(value)) c.calibration_points = [];
     if (value >= 1 && value <= 3) {
       c.pin = -1; c.spi_cs ??= -1; c.tc_type ??= 'K';
       syncSharedSpiChannels();
@@ -275,7 +309,7 @@ function registryBindingAccepts(key, direction, c) {
   const purpose = registryDerivedPurpose(direction,c);
   const requirements = {
     primary_n1:['input',['n1_speed']], primary_n2:['input',['n2_speed']], primary_egt:['input',['tot','tit']],
-    operator_throttle:['input',['throttle']], main_fuel_output:['output',['main_fuel']],
+    operator_throttle:['input',['throttle']], operator_idle:['input',['idle']], main_fuel_output:['output',['main_fuel']],
     main_fuel_shutoff:['output',['fuel_shutoff']], main_starter:['output',['starter']]
   };
   const req = requirements[String(key||'')];
@@ -296,7 +330,8 @@ const REGISTRY_BINDING_LABELS = {
   main_fuel_output:'Main fuel pump output',
   main_fuel_shutoff:'Fuel shutoff output',
   main_starter:'Starter output',
-  operator_throttle:'Throttle input'
+  operator_throttle:'Throttle input',
+  operator_idle:'Idle input'
 };
 const REGISTRY_BINDING_KEYS = Object.keys(REGISTRY_BINDING_LABELS);
 function registryBindingLabel(key) {
@@ -494,7 +529,8 @@ function createRegistryChannelFromPreset(index, pcbChoice) {
   const range = registryDefaultRange(_registryAddDirection, selectedDriver, preset.role);
   const id = registryUniqueId(preset.role === 'generic' ? registrySlug(name) : preset.id);
   if (!id) return registryAddError('Could not create an internal device reference. Close this window and try again.');
-  const safe = _registryAddDirection === 'output' ? 0 : undefined;
+  const safe = _registryAddDirection === 'output'
+    ? (purpose === 'prop_pitch' ? 1 : 0) : undefined;
   const channel = {id, name:name.slice(0, 15), purpose, role:preset.role, driver:selectedDriver, pin:-1, min:range.min, max:range.max, invert:false};
   if (pcbChoice) {
     channel.physical_port = pcbChoice.port.id;
@@ -527,7 +563,7 @@ function createRegistryChannelFromPreset(index, pcbChoice) {
     channel.pullup = registryIsSwitchRole(preset.role);
     channel.pulldown = false;
   }
-  resetRegistryPurposeDefaults(_registryAddDirection, purpose);
+  if (existing === 0) resetRegistryPurposeDefaults(_registryAddDirection, purpose);
   rows.push(channel);
   closeRegistryAddDialog();
   _registryEditOpen.add(registryEditKey(_registryAddDirection, rows.length - 1));
@@ -595,6 +631,9 @@ function registryRemovalImpact(direction, id) {
     const pumpPurpose = purpose === 'oil_flow' ? 'oil_pump' : purpose === 'scavenge_flow' ? 'scavenge_pump' : '';
     if (pumpPurpose && (r.outputs || []).some(out => registryDerivedPurpose('output',out) === pumpPurpose && out.has_flow_monitor))
       impact.push('the matching pump flow monitor');
+    const shaftSource = purpose === 'n1_speed' ? 2 : purpose === 'n2_speed' ? 3 : 0;
+    if (shaftSource && (cfg.oil_loops || []).some(loop => Number(loop?.target_source) === shaftSource))
+      impact.push('the matching oil loop will change to fixed high pressure');
   }
   const handle = idx >= 0 ? (direction === 'input' ? 80 + idx : 64 + idx) : -999;
   const bindCount = r.bindings.filter(b => b.channel === id).length;
@@ -658,17 +697,55 @@ function cleanupRegistryReferences(direction, id) {
   const channel = idx >= 0 ? rows[idx] : null;
   if (direction === 'input' && channel) {
     const purpose = registryDerivedPurpose('input', channel);
+    const shaftSource = purpose === 'n1_speed' ? 2 : purpose === 'n2_speed' ? 3 : 0;
+    if (shaftSource) (cfg.oil_loops || []).forEach(loop => {
+      if (Number(loop?.target_source) !== shaftSource) return;
+      loop.target_source = 0;
+      loop.target_bar = Number(loop.target_high_bar ?? loop.target_bar ?? 2.5);
+    });
     const pumpPurpose = purpose === 'oil_flow' ? 'oil_pump' : purpose === 'scavenge_flow' ? 'scavenge_pump' : '';
-    if (pumpPurpose) (r.outputs || []).forEach(out => {
-      if (registryDerivedPurpose('output',out) === pumpPurpose) {
+    if (pumpPurpose) {
+      const compatible = (r.inputs || []).filter(input =>
+        input !== channel && registryDerivedPurpose('input', input) === purpose);
+      (r.outputs || []).forEach(out => {
+        if (registryDerivedPurpose('output',out) === pumpPurpose && out.has_flow_monitor &&
+            (refMatches(out.flow_input) || (!out.flow_input && compatible.length === 0))) {
         out.has_flow_monitor = false;
         out.minimum_flow_l_min = 0;
+        out.flow_input = '';
       }
-    });
+      });
+    }
   }
   if (settingsCfg.rules && channel) settingsCfg.rules = settingsCfg.rules.filter(rule => !registryRuleReferencesChannel(rule, direction, channel));
   else if (settingsCfg.rules && direction === 'input') settingsCfg.rules = settingsCfg.rules.filter(rule => !refMatches(rule?.source) && !refMatches(rule?.sensor_id) && Number(rule?.sensor) !== handle);
   else if (settingsCfg.rules && direction === 'output') settingsCfg.rules = settingsCfg.rules.filter(rule => !refMatches(rule?.target) && !refMatches(rule?.actuator_id) && Number(rule?.actuator) !== handle);
+}
+function shiftRegistryNumericHandlesAfterRemoval(direction, removedIndex, oldCount) {
+  const base = direction === 'input' ? 80 : 64;
+  const removed = base + removedIndex;
+  const upper = base + oldCount;
+  const shift = value => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > removed && numeric < upper ? numeric - 1 : value;
+  };
+  if (direction === 'output') {
+    const seqKeys = ['startup_enter_actions','startup_exit_actions','shutdown_enter_actions','shutdown_exit_actions','ab_enter_actions','ab_exit_actions','ab_shut_enter_actions','ab_shut_exit_actions'];
+    seqKeys.forEach(key => (cfg[key] || []).forEach(slot => (slot || []).forEach(action => {
+      if (action && action.act !== undefined) action.act = shift(action.act);
+    })));
+    Object.values(cfg.custom_blocks || {}).forEach(block => (block?.steps || []).forEach(step => {
+      if (step.target !== undefined && Number.isFinite(Number(step.target))) step.target = shift(step.target);
+      if (step.actuator !== undefined) step.actuator = shift(step.actuator);
+      if (step.act !== undefined) step.act = shift(step.act);
+    }));
+    (settingsCfg.rules || []).forEach(rule => { if (rule?.actuator !== undefined) rule.actuator = shift(rule.actuator); });
+  } else {
+    Object.values(cfg.custom_blocks || {}).forEach(block => {
+      if (block?.condition?.sensor !== undefined) block.condition.sensor = shift(block.condition.sensor);
+    });
+    (settingsCfg.rules || []).forEach(rule => { if (rule?.sensor !== undefined) rule.sensor = shift(rule.sensor); });
+  }
 }
 function cleanupOilFlowShutdownDependency() {
   const r = registryRoot();
@@ -751,12 +828,16 @@ function confirmRegistryRemoveChannel() {
   if (_pendingRegistryRemove.channels) {
     const channels = _pendingRegistryRemove.channels;
     const r = registryRoot();
-    // Clean references before changing indices so legacy numeric handles still
-    // point at the same registry rows during dependency removal.
-    channels.forEach(item => cleanupRegistryReferences(item.direction, item.id));
-    channels.forEach(item => {
-      const row = (r[item.direction + 's'] || []).find(c => c.id === item.id);
+    // Remove from the highest index down. After each removal, shift surviving
+    // legacy numeric handles so they continue to address the same stable card.
+    const ordered = channels.map(item => ({...item, index:(r[item.direction + 's'] || []).findIndex(c => c.id === item.id)}))
+      .filter(item => item.index >= 0)
+      .sort((a,b) => a.direction === b.direction ? b.index - a.index : a.direction.localeCompare(b.direction));
+    ordered.forEach(item => {
+      const rows = r[item.direction + 's'] || [];
+      const row = rows[item.index];
       if (!row) return;
+      cleanupRegistryReferences(item.direction, item.id);
       if (item.direction === 'input') {
         const key = registryCoreSensorKey(row);
         if (key && cfg.sensors?.[key]) cfg.sensors[key].enabled = false;
@@ -765,11 +846,9 @@ function confirmRegistryRemoveChannel() {
         const key = registryCoreActuatorKey(row);
         if (key && cfg.actuators?.[key]) cfg.actuators[key].enabled = false;
       }
+      shiftRegistryNumericHandlesAfterRemoval(item.direction, item.index, rows.length);
+      rows.splice(item.index, 1);
     });
-    for (const direction of ['input','output']) {
-      const ids = new Set(channels.filter(item=>item.direction===direction).map(item=>item.id));
-      r[direction + 's'] = (r[direction + 's'] || []).filter(row=>!ids.has(row.id));
-    }
     clearUnusedTcaInterrupt();
     cleanupOilFlowShutdownDependency();
     closeRegistryRemoveDialog();
@@ -791,6 +870,7 @@ function confirmRegistryRemoveChannel() {
     const key = registryCoreActuatorKey(removed);
     if (key && cfg.actuators?.[key]) cfg.actuators[key].enabled = false;
   }
+  shiftRegistryNumericHandlesAfterRemoval(direction, index, r[direction + 's'].length);
   r[direction + 's'].splice(index, 1);
   clearUnusedTcaInterrupt();
   cleanupOilFlowShutdownDependency();

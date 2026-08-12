@@ -86,7 +86,7 @@ const BLOCKS = {
     label:'Igniter 1 Timed On', type:'action', badgeClass:'badge-action',
     visibleIf: hw => actuatorEnabled('igniter'),
     condition: null, timeout_action:null,
-    desc:'Igniter-1-only block. Prefer Igniter On or Pre-Heat when you want to choose igniter 1, AB / pilot igniter, glow, or wet glow from the block card. This block turns igniter 1 ON and leaves it ON when it exits.',
+    desc:'Igniter-1-only block. Prefer Igniter On or Pre-Heat when you want to choose igniter 1, secondary igniter, glow, or wet glow from the block card. This block turns igniter 1 ON and leaves it ON when it exits.',
     params:[
       {key:'pre_ign_spark_ms', label:'Ignition on time', unit:'ms', type:'int', min:100, max:10000, step:100, def:1500, configKey:'pre_ign_spark_ms'},
     ]
@@ -252,7 +252,7 @@ const BLOCKS = {
     label:'Ignition Output On', type:'action', badgeClass:'badge-action',
     visibleIf: hw => hasIgnitionOutput(hw),
     condition: null, timeout_action:null,
-    desc:'Switch the selected ignition output on. Choose igniter 1, AB / pilot igniter, glow plug, or wet glow from this card.',
+    desc:'Switch the selected ignition output on. Choose igniter 1, secondary igniter, glow plug, or wet glow from this card.',
     params:[]
   },
   IgniterOff: {
@@ -441,7 +441,7 @@ const BLOCKS = {
     visibleIf: hw => hw.di_channels?.some(ch => ch.pin >= 0),
     condition: hw => `DI-${(hw.wait_for_input_ch ?? 0) + 1} ${hw.wait_for_input_state !== false ? '-> active' : '-> inactive'}`,
     timeout_action:'abort',
-    desc:'Holds the sequence until a digital input channel reaches the expected state. Useful for interlocks, limit switches, or external gate signals. On timeout -> ABORT. Set timeout to 0 to wait indefinitely (use with caution - sequence hangs if condition is never met). Note: all WaitForInput blocks in a session share the same channel/state config.',
+    desc:'Holds the sequence until a digital input channel reaches the expected state. Useful for interlocks, limit switches, or external gate signals. The wait is always finite and aborts on timeout. Note: all WaitForInput blocks in a session share the same channel/state config.',
     hwWarnings:[
       { check: hw => hw.di_channels?.some(ch => ch.pin >= 0),
         msg: 'Warning: No digital inputs configured in Hardware. This block will never receive a signal and will always timeout/abort.',
@@ -453,8 +453,8 @@ const BLOCKS = {
         desc:'Digital input channel (DI-1..DI-4). Must match a channel configured in Hardware -> Digital Inputs.'},
       {key:'wait_for_input_state',   label:'Wait until active',        type:'bool', def:true, configKey:'wait_for_input_state',
         desc:'ON = hold until input goes active (high). OFF = hold until input goes inactive (low).'},
-      {key:'wait_for_input_timeout', label:'Timeout',       unit:'ms', type:'int',  min:0, max:60000, step:500, def:0, configKey:'wait_for_input_timeout',
-        desc:'Maximum wait time in ms. 0 = wait indefinitely (no timeout).'},
+      {key:'wait_for_input_timeout', label:'Timeout',       unit:'ms', type:'int',  min:500, max:60000, step:500, def:30000, configKey:'wait_for_input_timeout',
+        desc:'Maximum finite wait time. Remove the block if this gate is not required.'},
     ]
   },
   WaitForInputOff: {
@@ -499,7 +499,7 @@ const BLOCKS = {
     label:'AB Igniter On', type:'action', badgeClass:'badge-action',
     visibleIf: hw => actuatorEnabled('igniter2'),
     condition: null, timeout_action:null,
-    desc:'Enable the afterburner / pilot igniter.',
+    desc:'Enable the afterburner / secondary igniter.',
     params:[]
   },
   ABIgnOff: {
@@ -574,7 +574,7 @@ const BLOCKS = {
   GlowPreheat: {
     label:'Glow Preheat', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Ramps glow plug power linearly from 0 to maxPct over preheatMs, then holds at holdPct. Wet glow pilot fuel follows the hardware delay after glow ON. If a glow current sensor is fitted and "Wait until hot" is checked, the block keeps holding at holdPct until the current drops below the ready threshold. The plug stays at holdPct when this block exits.',
+    desc:'Ramps glow plug power linearly from 0 to maxPct over preheatMs, then holds at holdPct. Wet glow start fuel follows the hardware delay after glow ON. If a glow current sensor is fitted and "Wait until hot" is checked, the block keeps holding at holdPct until the current drops below the ready threshold. The plug stays at holdPct when this block exits.',
     params:[
       {key:'glow_preheat_ms',      label:'Preheat duration',  unit:'ms', type:'int', min:0, max:3600000, step:500, def:10000, configKey:'glow_preheat_ms'},
       {key:'glow_preheat_max_pct', label:'Peak duty',         unit:'%',  type:'float', min:0, max:100, step:5, def:80, configKey:'glow_preheat_max_pct',
@@ -587,9 +587,9 @@ const BLOCKS = {
     visibleIf: hw => actuatorEnabled('glow_plug'),
   },
   FuelPumpRamp: {
-    label:'Pilot / Auxiliary Fuel Pump Ramp', type:'action', badgeClass:'badge-action',
+    label:'Secondary / Auxiliary Fuel Pump Ramp', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Ramps pilot / auxiliary fuel pump demand linearly from startPct to endPct over rampMs. Completes when the ramp finishes. Useful for pilot fuel, turboshaft pre-metering, or staged fuel delivery.',
+    desc:'Ramps secondary / auxiliary fuel pump demand linearly from startPct to endPct over rampMs. Completes when the ramp finishes. Useful for start fuel, turboshaft pre-metering, or staged fuel delivery.',
     params:[
       {key:'fp2_start_pct',      label:'Start %',                     unit:'%',  type:'float', min:0,  max:100,   step:1,   def:0,    configKey:'fp2_start_pct'},
       {key:'fp2_end_pct',        label:'End %',                       unit:'%',  type:'float', min:0,  max:100,   step:1,   def:80,   configKey:'fp2_end_pct'},
@@ -598,33 +598,33 @@ const BLOCKS = {
     visibleIf: hw => actuatorHasProportionalOutput('fuel_pump2'),
   },
   FuelPump2Set: {
-    label:'Pilot / Auxiliary Fuel Pump Set', type:'action', badgeClass:'badge-action',
+    label:'Secondary / Auxiliary Fuel Pump Set', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Sets pilot / auxiliary fuel pump demand to a fixed value immediately. Use for known set-points after a ramp or as a quick preset.',
+    desc:'Sets secondary / auxiliary fuel pump demand to a fixed value immediately. Use for known set-points after a ramp or as a quick preset.',
     params:[
       {key:'fp2_demand_pct',     label:'Demand %',                    unit:'%',  type:'float', min:0, max:100, step:1, def:0, configKey:'fp2_demand_pct'},
     ],
     visibleIf: hw => actuatorHasProportionalOutput('fuel_pump2'),
   },
   FuelPump2On: {
-    label:'Pilot / Auxiliary Fuel Pump On', type:'action', badgeClass:'badge-action',
+    label:'Secondary / Auxiliary Fuel Pump On', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Switches relay-type pilot / auxiliary fuel pump on. This card is shown only when that pump is configured as an on/off output.',
+    desc:'Switches relay-type secondary / auxiliary fuel pump on. This card is shown only when that pump is configured as an on/off output.',
     params:[],
     visibleIf: hw => actuatorEnabled('fuel_pump2') && actuatorIsRelay('fuel_pump2'),
   },
   FuelPump2Off: {
-    label:'Pilot / Auxiliary Fuel Pump Off', type:'action', badgeClass:'badge-action',
+    label:'Secondary / Auxiliary Fuel Pump Off', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Switches relay-type pilot / auxiliary fuel pump off.',
+    desc:'Switches relay-type secondary / auxiliary fuel pump off.',
     params:[],
     visibleIf: hw => actuatorEnabled('fuel_pump2') && actuatorIsRelay('fuel_pump2'),
   },
   GovernorHold: {
     label:'Wait for N2 Speed Control', type:'while', badgeClass:'badge-while',
     condition: hw => `N2 within ${hw.gov_hold_band_rpm ?? 500} rpm of target`,
-    timeout_action:'complete',
-    desc:'Waits until N2 (power turbine) is within bandRpm of the governor target RPM, or until timeoutMs elapses. On timeout, proceeds normally (engine is already in RUNNING - governor will continue to regulate). Use after entering RUNNING to confirm the governor has taken control. Outputs: none (monitoring only).',
+    timeout_action:'fault',
+    desc:'Engages the real N2 speed controller bumplessly from the current demand, then requires healthy N2 feedback inside the selected band for 500 ms. Timeout faults startup and enters safe shutdown.',
     params:[
       {key:'gov_hold_timeout_ms', label:'Timeout', unit:'ms',  type:'int',   min:1000, max:60000, step:500,  def:10000, configKey:'gov_hold_timeout_ms'},
       {key:'gov_hold_band_rpm',   label:'Band',    unit:'rpm', type:'float', min:0, max:1000000000, step:50, def:500, configKey:'gov_hold_band_rpm'},
@@ -853,7 +853,7 @@ const BLOCK_INFO = {
     ]
   },
   ImmediateCut: {
-    desc: 'Emergency cut: zeros all main/pilot/afterburner fuel demands, closes fuel valves, and turns off ignition and starter outputs instantly.',
+    desc: 'Emergency cut: zeros all main/start/afterburner fuel demands, closes fuel valves, and turns off ignition and starter outputs instantly.',
     links: []
   },
   FuelPumpIdle: {
@@ -904,7 +904,7 @@ const BLOCK_INFO = {
     ]
   },
   GlowPreheat: {
-    desc: 'Ramps glow plug power, then holds. Wet glow pilot fuel follows the hardware fuel delay.',
+    desc: 'Ramps glow plug power, then holds. Wet glow start fuel follows the hardware fuel delay.',
     links: [
       { label: 'Glow Plug Preheat', url: '/config.html#glow-cfg-section' },
     ]
@@ -916,19 +916,19 @@ const BLOCK_INFO = {
     ]
   },
   FuelPumpRamp: {
-    desc: 'Ramps pilot / auxiliary fuel pump demand linearly from startPct to endPct over rampMs.',
+    desc: 'Ramps secondary / auxiliary fuel pump demand linearly from startPct to endPct over rampMs.',
     links: []
   },
   FuelPump2Set: {
-    desc: 'Sets pilot / auxiliary fuel pump demand to a fixed value immediately.',
+    desc: 'Sets secondary / auxiliary fuel pump demand to a fixed value immediately.',
     links: []
   },
   FuelPump2On: {
-    desc: 'Switches relay-type pilot / auxiliary fuel pump on.',
+    desc: 'Switches relay-type secondary / auxiliary fuel pump on.',
     links: []
   },
   FuelPump2Off: {
-    desc: 'Switches relay-type pilot / auxiliary fuel pump off.',
+    desc: 'Switches relay-type secondary / auxiliary fuel pump off.',
     links: []
   },
 };

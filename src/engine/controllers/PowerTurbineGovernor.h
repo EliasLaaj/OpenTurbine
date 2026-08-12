@@ -24,10 +24,9 @@
 //
 //  Prop pitch actuator management (turboprop mode):
 //    If usePropPitch is true the governor prefers to adjust
-//    propPitchDemand first (torque / load change) and only falls
-//    back to throttleDemand when pitch reaches its limits.  This
-//    matches conventional turboprop governing where the propeller
-//    governor is the primary speed-control authority.
+//    propPitchDemand supplies the configured speed-control authority.
+//    At a pitch endpoint main fuel remains operator-controlled; only
+//    the separate N2 fuel-pullback protection may reduce it.
 //
 //    Pitch is slew-rate limited (pitchRampSec: seconds for a
 //    full 0→100 % stroke).  The P-gain is also dt-scaled, so
@@ -55,6 +54,7 @@ public:
     float pitchKp      = 0.00020f;  // 20 pitch percentage-points/s at 1000 RPM error
     float pitchRampSec = 10.0f;     // hard slew limit for pitch (0=off)
     bool  usePropPitch = false;     // true = turboprop pitch-primary mode
+    bool  twoPositionPitch = false; // relay: OFF=fine, ON=coarse
 
     void begin() override {
         auto& ed = EngineData::instance();
@@ -90,15 +90,23 @@ public:
         if (dt <= 0.0f || dt > 0.5f) dt = 0.01f;
 
         if (targetRpm <= 0.0f) {
+            strlcpy(ed.governorControllerState, "Off", sizeof(ed.governorControllerState));
             // Governor disabled — release pitch to fine so manual throttle
             // has full authority without fighting a stale pitch demand.
-            // Slew-capped (pitchRampSec), not an instant 0-step.
-            if (_wasActive) {
-                _releasing = usePropPitch;
+            // Proportional pitch is slew-capped; relay pitch releases directly.
+            // Feedback loss deliberately clears _wasActive while moving pitch
+            // coarse-safe. A subsequent live target=0 update must still release
+            // that retained load instead of leaving pitch latched coarse merely
+            // because the last active tick had unhealthy feedback.
+            if (_wasActive || (usePropPitch && _pitchCurrent > 0.0f)) {
+                _releasing = usePropPitch && _pitchCurrent > 0.0f;
                 _wasActive = false;
             }
             if (_releasing) {
-                float maxStep      = pitchRampSec > 0.0f ? dt / pitchRampSec : 1.0f;
+                // A relay has no intermediate position: release it directly
+                // to fine. Servo/PWM pitch retains the configured smooth ramp.
+                float maxStep      = twoPositionPitch ? 1.0f
+                    : (pitchRampSec > 0.0f ? dt / pitchRampSec : 1.0f);
                 _pitchCurrent      = constrain(_pitchCurrent - maxStep, 0.0f, 1.0f);
                 ed.propPitchDemand = _pitchCurrent;
                 if (_pitchCurrent <= 0.0f) _releasing = false;
@@ -106,11 +114,15 @@ public:
             return;
         }
         if (!ed.n2Healthy) {
+            strlcpy(ed.governorControllerState,
+                    usePropPitch ? "Feedback lost: coarse-safe" : "Feedback lost",
+                    sizeof(ed.governorControllerState));
             _wasActive = false;
             if (usePropPitch) {
                 // Lost free-turbine feedback: add propeller load. Fine pitch
                 // would unload the shaft and can worsen an overspeed.
-                float maxStep = pitchRampSec > 0.0f ? dt / pitchRampSec : 1.0f;
+                float maxStep = twoPositionPitch ? 1.0f
+                    : (pitchRampSec > 0.0f ? dt / pitchRampSec : 1.0f);
                 _pitchCurrent = constrain(_pitchCurrent + maxStep, 0.0f, 1.0f);
                 ed.propPitchDemand = _pitchCurrent;
             }
@@ -118,11 +130,22 @@ public:
         }
         _wasActive = true;
         _releasing = false;   // active governor owns pitch from here
+        strlcpy(ed.governorControllerState,
+                usePropPitch ? (twoPositionPitch ? "Active: two-position pitch" : "Active: prop pitch")
+                             : "Active: main fuel",
+                sizeof(ed.governorControllerState));
 
         float error = targetRpm - ed.n2Rpm;
         if (fabsf(error) <= bandRpm) return;   // inside deadband — no action
 
         if (usePropPitch) {
+            if (twoPositionPitch) {
+                // Relay pitch is real two-position authority. The configured
+                // N2 deadband provides hysteresis by retaining state inside it.
+                _pitchCurrent = error > 0.0f ? 0.0f : 1.0f;
+                ed.propPitchDemand = _pitchCurrent;
+                return;
+            }
             // Turboprop: pitch primary, throttle secondary.
             // dt-scaled gain + hard slew cap so large errors can't step pitch
             // instantaneously (which would cause gearbox torque transients and
@@ -141,7 +164,14 @@ public:
                 ed.propPitchDemand = newPitch;
                 return;  // pitch authority: skip throttle
             }
-            // Pitch saturated — fall through to throttle
+            // Pitch saturation is not permission for hidden normal fuel
+            // governing. Separate N2 overspeed protection remains authoritative.
+            strlcpy(ed.governorControllerState,
+                    error > 0.0f
+                        ? "Pitch limit: fine; fuel remains operator-controlled"
+                        : "Pitch limit: coarse; fuel remains operator-controlled",
+                    sizeof(ed.governorControllerState));
+            return;
         }
 
         // Throttle-primary (or pitch authority exhausted).
@@ -151,6 +181,8 @@ public:
     }
 
     void reset() override {
+        strlcpy(EngineData::instance().governorControllerState, "Off",
+                sizeof(EngineData::instance().governorControllerState));
         _wasActive    = false;
         _lastMs       = millis();
         // Do not zero _pitchCurrent here: reset() is used mid-run by some callers.

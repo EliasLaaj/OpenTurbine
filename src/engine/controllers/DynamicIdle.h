@@ -14,7 +14,6 @@ public:
     float rampDownMs = 20000.0f;
     float deadbandRpm = 300.0f;
     float rpmLimit = 60000.0f;
-    float minMultiplier = 0.75f;
     float maxMultiplier = 1.50f;
     int source = 0; // 0=N1, 1=N2, 2=P1, 3=P2
     float targetPressure = 1.0f;
@@ -31,12 +30,16 @@ public:
     float idleTrimDownPctPerSec = 2.0f;
     float idleLearnRate = 0.02f;
     float idleLearnAccelMax = 1200.0f;
+    float pressureDecelEnter = 0.12f;
+    float pressureSettleBand = 0.03f;
+    float pressureFullResponse = 0.25f;
+    float pressureLearnRateMax = 1.0f;
 
     void begin() override { reset(); _lastMs = millis(); }
 
     void tick() override {
         auto& ed = EngineData::instance();
-        if (!ed.dynamicIdleEnabled) { reset(); return; }
+        if (!ed.dynamicIdleEnabled) { setState(ed, "Off"); reset(); return; }
         if (source != _lastSource) {
             reset();
             _lastSource = source;
@@ -46,7 +49,11 @@ public:
         const float target = pressureMode ? targetPressure : targetRpm;
         const float limit = pressureMode ? pressureLimit : rpmLimit;
         const float deadband = pressureMode ? pressureDeadband : deadbandRpm;
-        if (target <= 0.0f || limit <= 0.0f) { reset(); return; }
+        if (target <= 0.0f || limit <= 0.0f) {
+            setState(ed, "Inhibited: target/cutoff disabled");
+            reset();
+            return;
+        }
 
         bool installed = false, healthy = false;
         float feedback = 0.0f;
@@ -65,6 +72,7 @@ public:
         else if (dt > 0.05f) dt = 0.05f;
 
         if (!installed || !healthy) {
+            setState(ed, "Feedback lost");
             _idleFloor = 0.0f;
             _integrator = 0.0f;
             _wasEngaged = false;
@@ -91,20 +99,25 @@ public:
         }
 
         if (feedback > limit) {
+            setState(ed, "Waiting: above cutoff");
             _idleFloor = 0.0f;
             _integrator = 0.0f;
             _wasEngaged = false;
             return;
         }
 
-        const float minFloor = constrain((Config::fuelPumpMinPct / 100.0f) * minMultiplier, 0.0f, 1.0f);
+        // A metering pump cannot reliably reproduce a nonzero command below
+        // its calibrated minimum. Keep zero for authoritative fuel-cut paths,
+        // but use that calibration as Dynamic Idle's single nonzero floor.
+        const float minFloor = constrain(Config::fuelPumpMinPct / 100.0f, 0.0f, 1.0f);
         const float maxFloor = constrain((Config::throttleIdleMaxPct / 100.0f) * maxMultiplier, minFloor, 1.0f);
 
         if (idleMode == 1) {
-            const float enterBand = pressureMode ? fmaxf(deadband * 4.0f, target * 0.05f) : idleDecelEnterRpm;
-            const float settleBand = pressureMode ? fmaxf(deadband, target * 0.01f) : idleSettleBandRpm;
-            const float fullResponse = pressureMode ? fmaxf(deadband, target * 0.25f) : idleFullResponseRpm;
-            const float learnRateMax = pressureMode ? fmaxf(0.01f, target) : idleLearnAccelMax;
+            setState(ed, "Active");
+            const float enterBand = pressureMode ? pressureDecelEnter : idleDecelEnterRpm;
+            const float settleBand = pressureMode ? pressureSettleBand : idleSettleBandRpm;
+            const float fullResponse = pressureMode ? pressureFullResponse : idleFullResponseRpm;
+            const float learnRateMax = pressureMode ? pressureLearnRateMax : idleLearnAccelMax;
             if (!_wasEngaged) {
                 _wasEngaged = true;
                 _state = (feedback > target + enterBand && _learnedHoldValid) ? DiState::DecelCatch : DiState::Trim;
@@ -135,6 +148,7 @@ public:
         }
 
         const float error = target - feedback;
+        setState(ed, "Active");
         float rampStep = 0.0f;
         if (fabsf(error) >= deadband) {
             const float rampMs = error > 0 ? rampUpMs : rampDownMs;
@@ -163,6 +177,9 @@ public:
     }
 
 private:
+    static void setState(EngineData& ed, const char* value) {
+        strlcpy(ed.idleControllerState, value, sizeof(ed.idleControllerState));
+    }
     enum class DiState : uint8_t { Trim, DecelCatch };
     DiState _state = DiState::Trim;
     float _idleFloor = 0.0f;

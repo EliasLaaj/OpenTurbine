@@ -275,7 +275,11 @@ void HardwareConfig::_toDoc(JsonObject doc) {
             ? channelRegistry.inputs[l.pressureInputIndex].id : "";
         o["pump_output"] = l.pumpOutputIndex < channelRegistry.outputCount
             ? channelRegistry.outputs[l.pumpOutputIndex].id : "";
+        o["target_source"] = l.targetSource;
         o["target_bar"] = l.targetCentiBar / 100.0f;
+        o["target_high_bar"] = l.targetHighCentiBar / 100.0f;
+        o["speed_min_rpm"] = (uint32_t)l.speedMinHundredRpm * 100U;
+        o["speed_max_rpm"] = (uint32_t)l.speedMaxHundredRpm * 100U;
         o["deadband_bar"] = l.deadbandCentiBar / 100.0f;
         o["min_demand"] = l.minDemandPct / 100.0f;
         o["max_demand"] = l.maxDemandPct / 100.0f;
@@ -324,11 +328,6 @@ void HardwareConfig::_toDoc(JsonObject doc) {
     abt["input_min_us"]     = abInputMinUs;
     abt["input_max_us"]     = abInputMaxUs;
     abt["input_threshold"]  = abInputThreshold;
-
-    auto abfl = doc["ab_flame"].to<JsonObject>();
-    abfl["enabled"]   = hasAbFlame;
-    abfl["pin"]       = abFlamePin;
-    abfl["threshold"] = abFlameThreshold;
 
     auto as = doc["ab_seq"].to<JsonArray>();
     for (int i = 0; i < abSeqLen; i++) as.add(abSeq[i]);
