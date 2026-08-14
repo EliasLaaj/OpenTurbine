@@ -95,7 +95,7 @@ async function optionDisabled(page, selector, value) {
     results.push('dashboard shows every fitted full-hardware card and advanced section');
 
     await patchData(page, { has_torque: true, has_n2: false, turbo_power_w: 12345 });
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(750);
     assert.equal(await shown(page, '#torque-card'), true, 'torque card should still show when torque is fitted without N2');
     assert.equal((await page.locator('#turbo-power').textContent()).trim(), 'N2 required');
     results.push('dashboard shaft power display requires a fitted N2 source');
@@ -107,11 +107,12 @@ async function optionDisabled(page, selector, value) {
       has_fuel_flow: false, has_fuel_press: false, has_governor: false,
       has_thrust: false, registry_inputs: [], registry_outputs: [],
       has_glow_plug: false, has_bleed_valve: false, has_prop_pitch: false, has_fuel_pump2: false,
+      has_starter: false, has_starter_en: false, has_fuel_sol: false, has_igniter: false, has_igniter2: false,
       has_cool_fan: false, has_airstarter: false, has_oil_scavenge: false, has_afterburner: false,
       has_ab_sol: false, has_ab_pump: false, has_ab_flame: false,
       relight_enabled: false
     });
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(750);
     cards = await visibleIds(page, [
       'n2-card', 'tit-card', 'oil-card', 'flame-card', 'p1-card', 'p2-card', 'oil-temp-card',
       'batt-card', 'torque-card', 'glow-current-card', 'igniter-current-card', 'igniter2-current-card',

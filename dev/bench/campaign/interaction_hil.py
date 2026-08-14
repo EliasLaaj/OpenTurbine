@@ -310,14 +310,26 @@ class InteractionQualification:
         self.dut.command("TOGGLE_LIMP_MODE")
         self.drive(seconds=1.0)
 
-        self.t.set("N2", 0)
-        ok, lost = self.dut.poll_until(
-            lambda d: d.get("mode") == "RUNNING" and not d.get("n2_healthy") and
-                      d.get("limp_mode") and
-                      float(d.get("throttle_effective", 1) if d.get("throttle_effective") is not None else 1) <= 0.305 and
-                      float(d.get("prop_pitch_demand") or 0) >= 0.99,
-            timeout=7, interval=0.05,
-        )
+        # Keep the physical loss stimulus asserted while polling. A single
+        # serial SET can be acknowledged just as another campaign is releasing
+        # a timer; repeatedly commanding zero makes the fixture state explicit
+        # without weakening the ECU-side 500 ms loss-detection assertion.
+        deadline = time.time() + 7
+        ok = False
+        lost = self.dut.data()
+        while time.time() < deadline:
+            self.t.set("N2", 0)
+            lost = self.dut.data()
+            ok = (
+                lost.get("mode") == "RUNNING" and not lost.get("n2_healthy") and
+                lost.get("limp_mode") and
+                float(lost.get("throttle_effective", 1)
+                      if lost.get("throttle_effective") is not None else 1) <= 0.305 and
+                float(lost.get("prop_pitch_demand") or 0) >= 0.99
+            )
+            if ok:
+                break
+            time.sleep(0.05)
         fuel_pulse = self.t.get("THROTTLE_OUT")
         pitch = self.t.get("STARTER_EN")
         self.record(

@@ -32,6 +32,11 @@ def _nested_matches(cfg, partial):
 class DutConfig:
     def __init__(self, dut):
         self.dut = dut
+        # Campaign runners may install a recorder here so every direct config
+        # patch participates in exact post-test restoration. Keeping this at
+        # the low-level helper prevents individual campaigns from silently
+        # forgetting to register one of their temporary settings changes.
+        self.before_patch = None
 
     # ── low level ────────────────────────────────────────────
     def hw(self):
@@ -120,6 +125,8 @@ class DutConfig:
     def patch_cfg(self, partial, verify=True, tries=4):
         """PATCH a partial (nested) config — applies live — and verify it stuck."""
         code = resp = None
+        if callable(self.before_patch):
+            self.before_patch(partial)
         for _ in range(tries):
             code, resp = self.dut.patch("/api/config", partial)
             if code != 200:

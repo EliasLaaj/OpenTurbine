@@ -237,7 +237,7 @@ struct EngineData {
     // ── Plain-language fault / abort description ───────────────
     // Set by SafetyMonitor / enterAbortStandby before mode change.
     // Includes "what to do" guidance shown in the web UI fault banner.
-    char              faultDescription[192] = {};
+    char              faultDescription[320] = {};
 
     // ── Sequence validation (written by Core 1 while in STANDBY) ─
     // validateSequences() walks the active block list and checks hardware

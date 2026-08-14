@@ -1,9 +1,10 @@
 #pragma once
 #include "IActuator.h"
+#include "RelayDemand.h"
 #include <Arduino.h>
 
 // Digital relay / MOSFET actuator.
-// set(v >= 0.5) → on, set(v < 0.5) → off.
+// set(0) → off; any intentional nonzero demand → on.
 // activeHigh = true for active-high logic (most MOSFETs);
 // activeHigh = false for active-low relay boards.
 class RelayActuator : public IActuator {
@@ -30,7 +31,7 @@ public:
     }
 
     void set(float value) override {
-        _write(value >= 0.5f);
+        _write(RelayDemand::requested(value));
     }
 
     void off() override {

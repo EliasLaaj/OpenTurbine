@@ -18,17 +18,43 @@ either target to a build-only-by-a-few-bytes state.
 
 Systematic hardware-in-the-loop validation of the OpenTurbine firmware on the
 bench rig, aimed at finding defects **before** they reach a real turbine engine.
-The current release candidate is OpenTurbine 2.0.2. DUT and tester roles may be
+The current release candidate is OpenTurbine 2.0.3. DUT and tester roles may be
 swapped between the ESP32-S3 and Classic ESP32 as a campaign requires. Tests
 drive physical ADC/PCNT/SPI/digital paths where wired and use explicit simulator
 coverage for unavailable I²C devices.
 
 The first findings below are retained historical v1.x campaign evidence. Use
 the **v2.0.0 release-candidate HIL** section as the baseline and the newer
-2.0.2 verification audit and dated result files for current sign-off;
+2.0.3 verification audit and dated result files for current sign-off;
 superseded EGT-rate and old configuration behavior are not v2 requirements.
 
 Legend: ✅ pass · ⚠️ anomaly/concern · ❌ bug · ⏭️ not physically testable
+
+## v2.0.3 final cross-platform web and release qualification — 2026-08-14
+
+- ✅ The canonical `python tools/run_release_checks.py` publication gate passed,
+  including 204 safety-source checks, 43 browser UI behavior groups, native
+  behavior tests, configuration/package audits, both firmware builds, both
+  LittleFS images, and the enforced memory/linker budgets.
+- ✅ ESP32-S3 completed 70 complete seven-page navigation cycles (490 real page
+  loads) with no transient request failures. The HTTP TIME_WAIT guard stabilized
+  at seven retained entries instead of exhausting lwIP's fixed 16-PCB pool; 163
+  completed connections were reclaimed during the run. Final heap was 44.4 KiB
+  free with a 31.7 KiB largest block.
+- ✅ Classic ESP32 completed approximately 490 cumulative page loads on the same
+  firmware/UI behavior, including 140 loads with registry-backed START, STOP,
+  throttle, and idle inputs visible and live in the compact dashboard layout.
+  Final observed heap remained about 63.5 KiB free with a 38.9 KiB largest block.
+- ✅ Live engine-file save, export, import/restore, page navigation, theme
+  persistence, output-mode presentation, and compact telemetry were exercised.
+  Each ECU's original profile was restored afterward.
+- ✅ Both final v2.0.3 images booted on physical hardware, reported STANDBY, and
+  reported all outputs inactive. Both access points were visible simultaneously
+  after qualification, confirming neither board was left reset or in bootloader.
+
+This is dry-bench and simulated-plant evidence. It does not claim a fuel-burning
+engine run and does not replace installation-specific wiring inspection, output
+polarity checks, dry commissioning, or a controlled first-engine test.
 
 ## Findings (running)
 

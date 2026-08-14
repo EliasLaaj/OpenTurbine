@@ -34,42 +34,43 @@ if dynconfig:
 def patch_async_webserver_request(env):
     """Let the HTTP peer close completed ``Connection: close`` responses.
 
-    ESPAsyncWebServer 3.11.2 always actively closes after the peer has ACKed
-    the complete response. The prebuilt ESP32 lwIP has only 16 active PCBs and
-    a 60 s MSL, so a sequence of cold browser connections can make port 80
-    unreachable even though the ECU and Wi-Fi remain healthy. A TCP abort avoids
-    TIME_WAIT but can race a browser's receive path and appear as a connection
-    reset. Leaving the fully-ACKed socket open lets the conforming HTTP peer
-    perform the advertised close; the existing RX timeout cleans up a stalled
-    peer.
+    ESPAsyncWebServer 3.11.2 actively closes completed responses. The prebuilt
+    ESP32 lwIP has only 16 active PCBs and a 60 s MSL, so rapid cold connections
+    can fill TIME_WAIT. Let the conforming peer close the advertised response;
+    the server's existing RX timeout cleans up a stalled peer.
     """
     import os
 
-    request_cpp = os.path.join(
-        env.subst("$PROJECT_LIBDEPS_DIR"), env["PIOENV"],
-        "ESPAsyncWebServer", "src", "WebRequest.cpp")
+    source_dir = os.path.join(
+        env.subst("$PROJECT_LIBDEPS_DIR"), env["PIOENV"], "ESPAsyncWebServer", "src")
+    request_cpp = os.path.join(source_dir, "WebRequest.cpp")
     if not os.path.exists(request_cpp):
         return
+
     with open(request_cpp, "r", encoding="utf-8") as handle:
         text = handle.read()
-    old = "_client->close();  // this will trigger _onDisconnect() and object destruction"
-    aborted = "_client->abort();  // response is fully ACKed; avoid ECU-side TIME_WAIT PCB exhaustion"
-    new = "/* Peer closes the advertised Connection: close response; RX timeout guards stalled peers. */"
-    count = text.count(old)
-    aborted_count = text.count(aborted)
-    patched_count = text.count(new)
-    if count == 0 and aborted_count == 0 and patched_count == 2:
-        return
-    if count == 2 and aborted_count == 0 and patched_count == 0:
-        patched = text.replace(old, new)
-    elif count == 0 and aborted_count == 2 and patched_count == 0:
-        patched = text.replace(aborted, new)
-    else:
-        raise RuntimeError(
-            f"ESPAsyncWebServer completion patch expected 2 close sites, found "
-            f"{count} original, {aborted_count} abort, and {patched_count} patched; "
-            "review the pinned dependency before building")
-    if patched != text:
+    patched_method = """void AsyncWebServerRequest::_onAck(size_t len, uint32_t time) {
+  // os_printf("a:%u:%u\\n", len, time);
+  if (!_response) {
+    return;
+  }
+
+  if (!_response->_finished()) {
+    _response->_ack(this, len, time);
+    // The response advertises Connection: close. Let the peer send FIN after
+    // receiving the full body so the ECU does not retain a TIME_WAIT PCB.
+  } else {
+    // Single-send responses are also retired by the peer or RX timeout.
+  }
+}"""
+    start = text.find("void AsyncWebServerRequest::_onAck(size_t len, uint32_t time) {")
+    end_marker = "\n}\n\nvoid AsyncWebServerRequest::_onError"
+    end = text.find(end_marker, start)
+    if start < 0 or end < 0:
+        raise RuntimeError("ESPAsyncWebServer ACK handler changed; review pinned dependency")
+    current_method = text[start:end + 2]
+    if current_method != patched_method:
+        patched = text[:start] + patched_method + text[end + 2:]
         with open(request_cpp, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(patched)
 

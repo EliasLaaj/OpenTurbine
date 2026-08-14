@@ -2130,11 +2130,14 @@ static void checkABTrigger() {
             // writing an inflated value there causes the slew to drift upward
             // (toward throttleDemand, which is already offset) every tick.
             ed.abFuelOffset = Config::abMainFuelOffsetPct / 100.0f;
-            // Apply AB pump demand: follow throttle (lerp min→max) or fixed at max.
+            // A relay pump is simply energized while AB is running. Proportional
+            // pumps may follow throttle/input or use their configured fixed demand.
             // Track the protected throttle demand when available.
             {
                 float pct;
-                if (Config::abPumpControlMode == 1) {
+                if (hw.abPumpType == 2) {
+                    pct = 100.0f;
+                } else if (Config::abPumpControlMode == 1) {
                     float throttle = hw.hasThrottle ? g_ctrlThrottleSlew.currentDemand()
                                                         : ed.throttleDemand;
                     pct = Config::abPumpMinPct + (Config::abPumpMaxPct - Config::abPumpMinPct)
@@ -3174,7 +3177,8 @@ static void handleCommand(const OTPacket& pkt) {
         case OTCommand::START_TEST:
             if (HardwareConfig::hasStarter && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
                 ed.starterEnabled  = true;
-                ed.starterDemand   = constrain(Config::toolStartTestPct / 100.0f, 0.0f, 1.0f);
+                ed.starterDemand   = HardwareConfig::starterType == 2 ? 1.0f
+                    : constrain(Config::toolStartTestPct / 100.0f, 0.0f, 1.0f);
                 // If a starter-enable output is configured, the starter motor
                 // is intentionally gated until starterEnDelayMs has elapsed.
                 // Keep the test active long enough that "starter test" always
@@ -3217,8 +3221,12 @@ static void handleCommand(const OTPacket& pkt) {
                     ed.extraCooldownActive    = true;
                     ed.oilFailsafeActive      = false;  // take manual control
                     ed.starterEnabled         = ecUseStarter;
-                    ed.starterDemand          = ecUseStarter ? (Config::cooldownStarterPct / 100.0f) : 0.0f;
-                    ed.oilPumpPct             = ecUseOil ? Config::cooldownOilPct : 0.0f;
+                    ed.starterDemand          = ecUseStarter
+                        ? (HardwareConfig::starterType == 2 ? 1.0f : Config::cooldownStarterPct / 100.0f)
+                        : 0.0f;
+                    ed.oilPumpPct             = ecUseOil
+                        ? (HardwareConfig::oilPumpType == 2 ? 100.0f : Config::cooldownOilPct)
+                        : 0.0f;
                     ed.oilScavengeDemand      = ecUseScavenge ? 1.0f : 0.0f;
                     ed.oilScavengeOn          = ecUseScavenge;
                     ed.extraCooldownUntilMs = deadlineAfter(millis(), durationMs);
@@ -3349,14 +3357,16 @@ static void handleCommand(const OTPacket& pkt) {
 
         case OTCommand::GLOW_TEST:
             if (HardwareConfig::hasGlowPlug && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
-                ed.glowPlugDemand = constrain(Config::toolGlowTestPct / 100.0f, 0.0f, 1.0f);
+                ed.glowPlugDemand = HardwareConfig::glowPlugOutputType == 1 ? 1.0f
+                    : constrain(Config::toolGlowTestPct / 100.0f, 0.0f, 1.0f);
                 _glowTestUntilMs = deadlineAfter(millis(), Config::toolGlowTestMs);
             }
             break;
 
         case OTCommand::FUEL_PUMP2_TEST:
             if (HardwareConfig::hasFuelPump2 && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
-                ed.fuelPump2Demand     = constrain(Config::toolFuelPump2TestPct / 100.0f, 0.0f, 1.0f);
+                ed.fuelPump2Demand     = HardwareConfig::fuelPump2Type == 2 ? 1.0f
+                    : constrain(Config::toolFuelPump2TestPct / 100.0f, 0.0f, 1.0f);
                 _fuelPump2TestUntilMs = deadlineAfter(millis(), Config::toolFuelPump2TestMs);
             }
             break;
@@ -3372,7 +3382,8 @@ static void handleCommand(const OTPacket& pkt) {
         case OTCommand::AB_PUMP_TEST:
             if (HardwareConfig::hasAfterburner && HardwareConfig::hasAbPump &&
                 standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
-                ed.abPumpDemand   = constrain(Config::toolAbPumpTestPct / 100.0f, 0.0f, 1.0f);
+                ed.abPumpDemand   = HardwareConfig::abPumpType == 2 ? 1.0f
+                    : constrain(Config::toolAbPumpTestPct / 100.0f, 0.0f, 1.0f);
                 _abPumpTestUntilMs = deadlineAfter(millis(), Config::toolAbPumpTestMs);
             }
             break;

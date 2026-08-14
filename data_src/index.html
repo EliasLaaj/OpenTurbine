@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260814g',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260814g');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body data-page="dashboard">
 <nav>
@@ -181,7 +181,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     <div class="grid-2" id="pressure-cards"></div>
   </section>
   <section class="telemetry-group" id="ext-sensors-section" style="display:none">
-    <div class="telemetry-group-title">Electrical, Load And Auxiliary Sensors</div>
+    <div class="telemetry-group-title">Control, Electrical And Auxiliary Inputs</div>
     <div class="grid-3" id="electrical-cards"></div>
   </section>
 
@@ -190,7 +190,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     <div class="card big" id="n1-card" style="display:none" title="Gas-generator/core shaft speed. N1 can provide overspeed, underspeed, surge, idle-control, and startup feedback when those functions are enabled; fitting it for display alone does not enable every protection.">
       <div class="label"><span id="lbl-n1">N1 RPM</span> <span id="n1-health" class="dot"></span></div>
       <div class="value" id="n1">—</div>
-      <div class="peak-val">max <span id="max-n1">—</span></div>
+      <div class="peak-val">max <span id="max-n1">—</span> · rate <span id="n1-rate-val">—</span></div>
       <div class="gauge-bar-wrap"><div class="gauge-bar" id="n1-gauge-bar" style="width:0%"></div></div>
       <span id="n1-abs-label" class="gauge-abs-label">— / — RPM</span>
       <span id="n1-approach-warn" class="gauge-approach-warn" style="display:none">⚠ approaching limit</span>
@@ -212,7 +212,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     <div class="card big" id="n2-card" style="display:none" title="Power-turbine/output-shaft speed. The gauge limit is the independent hard N2 shutdown setting, not the gradual governor or pullback target.">
       <div class="label"><span id="lbl-n2">N2 RPM</span> <span id="n2-health" class="dot"></span></div>
       <div class="value" id="n2">—</div>
-      <div class="peak-val">max <span id="max-n2">—</span></div>
+      <div class="peak-val">max <span id="max-n2">—</span> · rate <span id="n2-rate-val">—</span></div>
       <div class="gauge-bar-wrap"><div class="gauge-bar" id="n2-gauge-bar" style="width:0%"></div></div>
       <span id="n2-abs-label" class="gauge-abs-label">— / — RPM</span>
       <span id="n2-approach-warn" class="gauge-approach-warn" style="display:none">⚠ approaching hard limit</span>
@@ -374,13 +374,18 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
         </div>
         <div id="adv-glow" style="display:none">
           Glow plug <span id="glow-pct" style="color:var(--text);font-weight:600">0</span><span id="glow-unit">%</span>
-          <span id="wet-glow-fuel-wrap" style="display:none"> &middot; wet fuel <span id="wet-glow-fuel-pct" style="color:var(--text);font-weight:600">0</span><span id="wet-glow-fuel-unit">%</span></span>
+          <span id="wet-glow-fuel-wrap" style="display:none"> &middot; wet fuel <span id="wet-glow-fuel-pct" style="color:var(--text);font-weight:600">0</span><span id="wet-glow-fuel-unit">%</span>
+            <span class="gauge-bar-wrap" style="width:80px;display:inline-block;vertical-align:middle;margin-left:.3rem"><span class="gauge-bar" id="wet-glow-fuel-gauge-bar" style="display:block;width:0%"></span></span>
+          </span>
           <div class="gauge-bar-wrap" style="width:80px;display:inline-block;vertical-align:middle;margin-left:.3rem">
             <div class="gauge-bar" id="glow-gauge-bar" style="width:0%;background:var(--yellow)"></div>
           </div>
         </div>
         <div id="adv-bleed" style="display:none">
-          Bleed valve <span id="bleed-state" style="font-weight:600">CLOSED</span>
+          Bleed valve <span id="bleed-state" style="font-weight:600">CLOSED</span><span id="bleed-unit"></span>
+          <div class="gauge-bar-wrap" style="width:80px;display:inline-block;vertical-align:middle;margin-left:.3rem">
+            <div class="gauge-bar" id="bleed-gauge-bar" style="width:0%"></div>
+          </div>
         </div>
         <div id="adv-pitch" style="display:none">
           Prop pitch <span id="pitch-pct" style="color:var(--text);font-weight:600">0</span><span id="pitch-unit">%</span>
@@ -395,13 +400,19 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
           </div>
         </div>
         <div id="adv-coolfan" style="display:none">
-          Cool fan <span id="coolfan-state" style="font-weight:600">OFF</span>
+          Cool fan <span id="coolfan-state" style="font-weight:600">OFF</span><span id="coolfan-unit"></span>
+          <div class="gauge-bar-wrap" style="width:80px;display:inline-block;vertical-align:middle;margin-left:.3rem">
+            <div class="gauge-bar" id="coolfan-gauge-bar" style="width:0%"></div>
+          </div>
         </div>
         <div id="adv-airstarter" style="display:none">
           Air starter valve <span id="airstarter-state" style="font-weight:600">CLOSED</span>
         </div>
         <div id="adv-scavenge" style="display:none">
-          Scavenge pump <span id="scavenge-state" style="font-weight:600">OFF</span>
+          Scavenge pump <span id="scavenge-state" style="font-weight:600">OFF</span><span id="scavenge-unit"></span>
+          <div class="gauge-bar-wrap" style="width:80px;display:inline-block;vertical-align:middle;margin-left:.3rem">
+            <div class="gauge-bar" id="scavenge-gauge-bar" style="width:0%"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -423,15 +434,17 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
   <!-- Afterburner card — shown only when hasAfterburner -->
   <section id="ab-section" style="display:none;margin-bottom:1rem">
     <div class="card small" style="display:flex;flex-direction:column">
-      <div class="label">Afterburner <span id="ab-sol-dot" class="dot" title="AB Solenoid"></span></div>
+      <div class="label">Afterburner <span id="ab-sol-state" class="ab-state-word binary-state-inactive" title="Afterburner fuel valve">VALVE CLOSED</span></div>
       <div class="ab-mode-val ab-mode-Off" id="ab-mode-val">OFF</div>
       <div class="oil-sub" id="ab-state-reason" style="display:none;color:var(--yellow)"></div>
       <div class="ab-indicators">
-        <div class="ab-ind"><span id="ab-arm-dot" class="dot" title="Arm switch"></span> ARM</div>
-        <div class="ab-ind"><span id="ab-flame-dot" class="dot" title="AB flame sensor"></span> FLAME</div>
-        <div class="ab-ind"><span id="ab-trig-dot" class="dot" title="Trigger active"></span> TRIG</div>
+        <div class="ab-ind">ARM <span id="ab-arm-state" class="ab-state-word binary-state-inactive" title="Arm switch">OFF</span></div>
+        <div class="ab-ind">FLAME <span id="ab-flame-state" class="ab-state-word binary-state-inactive" title="AB flame sensor">NONE</span></div>
+        <div class="ab-ind">TRIGGER <span id="ab-trig-state" class="ab-state-word binary-state-inactive" title="Trigger state">IDLE</span></div>
       </div>
-      <div class="oil-sub">pump: <span id="ab-pump-demand">—</span>%</div>
+      <div class="oil-sub">pump: <span id="ab-pump-demand">—</span><span id="ab-pump-unit">%</span>
+        <span class="gauge-bar-wrap" style="width:80px;display:inline-block;vertical-align:middle;margin-left:.3rem"><span class="gauge-bar" id="ab-pump-gauge-bar" style="display:block;width:0%"></span></span>
+      </div>
       <div class="oil-sub" id="ab-fuel-offset-row" style="display:none">main fuel offset: <span id="ab-fuel-offset">—</span>%</div>
       <div class="ab-controls">
         <button id="btn-ab-fire" class="ab-fire-btn" onclick="confirmAbFire()" disabled title="Manual fire is available when Hardware AB trigger source is Manual command only.">MANUAL FIRE</button>
@@ -446,8 +459,11 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
       <div class="label">Main Fuel Pump / Metering Output</div>
       <div class="value small" id="throttle-demand">—</div>
       <div class="gauge-bar-wrap"><div class="gauge-bar" id="throttle-gauge-bar" style="width:0%"></div></div>
-      <div class="oil-sub" id="throttle-input-row" style="display:none">throttle input: <span id="throttle-input-pct">—</span>%</div>
       <div class="oil-sub" id="throttle-feedback-inhibit-note" style="display:none;color:var(--yellow)">Throttle increase limited: fitted RPM/EGT feedback is unhealthy. Fix the sensor/calibration before live running; Bench Mode is only for dry actuator tests.</div>
+      <div class="oil-sub operator-input-summary" id="operator-input-row" style="display:none">
+        <span id="operator-throttle-wrap" style="display:none">throttle input: <span id="registry-input-value-operator_throttle">???</span>%</span>
+        <span id="operator-idle-wrap" style="display:none">idle/minimum input: <span id="registry-input-value-operator_idle">???</span>%</span>
+      </div>
       <div class="oil-sub" id="throttle-floor-row" title="Minimum reliable fuel-pump output. Outside standby calibration/tools, nonzero commands below this value are forced to zero. 0 = no minimum configured.">minimum pump output: <span id="throttle-idle-floor">—</span>%
         <span id="throttle-di-wrap" style="display:none"> · automatic idle <span id="throttle-di-state">Off</span>, target <span id="throttle-di-rpm">—</span> <span id="throttle-di-unit">rpm</span></span>
       </div>

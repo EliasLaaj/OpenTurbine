@@ -86,10 +86,16 @@ function installedBrowser() {
     await scenario(page, 'full');
     await waitShown(page, '#getting-started-banner', false);
     assert.equal(await text(page, '#fw-version'), 'vsim-1.0.0');
-    assert.equal(await text(page, '#throttle-input-pct'), '50.0');
+    assert.equal(await text(page, '#registry-input-value-operator_throttle'), '50.0');
+    assert.equal(await text(page, '#registry-input-value-operator_idle'), '28.0');
     assert.equal(await page.evaluate(() =>
       ['tot-card', 'tit-card', 'n1-card', 'n2-card'].every(id =>
         document.querySelector('#temperature-cards').contains(document.getElementById(id)))), true);
+    assert.equal(await page.locator('[data-registry-input-id="operator_throttle"]').count(), 0);
+    assert.equal(await page.locator('[data-registry-input-id="operator_idle"]').count(), 0);
+    assert.equal(await page.locator('[data-registry-input-id="start_switch"]').count(), 0);
+    assert.equal(await page.locator('[data-registry-input-id="stop_switch"]').count(), 0);
+    assert.match(await text(page, '#di-state-items'), /Start Switch\s*OFF.*Stop Switch\s*OFF/s);
     assert.equal(await page.evaluate(() =>
       ['tot-card', 'tit-card', 'n1-card', 'n2-card'].every(id =>
         document.getElementById(id)?.classList.contains('big')) &&
@@ -122,10 +128,23 @@ function installedBrowser() {
     assert.equal(await page.locator('[data-registry-input-id="maintenance_interlock"]').count(), 0);
     assert.equal(await page.locator('#di-states-wrap').isVisible(), true);
     assert.match(await text(page, '#di-state-items'), /Maintenance Interlock\s*ON/);
-    assert.equal(await page.locator('#di-state-items .switch-input-state.is-on').count(), 1);
+    assert.equal(await page.locator('#di-state-items .switch-input-state.is-caution').count(), 1);
+    assert.equal(await page.locator('#di-state-items .switch-input-state').first().evaluate(el =>
+      ['', 'none'].includes(getComputedStyle(el, '::before').content)), true);
     assert.deepEqual(await page.evaluate(() => [
       formatTelemetryAge(5900), formatTelemetryAge(65400), formatTelemetryAge(3723000)
     ]), ['5 s', '1m 5s', '1h 2m 3s']);
+    await page.evaluate(() => setTelemetryStale(true, 4200));
+    const staleGeometry = await page.evaluate(() => {
+      const nav = document.querySelector('nav').getBoundingClientRect();
+      const banner = document.getElementById('telemetry-stale-banner').getBoundingClientRect();
+      return { navBottom: nav.bottom, bannerTop: banner.top, bannerBottom: banner.bottom };
+    });
+    assert.ok(staleGeometry.bannerTop >= staleGeometry.navBottom - 0.5);
+    assert.ok(staleGeometry.bannerBottom > staleGeometry.bannerTop);
+    await page.evaluate(() => setTelemetryStale(false));
+    results.push('compact switch/operator inputs stay out of sensor cards and stale telemetry stays below navigation');
+
     await page.locator('#btn-ab-fire').click();
     assert.equal(await text(page, '#ot-dialog-title'), 'Fire afterburner?');
     assert.match(await text(page, '#ot-dialog-message'), /AB igniter, fuel valve, and fuel pump.*N1.*RPM.*TOT.*°C/is);
@@ -184,6 +203,78 @@ function installedBrowser() {
     await page.waitForFunction(() => getComputedStyle(document.getElementById('throttle-feedback-inhibit-note')).display === 'none');
     await page.waitForFunction(() => document.getElementById('tot-rise-rate-val')?.textContent?.includes('2.5'));
     assert.equal(await text(page, '#tit-rise-rate-val'), '—');
+    assert.equal(await text(page, '#n1-rate-val'), '+850 rpm/s');
+    assert.equal(await text(page, '#n2-rate-val'), '-120 rpm/s');
+    assert.equal(await text(page, '#starter-en-state'), 'ON');
+    assert.equal(await text(page, '#starter-pct'), '33');
+    assert.equal(await text(page, '#fuel-sol-state'), 'OPEN');
+    assert.equal(await text(page, '#igniter-state'), 'OFF');
+    assert.equal(await text(page, '#igniter2-state'), 'OFF');
+    assert.equal(await page.locator('#starter-en-state').evaluate(el => el.classList.contains('binary-state-active')), true);
+    assert.equal(await page.locator('#fuel-sol-state').evaluate(el => el.classList.contains('binary-state-active')), true);
+    assert.equal(await page.locator('#igniter-state').evaluate(el => el.classList.contains('binary-state-inactive')), true);
+    assert.equal(await page.locator('#igniter-gauge-bar').count(), 0);
+    assert.equal(await page.locator('#igniter2-gauge-bar').count(), 0);
+    assert.equal(await text(page, '#glow-pct'), '20');
+    assert.equal(await text(page, '#bleed-state'), '35');
+    assert.equal(await text(page, '#bleed-unit'), '%');
+    assert.equal(await text(page, '#coolfan-state'), '72');
+    assert.equal(await text(page, '#coolfan-unit'), '%');
+    assert.equal(await text(page, '#airstarter-state'), 'CLOSED');
+    assert.equal(await text(page, '#scavenge-state'), '64');
+    assert.equal(await text(page, '#scavenge-unit'), '%');
+    assert.equal(await text(page, '#pitch-pct'), '38');
+    assert.equal(await text(page, '#fp2-pct'), '42');
+    assert.equal(await text(page, '#ab-pump-demand'), '27');
+    assert.equal(await text(page, '#ab-pump-unit'), '%');
+    assert.equal(await text(page, '#ab-sol-state'), 'VALVE CLOSED');
+    assert.equal(await text(page, '#ab-arm-state'), 'ARMED');
+    assert.equal(await page.locator('#ab-arm-state.ab-state-caution').count(), 1);
+    assert.equal(await text(page, '#ab-flame-state'), 'NONE');
+    assert.equal(await text(page, '#ab-trig-state'), 'IDLE');
+    assert.equal(await page.locator('[data-registry-output-id="drain_valve"] .value').textContent(), 'ON');
+    assert.equal(await page.locator('[data-registry-output-id="drain_valve"] .value.binary-state-active').count(), 1);
+    assert.equal(await page.locator('[data-registry-output-id="drain_valve"] .gauge-bar-wrap').count(), 0);
+    assert.equal(await page.locator('#starter-en-gauge-bar').count(), 0);
+    assert.equal(await page.locator('#airstarter-gauge-bar').count(), 0);
+    const gaugePercent = id => page.locator(id).evaluate(el =>
+      100 * el.getBoundingClientRect().width / el.parentElement.getBoundingClientRect().width);
+    await page.waitForTimeout(400);
+    assert.ok(Math.abs(await gaugePercent('#throttle-gauge-bar') - 61) < 1.5);
+    assert.ok(Math.abs(await gaugePercent('#oil-output-gauge-bar') - 43) < 1.5);
+    assert.ok(Math.abs(await gaugePercent('#starter-gauge-bar') - 33) < 1.5);
+    assert.ok(Math.abs(await gaugePercent('#glow-gauge-bar') - 20) < 1.5);
+    assert.ok(Math.abs(await gaugePercent('#bleed-gauge-bar') - 35) < 1.5);
+    assert.ok(Math.abs(await gaugePercent('#pitch-gauge-bar') - 38) < 1.5);
+    assert.ok(Math.abs(await gaugePercent('#fp2-gauge-bar') - 42) < 1.5);
+    assert.ok(Math.abs(await gaugePercent('#coolfan-gauge-bar') - 72) < 1.5);
+    assert.ok(Math.abs(await gaugePercent('#scavenge-gauge-bar') - 64) < 1.5);
+    assert.ok(Math.abs(await gaugePercent('#ab-pump-gauge-bar') - 27) < 1.5);
+    assert.equal(await page.locator('[data-registry-output-id="bleed_valve"]').count(), 0);
+    assert.equal(await page.locator('[data-registry-output-id="air_starter"]').count(), 0);
+    await page.request.post(`${base}/__sim/data`, { data: {
+      oil_pct: 18, starter_demand: 0.33, glow_plug_pct: 20,
+      prop_pitch_demand: 0.38, fuel_pump2_demand: 0.12, ab_pump_demand: 0.10,
+      registry_outputs: [
+        {id:'oil_pump',purpose:'oil_pump',driver:11,demand:1},
+        {id:'starter',purpose:'starter',driver:11,demand:1},
+        {id:'glow_plug',purpose:'glow_plug',driver:11,demand:1},
+        {id:'prop_pitch',purpose:'prop_pitch',driver:11,demand:0},
+        {id:'fuel_pump',purpose:'fuel_pump',driver:11,demand:1},
+        {id:'ab_pump',purpose:'ab_pump',driver:11,demand:1}
+      ]
+    } });
+    await page.waitForFunction(() => document.getElementById('oil-pct')?.textContent === 'ON');
+    assert.equal(await text(page, '#starter-pct'), 'ON');
+    assert.equal(await text(page, '#glow-pct'), 'ON');
+    assert.equal(await text(page, '#pitch-pct'), 'FINE');
+    assert.equal(await text(page, '#fp2-pct'), 'ON');
+    assert.equal(await text(page, '#ab-pump-demand'), 'ON');
+    for (const id of ['oil-output-gauge-bar','starter-gauge-bar','glow-gauge-bar','pitch-gauge-bar','fp2-gauge-bar','ab-pump-gauge-bar']) {
+      assert.equal(await page.locator(`#${id}`).evaluate(el => getComputedStyle(el.parentElement).display), 'none');
+    }
+    await scenario(page, 'full');
+    results.push('dashboard actuator values, compact bars, and relay states follow configured output hardware');
     results.push('dashboard throttle inhibit warning follows selected EGT source, including TIT-primary setups');
     await scenario(page, 'full');
 
@@ -234,9 +325,10 @@ function installedBrowser() {
     await page.locator('#unit-temp-btn').click();
 
     const retainedTot = await text(page, '#tot');
-    await page.evaluate(() => ws.close());
+    await page.evaluate(() => stopGlobalTelemetry());
     await page.waitForTimeout(50);
     assert.equal(await text(page, '#tot'), retainedTot);
+    await page.evaluate(() => startTelemetryBoot());
     await page.request.post(`${base}/__sim/data`, { data: { tot: 651 } });
     await page.waitForFunction(() => document.getElementById('tot')?.textContent?.includes('651'), null, { timeout: 5000 });
     results.push('brief telemetry reconnect retains values and REST fallback keeps live pages updating without navigation');
@@ -270,7 +362,12 @@ function installedBrowser() {
 
     await scenario(page, 'fault');
     await waitShown(page, '#fault-card', true);
-    assert.equal(await text(page, '#fault-desc-text'), 'Oil pressure below running minimum');
+    const longFault = 'N2 over-speed: power-turbine RPM exceeded its hard shutdown limit.\nWhat to do: Do not restart until the driven load, shaft, coupling, N2 pickup, governor or propeller control, and configured N2 limit have been inspected.';
+    await page.request.post(`${base}/__sim/data`, { data: { fault_description: longFault } });
+    await page.waitForFunction(expected => document.getElementById('fault-desc-text')?.textContent === expected, longFault);
+    assert.equal(await text(page, '#fault-desc-text'), longFault);
+    assert.equal(await page.locator('#fault-desc-text').evaluate(el =>
+      ['anywhere', 'break-word'].includes(getComputedStyle(el).overflowWrap)), true);
     for (const route of ['/log.html', '/calibration.html', '/config.html', '/tools.html'])
       assert.equal(await page.locator(`#fault-card a[href="${route}"]`).count(), 1);
     results.push('fault scenario exposes the current diagnosis and direct investigation routes');
@@ -504,6 +601,12 @@ function installedBrowser() {
       const oilButton = document.querySelector('#btn-OIL_PRIME');
       return devButton && !devButton.disabled && oilButton && !oilButton.disabled;
     });
+    assert.equal(await page.locator('#appearance-picker .ot-tile').count(), 6);
+    await page.locator('#appearance-picker [data-theme-key="daylight"]').click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'daylight');
+    await page.waitForTimeout(100);
+    assert.equal((await state(page)).settings.ui_theme, 'daylight');
+    await page.locator('#appearance-picker [data-theme-key="carbon"]').click();
     assert.equal(await text(page, '#btn-dev-mode'), 'Enable Dev Mode');
     assert.equal(await page.locator('#card-TOGGLE_BENCH_MODE').isVisible(), false);
     assert.equal(await page.locator('#card-TOGGLE_SAFETY_CHECKS').isVisible(), false);
@@ -529,7 +632,7 @@ function installedBrowser() {
     await page.getByRole('button', { name: 'Save settings' }).click();
     await page.waitForTimeout(650);
     assert.equal(await page.evaluate(() => localStorage.getItem('ot_tool_confirmations_skip_all')), null);
-    results.push('tools gates prerequisites and uses one restorable confirmation preference for the full page');
+    results.push('tools gates prerequisites, renders and saves all themes, and uses one restorable confirmation preference for the full page');
 
     await page.request.patch(`${base}/api/hardware`, { data: {
       controllers: { dynamic_idle: true },

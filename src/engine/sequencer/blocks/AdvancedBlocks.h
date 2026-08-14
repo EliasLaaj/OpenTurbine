@@ -12,8 +12,9 @@
 //    Used during unloaded start (open=less surge risk) or surge
 //    prevention.  One-shot blocks — complete in a single tick.
 //
-//  GlowPreheat — ramps glow plug power up from 0 → maxPct
-//    over preheatMs, then holds at holdPct.  Used as the first
+//  GlowPreheat — ramps proportional glow power up from 0 → maxPct
+//    over preheatMs, then holds at holdPct. Relay glow outputs turn on
+//    for the bounded preheat period instead. Used as the first
 //    sequence block before fuel delivery to pre-heat the ignition element
 //    flame element.  Completes when preheat ramp finishes.
 //
@@ -65,8 +66,9 @@ public:
         // (applyConfig() copies these too, but onEnter is the authoritative source
         //  for blocks that aren't wired into Hardware::applyConfig.)
         preheatMs    = (unsigned long)Config::glowPreheatMs;
-        maxPct       = Config::glowPreheatMaxPct;
-        holdPct      = Config::glowHoldPct;
+        const bool relayOutput = HardwareConfig::glowPlugOutputType == 1;
+        maxPct       = relayOutput ? 100.0f : Config::glowPreheatMaxPct;
+        holdPct      = relayOutput ? 100.0f : Config::glowHoldPct;
         waitUntilHot = Config::glowWaitUntilHot;
     }
 

@@ -10,10 +10,38 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ## [Unreleased]
 
+## [2.0.3] — 2026-08-14
+
 ### Changed
 - Simplified Windows download guidance for normal users: use the official link and follow the Setup Tool; checksum comparison is now clearly optional advanced verification rather than a required installation step.
 - Documented SignPath Foundation as a potential zero-budget Authenticode-signing route for qualifying open-source releases.
+- Reworked the public landing page to explain what OpenTurbine is and summarize planning-level engine, control, protection, and logging capabilities before presenting installation choices.
+- Added a source-verified hardware compatibility table covering supported thermocouple interfaces, low-temperature sensors, shared-I2C expansion devices, load-cell interfaces, and native ESP32 I/O.
+- Made dashboard actuator presentation follow the configured electrical mode consistently: relay outputs use clear binary states, while PWM and servo/ESC outputs use percentages and compact demand bars.
+- Colored binary state words without adding indicators: ordinary active states are green, inactive states are neutral, armed/inhibit states are amber, and active stop/fault inputs are red.
+- Simplified both igniter dashboard outputs to binary ON/OFF words; internal dwell or coil drive never appears as a misleading operator percentage.
+- Restored the Tools appearance picker after the serialized low-connection web bootstrap and added live theme-selection persistence coverage.
+- Unified live browser telemetry on Classic ESP32 and ESP32-S3 around compact REST polling so page changes do not leave page-owned connections behind.
+- Kept command inputs intentionally compact on the dashboard: switches share one concise status strip, while throttle and idle show only their live percentages and small range bars.
 
+### Added
+- Added live N1 and N2 acceleration to the dashboard and simulator coverage for every core actuator display mode.
+- Added persistent dashboard cards for fitted throttle and idle command inputs, including live percentages and compact range bars in every engine mode.
+
+### Fixed
+- Fixed public dashboard captures occurring before animated gauge bars reached their reported values.
+- Unified generic relay commands across native GPIO, shared-I²C outputs, PCB profiles, sequences, rules, tools, telemetry, logging, and safety checks: zero is OFF and any positive demand is ON, with propeller pitch retained as an explicit two-position midpoint exception.
+- Prevented stale hidden percentage settings from disabling explicit relay starter, oil-pump, glow, auxiliary-fuel, or afterburner ON actions after changing an output from proportional to relay mode.
+- Fixed I2C relay outputs appearing as proportional percentages and prevented core bleed/afterburner outputs from also appearing as duplicate generic cards.
+- Fixed configured throttle and idle inputs disappearing from the dashboard in STANDBY, including profiles whose only fitted inputs are operator commands.
+- Advanced the shared web-asset generation so browsers cannot reuse the pre-fix dashboard script after an ECU update.
+- Prevented repeated navigation and editing from exhausting the ESP32-S3 lwIP TCP table. Local HTTP TIME_WAIT cleanup now starts before the fixed 16-connection pool can block the web UI, while preserving a protected tail for delayed packets.
+- Prevented the fixed navigation bar and connection banner from overlapping stale-telemetry and fault text, and allowed long fault guidance to wrap instead of clipping.
+
+### Validation
+- Passed the complete release gate, including 204 safety-source checks, 43 browser UI behavior groups, native behavior tests, package/configuration audits, and firmware plus LittleFS builds for both targets.
+- Passed approximately 490 real browser page loads on each physical target. ESP32-S3 completed a continuous 490-load soak with zero retries while exercising the TIME_WAIT guard; Classic completed equivalent cumulative navigation with compact operator inputs visible and live.
+- Reconfirmed both flashed ECUs in STANDBY with all outputs inactive and restored their original engine profiles after testing.
 ## [2.0.2] — 2026-08-12
 
 ### Added

@@ -71,6 +71,7 @@ def main() -> int:
         host_tmp.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ot-native-", dir=host_tmp) as tmp:
         tests = [
+            ("relay_demand", [str(ROOT / "dev" / "host" / "relay_demand_behavior.cpp")]),
             ("command_queue", [
                 str(ROOT / "dev" / "host" / "command_queue_behavior.cpp"),
                 str(ROOT / "src" / "system" / "CommandQueue.cpp"),

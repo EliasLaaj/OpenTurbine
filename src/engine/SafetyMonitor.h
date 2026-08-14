@@ -1,4 +1,5 @@
 #pragma once
+#include "../hal/actuators/RelayDemand.h"
 #include "EngineData.h"
 #include "../system/Config.h"
 #include "../system/HardwareConfig.h"
@@ -471,7 +472,7 @@ public:
             for (uint8_t i = 0; i < reg.outputCount && !protectionBlind; ++i) {
                 const auto& c = reg.outputs[i];
                 if (c.installed && c.hasCurrent && c.currentMaxAmps > 0.0f &&
-                    !reg.ownsCoreOutput(c) && ed.registryOutputDemand[i] > 0.001f &&
+                    !reg.ownsCoreOutput(c) && RelayDemand::requested(ed.registryOutputDemand[i]) &&
                     !ed.registryOutputCurrentHealthy[i]) protectionBlind = true;
             }
             const bool feedbackBlind = n1Blind || n2Blind || protectionBlind;
@@ -598,7 +599,7 @@ private:
                 effectiveDemand = mainPump ? ed.oilPumpPct / 100.0f
                                            : ed.oilScavengeDemand;
             if (c.installed && c.hasFlowMonitor && c.minimumFlow > 0.0f &&
-                effectiveDemand > 0.001f) {
+                RelayDemand::requested(effectiveDemand)) {
                 int8_t inputIndex = -1;
                 for (uint8_t j = 0; j < reg.inputCount; ++j) {
                     if (!reg.inputs[j].installed || strcmp(reg.inputs[j].purpose, inputPurpose))

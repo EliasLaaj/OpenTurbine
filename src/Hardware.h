@@ -1133,12 +1133,12 @@ namespace Hardware {
     inline void writeRegistryOutputSignal(const ChannelRegistry::Channel& c, float demand) {
         demand = constrain(demand, 0.0f, 1.0f);
         if (demand > 0.0f) demand = fmaxf(demand, constrain(c.minimumRunDemand, 0.0f, 1.0f));
-        float driveDemand = c.inverted ? 1.0f - demand : demand;
         if (c.driver == ChannelRegistry::I2cRelay) {
             I2CDeviceManager::writeOutput(c, demand);
         } else if (c.driver == ChannelRegistry::Relay) {
-            digitalWrite(c.pin, driveDemand >= 0.5f ? HIGH : LOW);
+            digitalWrite(c.pin, RelayDemand::physicalLevel(demand, c.inverted) ? HIGH : LOW);
         } else if (c.driver == ChannelRegistry::Pwm) {
+            const float driveDemand = c.inverted ? 1.0f - demand : demand;
             float minDuty = constrain(c.minValue, 0.0f, 1.0f);
             float maxDuty = constrain(c.maxValue, 0.0f, 1.0f);
             if (maxDuty < minDuty) maxDuty = minDuty;
@@ -1148,6 +1148,7 @@ namespace Hardware {
             uint32_t duty = (uint32_t)(dutyDemand * dutyMax + 0.5f);
             ledcWrite(c.pin, duty);
         } else if (c.driver == ChannelRegistry::Servo) {
+            const float driveDemand = c.inverted ? 1.0f - demand : demand;
             float minUs = (c.minValue >= 500.0f && c.minValue <= 2500.0f) ? c.minValue : 1000.0f;
             float maxUs = (c.maxValue >= 500.0f && c.maxValue <= 2500.0f && c.maxValue > minUs)
                         ? c.maxValue : 2000.0f;
@@ -1213,20 +1214,20 @@ namespace Hardware {
                 const bool coreOwner = reg.ownsCoreOutput(c);
                 switch (kind) {
                     case REG_OUTPUT_FUEL_SHUTOFF: if (coreOwner) ed.registryOutputDemand[i] = ed.fuelSolOpen ? 1.0f : 0.0f; break;
-                    case REG_OUTPUT_STARTER: if (coreOwner) ed.registryOutputDemand[i] = ed.effectiveStarterDemand > 0.001f ? 1.0f : 0.0f; break;
+                    case REG_OUTPUT_STARTER: if (coreOwner) ed.registryOutputDemand[i] = RelayDemand::binary(RelayDemand::requested(ed.effectiveStarterDemand)); break;
                     case REG_OUTPUT_STARTER_ENABLE: if (coreOwner) ed.registryOutputDemand[i] = ed.starterEnabled ? 1.0f : 0.0f; break;
-                    case REG_OUTPUT_OIL_PUMP: if (coreOwner) ed.registryOutputDemand[i] = ed.oilPumpPct > 0.1f ? 1.0f : 0.0f; break;
+                    case REG_OUTPUT_OIL_PUMP: if (coreOwner) ed.registryOutputDemand[i] = RelayDemand::binary(RelayDemand::requested(ed.oilPumpPct / 100.0f)); break;
                     case REG_OUTPUT_IGNITER: if (coreOwner) ed.registryOutputDemand[i] = ed.igniterOn ? 1.0f : 0.0f; break;
                     case REG_OUTPUT_AB_IGNITER: if (coreOwner) ed.registryOutputDemand[i] = ed.igniter2On ? 1.0f : 0.0f; break;
                     case REG_OUTPUT_AB_VALVE: if (coreOwner) ed.registryOutputDemand[i] = ed.abSolOpen ? 1.0f : 0.0f; break;
                     case REG_OUTPUT_AIR_STARTER: if (coreOwner) ed.registryOutputDemand[i] = ed.airstarterOpen ? 1.0f : 0.0f; break;
-                    case REG_OUTPUT_COOLING_FAN: if (coreOwner) ed.registryOutputDemand[i] = ed.coolFanOn ? 1.0f : 0.0f; break;
-                    case REG_OUTPUT_SCAVENGE_PUMP: if (coreOwner) ed.registryOutputDemand[i] = ed.oilScavengeOn ? 1.0f : 0.0f; break;
-                    case REG_OUTPUT_FUEL_PUMP: if (coreOwner) ed.registryOutputDemand[i] = ed.fuelPump2Demand > 0.001f ? 1.0f : 0.0f; break;
-                    case REG_OUTPUT_AB_PUMP: if (coreOwner) ed.registryOutputDemand[i] = ed.abPumpDemand > 0.001f ? 1.0f : 0.0f; break;
-                    case REG_OUTPUT_GLOW_PLUG: if (coreOwner) ed.registryOutputDemand[i] = ed.glowPlugDemand >= 0.5f ? 1.0f : 0.0f; break;
-                    case REG_OUTPUT_BLEED_VALVE: if (coreOwner) ed.registryOutputDemand[i] = ed.bleedValveDemand >= 0.5f ? 1.0f : 0.0f; break;
-                    case REG_OUTPUT_PROP_PITCH: if (coreOwner) ed.registryOutputDemand[i] = ed.propPitchDemand >= 0.5f ? 1.0f : 0.0f; break;
+                    case REG_OUTPUT_COOLING_FAN: if (coreOwner) ed.registryOutputDemand[i] = RelayDemand::binary(RelayDemand::requested(ed.coolFanDemand)); break;
+                    case REG_OUTPUT_SCAVENGE_PUMP: if (coreOwner) ed.registryOutputDemand[i] = RelayDemand::binary(RelayDemand::requested(ed.oilScavengeDemand)); break;
+                    case REG_OUTPUT_FUEL_PUMP: if (coreOwner) ed.registryOutputDemand[i] = RelayDemand::binary(RelayDemand::requested(ed.fuelPump2Demand)); break;
+                    case REG_OUTPUT_AB_PUMP: if (coreOwner) ed.registryOutputDemand[i] = RelayDemand::binary(RelayDemand::requested(ed.abPumpDemand)); break;
+                    case REG_OUTPUT_GLOW_PLUG: if (coreOwner) ed.registryOutputDemand[i] = RelayDemand::binary(RelayDemand::requested(ed.glowPlugDemand)); break;
+                    case REG_OUTPUT_BLEED_VALVE: if (coreOwner) ed.registryOutputDemand[i] = RelayDemand::binary(RelayDemand::requested(ed.bleedValveDemand)); break;
+                    case REG_OUTPUT_PROP_PITCH: if (coreOwner) ed.registryOutputDemand[i] = RelayDemand::binary(RelayDemand::midpoint(ed.propPitchDemand)); break;
                     default: break;
                 }
             }
@@ -1297,9 +1298,9 @@ namespace Hardware {
             } else if (!strcmp(p, "oil_pump")) {
                 ed.oilPumpPct = safe * 100.0f;
             } else if (!strcmp(p, "scavenge_pump")) {
-                ed.oilScavengeDemand = safe; ed.oilScavengeOn = safe > 0.001f;
+                ed.oilScavengeDemand = safe; ed.oilScavengeOn = RelayDemand::requested(safe);
             } else if (!strcmp(p, "cooling_fan")) {
-                ed.coolFanDemand = safe; ed.coolFanOn = safe > 0.001f;
+                ed.coolFanDemand = safe; ed.coolFanOn = RelayDemand::requested(safe);
             } else if (!strcmp(p, "fuel_pump")) {
                 ed.fuelPump2Demand = safe;
             } else if (!strcmp(p, "igniter")) {
@@ -1431,12 +1432,15 @@ namespace Hardware {
         g_blkOilPrime.timeoutMs           = Config::startupOilArmTimeoutMs;
         g_blkOilPrime.oilArmMinBar        = Config::oilStartupMinBar;
         g_blkOilPrime.startupOilDemand    = Config::oilStartupPressure;
-        g_blkOilPrime.startupOilPct       = Config::oilStartupPct;
-        g_blkStarterSpin.starterDemand    = Config::starterDemand / 100.0f;
+        const bool starterRelay = HardwareConfig::hasStarter && HardwareConfig::starterType == 2;
+        const bool oilPumpRelay = HardwareConfig::hasOilPump && HardwareConfig::oilPumpType == 2;
+        const bool abPumpRelay = HardwareConfig::hasAbPump && HardwareConfig::abPumpType == 2;
+        g_blkOilPrime.startupOilPct       = oilPumpRelay ? 100.0f : Config::oilStartupPct;
+        g_blkStarterSpin.starterDemand    = starterRelay ? 1.0f : Config::starterDemand / 100.0f;
         g_blkStarterSpin.targetRpm        = Config::preIgnRpm;
         g_blkStarterSpin.timeoutMs        = (unsigned long)Config::starterTimeoutMs;
         g_blkStarterSpin.oilStartupMinBar = Config::oilStartupMinBar;
-        g_blkStarterSpin.rampPctPerSec    = Config::starterStartupRampPctPerSec;
+        g_blkStarterSpin.rampPctPerSec    = starterRelay ? 0.0f : Config::starterStartupRampPctPerSec;
         g_blkStarterSpin.assistEnabled    = Config::starterAssistEnabled &&
                                              HardwareConfig::hasStarter &&
                                              HardwareConfig::starterType != 2 &&
@@ -1465,7 +1469,7 @@ namespace Hardware {
         g_blkWaitTOTCool.timeoutMs           = (unsigned long)Config::waitTotCoolTimeoutMs;
         g_blkThrottleSet.pct                 = Config::throttleSetPct;
         g_blkPreHeat.preheatMs               = (unsigned long)Config::preHeatMs;
-        g_blkOilPumpOn.demandPct             = Config::oilPumpOnPct;
+        g_blkOilPumpOn.demandPct             = oilPumpRelay ? 100.0f : Config::oilPumpOnPct;
         g_blkFuelPumpIdle.maxPct              = Config::throttleIdleMaxPct;  // unified idle ceiling
         g_blkModifiedIdle.multiplier          = Config::modifiedIdleMultiplier;
         g_blkSpool.rpmTarget              = Config::spoolRpmTarget;
@@ -1496,8 +1500,8 @@ namespace Hardware {
         g_blkRPMDrop.rpmThreshold         = Config::shutdownRpmDropThreshold;
         g_blkRPMDrop.timeoutMs            = Config::shutdownRpmDropTimeoutMs;
         g_blkCooldownSpin.totTarget          = Config::totCooldownTarget;
-        g_blkCooldownSpin.starterCoolPct     = Config::cooldownStarterPct / 100.0f;
-        g_blkCooldownSpin.oilCoolPct         = Config::cooldownOilPct;
+        g_blkCooldownSpin.starterCoolPct     = starterRelay ? 1.0f : Config::cooldownStarterPct / 100.0f;
+        g_blkCooldownSpin.oilCoolPct         = oilPumpRelay ? 100.0f : Config::cooldownOilPct;
         g_blkCooldownSpin.oilPressureTarget  = Config::cooldownOilPressureTarget;
         g_blkCooldownSpin.timeoutMs          = Config::shutdownCooldownTimeoutMs;
         g_blkFinalStop.timeoutMs            = Config::shutdownFinalStopTimeoutMs;
@@ -1519,7 +1523,7 @@ namespace Hardware {
         g_blkABIgnite.torchTotLimit       = Config::abTorchGuardMode == 2 ? 0.0f
             : (Config::abTorchGuardMode == 1 ? Config::abTorchTotLimit
                : max(0.0f, Config::primaryEgtLimitC() - Config::totSafeMargin));
-        g_blkABPumpOn.demandPct           = Config::abLightupPumpPct;
+        g_blkABPumpOn.demandPct           = abPumpRelay ? 100.0f : Config::abLightupPumpPct;
         g_blkABFlameConfirm.flameMode     = Config::abFlameMode;
         g_blkABFlameConfirm.totRiseDegC   = Config::abTotRiseDegC;
         g_blkABFlameConfirm.totRiseWindowMs= Config::abTotRiseWindowMs;
@@ -2424,7 +2428,7 @@ namespace Hardware {
             if (!registryOutputManaged(c)) continue;
             if (c.driver == ChannelRegistry::I2cRelay) continue; // parked by manager
             const float safe = constrain(c.safeDemand, 0.0f, 1.0f);
-            const bool high = (c.inverted ? 1.0f - safe : safe) >= 0.5f;
+            const bool high = RelayDemand::physicalLevel(safe, c.inverted);
             digitalWrite(c.pin, high ? HIGH : LOW);
             pinMode(c.pin, OUTPUT);
         }
@@ -2745,11 +2749,11 @@ namespace Hardware {
         ed.effectiveStarterDemand = starterDelayOk
             ? constrain(ed.starterDemand, 0.0f, 1.0f) : 0.0f;
         if (ed.mode == SysMode::STARTUP) {
-            const bool fuelNow = ed.throttleDemand > 0.001f || ed.fuelSolOpen ||
-                ed.fuelPump2Demand > 0.001f || ed.wetGlowFuelDemand > 0.001f;
+            const bool fuelNow = RelayDemand::requested(ed.throttleDemand) || ed.fuelSolOpen ||
+                RelayDemand::requested(ed.fuelPump2Demand) || RelayDemand::requested(ed.wetGlowFuelDemand);
             if (fuelNow) ed.fuelAdmitted = true;
             const bool ignitionNow = ed.igniterOn || ed.igniter2On ||
-                ed.glowPlugDemand > 0.001f;
+                RelayDemand::requested(ed.glowPlugDemand);
             if (fuelNow && ignitionNow) ed.combustionAttempted = true;
             if ((HardwareConfig::hasFlame && ed.flameHealthy && ed.flameDetected) ||
                 (Config::primaryEgtHealthy(ed) &&
@@ -2772,9 +2776,11 @@ namespace Hardware {
         // delay has elapsed — with the relay off, the demand must not reach
         // the ESC/motor (the relay may not be the sole power gate).
         if (hw.hasStarter && g_actStarter) {
-            g_actStarter->set(ed.effectiveStarterDemand);
+            g_actStarter->set(constrain(ed.effectiveStarterDemand, 0.0f, 1.0f));
         }
-        if (hw.hasAbPump      && g_actAbPump)      g_actAbPump->set(ed.abPumpDemand);
+        if (hw.hasAbPump && g_actAbPump) {
+            g_actAbPump->set(constrain(ed.abPumpDemand, 0.0f, 1.0f));
+        }
         if (hw.hasAbSol)         g_actAbSol.set(ed.abSolOpen ? 1.0f : 0.0f);
         if (hw.hasAirstarterSol) {
             const auto* airStarter = registryAirStarterOutput();
@@ -2789,7 +2795,7 @@ namespace Hardware {
                                                         constrain(ed.oilScavengeDemand, 0.0f, 1.0f)));
         if (hw.hasOilPump && g_actOilPump) {
             float demand = (hw.oilPumpType == 2)
-                         ? (ed.oilPumpPct > 0.0f ? 1.0f : 0.0f)
+                         ? RelayDemand::binary(RelayDemand::requested(ed.oilPumpPct / 100.0f))
                          : (ed.oilPumpPct / 100.0f);
             g_actOilPump->set(demand);
         }
@@ -2880,17 +2886,22 @@ namespace Hardware {
                 g_actIgniter2->set(ed.igniter2On ? duty2 : 0.0f);
             }
         }
-        if (hw.hasFuelPump2 && g_actFuelPump2)
-            g_actFuelPump2->set(registryOutputMinimum(g_registryOutputPlan.fuelPump,
-                                                      constrain(ed.fuelPump2Demand, 0.0f, 1.0f)));
+        if (hw.hasFuelPump2 && g_actFuelPump2) {
+            float demand = registryOutputMinimum(g_registryOutputPlan.fuelPump,
+                                                 constrain(ed.fuelPump2Demand, 0.0f, 1.0f));
+            g_actFuelPump2->set(demand);
+        }
         if (hw.hasBleedValve && g_actBleedValve)
             g_actBleedValve->set(constrain(ed.bleedValveDemand, 0.0f, 1.0f));
-        if (hw.hasPropPitch && g_actPropPitch)
-            g_actPropPitch->set(ed.propPitchDemand);
+        if (hw.hasPropPitch && g_actPropPitch) {
+            const float demand = constrain(ed.propPitchDemand, 0.0f, 1.0f);
+            g_actPropPitch->set(hw.propPitchType == 2
+                ? RelayDemand::binary(RelayDemand::midpoint(demand)) : demand);
+        }
         if (hw.hasGlowPlug) {
             float glowDemand = constrain(ed.glowPlugDemand, 0.0f, 1.0f);
             if (hw.glowPlugOutputType == 1)
-                g_actGlowPlugRelay.setOn(glowDemand > 0.001f);
+                g_actGlowPlugRelay.setOn(RelayDemand::requested(glowDemand));
             else
                 g_actGlowPlug.set(glowDemand);
             const bool registryWetGlowFuel =
@@ -2898,7 +2909,7 @@ namespace Hardware {
             if (hw.glowPlugType == 2 && (g_actWetGlowFuel || registryWetGlowFuel)) {
                 static bool s_wetGlowActive = false;
                 static unsigned long s_wetGlowOnMs = 0;
-                bool commandOn = glowDemand > 0.001f;
+                bool commandOn = RelayDemand::requested(glowDemand);
                 if (commandOn && !s_wetGlowActive) {
                     s_wetGlowActive = true;
                     s_wetGlowOnMs = millis();

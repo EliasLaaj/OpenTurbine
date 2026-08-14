@@ -33,29 +33,29 @@ BASE = os.environ.get("OTBENCH_DUT", "http://192.168.4.1").rstrip("/")
 
 
 TOOLS_FAST = {
-    "fuel_prime_ms": 600,
-    "oil_prime_ms": 600,
+    "fuel_prime_ms": 1500,
+    "oil_prime_ms": 1500,
     "ign_test_ms": 1500,
-    "ign2_test_ms": 600,
-    "glow_test_ms": 900,
+    "ign2_test_ms": 1500,
+    "glow_test_ms": 1500,
     "glow_test_pct": 100,
-    "start_test_ms": 600,
+    "start_test_ms": 1500,
     "start_test_pct": 45,
     # Keep physical-output pulses long enough to span an HTTP round trip plus a
     # tester capture. These are campaign-only values, not product defaults.
-    "fuel_sol_test_ms": 600,
-    "idle_test_ms": 600,
-    "oil_scav_test_ms": 600,
-    "cool_fan_test_ms": 600,
-    "airstarter_test_ms": 600,
-    "bleed_valve_test_ms": 600,
-    "fuel_pump2_test_ms": 600,
+    "fuel_sol_test_ms": 1500,
+    "idle_test_ms": 1500,
+    "oil_scav_test_ms": 1500,
+    "cool_fan_test_ms": 1500,
+    "airstarter_test_ms": 1500,
+    "bleed_valve_test_ms": 1500,
+    "fuel_pump2_test_ms": 1500,
     "fuel_pump2_test_pct": 60,
-    "ab_sol_test_ms": 600,
-    "ab_pump_test_ms": 600,
+    "ab_sol_test_ms": 1500,
+    "ab_pump_test_ms": 1500,
     "ab_pump_test_pct": 60,
-    "starter_en_test_ms": 600,
-    "prop_pitch_test_ms": 600,
+    "starter_en_test_ms": 1500,
+    "prop_pitch_test_ms": 1500,
     "prop_pitch_test_pct": 55,
 }
 
@@ -160,6 +160,7 @@ class TenBuildRunner:
         self.original_hw = self.dut.hardware()
         self.original_cfg = self.dut.config()
         self._restore_config_patch = {}
+        self.dc.before_patch = self.note_config_patch
         self.base_profile_id = self.original_hw.get("profile_id", "OpenTurbine")
         self.base_profile_desc = self.original_hw.get("profile_desc", "")
         self.base_wifi_password = self.original_hw.get("wifi_password", "")
@@ -1140,7 +1141,17 @@ class TenBuildRunner:
         except Exception:
             previous_boot_count = None
         classic_target = os.environ.get("OTBENCH_TARGET", "s3").strip().lower() == "classic"
-        code, resp = self.dut._post("/api/hardware", self.original_hw)
+        # A settings transaction from the final recovery step can still own
+        # the apply gate for a few control ticks. Treat that documented 409 as
+        # a short-lived ordering condition and retry the identical restore;
+        # leaving a temporary HIL profile installed is never an acceptable
+        # cleanup result.
+        deadline = time.time() + 5.0
+        while True:
+            code, resp = self.dut._post("/api/hardware", self.original_hw)
+            if code != 409 or "configuration update" not in str(resp).lower() or time.time() >= deadline:
+                break
+            time.sleep(0.1)
         if code != 200:
             self.log(f"WARNING: original hardware restore failed: HTTP {code} {resp}")
             return False

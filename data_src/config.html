@@ -31,7 +31,7 @@ main{max-width:1380px;padding:1.1rem 1.5rem 5.5rem}
 @media(max-width:700px){main{padding:.85rem .75rem 7.6rem}.cfg-workspace{position:relative;top:auto;margin:-.85rem 0 .75rem;padding:.75rem 0 .55rem;background:var(--bg)}.cfg-workspace-card{padding:.75rem;border-radius:11px}.cfg-workspace-head{margin-bottom:.6rem}.cfg-header-actions{margin-left:0;width:100%}.cfg-search{height:44px}.cfg-toolbar{flex-wrap:wrap}.cfg-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;overflow:visible}.cfg-filter{width:100%;padding:.28rem .4rem}.cfg-result-count{display:none}.config-group>summary{min-height:68px;padding:.7rem}.group-desc{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.group-meta{display:none}.group-content{padding:0 .55rem .55rem}.cfg-grid{grid-template-columns:minmax(0,1fr)}.save-bar{bottom:8px;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.45rem}.save-bar:not(.is-dirty){display:none}.save-bar .save-change-count{grid-column:1/-1}.save-bar .save-spacer,.save-bar a,.save-msg{display:none}.save-bar button{min-width:0;padding:.42rem .7rem}.preset-body select{min-width:100%}.save-recap-card{width:calc(100vw - 1rem);max-height:92vh}.save-recap-header,.save-recap-footer{flex-wrap:wrap}.save-recap-body{padding:.65rem;max-height:62vh;overflow-x:auto}}
 </style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260814g',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260814g');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body>
 <nav>
@@ -2347,8 +2347,12 @@ function applyHwConditions() {
   ghostField('ab_tw', hasEgt, 'AB EGT-rise confirmation requires a configured TOT or TIT sensor.');
   ghostField('ab_smt', hasEgt, 'No primary EGT source is configured in Hardware.');
   ghostField('ab_fld', hasAbFlame, 'Running flame-loss shutdown requires a dedicated AB flame sensor.');
-  ghostField('ab_lpp', hasAbPump, 'Light-up pump demand requires afterburner hardware and an AB pump output.');
-  ['ab_pcm','ab_pmn','ab_pmx','ab_mo','ab_sms'].forEach(k =>
+  const hasProportionalAbPump = hasAbPump && !isOnOffType('ab_pump');
+  const relayAbPumpReason = 'The afterburner pump is configured as relay/on-off. It is ON during light-up and while the afterburner runs; percentage and command-source settings apply only to PWM or servo/ESC pumps.';
+  ghostField('ab_lpp', hasProportionalAbPump, hasAbPump ? relayAbPumpReason : 'Light-up pump demand requires afterburner hardware and an AB pump output.');
+  ['ab_pcm','ab_pmn','ab_pmx'].forEach(k =>
+    ghostField(k, hasProportionalAbPump, hasAbPump ? relayAbPumpReason : 'AB fuel pump output is not configured in Hardware.'));
+  ['ab_mo','ab_sms'].forEach(k =>
     ghostField(k, hasAbPump, 'AB fuel pump output is not configured in Hardware.'));
   // A lone igniter or flame sensor is not an operable afterburner. Apply this
   // last so individual dependency checks cannot accidentally unlock a field.

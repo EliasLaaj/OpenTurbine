@@ -1,4 +1,5 @@
 #include "HardwareConfig.h"
+#include "../hal/actuators/RelayDemand.h"
 #include "Config.h"
 #include "hardware_profile.h"
 #include "pcb/PcbProfileManager.h"
@@ -840,12 +841,12 @@ float customThresholdToDisplay(uint8_t sensor, float value) {
 
 float customActuatorValueToStored(uint8_t actuator, float value) {
     if (customActuatorIsAnalog(actuator)) return constrain(value, 0.0f, 100.0f) / 100.0f;
-    return value >= 0.5f ? 1.0f : 0.0f;
+    return RelayDemand::binary(RelayDemand::requested(value));
 }
 
 float customActuatorValueToDisplay(uint8_t actuator, float value) {
     if (customActuatorIsAnalog(actuator)) return value * 100.0f;
-    return value >= 0.5f ? 1.0f : 0.0f;
+    return RelayDemand::binary(RelayDemand::requested(value));
 }
 
 uint8_t customOpId(const char* op) {

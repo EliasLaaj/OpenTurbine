@@ -454,7 +454,7 @@ public:
     struct SeqSideAction {
         bool    enabled = false;
         uint8_t actuator = 0;
-        float   value = 0.0f;  // 0.0-1.0 demand; relays use >=0.5 as ON
+        float   value = 0.0f;  // 0.0-1.0 demand; relays use any intentional nonzero as ON
     };
     struct CustomBlockStep {
         uint8_t type = 0;      // 0 = set actuator, 1 = delay

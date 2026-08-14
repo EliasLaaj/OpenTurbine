@@ -1,4 +1,5 @@
 #pragma once
+#include "../hal/actuators/RelayDemand.h"
 
 #include "HardwareConfig.h"
 #include "Config.h"
@@ -21,7 +22,7 @@ namespace OutputActivity {
             const auto& c = reg.outputs[i];
             if (!hasPhysicalEndpoint(c)) continue;
             const float demand = logicalDemand(c, i, ed);
-            if (demand <= 0.001f) continue;
+            if (!RelayDemand::requested(demand)) continue;
             // A propeller actuator may intentionally park at a non-zero
             // semantic position in STANDBY. That is its neutral/safe state,
             // not an outstanding tool or engine demand; otherwise START,

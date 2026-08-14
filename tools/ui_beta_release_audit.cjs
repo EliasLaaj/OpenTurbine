@@ -424,12 +424,12 @@ function enumNames(source, marker) {
     assert.doesNotMatch(indexHtml, /20260612b|20260617b|20260619a|20260625a|20260705a|Primary thermal limit/);
     assert.doesNotMatch(indexHtml, />Not saved<|No calibration saved|No successful test recorded/);
     assert.match(indexHtml, /Run a safe actuator or dry-sequence test/);
-    assert.match(indexHtml, /20260811f/);
+    assert.match(indexHtml, /20260814g/);
     for (const pageName of ['index.html', 'hardware.html', 'config.html', 'calibration.html', 'sequence.html', 'log.html', 'tools.html']) {
       const pageSource = fs.readFileSync(path.join('data_src', pageName), 'utf8');
       const sharedRefs = [...pageSource.matchAll(/\/(?:style\.css|app\.js|theme\.js|ui_dialog\.js)\?v=([^"'&]+)/g)];
       assert.ok(sharedRefs.length > 0, `${pageName} must version its shared assets`);
-      assert.ok(sharedRefs.every(match => match[1] === '20260811f'), `${pageName} has a stale shared-asset cache key`);
+      assert.ok(sharedRefs.every(match => match[1] === '20260814g'), `${pageName} has a stale shared-asset cache key`);
     }
     assert.match(indexHtml, /<body data-page="dashboard">/);
     assert.match(indexHtml, /id="profile-mismatch-banner" style="display:none"/);
@@ -442,7 +442,7 @@ function enumNames(source, marker) {
     await page.goto(`${base}/generate_204`);
     await page.waitForSelector('#n1-card', { state: 'attached' });
     await page.evaluate(() => startTelemetryBoot());
-    await page.waitForFunction(() => _pullPeriodMs === 333, null, {
+    await page.waitForFunction(() => _restFallbackTimer !== null, null, {
       timeout: 3000
     });
     const portalBoot = await page.evaluate(() => {
@@ -450,16 +450,18 @@ function enumNames(source, marker) {
         path: location.pathname,
         isLive: isLiveTelemetryPage(),
         isDashboard: isDashboardPage(),
-        pullPeriod: _pullPeriodMs
+        desiredPeriod: desiredPullPeriodMs(),
+        restActive: _restFallbackTimer !== null
       };
     });
     assert.deepEqual(portalBoot, {
       path: '/generate_204',
       isLive: true,
       isDashboard: true,
-      pullPeriod: 333
+      desiredPeriod: 333,
+      restActive: true
     });
-    results.push('captive portal dashboard entry starts the same 3 Hz telemetry pull as /index.html');
+    results.push('captive portal dashboard entry starts the same compact telemetry path as /index.html');
 
     const webServer = fs.readFileSync(path.join('src', 'system', 'web', 'WebServer.cpp'), 'utf8');
     // Shared filenames are replaced in place by the maintenance updater, so

@@ -1,4 +1,5 @@
 #pragma once
+#include "../hal/actuators/RelayDemand.h"
 // ============================================================
 //  RulesEngine — deterministic threshold and linear-map automations,
 //  evaluated every control tick.
@@ -385,10 +386,10 @@ private:
             return;
         }
         switch (act) {
-            case COOL_FAN:    ed.coolFanDemand = dem; ed.coolFanOn = dem >= 0.5f; break;
-            case BLEED_VALVE: ed.bleedValveDemand = dem; ed.bleedValveOpen = dem >= 0.5f; break;
+            case COOL_FAN:    ed.coolFanDemand = dem; ed.coolFanOn = RelayDemand::requested(dem); break;
+            case BLEED_VALVE: ed.bleedValveDemand = dem; ed.bleedValveOpen = RelayDemand::requested(dem); break;
             case FUEL_PUMP2:  ed.fuelPump2Demand = constrain(dem, 0.0f, 1.0f); break;
-            case OIL_SCAVENGE:ed.oilScavengeDemand = dem; ed.oilScavengeOn = dem >= 0.5f; break;
+            case OIL_SCAVENGE:ed.oilScavengeDemand = dem; ed.oilScavengeOn = RelayDemand::requested(dem); break;
             case THROTTLE:
                 ed.throttleDemand = constrain(dem, 0.0f, 1.0f);
                 if (ruleName) strlcpy(ed.throttleCommandOwner, ruleName, sizeof(ed.throttleCommandOwner));
@@ -398,7 +399,7 @@ private:
                 // A starter automation owns the complete starter action. This
                 // makes a potentiometer map usable even when an enable relay is
                 // fitted, while zero demand returns both outputs to off.
-                ed.starterEnabled = dem > 0.001f;
+                ed.starterEnabled = RelayDemand::requested(dem);
                 break;
             case STARTER_ENABLE: ed.starterEnabled = (dem >= 0.5f); break;
             case OIL_PUMP:

@@ -715,8 +715,12 @@ function applyHwConditions() {
   ghostField('ab_tw', hasEgt, 'AB EGT-rise confirmation requires a configured TOT or TIT sensor.');
   ghostField('ab_smt', hasEgt, 'No primary EGT source is configured in Hardware.');
   ghostField('ab_fld', hasAbFlame, 'Running flame-loss shutdown requires a dedicated AB flame sensor.');
-  ghostField('ab_lpp', hasAbPump, 'Light-up pump demand requires afterburner hardware and an AB pump output.');
-  ['ab_pcm','ab_pmn','ab_pmx','ab_mo','ab_sms'].forEach(k =>
+  const hasProportionalAbPump = hasAbPump && !isOnOffType('ab_pump');
+  const relayAbPumpReason = 'The afterburner pump is configured as relay/on-off. It is ON during light-up and while the afterburner runs; percentage and command-source settings apply only to PWM or servo/ESC pumps.';
+  ghostField('ab_lpp', hasProportionalAbPump, hasAbPump ? relayAbPumpReason : 'Light-up pump demand requires afterburner hardware and an AB pump output.');
+  ['ab_pcm','ab_pmn','ab_pmx'].forEach(k =>
+    ghostField(k, hasProportionalAbPump, hasAbPump ? relayAbPumpReason : 'AB fuel pump output is not configured in Hardware.'));
+  ['ab_mo','ab_sms'].forEach(k =>
     ghostField(k, hasAbPump, 'AB fuel pump output is not configured in Hardware.'));
   // A lone igniter or flame sensor is not an operable afterburner. Apply this
   // last so individual dependency checks cannot accidentally unlock a field.

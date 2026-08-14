@@ -159,6 +159,7 @@
       }
     }
     reconcileFromDevice();
+    renderPicker(document.getElementById('appearance-picker'));
   }
   loadBootAssets();
 })();

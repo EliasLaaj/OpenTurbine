@@ -1,4 +1,5 @@
 #pragma once
+#include "../actuators/RelayDemand.h"
 #include "LossRecheck.h"
 #include "../AdcThreshold.h"
 
@@ -97,7 +98,7 @@ public:
         if (!_enabled || c.driver != ChannelRegistry::I2cRelay ||
             c.deviceChannel >= 8 || !_present(c.i2cAddress, Tca9554)) return false;
         const uint8_t bit = (uint8_t)(1U << c.deviceChannel);
-        const bool on = (c.inverted ? 1.0f - demand : demand) >= 0.5f;
+        const bool on = RelayDemand::physicalLevel(demand, c.inverted);
         uint8_t& latch = _tcaLatch[c.i2cAddress - 0x20];
         uint8_t nextLatch = latch;
         if (on) nextLatch |= bit; else nextLatch &= (uint8_t)~bit;
@@ -358,8 +359,7 @@ private:
             assigned = true;
             const uint8_t bit = (uint8_t)(1U << c.deviceChannel);
             direction &= (uint8_t)~bit;
-            const bool safeOn =
-                (c.inverted ? 1.0f - c.safeDemand : c.safeDemand) >= 0.5f;
+            const bool safeOn = RelayDemand::physicalLevel(c.safeDemand, c.inverted);
             if (safeOn) latch |= bit;
         }
         if (!assigned) return true;

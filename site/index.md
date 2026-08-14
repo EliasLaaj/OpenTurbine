@@ -6,11 +6,24 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
 
 <section class="hero"><div class="shell hero-grid"><div>
 <p class="eyebrow">OpenTurbine 2.0 · open-source ESP32 turbine ECU</p>
-<h1>Build the turbine controller your system needs</h1>
-<p class="lede">Configure sensors, actuators, sequences, limits and control rules from a browser. No source-code build is required for the normal Windows setup.</p>
+<h1>A configurable ECU for experimental turbine engines</h1>
+<p class="lede"><strong>OpenTurbine turns a supported Classic ESP32 or ESP32-S3 board into a browser-configured engine control unit.</strong> It can manage starting, fuel, oil, ignition, shutdown, protection and logging for hobby and development turbines.</p>
+<p>Describe the sensors and actuators actually fitted, then build the operating sequence around your engine instead of adapting the engine to one fixed ECU layout.</p>
 {% include download-cta.html %}
 <p class="quiet">For turbojets, APUs, generators, turboshafts, turboprops and turbine test rigs.</p>
-</div><div><img class="screenshot" src="{{ '/assets/images/hero-dashboard.png' | relative_url }}?v=20260718b" width="1800" height="1050" alt="OpenTurbine dashboard during a representative simulated single-shaft turbine run, showing N1, turbine temperature, oil pressure, oil temperature, battery voltage and actuator demand"></div></div></section>
+</div><div><img class="screenshot" src="{{ '/assets/images/hero-dashboard.png' | relative_url }}?v=20260814a" width="1800" height="1050" alt="OpenTurbine dashboard during a representative simulated single-shaft turbine run, showing N1, shaft acceleration, turbine temperature, oil pressure, oil temperature, battery voltage and actuator demand"></div></div></section>
+
+<section class="section"><div class="shell">
+<p class="eyebrow">Plan a complete system</p>
+<h2>What can OpenTurbine do?</h2>
+<p class="lede">Use the common functions directly, or combine fitted hardware, editable sequences and simple control rules for an unusual turbine. Features stay out of the normal setup until their required hardware is present.</p>
+<div class="card-grid four">
+  <div class="card"><h3>Start and stop the engine</h3><p>Build timed or feedback-driven startup and shutdown sequences around electric starters, air starters, fuel valves and pumps, igniters, glow systems, purge, cooldown and oil scavenge hardware.</p></div>
+  <div class="card"><h3>Hold idle and govern a shaft</h3><p>Automatically hold idle from N1, N2, P1 or P2 feedback; regulate oil pressure; and govern a free power turbine through main fuel or propeller pitch.</p></div>
+  <div class="card"><h3>Support different turbine layouts</h3><p>Configure single-shaft turbojets, APUs and generators, free-turbine turboshafts, variable-pitch turboprops, afterburning engines and instrumented development rigs.</p></div>
+  <div class="card"><h3>Protect and understand the run</h3><p>Apply independent speed, temperature, oil, pressure, torque, flameout and sensor-health responses, then review event history, per-run CSV data and exact command ownership.</p></div>
+</div>
+</div></section>
 
 <section class="section alt"><div class="shell"><h2>Start where you are</h2><div class="card-grid three">
 <a class="card" href="{{ '/get-started/' | relative_url }}"><h3>Install on a board</h3><p>Use the Windows Setup Tool, connect to the ECU Wi-Fi and open the dashboard.</p></a>
@@ -31,7 +44,7 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
   <li>Threshold and input-to-output control rules</li>
   <li>Browser monitoring, backups, event logs and run logs</li>
 </ul>
-</div><figure><img class="screenshot" src="{{ '/assets/images/hardware-page.png' | relative_url }}?v=20260718b" width="1800" height="1050" loading="lazy" alt="OpenTurbine Hardware page showing a conflict-free example turbine channel inventory"><figcaption>Hardware contains only the sensors and actuators fitted to this example. Values shown throughout the documentation are examples, not settings to copy.</figcaption></figure></div></section>
+</div><figure><img class="screenshot" src="{{ '/assets/images/hardware-page.png' | relative_url }}?v=20260814a" width="1800" height="1050" loading="lazy" alt="OpenTurbine Hardware page showing a conflict-free example turbine channel inventory"><figcaption>Hardware contains only the sensors and actuators fitted to this example. Values shown throughout the documentation are examples, not settings to copy.</figcaption></figure></div></section>
 
 <section class="section alt"><div class="shell"><div class="compact-callout"><div><h2>Check compatibility before installing</h2><p>Normal setup supports Classic ESP32 boards with at least 4 MB flash and ESP32-S3 DevKitC-1-compatible boards with at least 8 MB flash. The universal S3 image also runs on 16 MB modules and does not require PSRAM. The guided installer currently requires Windows.</p></div><a class="button secondary" href="{{ '/hardware/' | relative_url }}">Read hardware requirements</a></div></div></section>
 

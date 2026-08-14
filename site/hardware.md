@@ -29,6 +29,31 @@ MAX6675, MAX31855, and MAX31856. DS18B20 uses a separate OneWire GPIO. A flashed
 PCB profile owns these physical connections and shows board-labelled ports
 instead of editable raw topology.
 
+## Supported sensor and expansion devices
+
+This is the current firmware compatibility list for planning a build. A module
+using a different chip is not automatically compatible just because its listing
+uses a similar description. Breakout-board voltage levels, reference voltage,
+input protection and load-driving capability still need to suit the installation.
+
+| Interface or chip | Supported use | Planning notes |
+| --- | --- | --- |
+| **MAX6675** | K-type thermocouple for TOT, TIT or oil temperature | Shared SPI clock/data with one unique CS per module. Read-only interface; no MOSI required. |
+| **MAX31855** | K-type thermocouple for TOT, TIT or oil temperature | Shared SPI clock/data with one unique CS per module. Read-only interface; no MOSI required. |
+| **MAX31856** | K, J, N, T, E, R, S or B thermocouple for TOT, TIT or oil temperature | Shared SPI plus MOSI so the ECU can configure and verify the converter; one unique CS per module. |
+| **NTC thermistor** | Oil, coolant, intake or ambient temperature | Native ADC divider with beta/resistance model or calibrated nonlinear curve. Not offered for turbine-gas temperature. |
+| **DS18B20** | Oil, coolant, intake or ambient temperature | Dedicated OneWire GPIO, external 4.7 kΩ pull-up to 3.3 V, selectable 9–12-bit resolution. Not offered for turbine-gas temperature. |
+| **TCA9554** | Eight I²C on/off inputs or low-current logic outputs per chip | Addresses `0x20–0x27`; optional shared open-drain interrupt for inputs. Use external rated drivers for real loads. A disconnected expander cannot be forced to change its retained output latch. |
+| **TLA2528** | Eight I²C analog inputs or analog-threshold switches per chip | Addresses `0x10–0x17`; configurable reference/supply scaling, valid-voltage window, engineering range and filtering. |
+| **NAU7802** | Two I²C bridge/load-cell channels for torque or thrust | Fixed address `0x2A`; both channels share gain and sample rate. One device can measure torque and thrust when each uses a different channel. |
+| **HX711** | Direct two-wire bridge/load-cell input for shaft torque | Uses one DOUT input and one SCK output GPIO. Calibration stores unloaded zero and torque scale. |
+| **Native ESP32 inputs** | Digital switches, ADC sensors, pulse/frequency sensors, PWM-duty inputs and RC receiver pulses | Covers N1/N2 speed, pressures, voltage, flow, flame, operator commands and generic fitted channels when the signal is conditioned to the selected ESP32 input limits. |
+| **Native ESP32 outputs** | On/off relay commands, proportional PWM and servo/ESC pulse commands | Covers fuel/oil pumps, starters, valves, ignition, propeller pitch and auxiliaries through suitable external driver electronics. GPIO never supplies load power. |
+
+The Hardware page only offers a detected shared-I²C device for a new assignment.
+Previously saved assignments remain visible but unhealthy if that chip or bus is
+lost, allowing the installation to be diagnosed or deliberately cleaned up.
+
 ## Power supply
 
 Power the controller from a clean regulated supply within the board manufacturer's limits. Fuse the ECU supply and each load supply appropriately. Keep starter, pump, motor, and ignition current away from sensor wiring and the ESP32 ground return. Use connectors, wire sizes, strain relief, and enclosure protection appropriate for vibration, heat, and current.

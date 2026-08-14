@@ -192,6 +192,10 @@ main { padding: 1.5rem; max-width: 920px; margin: 0 auto; }
   line-height: 1.1;
 }
 .value.small { font-size: 1.3rem; }
+.binary-state-active { color: var(--green) !important; }
+.binary-state-inactive { color: var(--dim) !important; }
+.ab-state-caution { color: var(--yellow) !important; }
+.ab-state-danger { color: var(--red) !important; }
 
 /* ── Status dot ─────────────────────────────────────────────── */
 .dot {
@@ -407,6 +411,8 @@ button.primary:hover { background: color-mix(in srgb,var(--accent) 85%,#000); bo
   color: color-mix(in srgb, var(--red) 55%, var(--text));
   white-space: pre-wrap;
   line-height: 1.55;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .fault-actions {
   display: flex;
@@ -996,8 +1002,9 @@ body[data-page="tools"] main { max-width: 1180px; }
 .ab-mode-Running      { color: var(--green); }
 .ab-mode-ShuttingDown { color: var(--yellow); }
 .ab-mode-Fault        { color: var(--red); }
-.ab-indicators { display: flex; gap: 0.7rem; font-size: 0.7rem; color: var(--dim); margin-top: 0.2rem; }
+.ab-indicators { display: flex; flex-wrap: wrap; gap: 0.45rem 0.8rem; font-size: 0.7rem; color: var(--dim); margin-top: 0.2rem; }
 .ab-ind        { display: flex; align-items: center; gap: 0.25rem; }
+.ab-state-word { font-family: var(--font-mono); font-weight: 700; }
 .ab-controls   { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
 .ab-controls button { font-size: 0.79rem; padding: 0.3rem 0.85rem; }
 .ab-fire-btn { background: var(--yellow); color: color-mix(in srgb, var(--yellow) 22%, #000); border: none; border-radius: var(--r-sm); cursor: pointer; font-weight: 700; }
@@ -1342,27 +1349,30 @@ main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inpu
   align-items: center;
   min-width: 0;
 }
-.switch-input-state::before {
-  width: .46rem;
-  height: .46rem;
-  flex: 0 0 .46rem;
-  border-radius: 50%;
-  background: var(--dim);
-  content: '';
-}
+.switch-input-state::before { content: none; }
 .switch-input-state strong {
   color: var(--dim);
   font-size: .7rem;
   letter-spacing: .04em;
 }
-.switch-input-state.is-on::before {
-  background: var(--green);
-  box-shadow: 0 0 7px color-mix(in srgb, var(--green) 65%, transparent);
-}
 .switch-input-state.is-on strong { color: var(--green); }
-.switch-input-state.is-alarm::before { background: var(--red); }
 .switch-input-state.is-alarm strong { color: var(--red); }
+.switch-input-state.is-caution strong { color: var(--yellow); }
+.operator-input-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .15rem .8rem;
+}
+.operator-input-summary > span + span::before {
+  content: '\00b7';
+  margin-right: .8rem;
+  color: var(--border-light);
+}
+.operator-input-summary .input-unhealthy {
+  color: var(--red);
+  font-weight: 700;
 .context-links strong { color: var(--text-2); font-size: .7rem; }
+}
 .context-links a {
   color: var(--blue);
   font-weight: 650;

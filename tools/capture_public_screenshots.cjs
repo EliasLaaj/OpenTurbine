@@ -88,16 +88,17 @@ async function setRunState(page, patch = {}) {
   await page.request.post(`${base}/__sim/scenario/full`);
   await page.request.post(`${base}/__sim/data`, { data: {
     mode: 'RUNNING', fw_version: firmwareVersion, uptime_s: 847, last_event: 'RUNNING',
-    n1: 58200, n2: 0, tot: 592, oil: 2.35, oil_temp: 74, batt_voltage: 12.4,
+    n1: 58200, n2: 0, n1_rpm_accel: 120, n2_rpm_accel: 0, tot: 592, oil: 2.35, oil_temp: 74, batt_voltage: 12.4,
     throttle_demand: 0.36, throttle_input_us: 1360, throttle_input_norm: 0.36, rc_throttle_norm: 0.36,
     oil_demand: 2.3, oil_pct: 41, flame: true, max_n1: 61400, max_tot: 628, max_oil_temp: 76,
     rpm_limit: 100000, tot_limit: 720, egt_limit: 720, oil_running_min: 1.4, oil_temp_limit: 110,
     idle_target_rpm: 58000, dynamic_idle_enabled: true, relight_enabled: false, relight_armed: false,
     has_n1: true, has_n2: false, has_tot: true, has_tit: false, has_oil_press: true, has_oil_temp: true,
     has_batt_voltage: true, has_throttle: true, has_oil_pump: true, has_oil_loop: true, has_dynamic_idle: true,
+    has_starter: false, has_starter_en: false, has_fuel_sol: false, has_igniter: false, has_igniter2: false,
     has_flame: false, has_p1: false, has_p2: false, has_torque: false, has_thrust: false, has_fuel_press: false, has_fuel_flow: false,
     has_governor: false, has_afterburner: false, has_ab_flame: false, has_glow_plug: false, has_fuel_pump2: false,
-    has_prop_pitch: false, has_airstarter: false, has_oil_scavenge: false, has_bleed_valve: false,
+    has_prop_pitch: false, has_airstarter: false, has_oil_scavenge: false, has_bleed_valve: false, has_cool_fan: false,
     has_glow_current: false, has_igniter_current: false, has_igniter2_current: false, has_oil_pump_current: false,
     glow_current_amps: 0, igniter_current_amps: 0, igniter2_current_amps: 0, oil_pump_current_amps: 0,
     cool_fan_on: false, bench_mode: false, dev_mode: false,
@@ -134,6 +135,9 @@ async function prepare(page) {
 async function capture(page, route, file, selector, scrollToSelector = false) {
   await page.goto(`${base}/${route}`);
   await page.waitForSelector(selector);
+  // Dashboard gauges animate from zero. Capture only after their displayed
+  // width has caught up with the already-updated numeric value.
+  await page.waitForTimeout(450);
   if (scrollToSelector) {
     await page.locator(selector).scrollIntoViewIfNeeded();
     await page.evaluate(() => window.scrollBy(0, -72));

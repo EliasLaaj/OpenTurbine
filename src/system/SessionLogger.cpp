@@ -1,4 +1,5 @@
 #include "SessionLogger.h"
+#include "../hal/actuators/RelayDemand.h"
 #include "SessionFiles.h"
 #include "Config.h"
 #include "HardwareConfig.h"
@@ -145,7 +146,7 @@ static void _writeRow(const SessionRow& row) {
     if (mask & Config::SLOG_FUEL_FLOW)  APPEND_ROW_FIELD(",%.3f",(double)row.fuelFlow);
     if (mask & Config::SLOG_GLOW) {
         const float glowPct = (HardwareConfig::glowPlugOutputType == 1)
-            ? (row.glowPlugDemand > 0.001f ? 100.0f : 0.0f)
+            ? (RelayDemand::requested(row.glowPlugDemand) ? 100.0f : 0.0f)
             : (row.glowPlugDemand * 100.0f);
         APPEND_ROW_FIELD(",%.0f", (double)glowPct);
     }

@@ -19,6 +19,7 @@ const hwConfig = read('src/system/HardwareConfig.cpp') +
   read('src/system/HardwareConfigSerialize.cpp');
 const main = read('src/main.cpp');
 const web = read('src/system/web/WebServer.cpp');
+const webApp = read('data_src/app.js');
 const outputActivity = read('src/system/OutputActivity.h');
 const configGate = read('src/system/ConfigApplyGate.h');
 const pcnt = read('src/hal/sensors/PCNTRpmSensor.h');
@@ -36,6 +37,9 @@ const channelRegistry = read('src/system/ChannelRegistry.h');
 const piecewiseCalibration = read('src/hal/sensors/PiecewiseCalibration.h');
 const adcThreshold = read('src/hal/AdcThreshold.h');
 const i2cManager = read('src/hal/i2c/I2CDeviceManager.h');
+const relayDemand = read('src/hal/actuators/RelayDemand.h');
+const relayActuator = read('src/hal/actuators/RelayActuator.h');
+const pcbProfileManager = read('src/system/pcb/PcbProfileManager.cpp');
 const lossRecheck = read('src/hal/i2c/LossRecheck.h');
 const ntc = read('src/hal/sensors/NTCSensor.h');
 const sequenceHtml = read('data_src/sequence.html');
@@ -86,6 +90,15 @@ expect('priority-ten AsyncTCP work is pinned away from the engine-control core',
 expect('PCNT failures are recoverable',
   !pcnt.includes('ESP_ERROR_CHECK') && pcnt.includes('feedback disabled without reboot'));
 expect('analog filters use four samples', analog.includes('RollingAvg<4> _avg'));
+expect('native, registry, I2C, and PCB-profile relays share nonzero and polarity semantics',
+  relayDemand.includes('return demand > 0.0f') &&
+  relayActuator.includes('RelayDemand::requested(value)') &&
+  hardware.includes('RelayDemand::physicalLevel(demand, c.inverted)') &&
+  i2cManager.includes('RelayDemand::physicalLevel(demand, c.inverted)') &&
+  pcbProfileManager.includes('RelayDemand::physicalLevel(first.safeDemand, !first.activeHigh)'));
+expect('relay propeller pitch remains an explicit midpoint two-position command',
+  hardware.includes('RelayDemand::binary(RelayDemand::midpoint(demand))') &&
+  hardware.includes('RelayDemand::binary(RelayDemand::midpoint(ed.propPitchDemand))'));
 expect('oil-pressure mapping is explicit',
   !hwConfig.includes('"oil_pressure_main", "pressure"'));
 expect('legacy oil loop binds explicit oil-pressure purpose',
@@ -500,10 +513,30 @@ expect('config UI does not race a full settings reread after minimal PATCH',
   configHtml.includes('Keep the exact values just sent as the new baseline') &&
   !configHtml.includes('cfg = await fetchAppliedConfig()'));
 const pioHook = fs.readFileSync(path.join(root, 'tools', 'pio_s3_dynconfig.py'), 'utf8');
-expect('HTTP completion leaves advertised close to peer without ECU TIME_WAIT exhaustion or browser resets',
-  pioHook.includes('ESPAsyncWebServer completion patch expected 2 close sites') &&
-  pioHook.includes('Peer closes the advertised Connection: close response') &&
-  !pioHook.includes('new = "_client->abort()'));
+expect('Tools polls compact live telemetry after loading its configuration and hardware documents',
+  toolsHtml.includes("fetchJsonWithTimeout('/api/telemetry', 3000)") &&
+  !toolsHtml.includes("fetchJsonWithTimeout('/api/data', 3000)"));
+expect('Classic and S3 browser telemetry use one compact transport without page-owned WebSocket churn',
+  webApp.includes('_useWebSocketTelemetry = false;') &&
+  webApp.includes("fetch('/api/telemetry'") &&
+  !webApp.includes("info?.target !== 'esp32dev'"));
+expect('HTTP TIME_WAIT pressure relief is scoped to port 80 and preserves a protected tail',
+  web.includes('if (pcb->local_port == 80) ++count;') &&
+  web.includes('while (count >= 8)') &&
+  web.includes('tcp_abort(oldest)') &&
+  web.includes('s_httpTimeWaitPcbs = count'));
+expect('HTTP completion leaves advertised close to the peer without ECU TIME_WAIT or browser resets',
+  pioHook.includes('Let the peer send FIN after') &&
+  pioHook.includes('retired by the peer or RX timeout') &&
+  !pioHook.includes('_client->abort();'));
+expect('WebSocket replacement never disconnects a client while the library client-list lock is held',
+  web.includes('if (client != s_activeWsClient) return;') &&
+  web.includes('The 250 ms cleanup in tick() safely reaps') &&
+  !web.includes('if (superseded) superseded->abort()'));
+expect('normal page navigation lets the browser close superseded WebSockets without filling lwIP TIME_WAIT',
+  web.includes('_ws.cleanupClients(4)') &&
+  web.includes('server-initiated TCP close') &&
+  !web.includes('_ws.cleanupClients(1)'));
 expect('OTA success uses delayed guarded restart so its HTTP response can leave first',
   web.includes('_scheduleRestart("firmware OTA", 3000)') &&
   !web.includes('if (_otaPendingRestart) {\n        _restartCleanly("firmware OTA")'));

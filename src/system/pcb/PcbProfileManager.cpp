@@ -3,6 +3,7 @@
 #include <esp_partition.h>
 #include <new>
 #include "../../engine/EngineData.h"
+#include "../../hal/actuators/RelayDemand.h"
 
 namespace {
 static constexpr uint8_t PROFILE_SUBTYPE = 0x40;
@@ -260,7 +261,7 @@ void PcbProfileManager::driveEarlySafeStates() {
                 !strcmp(mode.adapter, "servo_output")) {
                 driveInactive(mode.gpio, mode.activeHigh);
             } else {
-                const bool commandedOn = mode.safeDemand >= 0.5f;
+                const bool commandedOn = RelayDemand::requested(mode.safeDemand);
                 driveLevel(mode.gpio, mode.activeHigh ? commandedOn : !commandedOn);
             }
         }
@@ -581,7 +582,7 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
             const bool firstProportional = !strcmp(first.adapter, "pwm_output") ||
                                            !strcmp(first.adapter, "servo_output");
             const bool firstLevel = firstProportional ? !first.activeHigh :
-                (first.activeHigh ? first.safeDemand >= 0.5f : first.safeDemand < 0.5f);
+                RelayDemand::physicalLevel(first.safeDemand, !first.activeHigh);
             for (uint8_t b = a + 1; b < port.modeCount; ++b) {
                 const Mode& second = port.modes[b];
                 if (second.gpio != first.gpio || !strstr(second.adapter, "output") ||
@@ -590,7 +591,7 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
                 const bool secondProportional = !strcmp(second.adapter, "pwm_output") ||
                                                 !strcmp(second.adapter, "servo_output");
                 const bool secondLevel = secondProportional ? !second.activeHigh :
-                    (second.activeHigh ? second.safeDemand >= 0.5f : second.safeDemand < 0.5f);
+                    RelayDemand::physicalLevel(second.safeDemand, !second.activeHigh);
                 if (firstLevel != secondLevel) {
                     delete catalog;
                     strlcpy(_fault, "multipurpose PCB output modes disagree on boot-safe level",

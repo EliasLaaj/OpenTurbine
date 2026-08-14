@@ -1,5 +1,5 @@
 name: OpenTurbine
-version: "2.0.2"
+version: "2.0.3"
 status: Experimental
 default_ip: 192.168.4.1
 windows_asset_name: OpenTurbineSetupTool.exe

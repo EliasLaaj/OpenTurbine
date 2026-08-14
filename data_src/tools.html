@@ -5,7 +5,7 @@
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Tools</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260811f',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260811f');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260814g',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260814g');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 <style>
 .test-settings-card{width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .test-settings-head,.test-settings-foot{flex:0 0 auto;padding:1rem}
@@ -710,8 +710,8 @@ if (typeof _base !== 'function' || _base._toolsExtended) return;
 window.applyData = function(d) {
   const merged = _base(d);
   if (!merged) return;
-  // Use _lastData (accumulated by app.js) so slow fields like dev_mode_fw
-  // are not lost when a partial fast frame arrives and overwrites liveData.
+  // Use _lastData (accumulated by app.js) so fields from successive compact
+  // frames remain available while the page updates its controls.
   liveData = merged;
   d = merged;
   if (!d.mode) return;
@@ -1026,7 +1026,10 @@ async function pollToolsTelemetry() {
   if (toolsTelemetryInFlight) return;
   toolsTelemetryInFlight = true;
   try {
-    const d = await fetchJsonWithTimeout('/api/data', 3000);
+    // Hardware and configuration were loaded above. Tools only needs changing
+    // engine state here, so never allocate the large Dashboard snapshot after
+    // those two maintenance documents.
+    const d = await fetchJsonWithTimeout('/api/telemetry', 3000);
     window.applyData(d);
     // This poll owns the conn indicator here — app.js's /api/status heartbeat
     // is disabled on pages with local telemetry (hasPageLocalTelemetry).
@@ -1375,8 +1378,6 @@ function startWebAssetsUpdate(input) {
   input.value = '';
 }
 </script>
-
-<script>if(window.OTTheme)OTTheme.renderPicker(document.getElementById('appearance-picker'));</script>
 
 </body>
 </html>

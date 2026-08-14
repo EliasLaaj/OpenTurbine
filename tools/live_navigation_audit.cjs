@@ -95,7 +95,34 @@ function installedBrowser() {
     }
     const status = await page.request.get(`${base}/api/status`, { timeout: 5000 });
     assert.equal(status.ok(), true, `status failed after navigation cycle ${cycle + 1}`);
+    const statusData = await status.json();
+    console.log(`cycle ${cycle + 1}/${cycles} status ws=${statusData.ws_clients} ` +
+      `heap=${statusData.free_heap} max=${statusData.max_alloc_heap} ` +
+      `tw=${statusData.http_time_wait} reaped=${statusData.http_time_wait_reaped}`);
   }
+
+  await navigate(`${base}/`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#di-states-wrap:not([style*="display: none"])', { timeout: 10000 });
+  await page.waitForSelector('#operator-input-row:not([style*="display: none"])', { timeout: 10000 });
+  await page.waitForFunction(() =>
+    /^\d+(?:\.\d+)?$/.test(document.getElementById('registry-input-value-operator_throttle')?.textContent || '') &&
+    /^\d+(?:\.\d+)?$/.test(document.getElementById('registry-input-value-operator_idle')?.textContent || ''),
+  null, { timeout: 7000 });
+  const compactDashboard = await page.evaluate(() => ({
+    switches: document.getElementById('di-state-items')?.textContent || '',
+    throttle: document.getElementById('registry-input-value-operator_throttle')?.textContent || '',
+    idle: document.getElementById('registry-input-value-operator_idle')?.textContent || '',
+    oversizedSwitchCards: document.querySelectorAll(
+      '[data-registry-input-id="start_switch"], [data-registry-input-id="stop_switch"], ' +
+      '[data-registry-input-id="operator_throttle"], [data-registry-input-id="operator_idle"]'
+    ).length,
+  }));
+  assert.match(compactDashboard.switches, /Start Switch\s*(?:ON|OFF).*Stop Switch\s*(?:ON|OFF)/s);
+  assert.match(compactDashboard.throttle, /^\d+(?:\.\d+)?$/);
+  assert.match(compactDashboard.idle, /^\d+(?:\.\d+)?$/);
+  assert.equal(compactDashboard.oversizedSwitchCards, 0,
+    'switch, throttle, or idle input regressed into an oversized sensor card');
+  await page.screenshot({ path: path.join(screenshotDir, 'dashboard-compact-inputs.png'), fullPage: true });
 
   await navigate(`${base}/config.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#cf-sf_p1t', { state: 'attached' });
@@ -118,7 +145,17 @@ function installedBrowser() {
     assert.equal(await page.locator(`[data-bit="${bit}"]`).count(), 1, `${bit.toUpperCase()} logging is missing from Log > Session Data`);
 
   await navigate(`${base}/tools.html`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#btn-factory-reset:not([disabled])', { timeout: 10000 });
+  try {
+    await page.waitForSelector('#btn-factory-reset:not([disabled])', { timeout: 10000 });
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      connection: document.getElementById('conn-label')?.textContent,
+      mode: document.getElementById('mode-badge')?.textContent,
+      factoryDisabled: document.getElementById('btn-factory-reset')?.disabled,
+      staleBanner: document.getElementById('telemetry-stale-banner')?.textContent || '',
+    }));
+    throw new Error(`${error.message}\nTools live state=${JSON.stringify(state)}`);
+  }
   await page.locator('#btn-factory-reset').click();
   await page.locator('#ot-dialog-confirm').click();
   await page.waitForSelector('#ot-dialog-input:visible');

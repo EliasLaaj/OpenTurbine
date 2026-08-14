@@ -37,6 +37,25 @@ function registryDisplayName(c, fallback = 'Output') {
   const name = (c?.name && String(c.name).trim()) || c?.id || fallback;
   return String(name || '').includes('_') ? plainRegistryName(name, fallback) : name;
 }
+function configuredRegistryOutput(d, purposes, ids = []) {
+  const purposeSet = new Set(Array.isArray(purposes) ? purposes : [purposes]);
+  const idSet = new Set(Array.isArray(ids) ? ids : [ids]);
+  const outputs = Array.isArray(d?.registry_outputs) ? d.registry_outputs : [];
+  // Prefer the known core ID when a user also has auxiliary outputs with the
+  // same purpose. Purpose matching is the fallback for custom channel names.
+  return outputs.find(ch => ch && idSet.has(String(ch.id || ''))) ||
+    outputs.find(ch => ch && purposeSet.has(String(ch.purpose || '')));
+}
+function registryOutputIsRelay(ch) {
+  const driver = Number(ch?.driver);
+  return driver === 4 || driver === 11; // native GPIO relay or TCA9554 I2C relay
+}
+function relayDemandActive(demand) {
+  return Number(demand) > 0;
+}
+function relayTwoPositionHigh(demand) {
+  return Number(demand) >= 0.5;
+}
 function selectedEgtKey(d) {
   return d?.egt_source === 2 ? 'tit'
     : (d?.egt_source === 1 ? 'tot' : (d?.has_tot ? 'tot' : (d?.has_tit ? 'tit' : null)));
@@ -254,10 +273,9 @@ function drawSparkline(canvasId, data, color) {
 // setInterval at 333 ms is reliable for a visible foreground tab; if the tab
 // is backgrounded the rate drops to ~1 s which is acceptable for monitoring.
 let ws = null;
-// Classic ESP32 uses compact HTTP telemetry polling. Repeated full-page
-// navigation necessarily replaces WebSocket transports and can eventually
-// exhaust the older chip's small lwIP connection pool. S3 keeps WebSockets;
-// both paths feed the same applyData() UI and expose the same controls.
+// Both ESP32 targets use compact HTTP telemetry polling. It provides identical
+// UI behavior on Classic and S3 and, unlike a page-owned WebSocket, has no
+// persistent transport to tear down during full-page menu navigation.
 let _useWebSocketTelemetry = null;
 let _lastMsgMs = 0;
 let _lastConnectMs = 0;
@@ -273,6 +291,7 @@ let _statusHeartbeatTimer = null;
 let _staleTimer = null;
 let _telemetryStale = false;
 let _dashboardBootstrapTimer = null;
+let _connectTimer = null;
 
 function isLiveTelemetryPage() {
   if (document.body?.dataset?.page === 'dashboard') return true;
@@ -365,6 +384,7 @@ function startRestFallbackTimer() {
 }
 
 function stopGlobalTelemetry() {
+  if (_connectTimer) { clearTimeout(_connectTimer); _connectTimer = null; }
   if (_pullTimer) { clearInterval(_pullTimer); _pullTimer = null; _pullPeriodMs = 0; }
   if (_restFallbackTimer) { clearInterval(_restFallbackTimer); _restFallbackTimer = null; }
   if (_statusHeartbeatTimer) { clearInterval(_statusHeartbeatTimer); _statusHeartbeatTimer = null; }
@@ -529,6 +549,16 @@ function applyData(d) {
   if (totCard && d.has_tot !== undefined) totCard.style.display = d.has_tot ? '' : 'none';
   setText('max-n1',  d.max_n1  !== undefined ? fmtInt(d.max_n1) : '—');
   setText('max-n2',  d.max_n2  !== undefined ? fmtInt(d.max_n2) : '—');
+  if (d.n1_rpm_accel !== undefined) {
+    const rate = Math.round(Number(d.n1_rpm_accel));
+    setText('n1-rate-val', Number.isFinite(rate)
+      ? (rate > 0 ? '+' : '') + fmtInt(rate) + ' rpm/s' : '—');
+  }
+  if (d.n2_rpm_accel !== undefined) {
+    const rate = Math.round(Number(d.n2_rpm_accel));
+    setText('n2-rate-val', Number.isFinite(rate)
+      ? (rate > 0 ? '+' : '') + fmtInt(rate) + ' rpm/s' : '—');
+  }
   setText('max-tot', d.max_tot !== undefined ? toDispTemp(Number(d.max_tot)).toFixed(1) : '—');
   setText('oil', d.oil !== undefined ? toDispPress(Number(d.oil)).toFixed(2)       : '—');
   const oilCard = document.getElementById('oil-card');
@@ -536,6 +566,7 @@ function applyData(d) {
   setText('oil-demand-val', d.oil_demand !== undefined ? toDispPress(Number(d.oil_demand)).toFixed(2) : '—');
   const baseThrottle = d.throttle_demand !== undefined ? Number(d.throttle_demand) : undefined;
   const effectiveThrottle = d.throttle_effective !== undefined ? Number(d.throttle_effective) : baseThrottle;
+  clearBinaryStateText('throttle-demand');
   setText('throttle-demand', effectiveThrottle !== undefined
     ? (effectiveThrottle * 100).toFixed(1) + '%' : '—');
   const throttleOutputCard = document.getElementById('throttle-output-card');
@@ -559,23 +590,22 @@ function applyData(d) {
        (d.has_n1 && d.n1_healthy === false));
     feedbackInhibit.style.display = sensorBlocksIncrease ? '' : 'none';
   }
-  // Physical throttle input display (when throttle input is configured)
-  {
-    const iRow = document.getElementById('throttle-input-row');
-    const iVal = document.getElementById('throttle-input-pct');
-    const hasInput = d.throttle_input_type && d.throttle_input_type !== 'none';
-    if (iRow) iRow.style.display = hasInput && d.mode === 'RUNNING' ? '' : 'none';
-    if (iVal && hasInput) {
-      const rawNorm = d.throttle_input_raw !== undefined ? Number(d.throttle_input_raw) / 4095 : 0;
-      const norm = d.throttle_input_norm !== undefined
-        ? Number(d.throttle_input_norm)
-        : (d.throttle_input_type === 'servo' && d.rc_throttle_norm !== undefined)
-          ? Number(d.rc_throttle_norm) : rawNorm;
-      const pct = (norm * 100).toFixed(1);
-      iVal.textContent = pct;
+  if (d.oil_pct !== undefined) {
+    const oilChannel = configuredRegistryOutput(d, 'oil_pump', ['oil_pump','oil_pump_main']);
+    const oilPct = Math.max(0, Math.min(100, Number(d.oil_pct)));
+    const oilRelay = oilChannel ? registryOutputIsRelay(oilChannel) : false;
+    if (oilRelay) setBinaryStateText('oil-pct', relayDemandActive(oilPct / 100));
+    else {
+      clearBinaryStateText('oil-pct');
+      setText('oil-pct', oilPct + '%');
     }
+    setGaugeBar('oil-output-gauge-bar', oilRelay ? (relayDemandActive(oilPct / 100) ? 100 : 0) : oilPct);
+    const oilGauge = document.getElementById('oil-output-gauge-bar')?.parentElement;
+    if (oilGauge) oilGauge.style.display = oilRelay ? 'none' : '';
+  } else {
+    clearBinaryStateText('oil-pct');
+    setText('oil-pct', '—');
   }
-  setText('oil-pct',     d.oil_pct  !== undefined ? d.oil_pct + '%'          : '—');
   const oilOutputCard = document.getElementById('oil-output-card');
   if (oilOutputCard && d.has_oil_pump !== undefined) {
     oilOutputCard.style.display = d.has_oil_pump ? '' : 'none';
@@ -1066,10 +1096,6 @@ function applyData(d) {
     pushSparkline(_sparkTorque, Number(d.torque));
     drawSparkline('torque-sparkline', _sparkTorque, 'var(--accent)');
   }
-  if (d.oil_pct !== undefined) {
-    const oilPct = Number(d.oil_pct);
-    setGaugeBar('oil-output-gauge-bar', Math.max(0, Math.min(100, oilPct)));
-  }
   const oilFlowWarning = document.getElementById('oil-flow-warning-note');
   if (oilFlowWarning) oilFlowWarning.style.display = d.oil_flow_warning ? '' : 'none';
   renderRegistryOutputCards(d);
@@ -1326,58 +1352,100 @@ function applyData(d) {
                 || d.has_cool_fan  || d.has_airstarter  || d.has_oil_scavenge;
     advActSection.style.display = anyAdv ? '' : 'none';
     const actuatorIsRelay = type => Number(type) === 2;
+    const updateConfiguredDemand = ({purposes, ids, fallbackDemand, binaryActive, fallbackRelay = true,
+      valueId, unitId, barId, onLabel = 'ON', offLabel = 'OFF'}) => {
+      const channel = configuredRegistryOutput(d, purposes, ids);
+      // Dedicated telemetry is the live core command; registry demand is only
+      // a fallback because native core outputs need not mirror that array.
+      const demand = Math.max(0, Math.min(1, Number(fallbackDemand ?? channel?.demand ?? 0)));
+      const relay = channel ? registryOutputIsRelay(channel) : fallbackRelay;
+      const active = relay ? relayDemandActive(demand)
+        : (binaryActive === undefined ? relayTwoPositionHigh(demand) : !!binaryActive);
+      const pct = Math.round(demand * 100);
+      if (relay) setBinaryStateText(valueId, active, onLabel, offLabel);
+      else {
+        clearBinaryStateText(valueId);
+        setText(valueId, pct);
+      }
+      setText(unitId, relay ? '' : '%');
+      setGaugeBar(barId, relay ? (active ? 100 : 0) : pct);
+      const gauge = document.getElementById(barId)?.parentElement;
+      if (gauge) gauge.style.display = relay ? 'none' : 'inline-block';
+    };
 
     const advStarter = document.getElementById('adv-starter');
     if (advStarter) {
       advStarter.style.display = d.has_starter ? '' : 'none';
       if (d.has_starter && d.starter_demand !== undefined) {
         const pct = Math.round(Number(d.starter_demand) * 100);
-        const relay = actuatorIsRelay(d.starter_type);
-        setText('starter-pct', relay ? (pct > 0 ? 'ON' : 'OFF') : pct);
+        const channel = configuredRegistryOutput(d, 'starter', ['starter','main_starter','starter_main']);
+        const relay = channel ? registryOutputIsRelay(channel) : actuatorIsRelay(d.starter_type);
+        if (relay) setBinaryStateText('starter-pct', relayDemandActive(Number(d.starter_demand)));
+        else {
+          clearBinaryStateText('starter-pct');
+          setText('starter-pct', pct);
+        }
         setText('starter-unit', relay ? '' : '%');
-        setGaugeBar('starter-gauge-bar', relay ? (pct > 0 ? 100 : 0) : pct);
+        setGaugeBar('starter-gauge-bar', relay ? (relayDemandActive(Number(d.starter_demand)) ? 100 : 0) : pct);
+        const gauge = document.getElementById('starter-gauge-bar')?.parentElement;
+        if (gauge) gauge.style.display = relay ? 'none' : 'inline-block';
       }
     }
 
     const advStarterEn = document.getElementById('adv-starter-en');
     if (advStarterEn) {
       advStarterEn.style.display = d.has_starter_en ? '' : 'none';
-      if (d.has_starter_en) setText('starter-en-state', d.starter_enabled ? 'ON' : 'OFF');
+      if (d.has_starter_en) setBinaryStateText('starter-en-state', !!d.starter_enabled);
     }
 
     const advFuelSol = document.getElementById('adv-fuel-sol');
     if (advFuelSol) {
       advFuelSol.style.display = d.has_fuel_sol ? '' : 'none';
-      if (d.has_fuel_sol) setText('fuel-sol-state', d.fuel_sol_open ? 'OPEN' : 'CLOSED');
+      if (d.has_fuel_sol) setBinaryStateText('fuel-sol-state', d.fuel_sol_open, 'OPEN', 'CLOSED');
     }
 
     const advIgniter = document.getElementById('adv-igniter');
     if (advIgniter) {
       advIgniter.style.display = d.has_igniter ? '' : 'none';
-      if (d.has_igniter) setText('igniter-state', d.igniter_on ? 'ON' : 'OFF');
+      if (d.has_igniter) setBinaryStateText('igniter-state', !!d.igniter_on);
     }
 
     const advIgniter2 = document.getElementById('adv-igniter2');
     if (advIgniter2) {
       advIgniter2.style.display = d.has_igniter2 ? '' : 'none';
-      if (d.has_igniter2) setText('igniter2-state', d.igniter2_on ? 'ON' : 'OFF');
+      if (d.has_igniter2) setBinaryStateText('igniter2-state', !!d.igniter2_on);
     }
 
     const advGlow = document.getElementById('adv-glow');
     if (advGlow) {
       advGlow.style.display = d.has_glow_plug ? '' : 'none';
       if (d.has_glow_plug && d.glow_plug_pct !== undefined) {
-        const relay = Number(d.glow_plug_output_type || 0) === 1;
-        setText('glow-pct', relay ? (Number(d.glow_plug_pct) > 0 ? 'ON' : 'OFF') : Math.round(d.glow_plug_pct));
+        const glowChannel = configuredRegistryOutput(d, 'glow_plug', ['glow_plug','glow_plug_main']);
+        const relay = glowChannel ? registryOutputIsRelay(glowChannel) : Number(d.glow_plug_output_type || 0) === 1;
+        if (relay) setBinaryStateText('glow-pct', relayDemandActive(Number(d.glow_plug_pct) / 100));
+        else {
+          clearBinaryStateText('glow-pct');
+          setText('glow-pct', Math.round(d.glow_plug_pct));
+        }
         setText('glow-unit', relay ? '' : '%');
-        setGaugeBar('glow-gauge-bar', relay ? (Number(d.glow_plug_pct) > 0 ? 100 : 0) : d.glow_plug_pct);
+        setGaugeBar('glow-gauge-bar', relay ? (relayDemandActive(Number(d.glow_plug_pct) / 100) ? 100 : 0) : d.glow_plug_pct);
+        const glowGauge = document.getElementById('glow-gauge-bar')?.parentElement;
+        if (glowGauge) glowGauge.style.display = relay ? 'none' : 'inline-block';
         const wetGlowFuel = document.getElementById('wet-glow-fuel-wrap');
         if (wetGlowFuel) wetGlowFuel.style.display = d.has_wet_glow ? '' : 'none';
         if (d.has_wet_glow && d.wet_glow_fuel_pct !== undefined) {
-          const wetRelay = Number(d.wet_glow_fuel_type ?? 0) === 0;
+          const wetChannel = configuredRegistryOutput(d, ['wet_glow_fuel','pilot_fuel'], ['wet_glow_fuel','pilot_fuel']);
+          const wetRelay = wetChannel ? registryOutputIsRelay(wetChannel) : Number(d.wet_glow_fuel_type ?? 0) === 0;
           const wetPct = Number(d.wet_glow_fuel_pct);
-          setText('wet-glow-fuel-pct', wetRelay ? (wetPct > 0 ? 'ON' : 'OFF') : Math.round(wetPct));
+          if (wetRelay) setBinaryStateText('wet-glow-fuel-pct', relayDemandActive(wetPct / 100));
+          else {
+            clearBinaryStateText('wet-glow-fuel-pct');
+            setText('wet-glow-fuel-pct', Math.round(wetPct));
+          }
           setText('wet-glow-fuel-unit', wetRelay ? '' : '%');
+          setGaugeBar('wet-glow-fuel-gauge-bar', wetRelay ? (relayDemandActive(wetPct / 100) ? 100 : 0) : wetPct);
+          const wetGauge = document.getElementById('wet-glow-fuel-gauge-bar')?.parentElement;
+          if (wetGauge) wetGauge.style.display = wetRelay ? 'none' : 'inline-block';
         }
       }
     }
@@ -1385,7 +1453,13 @@ function applyData(d) {
     const advBleed = document.getElementById('adv-bleed');
     if (advBleed) {
       advBleed.style.display = d.has_bleed_valve ? '' : 'none';
-      if (d.has_bleed_valve) setText('bleed-state', d.bleed_valve_open ? 'OPEN' : 'CLOSED');
+      if (d.has_bleed_valve) updateConfiguredDemand({
+        purposes:'bleed_valve', ids:['bleed_valve','bleed_valve_main'],
+        fallbackDemand:d.bleed_valve_demand ?? (d.bleed_valve_open ? 1 : 0),
+        binaryActive:d.bleed_valve_open,
+        valueId:'bleed-state', unitId:'bleed-unit', barId:'bleed-gauge-bar',
+        onLabel:'OPEN', offLabel:'CLOSED'
+      });
     }
 
     const advPitch = document.getElementById('adv-pitch');
@@ -1393,12 +1467,16 @@ function applyData(d) {
       advPitch.style.display = d.has_prop_pitch ? '' : 'none';
       if (d.has_prop_pitch && d.prop_pitch_demand !== undefined) {
         const pct = Math.round(d.prop_pitch_demand * 100);
-        const relay = actuatorIsRelay(d.prop_pitch_type);
+        const channel = configuredRegistryOutput(d, 'prop_pitch', ['prop_pitch','prop_pitch_main']);
+        const relay = channel ? registryOutputIsRelay(channel) : actuatorIsRelay(d.prop_pitch_type);
         // Binary prop-pitch outputs are coarse/fine solenoids, not generic
         // on/off loads. Proportional servo/PWM installations retain 0-100%.
-        setText('pitch-pct', relay ? (pct > 0 ? 'COARSE' : 'FINE') : pct);
+        clearBinaryStateText('pitch-pct');
+        setText('pitch-pct', relay ? (relayTwoPositionHigh(d.prop_pitch_demand) ? 'COARSE' : 'FINE') : pct);
         setText('pitch-unit', relay ? '' : '%');
-        setGaugeBar('pitch-gauge-bar', relay ? (pct > 0 ? 100 : 0) : pct);
+        setGaugeBar('pitch-gauge-bar', relay ? (relayTwoPositionHigh(d.prop_pitch_demand) ? 100 : 0) : pct);
+        const gauge = document.getElementById('pitch-gauge-bar')?.parentElement;
+        if (gauge) gauge.style.display = relay ? 'none' : 'inline-block';
       }
     }
 
@@ -1407,29 +1485,46 @@ function applyData(d) {
       advFp2.style.display = d.has_fuel_pump2 ? '' : 'none';
       if (d.has_fuel_pump2 && d.fuel_pump2_demand !== undefined) {
         const pct = Math.round(d.fuel_pump2_demand * 100);
-        const relay = actuatorIsRelay(d.fuel_pump2_type);
-        setText('fp2-pct', relay ? (pct > 0 ? 'ON' : 'OFF') : pct);
+        const channel = configuredRegistryOutput(d, 'fuel_pump', ['fuel_pump','fuel_pump2']);
+        const relay = channel ? registryOutputIsRelay(channel) : actuatorIsRelay(d.fuel_pump2_type);
+        if (relay) setBinaryStateText('fp2-pct', relayDemandActive(Number(d.fuel_pump2_demand)));
+        else {
+          clearBinaryStateText('fp2-pct');
+          setText('fp2-pct', pct);
+        }
         setText('fp2-unit', relay ? '' : '%');
-        setGaugeBar('fp2-gauge-bar', relay ? (pct > 0 ? 100 : 0) : pct);
+        setGaugeBar('fp2-gauge-bar', relay ? (relayDemandActive(Number(d.fuel_pump2_demand)) ? 100 : 0) : pct);
+        const gauge = document.getElementById('fp2-gauge-bar')?.parentElement;
+        if (gauge) gauge.style.display = relay ? 'none' : 'inline-block';
       }
     }
 
     const advFan = document.getElementById('adv-coolfan');
     if (advFan) {
       advFan.style.display = d.has_cool_fan ? '' : 'none';
-      if (d.has_cool_fan) setText('coolfan-state', d.cool_fan_on ? 'ON' : 'OFF');
+      if (d.has_cool_fan) updateConfiguredDemand({
+        purposes:'cooling_fan', ids:['cooling_fan','cooling_fan_main','cool_fan'],
+        fallbackDemand:d.cool_fan_demand ?? (d.cool_fan_on ? 1 : 0),
+        binaryActive:d.cool_fan_on,
+        valueId:'coolfan-state', unitId:'coolfan-unit', barId:'coolfan-gauge-bar'
+      });
     }
 
     const advAir = document.getElementById('adv-airstarter');
     if (advAir) {
       advAir.style.display = d.has_airstarter ? '' : 'none';
-      if (d.has_airstarter) setText('airstarter-state', d.airstarter_open ? 'OPEN' : 'CLOSED');
+      if (d.has_airstarter) setBinaryStateText('airstarter-state', !!d.airstarter_open, 'OPEN', 'CLOSED');
     }
 
     const advScav = document.getElementById('adv-scavenge');
     if (advScav) {
       advScav.style.display = d.has_oil_scavenge ? '' : 'none';
-      if (d.has_oil_scavenge) setText('scavenge-state', d.oil_scavenge_on ? 'ON' : 'OFF');
+      if (d.has_oil_scavenge) updateConfiguredDemand({
+        purposes:'scavenge_pump', ids:['scavenge_pump','oil_scavenge_main','oil_scavenge_pump'],
+        fallbackDemand:d.oil_scavenge_demand ?? (d.oil_scavenge_on ? 1 : 0),
+        binaryActive:d.oil_scavenge_on,
+        valueId:'scavenge-state', unitId:'scavenge-unit', barId:'scavenge-gauge-bar'
+      });
     }
   }
 
@@ -1446,26 +1541,49 @@ function applyData(d) {
         modeEl.textContent = abMode.toUpperCase();
         modeEl.className   = 'ab-mode-val ab-mode-' + abMode;
       }
-      // These are normal boolean STATES, not sensor health: closed solenoid /
-      // arm off / trigger idle must render neutral, not red-fault. Titles are
-      // set manually so the generic "sensor fault (check wiring)" text never
-      // appears for a normal inactive state.
-      setDot('ab-sol-dot',  d.ab_sol_open      ? true : null);
-      setDot('ab-arm-dot',  d.ab_arm_switch_on ? true : null);
-      setDot('ab-trig-dot', d.ab_trigger_active ? true : null);
-      const _abT = (id, txt) => { const e = document.getElementById(id); if (e) e.title = txt; };
-      _abT('ab-sol-dot',  'Afterburner fuel valve — ' + (d.ab_sol_open ? 'OPEN' : 'closed'));
-      _abT('ab-arm-dot',  'AB arm switch — ' + (d.ab_arm_switch_on ? 'ARMED' : 'off'));
-      _abT('ab-trig-dot', 'AB trigger — ' + (d.ab_trigger_active ? 'ACTIVE' : 'idle'));
-      // AB flame: red only when the AB should be lit but no flame is seen —
-      // that is a real cue; otherwise neutral (green when burning).
+      // These are operating states, so show words rather than health dots.
+      // Normal inactive states remain neutral; only a missing expected flame
+      // is red, while the arm permission is amber to distinguish it from motion.
+      const setAbState = (id, text, tone, title) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = text;
+        el.classList.remove('binary-state-active', 'binary-state-inactive', 'ab-state-caution', 'ab-state-danger');
+        el.classList.add(tone);
+        el.title = title;
+      };
+      setAbState('ab-sol-state', d.ab_sol_open ? 'VALVE OPEN' : 'VALVE CLOSED',
+        d.ab_sol_open ? 'binary-state-active' : 'binary-state-inactive',
+        'Afterburner fuel valve — ' + (d.ab_sol_open ? 'OPEN' : 'closed'));
+      setAbState('ab-arm-state', d.ab_arm_switch_on ? 'ARMED' : 'OFF',
+        d.ab_arm_switch_on ? 'ab-state-caution' : 'binary-state-inactive',
+        'AB arm switch — ' + (d.ab_arm_switch_on ? 'ARMED' : 'off'));
+      setAbState('ab-trig-state', d.ab_trigger_active ? 'ACTIVE' : 'IDLE',
+        d.ab_trigger_active ? 'binary-state-active' : 'binary-state-inactive',
+        'AB trigger — ' + (d.ab_trigger_active ? 'ACTIVE' : 'idle'));
       const abExpectFlame = abMode === 'Igniting' || abMode === 'Running';
-      setDot('ab-flame-dot', d.has_ab_flame === false ? null
-                            : (d.ab_flame_on ? true : (abExpectFlame ? false : null)));
-      _abT('ab-flame-dot', d.has_ab_flame === false ? 'AB flame sensor not fitted'
-                          : (d.ab_flame_on ? 'AB flame — confirmed'
-                             : (abExpectFlame ? 'AB flame — NOT DETECTED while lit' : 'AB flame — no flame')));
-      if (d.ab_pump_demand !== undefined) setText('ab-pump-demand', Math.round(Number(d.ab_pump_demand) * 100));
+      setAbState('ab-flame-state', d.has_ab_flame === false ? 'NOT FITTED'
+          : (d.ab_flame_on ? 'CONFIRMED' : (abExpectFlame ? 'NOT DETECTED' : 'NONE')),
+        d.has_ab_flame === false || (!d.ab_flame_on && !abExpectFlame) ? 'binary-state-inactive'
+          : (d.ab_flame_on ? 'binary-state-active' : 'ab-state-danger'),
+        d.has_ab_flame === false ? 'AB flame sensor not fitted'
+          : (d.ab_flame_on ? 'AB flame — confirmed'
+             : (abExpectFlame ? 'AB flame — NOT DETECTED while lit' : 'AB flame — no flame')));
+      if (d.ab_pump_demand !== undefined) {
+        const channel = configuredRegistryOutput(d, 'ab_pump', ['ab_pump','ab_pump_main']);
+        const demand = Math.max(0, Math.min(1, Number(d.ab_pump_demand)));
+        const relay = channel ? registryOutputIsRelay(channel) : false;
+        const pct = Math.round(demand * 100);
+        if (relay) setBinaryStateText('ab-pump-demand', relayDemandActive(demand));
+        else {
+          clearBinaryStateText('ab-pump-demand');
+          setText('ab-pump-demand', pct);
+        }
+        setText('ab-pump-unit', relay ? '' : '%');
+        setGaugeBar('ab-pump-gauge-bar', relay ? (relayDemandActive(demand) ? 100 : 0) : pct);
+        const gauge = document.getElementById('ab-pump-gauge-bar')?.parentElement;
+        if (gauge) gauge.style.display = relay ? 'none' : 'inline-block';
+      }
       const abOffset = Number(d.ab_fuel_offset || 0);
       const abOffsetRow = document.getElementById('ab-fuel-offset-row');
       if (abOffsetRow) abOffsetRow.style.display = Math.abs(abOffset) > 0.001 ? '' : 'none';
@@ -1651,6 +1769,20 @@ function setText(id, val) {
   if (el) el.textContent = val;
 }
 
+function setBinaryStateText(id, active, onLabel = 'ON', offLabel = 'OFF') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = active ? onLabel : offLabel;
+  el.classList.toggle('binary-state-active', !!active);
+  el.classList.toggle('binary-state-inactive', !active);
+}
+
+function clearBinaryStateText(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('binary-state-active', 'binary-state-inactive');
+}
+
 function setDot(id, ok, tooltip) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -1803,7 +1935,10 @@ window.addEventListener('pageshow', (e) => {
   }
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) requestTelemetryNow();
+  if (!document.hidden) {
+    if (_useWebSocketTelemetry && usesGlobalTelemetry() && (!ws || ws.readyState > WebSocket.OPEN)) connect();
+    requestTelemetryNow();
+  }
 });
 window.addEventListener('pagehide', stopGlobalTelemetry);
 window.addEventListener('beforeunload', stopGlobalTelemetry);
@@ -1814,17 +1949,18 @@ async function startTelemetryBoot() {
     return;
   }
   if (_useWebSocketTelemetry === null) {
-    try {
-      const response = await fetch('/api/device_info', { cache: 'no-store' });
-      const info = response.ok ? await response.json() : null;
-      _useWebSocketTelemetry = info?.target !== 'esp32dev';
-    } catch (_) {
-      // Preserve the S3/current behavior if identity cannot be read.
-      _useWebSocketTelemetry = true;
-    }
+    _useWebSocketTelemetry = false;
   }
-  if (_useWebSocketTelemetry) connect();
-  else {
+  if (_useWebSocketTelemetry) {
+    // Do not create a TCP/WebSocket transport for a page the user is merely
+    // passing through. Rapid menu navigation previously accumulated teardown
+    // work faster than the ESP32 network stack could retire it. A page that is
+    // actually being viewed becomes live after this short, unobtrusive delay.
+    _connectTimer = setTimeout(() => {
+      _connectTimer = null;
+      if (usesGlobalTelemetry() && !document.hidden) connect();
+    }, 900);
+  } else {
     startStaleMonitor();
     await restTelemetryFallbackNow();
   }
@@ -1854,7 +1990,9 @@ function setTelemetryStale(stale, ageMs = 0) {
     banner = document.createElement('div');
     banner.id = 'telemetry-stale-banner';
     banner.style.cssText = 'display:none;position:sticky;top:48px;z-index:95;padding:.65rem 1rem;text-align:center;background:#7f1d1d;color:#fff;border-bottom:2px solid #ef4444;font-weight:800;letter-spacing:.04em';
-    document.body.insertBefore(banner, document.body.firstChild?.nextSibling || null);
+    const nav = document.querySelector('nav');
+    if (nav) nav.insertAdjacentElement('afterend', banner);
+    else document.body.prepend(banner);
   }
   banner.style.display = _telemetryStale ? '' : 'none';
   if (_telemetryStale) {
@@ -1902,7 +2040,7 @@ function mergeTelemetryChannels(previousRows, nextRows) {
 const DASHBOARD_CORE_OUTPUT_PURPOSES = new Set([
   'main_fuel','fuel_shutoff','starter','starter_enable','oil_pump','scavenge_pump',
   'cooling_fan','fuel_pump','igniter','ab_igniter','glow_plug','ab_pump','prop_pitch',
-  'air_starter'
+  'air_starter','bleed_valve','ab_valve','wet_glow_fuel'
 ]);
 const DASHBOARD_CORE_OUTPUT_IDS = new Set([
   'main_fuel_output','main_fuel','throttle','main_starter','starter','starter_main',
@@ -1910,7 +2048,8 @@ const DASHBOARD_CORE_OUTPUT_IDS = new Set([
   'main_fuel_shutoff','fuel_sol','igniter','igniter_main','ab_igniter','igniter2',
   'glow_plug','glow_plug_main','ab_pump','ab_pump_main','prop_pitch','prop_pitch_main',
   'fuel_pump','fuel_pump2','cooling_fan','cool_fan','air_starter','airstarter_sol',
-  'scavenge_pump','oil_scavenge_pump'
+  'scavenge_pump','oil_scavenge_pump','bleed_valve','bleed_valve_main',
+  'ab_solenoid','ab_sol','wet_glow_fuel'
 ]);
 function registryOutputAlreadyHasCoreCard(ch) {
   const id = String(ch?.id || '');
@@ -1919,22 +2058,28 @@ function registryOutputAlreadyHasCoreCard(ch) {
 }
 const DASHBOARD_CORE_INPUT_PURPOSES = new Set([
   'n1_speed','n2_speed','tot','tit','oil_pressure','oil_temperature','fuel_pressure',
-  'fuel_flow','p1_pressure','p2_pressure','flame','torque','thrust','battery_voltage','throttle','idle'
+  'fuel_flow','p1_pressure','p2_pressure','flame','torque','thrust','battery_voltage'
 ]);
 const DASHBOARD_CORE_INPUT_IDS = new Set([
   'n1_main','primary_n1','n2_main','primary_n2','tot_main','primary_egt','tit_main',
   'oil_pressure_main','oil_temperature','fuel_pressure','fuel_flow','p1_main','p1',
-  'p2_main','p2','flame_main','torque_main','thrust_main','battery_voltage','batt_voltage_main',
-  'operator_throttle','operator_idle','throttle_input','idle_input'
+  'p2_main','p2','flame_main','torque_main','thrust_main','battery_voltage','batt_voltage_main'
 ]);
 function registryInputAlreadyHasCoreCard(ch) {
   const id = String(ch?.id || '');
   const purpose = String(ch?.purpose || '');
   return DASHBOARD_CORE_INPUT_IDS.has(id) || DASHBOARD_CORE_INPUT_PURPOSES.has(purpose);
 }
+function registryInputIsOperator(ch) {
+  const role = String(ch?.role || '');
+  const purpose = String(ch?.purpose || '');
+  return role === 'operator' || purpose === 'throttle' || purpose === 'idle';
+}
 function registryInputIsBinary(ch) {
   const role = String(ch?.role || '');
-  return Number(ch?.driver) === 0 || ['digital_switch','fault','estop','inhibit_start','low_oil_switch','oil_zero_switch','sequence_gate','ab_arm','ab_fire','limp_mode','flame'].includes(role);
+  const purpose = String(ch?.purpose || '');
+  return Number(ch?.driver) === 0 || ['digital_switch','switch','fault','estop','inhibit_start','low_oil_switch','oil_zero_switch','sequence_gate','ab_arm','ab_fire','limp_mode','flame'].includes(role) ||
+    ['start_switch','stop_switch','emergency_stop','inhibit_start','low_oil_switch','oil_zero_switch','sequence_gate','ab_arm','ab_fire','limp_mode'].includes(purpose);
 }
 function registryInputDisplay(ch) {
   const value = Number(ch?.value);
@@ -1949,7 +2094,8 @@ function registryInputDisplay(ch) {
   if (role === 'flow') return {value:value.toFixed(2), unit:'L/min', numeric:value};
   if (role === 'torque') return {value:value.toFixed(1), unit:'Nm', numeric:value};
   if (role === 'thrust') return {value:value.toFixed(1), unit:'N', numeric:value};
-  if (role === 'operator') return {value:(value * 100).toFixed(1), unit:'%', numeric:value};
+  if (role === 'operator' || purpose === 'throttle' || purpose === 'idle')
+    return {value:(value * 100).toFixed(1), unit:'%', numeric:value};
   if (purpose === 'generic' || role === 'generic') return {value:value.toFixed(3), unit:'0-1', numeric:value};
   return {value:value.toFixed(2), unit:'', numeric:value};
 }
@@ -1962,6 +2108,7 @@ function registryInputRangeText(ch) {
   if (role === 'speed') return 'speed input';
   if (role === 'voltage') return 'voltage input';
   if (role === 'flow') return 'flow input';
+  if (role === 'operator' || purpose === 'throttle' || purpose === 'idle') return '0–100% command input';
   if (purpose === 'generic' || role === 'generic') return 'normalized automation input';
   return 'registry input';
 }
@@ -1978,12 +2125,39 @@ function renderRegistryInputCards(d) {
   const rows = (Array.isArray(d.registry_inputs) ? d.registry_inputs : [])
     .filter(ch => ch && ch.id && !registryInputAlreadyHasCoreCard(ch));
   const binaryRows = rows.filter(registryInputIsBinary);
-  const cardRows = rows.filter(ch => !registryInputIsBinary(ch));
+  const operatorRows = rows.filter(ch => !registryInputIsBinary(ch) && registryInputIsOperator(ch));
+  const cardRows = rows.filter(ch => !registryInputIsBinary(ch) && !registryInputIsOperator(ch));
   renderSwitchInputStrip(binaryRows.map(ch => ({
+    id: ch.id,
     name: registryDisplayName(ch, 'Switch'),
     on: Number(ch.value) >= 0.5,
-    alarm: Number(ch.value) >= 0.5 && ['fault','estop'].includes(String(ch.role || ''))
+    semantic: ['fault','estop','low_oil_switch','oil_zero_switch'].includes(String(ch.role || '')) ||
+        ['stop_switch','emergency_stop'].includes(String(ch.purpose || '')) ? 'danger'
+      : ['inhibit_start','sequence_gate','ab_arm'].includes(String(ch.role || '')) ||
+          ['inhibit_start','sequence_gate','ab_arm'].includes(String(ch.purpose || '')) ? 'caution'
+      : 'normal'
   })));
+
+  const operatorRow = document.getElementById('operator-input-row');
+  const updateOperatorInput = (purpose, fallbackName) => {
+    const ch = operatorRows.find(row => String(row.purpose || '') === purpose);
+    const wrap = document.getElementById(`operator-${purpose}-wrap`);
+    const value = document.getElementById(`registry-input-value-operator_${purpose}`);
+    if (wrap) wrap.style.display = ch ? '' : 'none';
+    if (!ch) return false;
+    const display = registryInputDisplay(ch);
+    if (value) {
+      value.textContent = display.value;
+      value.classList.toggle('input-unhealthy', ch.healthy === false);
+      value.title = ch.healthy === false
+        ? `${registryDisplayName(ch, fallbackName)} is unhealthy - check Hardware and Calibration`
+        : `${registryDisplayName(ch, fallbackName)} live input`;
+    }
+    return true;
+  };
+  const hasThrottleInput = updateOperatorInput('throttle', 'Throttle Input');
+  const hasIdleInput = updateOperatorInput('idle', 'Idle Input');
+  if (operatorRow) operatorRow.style.display = hasThrottleInput || hasIdleInput ? '' : 'none';
   if (!cardRows.length) {
     host.innerHTML = '';
     return rows.length;
@@ -1996,7 +2170,7 @@ function renderRegistryInputCards(d) {
     const health = ch.healthy === false ? ' bad' : '';
     return `<div class="card small registry-input-card" data-registry-input-id="${escapeHtmlText(safeId)}" title="${escapeHtmlText(name)} live value. ${escapeHtmlText(range)}.">
       <div class="label">${escapeHtmlText(name)} <span class="dot${health}" title="${ch.healthy === false ? 'Unhealthy' : 'Healthy'}"></span></div>
-      <div class="value small">${escapeHtmlText(display.value)}</div>
+      <div class="value small" id="registry-input-value-${escapeHtmlText(safeId)}">${escapeHtmlText(display.value)}</div>
       <div class="peak-val">${escapeHtmlText(display.unit || range)}</div>
       <canvas class="sparkline" id="regin-spark-${escapeHtmlText(safeId)}"></canvas>
     </div>`;
@@ -2018,7 +2192,8 @@ function renderSwitchInputStrip(rows) {
   if (!wrap || !host) return;
   wrap.style.display = rows.length ? '' : 'none';
   host.innerHTML = rows.map(row => {
-    const cls = row.alarm ? ' is-alarm' : row.on ? ' is-on' : '';
+    const cls = !row.on ? '' : row.semantic === 'danger' ? ' is-alarm'
+      : row.semantic === 'caution' ? ' is-caution' : ' is-on';
     return `<span class="switch-input-state${cls}" title="${escapeHtmlText(row.name)} is ${row.on ? 'on' : 'off'}">
       <span>${escapeHtmlText(row.name)}</span><strong>${row.on ? 'ON' : 'OFF'}</strong>
     </span>`;
@@ -2027,6 +2202,7 @@ function renderSwitchInputStrip(rows) {
 function registryOutputRangeText(ch) {
   const driver = Number(ch?.driver);
   if (driver === 4) return 'relay output';
+  if (driver === 11) return 'I2C relay output';
   if (driver === 5) return `${Math.round(Number(ch?.min || 0) * 100)}–${Math.round(Number(ch?.max ?? 1) * 100)}% PWM range`;
   if (driver === 6) return `${Math.round(Number(ch?.min || 1000))}–${Math.round(Number(ch?.max || 2000))} us servo range`;
   return 'output range';
@@ -2049,11 +2225,13 @@ function renderRegistryOutputCards(d) {
   }
   host.innerHTML = rows.map((ch, i) => {
     const driver = Number(ch.driver);
-    const relay = driver === 4;
+    const relay = registryOutputIsRelay(ch);
     const demand = Math.max(0, Math.min(1, Number(ch.demand || 0)));
     const pct = demand * 100;
     const id = String(ch.id || `output_${i}`).replace(/[^a-zA-Z0-9_-]/g, '_');
-    const value = relay ? (demand >= 0.5 ? 'ON' : 'OFF') : `${pct.toFixed(1)}%`;
+    const active = relayDemandActive(demand);
+    const value = relay ? (active ? 'ON' : 'OFF') : `${pct.toFixed(1)}%`;
+    const valueClass = relay ? (active ? ' binary-state-active' : ' binary-state-inactive') : '';
     const name = registryDisplayName(ch);
     const range = registryOutputRangeText(ch);
     const current = ch.has_current
@@ -2061,8 +2239,8 @@ function renderRegistryOutputCards(d) {
       : '';
     return `<div class="card small registry-output-card" data-registry-output-id="${escapeHtmlText(id)}" title="${escapeHtmlText(name)} current command. ${escapeHtmlText(range)}.">
       <div class="label">${escapeHtmlText(name)}</div>
-      <div class="value small">${value}</div>
-      <div class="gauge-bar-wrap"><div class="gauge-bar" style="width:${relay ? (demand >= 0.5 ? 100 : 0) : pct}%"></div></div>
+      <div class="value small${valueClass}">${value}</div>
+      ${relay ? '' : `<div class="gauge-bar-wrap"><div class="gauge-bar" style="width:${pct}%"></div></div>`}
       <div class="oil-sub">${escapeHtmlText(range)}</div>
       ${current}
     </div>`;

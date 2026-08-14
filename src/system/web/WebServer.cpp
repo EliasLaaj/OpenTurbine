@@ -38,6 +38,8 @@ extern AnalogLinearSensor g_sensorFuelFlow;
 #include <DNSServer.h>
 #include <Arduino.h>
 #include <Update.h>
+#include <lwip/tcpip.h>
+#include <lwip/priv/tcp_priv.h>
 #include <mbedtls/sha256.h>
 #include <new>
 
@@ -74,6 +76,44 @@ static AsyncWebSocketClient* s_activeWsClient = nullptr;
 // validation can reclaim the largest contiguous heap block.
 static JsonDocument s_wsTelemetryDoc;
 static JsonDocument s_restTelemetryDoc;
+
+// ESP-IDF's prebuilt lwIP permits only 16 active TCP PCBs and retains an
+// actively closed connection in TIME_WAIT for 60 seconds. Most browser peers
+// close first, but even occasional server-side timeout closes can accumulate
+// during long configuration sessions. Keep normal TIME_WAIT protection, then
+// relieve only local HTTP pressure before it can starve Wi-Fi and the safety UI.
+static volatile uint16_t s_httpTimeWaitPcbs = 0;
+static volatile uint32_t s_httpTimeWaitReaped = 0;
+static volatile bool s_tcpMaintenancePending = false;
+
+static void _maintainHttpTimeWait(void*) {
+    uint16_t count = 0;
+    for (tcp_pcb* pcb = tcp_tw_pcbs; pcb; pcb = pcb->next)
+        if (pcb->local_port == 80) ++count;
+
+    // Seven retained entries still protect against delayed duplicate segments
+    // while leaving over half of lwIP's 16-PCB pool available for new work.
+    // The remote OS also keeps its matching tuple in TIME_WAIT, so it cannot
+    // legitimately reuse one of these connections while we relieve pressure.
+    while (count >= 8) {
+        tcp_pcb* oldest = nullptr;
+        uint32_t oldestAge = 0;
+        for (tcp_pcb* pcb = tcp_tw_pcbs; pcb; pcb = pcb->next) {
+            if (pcb->local_port != 80) continue;
+            const uint32_t age = tcp_ticks - pcb->tmr;
+            if (!oldest || age > oldestAge) {
+                oldest = pcb;
+                oldestAge = age;
+            }
+        }
+        if (!oldest) break;
+        tcp_abort(oldest);  // TIME_WAIT has no live application callback.
+        --count;
+        s_httpTimeWaitReaped = s_httpTimeWaitReaped + 1;
+    }
+    s_httpTimeWaitPcbs = count;
+    s_tcpMaintenancePending = false;
+}
 
 static void _releaseLiveTelemetryTransport() {
     if (s_activeWsClient) {
@@ -254,10 +294,13 @@ static bool _claimWebRx(AsyncWebServerRequest* req, size_t index) {
         // A client can disappear after the response acquires the shared
         // buffer but before AsyncWebServer calls its final fill/destructor.
         // Never let that abandoned response lease deadlock every later JSON
-        // request indefinitely. Ten seconds is far longer than a 16 KiB local
-        // AP transfer, while the owner check in _releaseWebRx() prevents a
-        // late destructor from releasing a newer claimant.
-        if (g_webRxOwner && (millis() - g_webRxClaimMs) < 10000) {
+        // request indefinitely. A read-response lease may be reclaimed shortly
+        // after the browser's 3 s request timeout; uploads keep the longer
+        // window because their body can legitimately arrive in many chunks.
+        // The owner check in _releaseWebRx() prevents a late destructor from
+        // releasing a newer claimant.
+        const unsigned long staleMs = g_webRxResponseLease ? 3500UL : 10000UL;
+        if (g_webRxOwner && (millis() - g_webRxClaimMs) < staleMs) {
             portEXIT_CRITICAL(&s_webRxMux);
             req->send(409, "application/json",
                       "{\"error\":\"Another configuration transfer is in progress\"}");
@@ -1444,6 +1487,7 @@ static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool ful
     }
     doc["profile_match"]         = Config::profileMatch;
     doc["config_version_mismatch"] = ed.configVersionMismatch;
+    doc["limp_throttle_cap"]     = Config::limpMaxThrottlePct;
     doc["fw_version"]            = OT_VERSION;
     doc["uptime_s"]              = ed.uptimeMs / 1000;
     doc["boot_count"]            = ed.bootCount;
@@ -1665,7 +1709,6 @@ static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool ful
                            input.driver == ChannelRegistry::PwmDuty);
         }
         doc["rc_pwm_active"]         = rcPwmActive;
-        doc["limp_throttle_cap"]     = Config::limpMaxThrottlePct;
         doc["fuel_idle_max_pct"]     = Config::throttleIdleMaxPct;  // unified idle ceiling
         doc["fuel_pump_min_pct"]     = Config::fuelPumpMinPct;
         doc["oil_pump_on_pct"]       = Config::oilPumpOnPct;
@@ -2032,16 +2075,20 @@ void WebServer::_setupRoutes() {
     // GET /api/status
     _server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest* req) {
         auto& ed = EngineData::instance();
-        char buf[240];
+        char buf[320];
         snprintf(buf, sizeof(buf),
             "{\"mode\":\"%s\",\"locked\":%s,\"profile_match\":%s,\"config_apply_busy\":%s,"
-            "\"free_heap\":%u,\"max_alloc_heap\":%u}",
+            "\"free_heap\":%u,\"max_alloc_heap\":%u,\"ws_clients\":%u,"
+            "\"http_time_wait\":%u,\"http_time_wait_reaped\":%u}",
             sysModeStr(ed.mode),
             Config::isLocked() ? "true" : "false",
             Config::profileMatch ? "true" : "false",
             ConfigApplyGate::busy() ? "true" : "false",
             static_cast<unsigned>(ESP.getFreeHeap()),
-            static_cast<unsigned>(ESP.getMaxAllocHeap()));
+            static_cast<unsigned>(ESP.getMaxAllocHeap()),
+            static_cast<unsigned>(_ws.count()),
+            static_cast<unsigned>(s_httpTimeWaitPcbs),
+            static_cast<unsigned>(s_httpTimeWaitReaped));
         AsyncWebServerResponse* resp = req->beginResponse(200, "application/json", buf);
         _finalizeJsonResponse(resp);
         req->send(resp);
@@ -3792,14 +3839,11 @@ void WebServer::_setupRoutes() {
         if (type == WS_EVT_CONNECT) {
             // This ECU intentionally serves one live telemetry browser. A page
             // navigation can establish its replacement socket before the old
-            // page's graceful close completes; abort the superseded transport
-            // immediately so it cannot consume a Classic ESP32 TCP slot for
-            // the acknowledgement timeout.
-            if (s_activeWsClient && s_activeWsClient != client) {
-                AsyncClient* superseded = s_activeWsClient->client();
-                s_activeWsClient = nullptr;
-                if (superseded) superseded->abort();
-            }
+            // page's graceful close completes. Do not close/abort the old
+            // client from this callback: ESPAsyncWebServer invokes CONNECT
+            // while holding its client-list lock, and disconnect cleanup
+            // needs that same lock. The 250 ms cleanup in tick() safely reaps
+            // clients after their browser-side disconnect instead.
             s_activeWsClient = client;
             _wsPendingResponse = false;
             // Every UI client sends an immediate pull from its onopen handler.
@@ -3818,7 +3862,14 @@ void WebServer::_setupRoutes() {
                 s_wsTelemetryDoc.shrinkToFit();
             }
             return;
-        } else if (type == WS_EVT_DATA) {
+        }
+
+        // A superseded page can send one final pull before tick() closes it.
+        // It no longer owns the shared telemetry document and must not enqueue
+        // another frame or alter the replacement page's pending state.
+        if (client != s_activeWsClient) return;
+
+        if (type == WS_EVT_DATA) {
             if (!client->canSend()) {
                 _wsPendingResponse = true;
                 return;
@@ -3901,6 +3952,16 @@ bool WebServer::begin() {
 void WebServer::tick() {
     unsigned long _t0 = millis();
     _dns.processNextRequest();
+    {
+        static unsigned long lastTcpMaintenanceMs = 0;
+        const unsigned long now = millis();
+        if (!s_tcpMaintenancePending && now - lastTcpMaintenanceMs >= 1000) {
+            lastTcpMaintenanceMs = now;
+            s_tcpMaintenancePending = true;
+            if (tcpip_try_callback(_maintainHttpTimeWait, nullptr) != ERR_OK)
+                s_tcpMaintenancePending = false;
+        }
+    }
     unsigned long _t1 = millis();
     const SysMode mode = EngineData::instance().mode;
     // SPI-flash program/erase operations suspend the other ESP32 core while
@@ -4012,18 +4073,17 @@ void WebServer::tick() {
             _restartCleanly(_pendingRestartReason);
         }
     }
-    // Purge stale WebSocket clients promptly (handles page navigations that leave
-    // ghost connections).  Keep at most 1 — multiple stale connections cause
-    // canSend() to return false and eventually exhaust async TCP clients. Run even
-    // with no station connected so a departed browser cannot leave resources behind.
+    // Reap WebSocket objects that the TCP stack has already disconnected. Do
+    // not force every superseded page closed here: server-initiated TCP close
+    // leaves a 60 s TIME_WAIT PCB on this lwIP build, and quick navigation can
+    // consume the whole 16-PCB pool. One browser normally closes its old page
+    // socket itself; allowing up to four transient clients covers that overlap
+    // while still bounding genuinely stale peers.
     unsigned long now = millis();
     static unsigned long _lastCleanMs = 0;
     if (now - _lastCleanMs >= 250) {
         _lastCleanMs = now;
-        for (uint8_t i = 0; i < 4 && _ws.count() > 1; ++i) {
-            _ws.cleanupClients(1);
-        }
-        _ws.cleanupClients(1);
+        _ws.cleanupClients(4);
     }
 }
 
