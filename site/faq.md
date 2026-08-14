@@ -44,7 +44,7 @@ Control Rules are small automations in the **Sequence** page. A rule can switch 
 
 ## Why does Windows warn about the Setup Tool?
 
-Download only from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases) page. A new or unsigned release can trigger a Windows warning; check that release’s notes and SHA-256 file.
+Use the official OpenTurbine download link and choose **More info → Run anyway** when Windows offers it. Do not disable Windows security or use an installer from another website. Normal installation does not require understanding checksums; the Setup Tool automatically verifies the firmware package it downloads.
 
 ## Where are logs and complete instructions?
 

@@ -26,7 +26,9 @@ If a requested download says **Not Found**, that release asset is not published.
 
 The current installer may be unsigned or may not yet have Microsoft download reputation, so Microsoft Edge, Chrome, or SmartScreen may warn about a new or uncommon application. Windows 11 Smart App Control can block unsigned or untrusted apps more strictly.
 
-Only continue when the file came from the official `elia179/OpenTurbine-ESP32-Gas-Turbine-ECU` release page. In SmartScreen choose **More info → Run anyway**. If a browser blocks the download, open its Downloads panel and choose to keep the file. Do not disable Windows security globally for OpenTurbine. A release may also include a `.sha256` file for checksum verification.
+Only continue when you used the official OpenTurbine download link above. In SmartScreen choose **More info → Run anyway**. If a browser blocks the download, open its Downloads panel and choose to keep the file. Do not disable Windows security globally for OpenTurbine.
+
+Normal installation does not require understanding checksums or file hashes. The Setup Tool automatically verifies the firmware package it downloads. Releases also include `.sha256` files for developers and users who deliberately want optional advanced verification.
 
 The setup tool can install the USB serial driver needed by common CP210x and WCH CH340/CH341/CH343 boards. It detects the connected USB bridge hardware ID and offers only the matching driver. After driver installation it rescans Windows and continues automatically when the matching COM port appears; reconnect or restart only if the tool explicitly asks.
 

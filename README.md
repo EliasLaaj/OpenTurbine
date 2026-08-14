@@ -54,7 +54,7 @@ Keep only one OpenTurbine browser tab open at a time. This applies to both
 Classic ESP32 and ESP32-S3 ECUs; close an old dashboard tab before opening the
 panel in another tab, window, browser, phone, or computer.
 
-If Windows warns about the Setup Tool, confirm the file came from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases) page, read the current release notes, and verify the published checksum before continuing.
+If Windows warns about the Setup Tool, confirm that you used the official link above. Choose **More info → Run anyway** when Windows offers it. Do not disable Windows security or use an installer from another website. Normal installation does not require understanding or checking file hashes; [advanced verification](docs/WINDOWS_FLASHER_INSTALL.md#optional-advanced-checksum-verification) is optional.
 
 ## Supported targets
 

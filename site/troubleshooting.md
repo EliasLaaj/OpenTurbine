@@ -9,7 +9,7 @@ Keep fuel, ignition, starter power, and other hazardous loads isolated while dia
 
 ## Windows blocks the Setup Tool
 
-Download only from the official [OpenTurbine Releases](https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases) page. Windows can warn about a new or unsigned application. Confirm the release, its notes, and checksum before using the Windows-provided More info/Run anyway path. Do not disable Windows protection globally or use a copy from an unrelated site.
+Use the official OpenTurbine download link. Windows can warn about a new or unsigned application; choose **More info → Run anyway** when Windows offers it. Do not disable Windows protection globally or use a copy from another website. Normal installation does not require understanding checksums, and the Setup Tool automatically verifies the firmware package it downloads.
 
 ## CP210x driver installation fails
 

@@ -34,7 +34,11 @@ same **Run anyway** path. The release fix is an Authenticode-signed EXE
 published from the official release page, not asking users to disable Windows
 security globally.
 
-## Verify a checksum
+## Optional advanced checksum verification
+
+Normal users do not need this step, and the Setup Tool automatically verifies
+the firmware package it downloads. A checksum is an additional manual check for
+developers and advanced users who specifically want one.
 
 When the release includes `OpenTurbineSetupTool.exe.sha256`, place it beside the executable and run:
 

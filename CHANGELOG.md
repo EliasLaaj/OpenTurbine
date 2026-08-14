@@ -10,6 +10,10 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ## [Unreleased]
 
+### Changed
+- Simplified Windows download guidance for normal users: use the official link and follow the Setup Tool; checksum comparison is now clearly optional advanced verification rather than a required installation step.
+- Documented SignPath Foundation as a potential zero-budget Authenticode-signing route for qualifying open-source releases.
+
 ## [2.0.2] — 2026-08-12
 
 ### Added

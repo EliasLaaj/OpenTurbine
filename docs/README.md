@@ -77,4 +77,4 @@ Before publishing a release:
 7. Test USB installation on a blank board and Wi-Fi update on an installed ECU.
 8. Perform the physical ECU bench campaign required by the changed control paths.
 9. Confirm the firmware, package manifest, changelog, release title, and website all identify `2.0.2`.
-10. Publish `OpenTurbineSetupTool.exe`, `OpenTurbine_Recommended.zip`, and their SHA-256 files under the exact stable asset names used by the root README.
+10. Publish `OpenTurbineSetupTool.exe`, `OpenTurbine_Recommended.zip`, and their SHA-256 files under the exact stable asset names required by the release workflow and Setup Tool.

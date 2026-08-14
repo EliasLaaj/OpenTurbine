@@ -109,6 +109,15 @@ guarantee that Microsoft will immediately stop warning on a brand-new app, but i
 gives Windows a verified publisher identity and lets reputation carry forward
 across releases signed by the same publisher.
 
+For a zero-budget open-source project, the preferred route to investigate is
+[SignPath Foundation](https://signpath.org/), which offers free signing for
+accepted open-source projects. Acceptance is not automatic. Its published
+conditions include an OSI-approved license, a maintained and already released
+project, public documentation, repository 2FA, a code-signing policy with named
+roles, verifiable CI-built artifacts, and manual release approval. If accepted,
+integrate SignPath into the release workflow and retain the existing rule that
+publication stops unless the returned Authenticode signature verifies.
+
 Use a production OV/EV code-signing certificate issued by a CA trusted by
 Windows. For local signing from a PFX:
 
@@ -158,6 +167,8 @@ References:
 - Microsoft SmartScreen reputation for Windows app developers: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation
 - Microsoft Smart App Control overview: https://learn.microsoft.com/en-us/windows/apps/develop/smart-app-control/overview
 - Microsoft SignTool reference: https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool
+- SignPath Foundation free open-source signing: https://signpath.org/
+- SignPath Foundation eligibility conditions: https://signpath.org/terms.html
 
 The ZIP must contain:
 
