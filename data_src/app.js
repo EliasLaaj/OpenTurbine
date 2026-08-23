@@ -273,9 +273,10 @@ function drawSparkline(canvasId, data, color) {
 // setInterval at 333 ms is reliable for a visible foreground tab; if the tab
 // is backgrounded the rate drops to ~1 s which is acceptable for monitoring.
 let ws = null;
-// Both ESP32 targets use compact HTTP telemetry polling. It provides identical
-// UI behavior on Classic and S3 and, unlike a page-owned WebSocket, has no
-// persistent transport to tear down during full-page menu navigation.
+// Both ESP32 targets use one compact WebSocket while a live page is open.
+// REST remains a timed fallback, but must not be the normal polling transport:
+// this server intentionally closes completed HTTP responses, and repeated
+// polling can exhaust lwIP's small connection pool during a long session.
 let _useWebSocketTelemetry = null;
 let _lastMsgMs = 0;
 let _lastConnectMs = 0;
@@ -291,21 +292,23 @@ let _statusHeartbeatTimer = null;
 let _staleTimer = null;
 let _telemetryStale = false;
 let _dashboardBootstrapTimer = null;
+let _dashboardBootstrapRetryTimer = null;
 let _connectTimer = null;
 
 function isLiveTelemetryPage() {
   if (document.body?.dataset?.page === 'dashboard') return true;
   return location.pathname === '/' ||
     location.pathname === '/index.html' ||
-    location.pathname === '/calibration.html' ||
-    location.pathname === '/config.html';
+    location.pathname === '/calibration.html';
 }
 function isDashboardPage() {
   if (document.body?.dataset?.page === 'dashboard') return true;
   return location.pathname === '/' || location.pathname === '/index.html';
 }
 function isConfigPage() {
-  return location.pathname === '/config.html';
+  return location.pathname === '/config.html' ||
+    location.pathname === '/controllers.html' ||
+    location.pathname === '/system.html';
 }
 function isCalibrationPage() {
   return location.pathname === '/calibration.html';
@@ -350,6 +353,20 @@ function requestTelemetryNow() {
   }
 }
 
+function waitForGlobalTelemetryIdle(timeoutMs = 1500) {
+  if (!_wsRequestInFlight) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const started = Date.now();
+    const poll = () => {
+      if (!_wsRequestInFlight) resolve(true);
+      else if (Date.now() - started >= timeoutMs) resolve(false);
+      else setTimeout(poll, 25);
+    };
+    poll();
+  });
+}
+window.OTWaitForTelemetryIdle = waitForGlobalTelemetryIdle;
+
 async function restTelemetryFallbackNow() {
   if (!isLiveTelemetryPage() || document.hidden || _restFallbackInFlight) return;
   const freshForMs = _useWebSocketTelemetry === false
@@ -389,6 +406,7 @@ function stopGlobalTelemetry() {
   if (_restFallbackTimer) { clearInterval(_restFallbackTimer); _restFallbackTimer = null; }
   if (_statusHeartbeatTimer) { clearInterval(_statusHeartbeatTimer); _statusHeartbeatTimer = null; }
   if (_dashboardBootstrapTimer) { clearTimeout(_dashboardBootstrapTimer); _dashboardBootstrapTimer = null; }
+  if (_dashboardBootstrapRetryTimer) { clearTimeout(_dashboardBootstrapRetryTimer); _dashboardBootstrapRetryTimer = null; }
   _wsRequestInFlight = false;
   _restFallbackInFlight = false;
   if (ws) {
@@ -400,6 +418,14 @@ function stopGlobalTelemetry() {
     } catch (_) {}
     ws = null;
   }
+}
+function prepareGlobalTelemetryNavigation() {
+  if (_connectTimer) { clearTimeout(_connectTimer); _connectTimer = null; }
+  if (_pullTimer) { clearInterval(_pullTimer); _pullTimer = null; _pullPeriodMs = 0; }
+  if (_restFallbackTimer) { clearInterval(_restFallbackTimer); _restFallbackTimer = null; }
+  if (_statusHeartbeatTimer) { clearInterval(_statusHeartbeatTimer); _statusHeartbeatTimer = null; }
+  if (_dashboardBootstrapTimer) { clearTimeout(_dashboardBootstrapTimer); _dashboardBootstrapTimer = null; }
+  if (_dashboardBootstrapRetryTimer) { clearTimeout(_dashboardBootstrapRetryTimer); _dashboardBootstrapRetryTimer = null; }
 }
 
 function setConnectionState(ok, text) {
@@ -418,6 +444,10 @@ function startStatusHeartbeat() {
     try {
       const r = await fetch('/api/status', { cache: 'no-store' });
       setConnectionState(r.ok, r.ok ? 'Connected' : 'Disconnected');
+      if (r.ok && isConfigPage()) {
+        const status = await r.json();
+        applyData(status);
+      }
     } catch (_) {
       setConnectionState(false, 'Disconnected');
     }
@@ -459,10 +489,15 @@ function connect() {
   ws.onerror = () => { ws.close(); };
 
   ws.onmessage = (ev) => {
-    _wsRequestInFlight = false;
-    _wsRequestSentMs = 0;
     _lastMsgMs = Date.now();
-    try { applyData(JSON.parse(ev.data)); } catch(e) {}
+    try {
+      const frame = JSON.parse(ev.data);
+      if (frame._frame_more !== true) {
+        _wsRequestInFlight = false;
+        _wsRequestSentMs = 0;
+      }
+      applyData(frame);
+    } catch(e) {}
   };
 }
 
@@ -471,6 +506,10 @@ let _lastData = null;
 function applyData(d) {
   setTelemetryStale(false, 0);
   if (d?.profile_id) scopeSparklineHistory(d.profile_id);
+  if (d?.startup_seq_count !== undefined) {
+    const emptySequenceBanner = document.getElementById('empty-seq-banner');
+    if (emptySequenceBanner) emptySequenceBanner.style.display = Number(d.startup_seq_count) > 0 ? 'none' : '';
+  }
   let bootChanged = false;
   if (d && d.boot_count !== undefined) {
     const nextBootCount = Number(d.boot_count);
@@ -544,7 +583,7 @@ function applyData(d) {
   setText('n2',  d.n2  !== undefined ? fmtInt(d.n2)  : '—');
   const n2Card = document.getElementById('n2-card');
   if (n2Card && d.has_n2 !== undefined) n2Card.style.display = d.has_n2 ? '' : 'none';
-  setText('tot', d.tot !== undefined ? toDispTemp(Number(d.tot)).toFixed(1)       : '—');
+  setText('tot', d.tot !== undefined && d.tot_healthy !== false ? toDispTemp(Number(d.tot)).toFixed(1) : '—');
   const totCard = document.getElementById('tot-card');
   if (totCard && d.has_tot !== undefined) totCard.style.display = d.has_tot ? '' : 'none';
   setText('max-n1',  d.max_n1  !== undefined ? fmtInt(d.max_n1) : '—');
@@ -560,7 +599,7 @@ function applyData(d) {
       ? (rate > 0 ? '+' : '') + fmtInt(rate) + ' rpm/s' : '—');
   }
   setText('max-tot', d.max_tot !== undefined ? toDispTemp(Number(d.max_tot)).toFixed(1) : '—');
-  setText('oil', d.oil !== undefined ? toDispPress(Number(d.oil)).toFixed(2)       : '—');
+  setText('oil', d.oil !== undefined && d.oil_healthy !== false ? toDispPress(Number(d.oil)).toFixed(2) : '—');
   const oilCard = document.getElementById('oil-card');
   if (oilCard && d.has_oil_press !== undefined) oilCard.style.display = d.has_oil_press ? '' : 'none';
   setText('oil-demand-val', d.oil_demand !== undefined ? toDispPress(Number(d.oil_demand)).toFixed(2) : '—');
@@ -663,11 +702,15 @@ function applyData(d) {
     }
   }
   const throttleCard = document.getElementById('throttle-output-card');
-  if (throttleCard && d.throttle_command_owner)
+  if (throttleCard && d.throttle_command_owner) {
     throttleCard.title = `Final command owner: ${d.throttle_command_owner}. Actual fuel output remains subject to protection and calibrated hardware limits.`;
-  const oilOwnerCard = document.getElementById('oil-card');
-  if (oilOwnerCard && d.oil_command_owner)
+    setText('throttle-command-details', `Owner: ${d.throttle_command_owner}. Safety limits and the calibrated hardware range remain authoritative.`);
+  }
+  const oilOwnerCard = document.getElementById('oil-output-card');
+  if (oilOwnerCard && d.oil_command_owner) {
     oilOwnerCard.title = `Final command owner: ${d.oil_command_owner}. Bearing oil pressure and configured fault protection remain authoritative.`;
+    setText('oil-command-details', `Owner: ${d.oil_command_owner}. Oil-pressure protection and the configured output range remain authoritative.`);
+  }
   const pitchStatus = document.getElementById('adv-pitch');
   if (pitchStatus && d.prop_pitch_command_owner)
     pitchStatus.title = `Final command owner: ${d.prop_pitch_command_owner}. 0% is fine/minimum load; 100% is coarse/maximum load.`;
@@ -893,11 +936,7 @@ function applyData(d) {
     sbr.style.display = show ? '' : 'none';
     if (show) sbr.textContent = '⚠ ' + startBlock;
   }
-  const limitedStart = document.getElementById('btn-limited-start');
-  const limitedNote = document.getElementById('limited-start-note');
   const limitedAllowed = d.mode === 'STANDBY' && d.limited_start_allowed === true;
-  if (limitedStart) limitedStart.style.display = limitedAllowed ? '' : 'none';
-  if (limitedNote) limitedNote.style.display = limitedAllowed ? '' : 'none';
   setDisabled('btn-stop',  !running);
   setHwActive('btn-start', !!d.start_switch_active);
   setHwActive('btn-stop',  !!d.stop_switch_active);
@@ -1076,13 +1115,17 @@ function applyData(d) {
     pushSparkline(_sparkN2, Number(d.n2));
     drawSparkline('n2-sparkline', _sparkN2, 'var(--accent)');
   }
-  if (d.tot !== undefined) {
+  if (d.tot !== undefined && d.tot_healthy !== false) {
     pushSparkline(_sparkTot, Number(d.tot));
     drawSparkline('tot-sparkline', _sparkTot, 'var(--accent)');
+  } else if (d.tot_healthy === false) {
+    drawSparkline('tot-sparkline', [], 'var(--accent)');
   }
-  if (d.tit !== undefined) {
+  if (d.tit !== undefined && d.tit_healthy !== false) {
     pushSparkline(_sparkTit, Number(d.tit));
     drawSparkline('tit-sparkline', _sparkTit, 'var(--accent)');
+  } else if (d.tit_healthy === false) {
+    drawSparkline('tit-sparkline', [], 'var(--accent)');
   }
   if (d.has_oil_temp && d.oil_temp !== undefined) {
     pushSparkline(_sparkOilTemp, Number(d.oil_temp));
@@ -1131,7 +1174,7 @@ function applyData(d) {
   if (titCard) {
     titCard.style.display = d.has_tit ? '' : 'none';
     if (d.has_tit) {
-      setText('tit', d.tit !== undefined ? toDispTemp(Number(d.tit)).toFixed(1) : '—');
+      setText('tit', d.tit !== undefined && d.tit_healthy !== false ? toDispTemp(Number(d.tit)).toFixed(1) : '—');
       setText('max-tit', d.max_tit !== undefined ? toDispTemp(Number(d.max_tit)).toFixed(1) : '—');
       setDot('tit-health', d.tit_healthy, lbl('tit'));
       if (d.tit !== undefined) {
@@ -1942,14 +1985,35 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', stopGlobalTelemetry);
 window.addEventListener('beforeunload', stopGlobalTelemetry);
+window.addEventListener('ot:navigation-prepare', prepareGlobalTelemetryNavigation);
 window.addEventListener('ot:navigation-start', stopGlobalTelemetry);
+
+async function loadDashboardSnapshot(attempt = 0) {
+  if (!isDashboardPage() || document.hidden) return;
+  try {
+    const response = await fetch('/api/data', { cache: 'no-store' });
+    if (!response.ok) return;
+    const data = await response.json();
+    if (data?._snapshot_deferred) {
+      if (attempt < 5 && isDashboardPage()) {
+        _dashboardBootstrapRetryTimer = setTimeout(() => {
+          _dashboardBootstrapRetryTimer = null;
+          loadDashboardSnapshot(attempt + 1);
+        }, 350 + attempt * 200);
+      }
+      return;
+    }
+    applyData(data);
+  } catch (_) {}
+}
+
 async function startTelemetryBoot() {
   if (!usesGlobalTelemetry()) {
     if (!hasPageLocalTelemetry()) startStatusHeartbeat();
     return;
   }
   if (_useWebSocketTelemetry === null) {
-    _useWebSocketTelemetry = false;
+    _useWebSocketTelemetry = true;
   }
   if (_useWebSocketTelemetry) {
     // Do not create a TCP/WebSocket transport for a page the user is merely
@@ -1973,10 +2037,7 @@ async function startTelemetryBoot() {
     const delay = _useWebSocketTelemetry ? 2500 : 0;
     _dashboardBootstrapTimer = setTimeout(() => {
       _dashboardBootstrapTimer = null;
-      fetch('/api/data', { cache: 'no-store' })
-        .then(r => r.json())
-        .then(d => { try { applyData(d); } catch(e) {} })
-        .catch(() => {});
+      loadDashboardSnapshot();
     }, delay);
   }
 }
@@ -2071,15 +2132,19 @@ function registryInputAlreadyHasCoreCard(ch) {
   return DASHBOARD_CORE_INPUT_IDS.has(id) || DASHBOARD_CORE_INPUT_PURPOSES.has(purpose);
 }
 function registryInputIsOperator(ch) {
+  const id = String(ch?.id || '');
   const role = String(ch?.role || '');
   const purpose = String(ch?.purpose || '');
-  return role === 'operator' || purpose === 'throttle' || purpose === 'idle';
+  return role === 'operator' || purpose === 'throttle' || purpose === 'idle' ||
+    id === 'operator_throttle' || id === 'operator_idle';
 }
 function registryInputIsBinary(ch) {
+  const id = String(ch?.id || '');
   const role = String(ch?.role || '');
   const purpose = String(ch?.purpose || '');
   return Number(ch?.driver) === 0 || ['digital_switch','switch','fault','estop','inhibit_start','low_oil_switch','oil_zero_switch','sequence_gate','ab_arm','ab_fire','limp_mode','flame'].includes(role) ||
-    ['start_switch','stop_switch','emergency_stop','inhibit_start','low_oil_switch','oil_zero_switch','sequence_gate','ab_arm','ab_fire','limp_mode'].includes(purpose);
+    ['start_switch','stop_switch','emergency_stop','inhibit_start','low_oil_switch','oil_zero_switch','sequence_gate','ab_arm','ab_fire','limp_mode'].includes(purpose) ||
+    ['start_switch','stop_switch','emergency_stop'].includes(id);
 }
 function registryInputDisplay(ch) {
   const value = Number(ch?.value);
@@ -2094,7 +2159,7 @@ function registryInputDisplay(ch) {
   if (role === 'flow') return {value:value.toFixed(2), unit:'L/min', numeric:value};
   if (role === 'torque') return {value:value.toFixed(1), unit:'Nm', numeric:value};
   if (role === 'thrust') return {value:value.toFixed(1), unit:'N', numeric:value};
-  if (role === 'operator' || purpose === 'throttle' || purpose === 'idle')
+  if (registryInputIsOperator(ch))
     return {value:(value * 100).toFixed(1), unit:'%', numeric:value};
   if (purpose === 'generic' || role === 'generic') return {value:value.toFixed(3), unit:'0-1', numeric:value};
   return {value:value.toFixed(2), unit:'', numeric:value};
@@ -2140,7 +2205,8 @@ function renderRegistryInputCards(d) {
 
   const operatorRow = document.getElementById('operator-input-row');
   const updateOperatorInput = (purpose, fallbackName) => {
-    const ch = operatorRows.find(row => String(row.purpose || '') === purpose);
+    const ch = operatorRows.find(row => String(row.purpose || '') === purpose ||
+      String(row.id || '') === `operator_${purpose}`);
     const wrap = document.getElementById(`operator-${purpose}-wrap`);
     const value = document.getElementById(`registry-input-value-operator_${purpose}`);
     if (wrap) wrap.style.display = ch ? '' : 'none';
@@ -2256,13 +2322,8 @@ function scheduleTelemetryBoot() {
 }
 scheduleTelemetryBoot();
 
-// Show banner if startup sequence is empty (checked once at page load)
+// Show the empty-sequence banner from the full dashboard snapshot. Fetching
+// /api/hardware here raced /api/data for the ECU's single large-response
+// buffer and produced harmless but user-visible 409 errors during navigation.
 const _emptySeqBanner = document.getElementById('empty-seq-banner');
-if (_emptySeqBanner) {
-  fetch('/api/hardware')
-    .then(r => r.json())
-    .then(hw => {
-      _emptySeqBanner.style.display = (hw.startup_seq && hw.startup_seq.length > 0) ? 'none' : '';
-    })
-    .catch(() => {});
-}
+if (_emptySeqBanner) _emptySeqBanner.style.display = 'none';

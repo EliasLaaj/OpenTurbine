@@ -493,21 +493,22 @@ function selectRegistryAddPreset(index) {
   if (pcbProfileActive()) {
     const choices = pcbCompatibleChoices(_registryAddDirection, purpose, preset.role);
     const box = document.getElementById('registry-add-catalog');
-    if (!choices.length) {
-      return registryAddError(`No unassigned port on ${pcbProfile.name || 'this PCB'} supports ${preset.label}. Remove another assignment or check the PCB wiring.`);
-    }
     document.getElementById('registry-add-title').textContent = `Connect ${preset.label}`;
     const search = document.getElementById('registry-add-search');
     if (search) search.style.display = 'none';
-    box.innerHTML = `<div class="hw-desc" style="margin-bottom:.65rem">Choose the labelled PCB connection where this device is physically wired. GPIO, chip and signal-driver details come from the flashed PCB profile.</div>
+    box.innerHTML = `<div class="hw-desc" style="margin-bottom:.65rem">Choose a labelled PCB connection when available. Advanced builders may instead use a genuinely spare ESP32 GPIO; reserved PCB pins remain blocked.</div>
       <div class="registry-add-group"><div class="registry-add-group-title">Compatible connections</div><div class="registry-add-group-grid">
       ${choices.map(choice=>`<button type="button" class="registry-add-option" ${choice.mode.available===false?'disabled aria-disabled="true"':''} onclick="selectRegistryProfilePort(${index},'${choice.port.id}','${choice.mode.id}')">${escapeHtmlText(pcbChoiceLabel(choice))}<small>${escapeHtmlText(choice.mode.available===false?(choice.mode.status||'Fitted device is not responding'):(choice.port.description || choice.mode.adapter.replaceAll('_',' ')))}</small></button>`).join('')}
+      <button type="button" class="registry-add-option" onclick="selectRegistryBareGpio(${index})">Spare ESP32 GPIO<small>Direct wiring; choose a valid unreserved pin on the device card.</small></button>
       </div></div>`;
     const panel = document.querySelector('#registry-add-modal .registry-add-panel');
     if (panel) panel.scrollTop = 0;
     return;
   }
   createRegistryChannelFromPreset(index, null);
+}
+function selectRegistryBareGpio(presetIndex) {
+  createRegistryChannelFromPreset(presetIndex, null, true);
 }
 function selectRegistryProfilePort(presetIndex, portId, modeId) {
   const port = (pcbProfile.ports || []).find(row=>row.id===portId);
@@ -516,7 +517,7 @@ function selectRegistryProfilePort(presetIndex, portId, modeId) {
   if (mode.available === false) return registryAddError(mode.status || 'That fitted PCB device is not responding.');
   createRegistryChannelFromPreset(presetIndex, {port,mode});
 }
-function createRegistryChannelFromPreset(index, pcbChoice) {
+function createRegistryChannelFromPreset(index, pcbChoice, bareGpio = false) {
   const presets = _registryAddDirection === 'input' ? REGISTRY_INPUT_PRESETS : REGISTRY_OUTPUT_PRESETS;
   const preset = presets[index];
   if (!preset) return;
@@ -532,6 +533,10 @@ function createRegistryChannelFromPreset(index, pcbChoice) {
   const safe = _registryAddDirection === 'output'
     ? (purpose === 'prop_pitch' ? 1 : 0) : undefined;
   const channel = {id, name:name.slice(0, 15), purpose, role:preset.role, driver:selectedDriver, pin:-1, min:range.min, max:range.max, invert:false};
+  if (bareGpio) {
+    channel.physical_port = '';
+    channel.physical_mode = '';
+  }
   if (pcbChoice) {
     channel.physical_port = pcbChoice.port.id;
     channel.physical_mode = pcbChoice.mode.id;
@@ -658,10 +663,10 @@ function registryRemovalImpact(direction, id) {
   const ruleCount = (settingsCfg.rules || []).filter(rule => channel
     ? registryRuleReferencesChannel(rule, direction, channel)
     : rule && (
-      (direction === 'input' && (refMatches(rule.source) || refMatches(rule.sensor_id) || Number(rule.sensor) === handle)) ||
+      (direction === 'input' && (refMatches(rule.source) || refMatches(rule.target_source) || refMatches(rule.sensor_id) || Number(rule.sensor) === handle)) ||
       (direction === 'output' && (refMatches(rule.target) || refMatches(rule.actuator_id) || Number(rule.actuator) === handle))
     )).length;
-  if (ruleCount) impact.push(`${ruleCount} control rule(s)`);
+  if (ruleCount) impact.push(`${ruleCount} custom controller reference(s)`);
   return impact;
 }
 function registryReferenceAliases(direction, id) {

@@ -421,12 +421,13 @@ public:
     static float fuelFlowValMax;       // Flow rate in units/min at fuelFlowRawMax
 
     // ── Automation rules ("if this, then that") ──────────────
-    // Small, deterministic automations evaluated every control tick. A rule is
-    // either a threshold switch or a linear input-to-output map. Outside its
-    // selected engine states the target is explicitly driven to offValue.
+    // Small, deterministic custom controls evaluated every control tick. A
+    // definition is a threshold switch, linear map, or feedback controller.
+    // Outside its selected engine states the target is released to its normal
+    // sequence/direct owner.
     struct Rule {
         bool    enabled;
-        uint8_t kind;       // 0=threshold on/off, 1=linear map
+        uint8_t kind;       // 0=threshold on/off, 1=linear map, 2=feedback
         uint8_t sensor;     // 0=oil_temp 1=tot 2=n1_rpm 3=oil_press 4=tit 5=batt_v 6=n2_rpm
         uint8_t op;         // threshold rules: 0=above, 1=below
         float   threshold;  // SI units: °C, bar, RPM, V
@@ -438,16 +439,30 @@ public:
         float   inputMax;
         float   outputMin;  // map target range, canonical 0–1
         float   outputMax;
+        uint8_t targetSourceType; // feedback: 0=fixed, 1=two-state, 2=variable map
+        uint8_t targetSensor;     // compact handle resolved from targetSourceId
+        float   targetFixed;      // feedback engineering-unit target
+        float   targetLow;        // switch OFF / variable low target
+        float   targetHigh;       // switch ON / variable high target
+        float   targetInputMin;   // variable target-source range
+        float   targetInputMax;
+        float   responseGain;     // output fraction per feedback engineering unit
+        float   integralGain;     // output fraction per unit-second
+        float   deadband;         // feedback engineering units
         uint8_t modeMask;   // STANDBY=1, STARTUP=2, RUNNING=4, SHUTDOWN=8
         char    name[24];   // display name (UI only)
         // Persisted references. The numeric fields above are compact handles
         // resolved once while loading; control ticks never compare IDs.
         char    sourceId[24] = {};
         char    targetId[24] = {};
+        char    targetSourceId[24] = {};
     };
     static constexpr int MAX_RULES = 16;
     static Rule rules[MAX_RULES];
     static int  ruleCount;
+    // 0 = legacy implicit/dedicated owners; 1 = output-first editable control
+    // definitions. The UI performs the one-time, reviewable migration.
+    static uint8_t controllerSchema;
 
     // ── Profile ID (read-only after load) ─────────────────────
     static char    profileId[64];
@@ -465,7 +480,7 @@ public:
 
     // ── API ───────────────────────────────────────────────────
     static void load();
-    static bool save();          // write-to-tmp + rename; returns false on LittleFS error
+    static bool save(bool writeRuntimeHardware = false); // atomic unified save; full restore passes true
     static void sanitizeForHardware(); // clear settings that reference unequipped hardware
     // Auto-fill a sane default threshold for any threshold-based
     // safeties just ENABLED (off->on) while its threshold is 0, so a ticked
@@ -511,7 +526,9 @@ public:
     // unified-file write, and reloads the on-disk values if the write fails.
     // Persists a validated candidate without touching live Config statics.
     // On success, ownership of outJson transfers to ConfigApplyGate/the ECU core.
-    static bool persistJsonCandidateReleasing(JsonDocument& doc, char*& outJson, size_t& outLen);
+    static bool persistJsonCandidateReleasing(JsonDocument& doc, char*& outJson,
+                                              size_t& outLen, char* scratch = nullptr,
+                                              size_t scratchLen = 0);
     static bool applyJsonRuntimeOnly(const JsonDocument& doc, bool allowActiveLive = false,
                                      bool validateHardwareDependencies = true); // no flash write
     // Classic ESP32 can become too fragmented to hold the serialized transfer
@@ -526,7 +543,8 @@ private:
     static void _fromDoc(const JsonDocument& doc);
     static void _toDoc(JsonDocument& doc);
     static void _writeDoc(JsonObject doc);
-    static bool _saveSettingsJson(const char* settingsJson, size_t settingsLen);
+    static bool _saveSettingsJson(const char* settingsJson, size_t settingsLen,
+                                  bool writeRuntimeHardware = false);
     static volatile bool _savePending;
     static volatile bool _runtimeStatsSavePending;
     static volatile uint8_t _runtimeStatsError; // 0=ok, 1=NVS open, 2=write

@@ -1,0 +1,25 @@
+S3 ESP32-S3 build=03bb6361f1a1ecac; original ramp=600 ms; duration=300s
+S3 navigation 1: /controllers.html connected heap=50992/31732 ws=0 tw=0 boot=undefined reset=undefined
+S3 config PATCH response HTTP 200
+S3 edit: throttle ramp 650 ms save acknowledged
+S3 navigation 2: /tools.html connected heap=39452/27636 ws=1 tw=0 boot=undefined reset=undefined
+S3 complete engine-file download + same-file restore passed
+S3 navigation 3: / connected heap=39264/27636 ws=1 tw=0 boot=undefined reset=undefined
+S3 navigation 4: /hardware.html connected heap=33728/21492 ws=1 tw=1 boot=undefined reset=undefined
+S3 navigation 5: /system.html connected heap=44672/31732 ws=0 tw=1 boot=undefined reset=undefined
+S3 navigation 6: /calibration.html connected heap=33724/20468 ws=1 tw=1 boot=undefined reset=undefined
+S3 navigation 7: /sequence.html connected heap=33468/21492 ws=1 tw=2 boot=undefined reset=undefined
+S3 navigation 8: /log.html connected heap=26780/11764 ws=0 tw=3 boot=undefined reset=undefined
+S3 navigation 9: /tools.html connected heap=31592/19444 ws=1 tw=4 boot=undefined reset=undefined
+S3 navigation 10: / connected heap=29916/18420 ws=1 tw=5 boot=undefined reset=undefined
+S3 navigation 11: /hardware.html connected heap=31868/20468 ws=1 tw=6 boot=undefined reset=undefined
+S3 navigation 12: /system.html connected heap=43048/28660 ws=0 tw=5 boot=undefined reset=undefined
+S3 navigation 13: /calibration.html connected heap=30436/19444 ws=1 tw=5 boot=undefined reset=undefined
+S3 navigation 14: /sequence.html connected heap=33284/21492 ws=1 tw=5 boot=undefined reset=undefined
+S3 navigation 15: /log.html connected heap=26964/12788 ws=0 tw=4 boot=undefined reset=undefined
+S3 navigation 16: /tools.html connected heap=30692/17396 ws=1 tw=2 boot=undefined reset=undefined
+S3 navigation 17: /controllers.html connected heap=43568/28660 ws=0 tw=3 boot=undefined reset=undefined
+S3 config PATCH response HTTP 200
+S3 restore: throttle ramp 600 ms save acknowledged
+S3 navigation 18: / connected heap=32004/20468 ws=1 tw=2 boot=undefined reset=undefined
+S3 realistic session PASSED: 271s, 18 navigations, 2 persisted config saves, original config restored.

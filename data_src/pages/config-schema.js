@@ -1,5 +1,5 @@
 // ── Config schema — maps UI field key → JSON path + metadata ──
-const SCHEMA = [
+const ALL_CONFIG_SCHEMA = [
   { title: 'Engine Protection Limits', id: 'engine-limits', sectionNote:'N1 is the gas-generator or core shaft speed. TOT is turbine-outlet temperature; TIT is turbine-inlet temperature. Choose the temperature measurement used by your engine documentation.', fields: [
     { key:'rpm_limit',          path:['engine','rpm_limit'],          label:'Maximum N1 Speed', unit:'RPM', desc:'Hard overspeed limit for the gas-generator/core shaft. Used only when an N1 sensor is fitted.', step:1000, min:1000, basic:true },
     { key:'n2_rpm_limit',       path:['engine','n2_rpm_limit'],       label:'Maximum N2 Speed', unit:'RPM', zeroOff:true, desc:'Independent hard shutdown limit for the free power-turbine/output shaft. This is separate from gradual N2 throttle pullback. Used only when N2 overspeed safety is enabled in Hardware.', step:1000, min:0, basic:true },
@@ -13,27 +13,28 @@ const SCHEMA = [
     { key:'sf_pt_d',            path:['safety','pressure_torque_trip_confirm_ms'], label:'Pressure / Torque Hard-Trip Confirmation (ms)', desc:'P1, P2 or torque must remain above its hard limit for this long before shutdown. 0 is immediate.', step:25, min:0, max:60000 },
     { key:'tot_safe_margin',    path:['engine','tot_safe_margin'],    label:'Temperature Warning Margin', unitType:'temp_delta', desc:'Distance below the active hard temperature limit where warnings and gradual throttle reduction begin.', step:5, min:0, basic:true },
   ]},
-  { title: 'Oil System', id: 'oil-config-section', sectionNote:'Running oil protection and automatic pressure control. Startup oil pressure, minimum-before-ignition, and fixed no-sensor pump duty are set where they are used: Sequence > Build Oil Pressure / Starter Spin.', fields: [
-    { key:'oil_rm',  path:['oil','running_min'],        label:'Running Low-Pressure Shutdown', unitType:'press', desc:'The ECU shuts the engine down if oil pressure stays below this value while running.', step:0.1, min:0, max:20, basic:true },
-    { key:'oil_zb',  path:['oil_advanced','zero_bar'],  label:'No-Pressure Shutdown Threshold', unitType:'press', desc:'Detects a stopped pump, broken line, or disconnected sensor when pressure is effectively zero.', step:0.05, min:0 },
-    { key:'sf_lo_d', path:['safety','low_oil_confirm_ms'], label:'Low-Oil Confirmation (ms)', desc:'Oil pressure must remain below the running shutdown value for this long before shutdown. 0 is immediate.', step:50, min:0, max:60000 },
-    { key:'sf_oz_d', path:['safety','oil_zero_confirm_ms'], label:'Near-Zero Oil Confirmation (ms)', desc:'Catastrophic near-zero oil pressure must persist for this time. Keep this shorter than the normal low-oil confirmation.', step:25, min:0, max:60000 },
+  { title: 'Oil Pressure Control', id: 'oil-config-section', sectionNote:'Normal pressure-controller behavior for the primary oil system. Additional oil-system targets and pump limits stay in their individual controller cards above.', fields: [
     { key:'oil_tm',  path:['oil','use_throttle_map'],   label:'Increase Oil Pressure with Throttle', desc:'Raise the oil-pressure target as throttle increases. Leave disabled for one constant running target.', type:'checkbox' },
     { key:'oil_mm',  path:['oil','map_min'],            label:'Normal Running Oil Pressure', unitType:'press', desc:'Target at idle and throughout running when throttle-based pressure is disabled. Keep it above the low-pressure shutdown value.', step:0.1, min:0, max:20, basic:true },
     { key:'oil_mx',  path:['oil','map_max'],            label:'Full-Throttle Oil Pressure', unitType:'press', desc:'Target at full throttle when throttle-based pressure is enabled.', step:0.1, min:0, max:20, wrapId:'field-oil_mx' },
     { key:'oil_as',  path:['oil','adjust_scale'],       label:'Oil Pressure Response Gain', desc:'How strongly pump output reacts to pressure error. Higher responds faster but can oscillate. Technical name: proportional or P gain.', step:0.05,min:0 },
     { key:'oil_mp',  path:['oil','min_pct'],            label:'Minimum Automatic Pump Output (%)', desc:'Lowest output used by automatic pressure regulation. Startup steps can still command a higher output.', step:1, min:0, max:100 },
     { key:'oa_db',   path:['oil_advanced','deadband_bar'], label:'No-Correction Pressure Band', unitType:'press', desc:'No small pump corrections are made while pressure is within this distance of the target. Technical name: deadband.', step:0.05, min:0 },
+    { key:'oil_fd',  path:['oil','failsafe_delay_ms'],  label:'Pressure-Sensor Fault Delay (ms)', desc:'How long invalid oil-pressure feedback is tolerated before automatic pressure regulation stops and the fixed fallback output below takes over.', step:100, min:0 },
+    { key:'oil_fp',  path:['oil','failsafe_pct'],       label:'Fixed Pump Output After Pressure-Sensor Failure (%)', desc:'Open-loop pump output used after oil-pressure feedback has remained invalid for the fault delay above. This is separate from windmilling protection.', step:5, min:0, max:100 },
+  ]},
+  { title: 'Oil Pressure Safety', id: 'oil-safety-section', sectionNote:'Independent oil-pressure, current, and flow protections. Startup oil requirements remain in the startup Sequence blocks where they act.', fields: [
+    { key:'oil_rm',  path:['oil','running_min'],        label:'Running Low-Pressure Shutdown', unitType:'press', desc:'The ECU shuts the engine down if oil pressure stays below this value while running.', step:0.1, min:0, max:20, basic:true },
+    { key:'oil_zb',  path:['oil_advanced','zero_bar'],  label:'No-Pressure Shutdown Threshold', unitType:'press', desc:'Detects a stopped pump, broken line, or disconnected sensor when pressure is effectively zero.', step:0.05, min:0 },
+    { key:'sf_lo_d', path:['safety','low_oil_confirm_ms'], label:'Low-Oil Confirmation (ms)', desc:'Oil pressure must remain below the running shutdown value for this long before shutdown. 0 is immediate.', step:50, min:0, max:60000 },
+    { key:'sf_oz_d', path:['safety','oil_zero_confirm_ms'], label:'Near-Zero Oil Confirmation (ms)', desc:'Catastrophic near-zero oil pressure must persist for this time. Keep this shorter than the normal low-oil confirmation.', step:25, min:0, max:60000 },
     { key:'oil_ocd', path:['oil_advanced','pump_overcurrent_delay_ms'], label:'Continuous Pump Overcurrent Shutdown Delay (ms)', desc:'With oil-pump current sensing fitted, warn immediately and shut down only if current remains above the Hardware current limit for this long.', step:100, min:100, max:60000 },
     { key:'oil_ufd', path:['oil_advanced','pump_underflow_delay_ms'], label:'Low Oil-Flow Confirmation Delay (ms)', desc:'How long a monitored main or scavenge pump may remain below its own Hardware minimum-flow value before the ECU confirms a flow fault.', step:100, min:100, max:60000 },
     { key:'oil_ufs', path:['oil_advanced','shutdown_on_underflow'], label:'Shutdown on Confirmed Low Oil Flow', type:'checkbox', desc:'Off (default): report a warning and keep running. On: a confirmed low/no-flow fault requests an engine shutdown. Configure and test each pump flow meter in Hardware before enabling this.' },
-    { key:'oil_fd',  path:['oil','failsafe_delay_ms'],  label:'Pressure-Sensor Fault Delay (ms)', desc:'How long invalid oil-pressure feedback is tolerated before automatic pressure regulation stops and the fixed fallback output below takes over.', step:100, min:0 },
-    { key:'oil_fp',  path:['oil','failsafe_pct'],       label:'Fixed Pump Output After Pressure-Sensor Failure (%)', desc:'Open-loop pump output used after oil-pressure feedback has remained invalid for the fault delay above. This is separate from windmilling protection.', step:5, min:0, max:100 },
   ]},
   { title: 'Throttle Response', id: 'throttle', sectionNote:'Normal operator-demand shaping and output movement limits. These settings do not replace independent hard engine shutdowns.', fields: [
     { key:'th_ru', path:['throttle','ramp_up_ms'],   label:'Full Opening Time (ms)', desc:'Time for the fuel/throttle output to move from 0 to 100%. A larger value opens more gently.', step:50, min:0, basic:true },
     { key:'th_rd', path:['throttle','ramp_down_ms'], label:'Full Closing Time (ms)', desc:'Time for the fuel/throttle output to move from 100% to 0. A smaller value closes faster.', step:50, min:0, basic:true },
-    { key:'th_mx', path:['throttle','idle_max_pct'], label:'Maximum Idle Fuel Output (%)', desc:'Fuel/throttle output when the idle control is at its maximum. The low end comes from Calibration > Minimum Reliable Fuel-Pump Output.', step:1, min:0, max:100, basic:true },
     { key:'th_ex', path:['throttle','expo'],         label:'Low-Throttle Sensitivity', desc:'Softens response near idle while preserving full travel. 0 is linear; 1 is maximum softening. Technical name: throttle expo.', step:0.05, min:0, max:1 },
   ]},
   { title: 'Gradual Fuel Limit Protection', id: 'gradual-protection', sectionNote:'Optional non-emergency fuel reduction as a measured value approaches its configured boundary. Independent hard shutdown limits remain active and separate.', fields: [
@@ -63,10 +64,11 @@ const SCHEMA = [
     { key:'rl_zone', path:['throttle','pullback_approach_zone_rpm'], label:'Begin Prediction This Far Below Limit (RPM)', desc:'Distance below the gradual limit where the ECU starts slowing fuel increases. 0 chooses this distance automatically.', step:500, min:0 },
     { key:'rl_acc', path:['throttle','rpm_accel_filter'], label:'Speed-Change Smoothing (0-1)', desc:'Smooths the estimated rate of RPM change. Lower values are steadier but slower; higher values react faster but pass more sensor noise.', step:0.01, min:0.02, max:1 },
   ]},
-  { title: 'Reduced-Power Mode', sectionNote:'This one cap is shared by manual Reduced-Power Mode and the automatic response to losing feedback required by an enabled shaft controller or safety protection. Sensor loss turns Reduced-Power Mode on; it does not create a separate hidden limit.', fields: [
+  { title: 'Reduced-Power Mode', id:'reduced-power-section', sectionNote:'This one cap is shared by manual Reduced-Power Mode and the automatic response to losing feedback required by an enabled shaft controller or safety protection. Sensor loss turns Reduced-Power Mode on; it does not create a separate hidden limit.', fields: [
     { key:'lm_mt', path:['limp_mode','max_throttle_pct'], label:'Maximum Fuel Output (%)', desc:'Shared main-fuel cap when Reduced-Power Mode is turned on from Tools or a configured switch, or automatically because feedback used by an enabled protection/controller becomes unhealthy. A high value also permits higher fuel after that safety feedback is lost.', step:5, min:0, max:100, basic:true },
   ]},
-  { title: 'Automatic Idle Control', id:'idle-control-cfg-section', sectionNote:'Enable this controller in Hardware > Controllers. It adjusts Main Fuel near idle to hold one selected N1, N2, P1 or P2 feedback value as accessory load changes. Choose only an installed, calibrated sensor; N1/N2 are the normal proven choices.', fields: [
+  { title: 'Idle', id:'idle-control-cfg-section', sectionNote:'Idle is the minimum normal-running fuel authority. Its calibrated low end comes from Hardware; Automatic Idle may raise that floor to hold selected shaft-speed or pressure feedback.', fields: [
+    { key:'th_mx', path:['throttle','idle_max_pct'], label:'Maximum Normal Idle Fuel Output (%)', desc:'Highest fuel output available to the idle layer. The low end is the calibrated Minimum Reliable Fuel-Pump Output from Hardware. Shutdown, STOP, and hard safety may still command zero.', step:1, min:0, max:100, basic:true },
     { key:'di_src', path:['dynamic_idle','source'], label:'Idle Feedback Source', type:'select', options:[{v:0,l:'N1 core speed (normal / proven)'},{v:1,l:'N2 output-shaft speed (normal / proven)'},{v:2,l:'P1 pressure (experimental)'},{v:3,l:'P2 pressure (experimental)'}], desc:'N1/N2 speed feedback is the normal proven approach. Pressure feedback is available for experimental turbine arrangements and requires careful stand validation.', basic:true },
     { key:'di_tr', path:['dynamic_idle','target_rpm'],    label:'Idle Target (N1/N2)', unit:'RPM', desc:'Used when the selected feedback source is N1 or N2.', step:500, min:0, basic:true },
     { key:'di_tp', path:['dynamic_idle','target_pressure_bar'], label:'Idle Target (P1/P2)', unitType:'press', desc:'Used when the selected feedback source is P1 or P2.', step:0.01, min:0, max:1000, basic:true },
@@ -79,9 +81,9 @@ const SCHEMA = [
     { key:'di_mx', path:['dynamic_idle','max_multiplier'],label:'Maximum Fuel Range Multiplier', desc:'Allows the controller extra fuel authority above the configured maximum idle output.', step:0.05, min:1, max:3 },
     { key:'di_ig', path:['dynamic_idle','i_gain'],       label:'Long-Term Correction Strength', desc:'Removes a persistent speed error caused by changing accessory load. 0 disables this correction. Start small: 0.05–0.15. Technical name: integral gain.', step:0.01, min:0, max:2 },
     { key:'di_im', path:['dynamic_idle','i_max'],        label:'Maximum Long-Term Correction', desc:'Limits how much fuel the long-term correction may add or remove. 0.10 means 10% of the available fuel range.', step:0.01, min:0, max:0.5 },
-    { key:'di_mode', path:['dynamic_idle','idle_mode'], label:'Idle-Control Method', type:'select', options:[{v:0,l:'Standard idle control'},{v:1,l:'Predictive fast-deceleration control'}], desc:'Standard control corrects present speed error. Predictive control learns the steady idle output and briefly reduces fuel during a fast return from high speed so RPM settles without hanging high.' },
-    { key:'di_de', path:['dynamic_idle','decel_enter_rpm'], label:'Fast-Deceleration Entry Above Target (RPM)', desc:'Predictive control activates when RPM is at least this far above the idle target.', step:100, min:0 },
-    { key:'di_dd', path:['dynamic_idle','decel_drop_pct'], label:'Fast-Deceleration Fuel Reduction (%)', desc:'How far below the learned steady-idle output fuel may drop during a fast return to idle.', step:0.5, min:0 },
+    { key:'di_mode', path:['dynamic_idle','idle_mode'], label:'Idle-Control Method', type:'select', options:[{v:0,l:'Standard idle control (default)'},{v:1,l:'Predictive fast-deceleration control'}], desc:'Standard control corrects present feedback error and does not apply a predictive fuel drop. Predictive control adds optional learned fast-deceleration behavior.' },
+    { key:'di_de', path:['dynamic_idle','decel_enter_rpm'], label:'Fast-Deceleration Entry Above Target (RPM)', zeroOff:true, desc:'Predictive deceleration catch can begin when RPM is at least this far above idle. 0 disables the fast-deceleration fuel drop.', step:100, min:0 },
+    { key:'di_dd', path:['dynamic_idle','decel_drop_pct'], label:'Fast-Deceleration Fuel Reduction (%)', zeroOff:true, desc:'How far below learned steady-idle fuel the controller may drop. 0 disables the fast-deceleration fuel drop.', step:0.5, min:0 },
     { key:'di_lk', path:['dynamic_idle','lookahead_ms'], label:'Idle Speed Prediction Time (ms)', desc:'How far ahead predictive idle control estimates shaft speed.', step:100, min:0 },
     { key:'di_sb', path:['dynamic_idle','settle_band_rpm'], label:'Settled Speed Band (RPM)', desc:'The ECU considers idle stable and learns the required fuel output while RPM is within this distance of target.', step:100, min:0 },
     { key:'di_fr', path:['dynamic_idle','full_response_rpm'], label:'Speed Error for Full Correction (RPM)', desc:'RPM error where automatic idle control reaches its maximum correction rate.', step:500, min:0 },
@@ -89,7 +91,7 @@ const SCHEMA = [
     { key:'di_td', path:['dynamic_idle','trim_down_pct_s'], label:'Maximum Fuel Correction Decrease (%/s)', desc:'Fastest rate at which predictive idle control may remove fuel.', step:0.5, min:0 },
     { key:'di_lr', path:['dynamic_idle','learn_rate'], label:'Steady-Idle Learning Speed (0-1)', desc:'How quickly the learned steady-idle fuel output adapts after speed settles. Smaller values are steadier.', step:0.01, min:0 },
     { key:'di_la', path:['dynamic_idle','learn_accel_max'], label:'Maximum Speed Change While Learning (RPM/s)', desc:'The ECU learns steady-idle fuel only while RPM is changing more slowly than this value.', step:100, min:0 },
-    { key:'di_pde', path:['dynamic_idle','pressure_decel_enter_bar'], label:'Catch Entry Above Target', unit:'bar', desc:'Predictive pressure control enters deceleration catch this far above target.', step:0.01, min:0 },
+    { key:'di_pde', path:['dynamic_idle','pressure_decel_enter_bar'], label:'Catch Entry Above Target', unitType:'press', zeroOff:true, desc:'Predictive pressure deceleration catch can begin this far above target. 0 disables the fast-deceleration fuel drop.', step:0.01, min:0 },
     { key:'di_psb', path:['dynamic_idle','pressure_settle_band_bar'], label:'Settled Pressure Band', unit:'bar', desc:'Pressure band in which the ECU may learn the steady-idle fuel demand.', step:0.01, min:0 },
     { key:'di_pfr', path:['dynamic_idle','pressure_full_response_bar'], label:'Pressure Error for Full Correction', unit:'bar', desc:'Pressure error where predictive idle reaches its configured correction rate.', step:0.01, min:0 },
     { key:'di_plr', path:['dynamic_idle','pressure_learn_rate_max_bar_s'], label:'Maximum Pressure Change While Learning', unit:'bar/s', desc:'Learning pauses while pressure changes faster than this value.', step:0.01, min:0 },
@@ -114,9 +116,9 @@ const SCHEMA = [
     { key:'rl_to', path:['relight','relight_timeout_ms'], label:'Relight Timeout (ms)',      desc:'Maximum relight time after a flameout. If combustion is not restored, ignition is cut and the engine shuts down. 0 uses the hard 30-second maximum; shorter configured values win.', step:100, min:0, max:30000 },
   ]},
   { title: 'ECU Runtime', sectionNote:'Advanced control-loop scheduling. Logging frequency and channel selection are configured on the Log page.', fields: [
-    { key:'tm_lh', path:['telemetry','control_loop_hz'], label:'ECU Loop Target Hz', desc:'Main control-loop target frequency. Default 400 Hz. Lower values reduce CPU use; higher values improve control granularity but increase load. Recommended range: 200-500 Hz. Takes effect after a reboot.', step:50, min:50, max:1000 },
+    { key:'tm_lh', path:['telemetry','control_loop_hz'], label:'ECU Loop Target Hz', desc:'Main control-loop target frequency. Default 400 Hz. Lower values reduce CPU use; higher values improve control granularity but increase load. Recommended range: 200-500 Hz. Takes effect after a reboot.', step:50, min:50, max:1000, basic:true },
   ]},
-  { title: 'External Instrument Cluster Display', sectionNote:'Hardware > External Cluster is the single enable switch for data transmission. These optional display-only thresholds change gauge warning colours and status messages; they do not trigger ECU shutdowns.', fields: [
+  { title: 'External Instrument Cluster Display', sectionNote:'Enable the OT Cluster link above. These optional display-only thresholds change gauge warning colours and status messages; they do not trigger ECU shutdowns.', fields: [
     { key:'cl_n1', path:['cluster','n1_warn_rpm'],  label:'N1 Warn RPM',   desc:'N1 warning zone start on cluster gauge (yellow). 0 = auto (RPM Limit × 0.9). N1_MAX comes from Engine Limits → RPM Limit', step:500, min:0 },
     { key:'cl_n2', path:['cluster','n2_warn_rpm'],  label:'N2 Warn RPM',   desc:'N2 RPM warning threshold for cluster display', step:500, min:0 },
     { key:'cl_tw', path:['cluster','tot_warn_c'],   label:'EGT Warn',   unitType:'temp',  zeroOff:true, desc:'Selected engine-temperature warning threshold for cluster status. 0 = auto (selected EGT limit minus safety margin).', step:10, min:0 },
@@ -129,15 +131,17 @@ const SCHEMA = [
     { key:'sa_on', path:['starter_control','pulsed_assist_on_ms'], label:'Pulse ON Time', unit:'ms', desc:'How long the starter remains energized during each assist pulse.', step:10, min:1, max:60000 },
     { key:'sa_off', path:['starter_control','pulsed_assist_off_ms'], label:'Pulse OFF Time', unit:'ms', desc:'Rest time between assist pulses.', step:10, min:1, max:60000 },
   ]},
-  { title: 'Windmilling Oil Protection', sectionNote:'Runs the oil pump while a shaft is still turning in standby, for example from airflow, vehicle movement, or residual momentum after shutdown. It uses the fixed/floor output below when no pressure target is selected. With a pressure target, it uses the normal oil-pressure regulator and never commands less than that floor. For a 100,000 RPM core shaft, 1,000 RPM is a conservative starting threshold; raise it only above verified sensor noise.', fields: [
+  { title: 'Windmilling Oil Protection', id:'windmilling-oil-section', sectionNote:'Runs the oil pump while a shaft is still turning in standby, for example from airflow, vehicle movement, or residual momentum after shutdown. It uses the fixed/floor output below when no pressure target is selected. With a pressure target, it uses the normal oil-pressure regulator and never commands less than that floor. For a 100,000 RPM core shaft, 1,000 RPM is a conservative starting threshold; raise it only above verified sensor noise.', fields: [
     { key:'so_src', path:['standby_oil','source'], label:'Shaft to Monitor', type:'select', options:[{v:0,l:'Core shaft (N1)'},{v:1,l:'Power/output shaft (N2)'},{v:2,l:'Either fitted shaft'}], desc:'Choose which shaft can automatically request protective oil flow.' },
     { key:'so_rl', path:['standby_oil','rpm_limit'], label:'Start Oil Pump Above', unit:'RPM', desc:'Oil protection starts when the selected shaft exceeds this speed while the ECU is in standby. Keep it below that shaft\'s maximum speed or the protection can never activate.', step:10, min:0 },
     { key:'so_fp', path:['standby_oil','feed_pct'],  label:'Windmilling Fixed / Minimum Pump Output (%)', desc:'Used as the fixed windmilling output when the pressure target is 0, or as the minimum pump output while pressure is regulated.', step:5, min:0, max:100 },
     { key:'so_fb', path:['standby_oil','feed_bar'],  label:'Optional Windmilling Oil Pressure Target', unitType:'press', desc:'Above 0: use the normal automatic oil-pressure regulator to hold this target, with the fixed/minimum output as its floor. At 0: command only the fixed output. Pressure mode requires a fitted oil-pressure sensor and Oil pressure loop enabled in Hardware.', step:0.1, min:0, max:20 },
   ]},
-  { title: 'Manual Relight and Cooldown Override', fields: [
+  { title: 'Cooldown Control', id:'cooldown-section', fields: [
     { key:'tot_cooldown_target', path:['engine','tot_cooldown_target'], label:'Cooldown Temperature Target', unitType:'temp', desc:'Cooldown completes after the selected engine temperature falls below this value.', step:10, min:0, max:100000, basic:true },
     { key:'ms_cs', path:['misc','cooldown_skip_hold_ms'], label:'Cooldown Skip Hold (ms)', desc:'Hold START+STOP simultaneously for this long during SHUTDOWN to force-skip the cooldown and go to STANDBY, even if selected EGT is still above the cooldown target.', step:500, min:500 },
+  ]},
+  { title: 'Manual Relight', id:'manual-relight-section', fields: [
     { key:'ms_it', path:['misc','igniter_on_start_target'], label:'START Relight Output', type:'select', options:[{v:0,l:'Igniter 1'},{v:1,l:'Secondary Igniter'},{v:2,l:'Glow / Wet Glow'}], desc:'Which configured ignition output is held on while START is held during RUNNING.' },
     { key:'ms_is', path:['misc','igniter_on_start'],      label:'Igniter on START (running)', desc:'Fire igniter while START button is held during RUNNING — manual relight aid. Disable if accidental button presses are a concern.', type:'checkbox' },
   ]},
@@ -202,6 +206,19 @@ const SCHEMA = [
   ]},
 ];
 
+// The old all-in-one Config page is intentionally split by ownership. Keep a
+// single field definition source so labels, validation, live-edit rules and
+// serialization cannot drift between the two pages.
+const CONFIG_SURFACE = window.OT_CONFIG_SURFACE || 'controllers';
+const SYSTEM_SECTIONS = new Set([
+  'ECU Runtime',
+  'External Instrument Cluster Display'
+]);
+const SCHEMA = ALL_CONFIG_SCHEMA.filter(section =>
+  CONFIG_SURFACE === 'system'
+    ? SYSTEM_SECTIONS.has(section.title)
+    : !SYSTEM_SECTIONS.has(section.title));
+
 let cfg      = {};
 let isLocked = false;
 let runtimeMode = 'STANDBY';
@@ -213,6 +230,8 @@ const LIVE_CONFIG_KEYS = new Set([
   'di_pde','di_psb','di_pfr','di_plr'
 ]);
 let _cfgDirty = false;
+let _controllerRulesDirty = false;
+let _controllerHardwareDirty = false;
 
 // ── Per-field changed-state tracking (mirrors hardware.html) ──
 let _fieldSnap = {};
@@ -269,6 +288,8 @@ function _buildChanges() {
         inactiveReason: inactive ? _fieldInactiveReason(wrap) : '',
       });
     });
+  if (_controllerRulesDirty) changes.push({key:'__simple_controls', label:'Custom controllers', was:'Saved setup', now:'Updated setup', inactive:false});
+  if (_controllerHardwareDirty) changes.push({key:'__controller_hardware', label:'Controller assignments and safety enables', was:'Saved setup', now:'Updated setup', inactive:false});
   return changes;
 }
 
@@ -310,6 +331,8 @@ function _markDirty() {
 }
 function _clearDirty() {
   _cfgDirty = false;
+  _controllerRulesDirty = false;
+  _controllerHardwareDirty = false;
   const btn = document.getElementById('btn-save');
   const discard = document.getElementById('btn-discard');
   const bar = document.querySelector('.save-bar');

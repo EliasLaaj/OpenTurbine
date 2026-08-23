@@ -42,8 +42,8 @@ CURRENT_GUIDANCE_SOURCES = [
     ROOT / "examples/OTCClusterClient.h",
 ]
 REQUIRED_IMAGES = [
-    "hero-dashboard.png", "hardware-page.png", "config-page.png", "calibration-page.png",
-    "sequence-page.png", "control-rules-page.png", "tools-page.png",
+    "hero-dashboard.png", "hardware-page.png", "controllers-page.png", "system-page.png",
+    "calibration-page.png", "sequence-page.png", "tools-page.png",
     "social-preview.png", "system-overview.svg",
 ]
 

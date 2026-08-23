@@ -9,7 +9,7 @@ lede: Build a safe interface around the ESP32; a GPIO pin is a logic signal, nev
 
 This guide covers the physical interface for an OpenTurbine ESP32 turbine ECU. It is not a universal turbine wiring diagram. Keep fuel, ignition, starter, and other load power disconnected while checking the installation.
 
-New to electronics or microcontrollers? Use the [complete beginner user guide]({{ '/user-guide/' | relative_url }}) first. It now contains the enlarged wiring diagram, wire-by-wire connection patterns, every supported input/output purpose, every controller and safety function, calibration, sequencing, dry testing, and a source-generated reference for all Config fields.
+New to electronics or microcontrollers? Use the [complete beginner user guide]({{ '/user-guide/' | relative_url }}) first. It contains the enlarged wiring diagram, wire-by-wire connection patterns, every supported input/output purpose, controller and safety behavior, calibration, sequencing, dry testing, and a source-generated Controllers/System field reference.
 
 ## Supported ESP32 targets
 
@@ -17,7 +17,7 @@ Use a Classic ESP32 with at least 4 MB flash, or an ESP32-S3 DevKitC-1-compatibl
 
 ## Installed Channel Inventory
 
-The Hardware page is the source of truth for what is physically connected. Add each fitted input and output once, give it a short unique stable ID, select its electrical driver, assign a valid GPIO, and set the real engineering range. Display names can change later; stable IDs should not change after sequences, rules, controllers, or telemetry refer to them.
+The Hardware page is the source of truth for what is physically connected. Add each fitted input and output once, give it a short unique stable ID, select its electrical driver, assign a valid GPIO, and set the real engineering range. Display names can change later; stable IDs should not change after sequences, controllers, or telemetry refer to them.
 
 Inputs can represent digital switches, analog measurements, pulse/frequency sensors, or RC PWM commands. Outputs can represent relays, proportional PWM loads, or servo/ESC commands. Set boot-safe and fault-safe output demand deliberately. Resolve every missing requirement, invalid-channel message, and GPIO conflict before saving; the firmware blocks unsafe or ambiguous hardware configurations rather than guessing.
 

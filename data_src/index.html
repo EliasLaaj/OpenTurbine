@@ -5,14 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine</title>
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260814g',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260814g');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body data-page="dashboard">
 <nav>
   <a href="/" class="active" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
+  <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
@@ -43,7 +45,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     <div id="gs-progress" class="gs-progress">0 of 5 setup activities recorded in this browser.</div>
     <ol class="gs-steps">
       <li data-setup-step="hardware" data-setup-done="Hardware saved in this browser"><a href="/hardware.html">Describe fitted hardware and assign pins</a><span class="gs-step-state">No hardware save recorded</span></li>
-      <li data-setup-step="config" data-setup-done="Config saved in this browser"><a href="/config.html">Enter and verify engine safety limits</a><span class="gs-step-state">No config save recorded</span></li>
+      <li data-setup-step="config" data-setup-done="Controllers saved in this browser"><a href="/controllers.html">Configure outputs and verify safety limits</a><span class="gs-step-state">No controller save recorded</span></li>
       <li data-setup-step="calibration" data-setup-done="Calibration saved in this browser"><a href="/calibration.html">Calibrate fitted sensors and actuators</a><span class="gs-step-state">No calibration save recorded</span></li>
       <li data-setup-step="sequence" data-setup-done="Sequence saved in this browser"><a href="/sequence.html">Review startup and shutdown sequences</a><span class="gs-step-state">No sequence save recorded</span></li>
       <li data-setup-step="tools" data-setup-done="Tool command completed in this browser"><a href="/tools.html">Run a safe actuator or dry-sequence test</a><span class="gs-step-state">No tool command recorded</span></li>
@@ -53,7 +55,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
 
   <div id="dev-banner" class="dev-banner" style="display:none">
     ⚠ DEV MODE — dev controls &amp; live config editing unlocked (safety checks stay active unless bypassed via Bench Mode) &nbsp;
-    <a href="/config.html" style="color:var(--yellow);text-decoration:underline">→ Live Config Edit</a>
+    <a href="/controllers.html" style="color:var(--yellow);text-decoration:underline">→ Live Controller Edit</a>
   </div>
   <!-- Empty startup sequence warning -->
   <div id="empty-seq-banner" style="display:none;background:color-mix(in srgb, var(--yellow) 7%, transparent);border:1px solid color-mix(in srgb, var(--yellow) 40%, transparent);border-radius:7px;padding:.55rem 1rem;margin-bottom:.6rem;font-size:.82rem;color:var(--yellow);text-align:center">
@@ -82,7 +84,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
   <div id="config-version-banner" style="display:none;background:color-mix(in srgb, var(--yellow) 7%, transparent);border:1px solid color-mix(in srgb, var(--yellow) 40%, transparent);border-radius:7px;padding:.75rem 1rem;margin-bottom:1rem;font-size:.82rem;color:var(--yellow);line-height:1.6">
     <strong>⚠ Config schema mismatch</strong> — this engine file was written for a different firmware settings schema.
     Missing or unsupported settings may use built-in defaults and may not match your engine.<br>
-    <b>Recommended:</b> Go to <a href="/calibration.html" style="color:var(--yellow);text-decoration:underline">Calibration</a> and re-run sensor calibration, then verify all settings on the <a href="/config.html" style="color:var(--yellow);text-decoration:underline">Config</a> page before starting the engine.
+    <b>Recommended:</b> Go to <a href="/calibration.html" style="color:var(--yellow);text-decoration:underline">Calibration</a> and re-run sensor calibration, then verify all active controls and safety limits on <a href="/controllers.html" style="color:var(--yellow);text-decoration:underline">Controllers</a> before starting the engine.
   </div>
 
   <!-- Config load warning — boot config carried out-of-normal-range safety limits.
@@ -90,7 +92,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
        Dismiss lasts this page load only; reappears on reload while the warning persists. -->
   <div id="config-load-warn-banner" style="display:none;background:color-mix(in srgb, var(--yellow) 7%, transparent);border:1px solid color-mix(in srgb, var(--yellow) 40%, transparent);border-radius:7px;padding:.6rem 1rem;margin-bottom:.6rem;font-size:.82rem;color:var(--yellow);align-items:center;justify-content:space-between">
     <span>&#9888; <span id="config-load-warn-text"></span>
-      <a href="/config.html" style="color:var(--yellow);text-decoration:underline;margin-left:.5rem">Review limits →</a></span>
+      <a href="/controllers.html" style="color:var(--yellow);text-decoration:underline;margin-left:.5rem">Review limits →</a></span>
     <button onclick="this.parentElement.style.display='none';window._cfgLoadWarnDismissed=true" style="background:none;border:none;color:var(--yellow);font-size:1.2rem;cursor:pointer;margin-left:.8rem;line-height:1">&times;</button>
   </div>
 
@@ -108,16 +110,10 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
   <div id="fault-card" style="display:none">
     <div class="fault-title">⚠ Startup locked — exact reason</div>
     <div class="fault-desc" id="fault-desc-text"></div>
-    <button id="btn-limited-start" style="display:none;margin-top:.75rem"
-            onclick="confirmLimitedStart()">START IN REDUCED-POWER MODE</button>
-    <div id="limited-start-note" class="fault-desc" style="display:none;margin-top:.45rem">
-      One eligible failed sensor can be acknowledged explicitly. The normal
-      startup sequence and every unrelated interlock remain active.
-    </div>
     <div class="fault-actions" aria-label="Fault investigation">
       <a href="/log.html">Event evidence</a>
       <a href="/calibration.html">Check calibration</a>
-      <a href="/config.html">Review limits</a>
+      <a href="/controllers.html">Review limits</a>
       <a href="/tools.html">Standby diagnostics</a>
     </div>
   </div>
@@ -469,6 +465,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
       </div>
       <div class="oil-sub" id="throttle-startup-range-row" style="display:none">startup idle-input command range: <span id="throttle-startup-range">—</span>%</div>
       <div class="oil-sub" id="throttle-effective-note" style="display:none">base demand: <span id="throttle-base-demand">—</span>% + AB offset</div>
+      <details class="command-details"><summary>Command details</summary><div class="oil-sub" id="throttle-command-details">Owner unavailable</div></details>
     </div>
     <div class="card small" id="oil-output-card" title="Actual oil-pump PWM output. Controller Minimum Duty is a closed-loop floor, not a maximum; sequence steps such as Oil Pump On may command 100%.">
       <div class="label">Oil Pump Output</div>
@@ -478,6 +475,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
       <div class="oil-sub" id="oil-failsafe-note" style="display:none;color:var(--red)">⚠ sensor failsafe</div>
       <div class="oil-sub" id="oil-flow-warning-note" style="display:none;color:var(--warning)">⚠ monitored oil flow low or unavailable</div>
       <div class="oil-sub" id="standby-oil-feed-note" style="display:none;color:var(--accent)" title="Windmilling protection is running the oil pump because a shaft is still turning while the engine is in standby.">● windmilling oil protection active</div>
+      <details class="command-details"><summary>Command details</summary><div class="oil-sub" id="oil-command-details">Owner unavailable</div></details>
     </div>
     <div class="card small" style="grid-column:1/-1" title="Most recent state transition or ECU event. Full event history with timestamps is available on the Log page.">
       <div class="label">Last Event</div>
@@ -495,7 +493,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
         &nbsp; Total: <span id="hour-run-time">—</span>
       </div>
     </div>
-    <div class="card small" id="relight-card" style="grid-column:1/-1" title="Auto-relight: if combustion is lost while N1 is still above the minimum windmill RPM, the ECU re-ignites automatically. Flame, N1, or selected EGT can confirm success. Shows armed state and attempt count vs the configured limit.">
+    <div class="card small" id="relight-card" style="display:none;grid-column:1/-1" title="Auto-relight: if combustion is lost while N1 is still above the minimum windmill RPM, the ECU re-ignites automatically. Flame, N1, or selected EGT can confirm success. Shows armed state and attempt count vs the configured limit.">
       <div class="label">Relight</div>
       <div class="value small" id="relight-status">—</div>
       <div class="oil-sub" id="manual-relight-note" style="display:none;color:var(--yellow)">Throttle held above idle — relight active</div>
@@ -512,20 +510,6 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     </div>
   </section>
 </main>
-
-<!-- Config Export / Import -->
-<div style="max-width:900px;margin:1rem auto;padding:0 1rem">
-  <div style="border:1px solid var(--border);border-radius:8px;padding:.75rem 1rem;background:var(--surface)">
-    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-bottom:.5rem">ECU Config — Export / Import</div>
-    <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
-      <a href="/tools.html"
-         style="font-size:.82rem;padding:.35rem .9rem;border:1px solid var(--accent);border-radius:5px;color:var(--accent);text-decoration:none;background:var(--bg)">
-        Open Tools Backup / Restore
-      </a>
-    </div>
-    <div style="font-size:.68rem;color:var(--dim);margin-top:.4rem">Full import/export is centralized on Tools to avoid restoring only part of the ECU configuration. Logs are stored separately.</div>
-  </div>
-</div>
 
 <!-- Beta acknowledgement dialog -->
 <div id="beta-ack-overlay" class="beta-ack-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="beta-ack-title">
@@ -682,20 +666,33 @@ function renderStartChecks(sequenceCount, sequenceUnavailable = false) {
   rows.push(['Safety state', d.bench_mode ? '<strong class="bad">BENCH MODE — BYPASSED</strong>' : 'Normal checks']);
   rows.push(['Startup sequence', sequenceUnavailable ? 'Could not read — ECU will still validate START' :
     (Number.isInteger(sequenceCount) ? sequenceCount + ' block' + (sequenceCount === 1 ? '' : 's') : 'Checking…')]);
+  const limited = d.mode === 'STANDBY' && d.limited_start_allowed === true;
+  const normalButton = document.getElementById('btn-confirm-start');
+  if (normalButton) {
+    normalButton.disabled = false;
+    normalButton.textContent = limited ? 'Start Reduced Power' : 'Confirm Start';
+    normalButton.classList.toggle('limited-start-confirm', limited);
+  }
+  const limitedNote = limited
+    ? '<div class="start-confirm-checks-note" style="color:var(--yellow)"><strong>' +
+      escapeHtmlText(String(d.limited_start_sensor || 'Required sensor')) +
+      ' feedback is unavailable.</strong> Reduced-power start keeps the configured fuel cap, disables afterburner, and preserves every unrelated interlock.</div>'
+    : '';
   box.innerHTML = '<div class="start-confirm-checks-title">Live ECU start checks</div>' +
     rows.map(([name, value]) => `<div class="start-confirm-checks-row"><span>${escapeHtmlText(name)}</span><span>${value}</span></div>`).join('') +
-    '<div class="start-confirm-checks-note">Live state is checked again when you confirm.</div>';
+    limitedNote + '<div class="start-confirm-checks-note">Live state is checked again when you confirm.</div>';
 }
 function confirmStart() {
-  document.getElementById('start-confirm-overlay').style.display = 'none';
+  const limited = _lastData?.mode === 'STANDBY' && _lastData?.limited_start_allowed === true;
   const dashboardStart = document.getElementById('btn-start');
   const mode = (_lastData && _lastData.mode) || 'unknown';
-  if (_telemetryStale || !_lastData || mode !== 'STANDBY' || dashboardStart?.disabled) {
+  if (_telemetryStale || !_lastData || mode !== 'STANDBY' || (dashboardStart?.disabled && !limited)) {
     const reason = _telemetryStale ? 'live telemetry is stale'
       : (dashboardStart?.title || ('ECU mode is ' + mode));
     alert('START is no longer available: ' + reason + '.\n\nReview the live dashboard state and try again.');
     return;
   }
+  document.getElementById('start-confirm-overlay').style.display = 'none';
   // Guard: verify startup sequence is non-empty before sending start
   fetch('/api/hardware').then(r => r.json()).then(hw => {
     const seq = hw.startup_seq || [];
@@ -703,18 +700,18 @@ function confirmStart() {
       alert('Startup sequence is empty.\n\nGo to the Sequence page and add blocks (at minimum: OilPumpOn -> TimedDelay -> IgniterOn -> FuelPumpIdle -> TimedDelay -> IgniterOff -> TimedDelay) before starting.');
       return;
     }
-    _doStart();
-  }).catch(() => _doStart()); // if fetch fails, proceed and let firmware handle it
+    _doStart(limited);
+  }).catch(() => _doStart(limited)); // if fetch fails, proceed and let firmware handle it
 }
-async function _doStart() {
+async function _doStart(limited = false) {
   // Spinner/feedback state: disable button and change text
   const btn = document.getElementById('btn-start');
   if (btn) {
     btn._originalText = btn.textContent;
-    btn.textContent = 'Starting...';
+    btn.textContent = limited ? 'Starting reduced power...' : 'Starting...';
     btn.disabled = true;
   }
-  const result = await sendCmd('/api/start');
+  const result = await sendCmd(limited ? '/api/start-limited' : '/api/start');
   if (!result || !result.ok) {
     if (btn) {
       btn.textContent = btn._originalText || 'START';
@@ -727,7 +724,7 @@ async function _doStart() {
     // Guard against the engine having already entered STARTUP \u2014 in that case the button
     // must stay disabled until the sequence completes or fails.
     btn._startTimeout = setTimeout(function() {
-      if (btn.disabled && btn.textContent === 'Starting...') {
+      if (btn.disabled && (btn.textContent === 'Starting...' || btn.textContent === 'Starting reduced power...')) {
         const mode = (_lastData && _lastData.mode) || '';
         const active = mode === 'RUNNING' || mode === 'STARTUP' || mode === 'SHUTDOWN';
         if (!active) {
@@ -737,19 +734,6 @@ async function _doStart() {
       }
     }, 3000);
   }
-}
-async function confirmLimitedStart() {
-  const d = _lastData || {};
-  const sensor = String(d.limited_start_sensor || 'failed sensor');
-  const cap = Number.isFinite(Number(d.limp_throttle_cap)) ? Number(d.limp_throttle_cap).toFixed(0) : 'configured';
-  const accepted = confirm(
-    'Start in REDUCED-POWER MODE?\n\nOverride: ' + sensor +
-    '\nFuel cap: ' + cap + '%\n\nThe protection provided by this sensor will be unavailable. All other startup checks, interlocks, limits, STOP/estop functions, and outputs remain under normal control. A second required sensor failure will stop the engine.'
-  );
-  if (!accepted) return;
-  const result = await sendCmd('/api/start-limited');
-  if (!result || !result.ok) return;
-  document.getElementById('start-confirm-overlay').style.display = 'none';
 }
 function cancelStart() {
   document.getElementById('start-confirm-overlay').style.display = 'none';

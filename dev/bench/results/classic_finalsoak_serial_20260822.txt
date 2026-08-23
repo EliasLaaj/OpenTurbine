@@ -1,0 +1,98 @@
+[WebServer] POST /api/ecu_config: 15160 bytes - reboot in 1s
+[WebServer] Restarting: engine config restore
+ets Jul 29 2019 12:21:46
+
+rst:0xc (SW_CPU_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:4640
+load:0x40078000,len:15660
+load:0x40080400,len:3164
+entry 0x4008059c
+
+[OT] OpenTurbine booting - default profile: OpenTurbine
+[OT] LittleFS OK
+[OT] Boot #322
+[OT] Reset reason: SOFTWARE (3)
+[OT] system diagnostics ready
+[HWCfg] Loaded OK - profile: OpenTurbine
+[Config] Loaded OK - profile: OpenTurbine
+[OT] Sequences: startup=7, shutdown=3, ab_ign=0, ab_shut=0 blocks
+[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.
+[OT] Starting web server
+[WiFi] AP: OpenTurbine  IP: 192.168.4.1  (open network)  TX=8 dBm
+[WiFi] Captive portal DNS started
+[WiFi] mDNS: http://ot.local
+[WebServer] Started on port 80
+[OT] Web server ready
+[THROTTLE_SRV] servo attach pin=22 freq=50Hz bits=16 OK
+[OIL_PUMP] LEDC attach pin=4 freq=5000Hz bits=12 OK
+[OT] Setup complete
+[Config] Refusing settings save: unified candidate failed structural verification
+[Config] Incomplete write to ecu_config.tmp
+[HWCfg] Hardware channel registry is missing or invalid - START inhibited
+[Config] JSON parse error: NoMemory
+[OTA] Upload start: firmware.bin
+[OTA] Success: 1617296 bytes - rebooting
+[WebServer] Restarting: firmware OTA
+ets Jul 29 2019 12:21:46
+
+rst:0xc (SW_CPU_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:4640
+load:0x40078000,len:15660
+load:0x40080400,len:3164
+entry 0x4008059c
+
+[OT] OpenTurbine booting - default profile: OpenTurbine
+[OT] LittleFS OK
+[OT] Boot #323
+[OT] Reset reason: SOFTWARE (3)
+[OT] system diagnostics ready
+[HWCfg] Loaded OK - profile: OpenTurbine
+[Config] Loaded OK - profile: OpenTurbine
+[OT] Sequences: startup=7, shutdown=3, ab_ign=0, ab_shut=0 blocks
+[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.
+[OT] Starting web server
+[WiFi] AP: OpenTurbine  IP: 192.168.4.1  (open network)  TX=8 dBm
+[WiFi] Captive portal DNS started
+[WiFi] mDNS: http://ot.local
+[WebServer] Started on port 80
+[OT] Web server ready
+[THROTTLE_SRV] servo attach pin=22 freq=50Hz bits=16 OK
+[OIL_PUMP] LEDC attach pin=4 freq=5000Hz bits=12 OK
+[OT] Setup complete
+[WebServer] POST /api/ecu_config: 20768 bytes - reboot in 1s
+[WebServer] Restarting: engine config restore
+ets Jul 29 2019 12:21:46
+
+rst:0xc (SW_CPU_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:2
+load:0x3fff0030,len:4640
+load:0x40078000,len:15660
+load:0x40080400,len:3164
+entry 0x4008059c
+
+[OT] OpenTurbine booting - default profile: OpenTurbine
+[OT] LittleFS OK
+[OT] Boot #324
+[OT] Reset reason: SOFTWARE (3)
+[OT] system diagnostics ready
+[HWCfg] Loaded OK - profile: OpenTurbine
+[Config] Loaded OK - profile: OpenTurbine
+[OT] Sequences: startup=7, shutdown=3, ab_ign=0, ab_shut=0 blocks
+[VALIDATE] WARN startup: No starter, spool, or air-starter action is present. The sequence assumes the rotor is spooled externally; add a starter action unless manual/external starting is intentional.
+[OT] Starting web server
+[WiFi] AP: OpenTurbine  IP: 192.168.4.1  (open network)  TX=8 dBm
+[WiFi] Captive portal DNS started
+[WiFi] mDNS: http://ot.local
+[WebServer] Started on port 80
+[OT] Web server ready
+[THROTTLE_SRV] servo attach pin=22 freq=50Hz bits=16 OK
+[OIL_PUMP] LEDC attach pin=4 freq=5000Hz bits=12 OK
+[OT] Setup complete

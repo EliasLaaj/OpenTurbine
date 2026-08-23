@@ -42,7 +42,7 @@ function runValidation() {
   if (idleTargetRpm !== undefined && idleComparisonLimit !== undefined &&
       idleComparisonLimit > 0 && idleTargetRpm >= idleComparisonLimit) {
     warnings.push({
-      section: 'Automatic Idle Control',
+      section: 'Idle',
       key:     'warn-idlelimit',
       msg:     '⚠ Idle target is at or above the selected shaft hard limit.'
     });
@@ -151,7 +151,7 @@ function runValidation() {
   const oilRunningVal = fv('oil_rm');
   if (oilRunningVal !== undefined && oilRunningVal === 0) {
     warnings.push({
-      section: 'Oil System',
+      section: 'Oil Pressure Safety',
       key:     'warn-oil-zero',
       msg:     '⚠ Running Oil Min is 0 — oil pressure fault protection is DISABLED. Set a value to protect the engine.'
     });
@@ -213,6 +213,36 @@ async function validateBeforeSave(cfg) {
   const hasP2 = hasRegistryInput('p2_pressure');
   const hasFlame = hasRegistryInput('flame');
   const hasAnyIdleRpm = hasN1 || hasN2;
+
+  const customControls = _controllerRulesDirty && Array.isArray(cfg.rules) ? cfg.rules : [];
+  const installedInputs = new Set(simpleControlInputs().map(row => String(row.id || '')));
+  const availableOutputs = new Set(simpleControlOutputs().map(row => String(row.id || '')));
+  const claimedOutputs = new Set();
+  customControls.forEach((control, index) => {
+    const label = String(control.name || `Custom controller ${index + 1}`);
+    const output = String(control.target || '');
+    const kind = Number(control.kind || 0);
+    if ((Number(control.mode_mask ?? 4) & 0x0f) === 0)
+      errors.push(`${label}: select at least one operating state.`);
+    if (!installedInputs.has(String(control.source || '')))
+      errors.push(`${label}: choose a fitted input or feedback signal.`);
+    if (!availableOutputs.has(output))
+      errors.push(`${label}: its output is unavailable or already belongs to a dedicated controller.`);
+    if (control.enabled !== false && claimedOutputs.has(output))
+      errors.push(`${label}: another custom controller already owns this output.`);
+    if (control.enabled !== false) claimedOutputs.add(output);
+    if (kind === 1 && Number(control.input_min) === Number(control.input_max))
+      errors.push(`${label}: mapped input low and high cannot be equal.`);
+    if (kind === 2) {
+      const targetType = Number(control.target_source_type || 0);
+      if (targetType !== 0 && !installedInputs.has(String(control.target_source || '')))
+        errors.push(`${label}: choose a fitted target-source input.`);
+      if (targetType === 2 && Number(control.target_input_min) === Number(control.target_input_max))
+        errors.push(`${label}: target-source input low and high cannot be equal.`);
+      if (Number(control.output_min) > Number(control.output_max))
+        errors.push(`${label}: minimum output must not exceed maximum output.`);
+    }
+  });
 
   if (hasN1 && rpmLimit !== undefined && minRpm !== undefined && minRpm >= rpmLimit)
     errors.push('Min RPM (' + minRpm + ') must be below RPM Limit (' + rpmLimit + ').');
@@ -456,6 +486,44 @@ function _cancelSaveRecap() {
   if (cb) cb.disabled = false;
 }
 
+async function _saveUnifiedControllerChanges(payload, saveMsg, confirmButton) {
+  const merge = (target, patch) => {
+    for (const [key, value] of Object.entries(patch || {})) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        if (!target[key] || typeof target[key] !== 'object' || Array.isArray(target[key])) target[key] = {};
+        merge(target[key], value);
+      } else target[key] = value;
+    }
+  };
+  if (typeof stopGlobalTelemetry === 'function') stopGlobalTelemetry();
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const latestResponse = await fetch('/api/ecu_config', {cache:'no-store'});
+  if (!latestResponse.ok) throw new Error('could not refresh the current engine file');
+  const engine = await latestResponse.json();
+  if (!engine.hardware || !engine.settings) throw new Error('current engine file is incomplete');
+  merge(engine.settings, payload);
+  if (CONFIG_SURFACE === 'controllers') {
+    engine.hardware.controllers = JSON.parse(JSON.stringify(hwCfg.controllers || {}));
+    engine.hardware.safety = JSON.parse(JSON.stringify(hwCfg.safety || {}));
+    engine.hardware.oil_loops = JSON.parse(JSON.stringify(hwCfg.oil_loops || []));
+  } else if (CONFIG_SURFACE === 'system') {
+    for (const key of ['profile_id','profile_desc','wifi_password','wifi_tx_power_dbm','cluster_serial','mavlink']) {
+      if (hwCfg[key] !== undefined) engine.hardware[key] = JSON.parse(JSON.stringify(hwCfg[key]));
+    }
+    engine.settings.profile_id = engine.hardware.profile_id;
+  }
+  const response = await fetch('/api/ecu_config?source=controllers', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(engine)
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok === false) throw new Error(result.detail || result.error || `HTTP ${response.status}`);
+  _clearDirty();
+  saveMsg.textContent = '✓ Saved — ECU rebooting…';
+  saveMsg.style.color = 'var(--green)';
+  if (confirmButton) confirmButton.disabled = true;
+  setTimeout(() => { location.href = CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'; }, 12000);
+}
+
 // Stage 2: user confirmed — actually send to device.
 function _doSave() {
   const cb = document.getElementById('save-recap-confirm-btn');
@@ -476,15 +544,51 @@ function _doSave() {
     const value = field.path.reduce((obj, key) => obj?.[key], cfg);
     if (value !== undefined) setPath(payload, field.path, value);
   }));
-  fetch('/api/config', {
-    method: 'PATCH',
-    body: JSON.stringify(payload),
-    headers: { 'Content-Type': 'application/json' }
-  }).then(async r => {
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok || d.ok === false) throw new Error(d.error || d.reason || ('HTTP ' + r.status));
-    return d;
-  }).then(async d => {
+  if (_controllerRulesDirty) {
+    payload.rules = JSON.parse(JSON.stringify(cfg.rules || []));
+    payload.controller_schema = Number(cfg.controller_schema || 1);
+  }
+  if (_controllerHardwareDirty) {
+    _saveUnifiedControllerChanges(payload, saveMsg, cb).catch(error => {
+      saveMsg.textContent = '✗ ' + (error?.message || error);
+      saveMsg.style.color = '#f55';
+      if (cb) cb.disabled = false;
+      if (typeof startTelemetryBoot === 'function') startTelemetryBoot();
+    });
+    return;
+  }
+  // A Classic ESP32 can be close to its largest-contiguous-block limit while
+  // the live WebSocket owns queued frames. Pause it briefly for the durable
+  // filesystem transaction, then resume normal telemetry automatically.
+  const pauseTelemetry = typeof stopGlobalTelemetry === 'function';
+  const sendSave = async () => {
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      try {
+        const r = await fetch('/api/config', {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal
+        });
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.ok !== false) return d;
+        lastError = new Error(d.error || d.reason || ('HTTP ' + r.status));
+        if (![500, 503].includes(r.status)) throw lastError;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= 2) throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
+      saveMsg.textContent = 'Storage busy — retrying…';
+      await new Promise(resolve => setTimeout(resolve, 1200 + attempt * 600));
+    }
+    throw lastError || new Error('Save failed');
+  };
+  const finishSave = () => sendSave().then(async d => {
     if (d.ok) {
       if (window.OTSetup) OTSetup.mark('config');
       // Firmware returns success only after validating and durably persisting
@@ -512,7 +616,31 @@ function _doSave() {
     saveMsg.textContent = '✗ ' + e;
     saveMsg.style.color = '#f55';
     if (cb) cb.disabled = false;
+  }).finally(() => {
+    if (pauseTelemetry && typeof startTelemetryBoot === 'function') startTelemetryBoot();
   });
+  // Closing the WebSocket is asynchronous; give AsyncTCP one scheduling slice
+  // to release its frame/connection storage before opening LittleFS.
+  if (pauseTelemetry) {
+    const idle = typeof window.OTWaitForTelemetryIdle === 'function'
+      ? window.OTWaitForTelemetryIdle(1600) : Promise.resolve(true);
+    idle.finally(async () => {
+      stopGlobalTelemetry();
+      // WebSocket messages are copied into heap-backed send buffers. Their
+      // ACK/destructors can trail close() briefly on Classic. Wait until the
+      // ECU reports a useful contiguous block instead of racing LittleFS and
+      // returning a low-memory save error. This normally completes in well
+      // under a second and is bounded so a status fault cannot hang Save.
+      for (let attempt = 0; attempt < 16; attempt++) {
+        try {
+          const status = await fetch('/api/status', { cache:'no-store' }).then(r => r.ok ? r.json() : null);
+          if (status && Number(status.max_alloc_heap) >= 12000 && Number(status.ws_clients || 0) === 0) break;
+        } catch (_) {}
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      finishSave();
+    });
+  } else finishSave();
 }
 
 // ── Engine type presets ───────────────────────────────────────

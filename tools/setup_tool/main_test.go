@@ -197,7 +197,7 @@ func TestManifestCompatibilityUsesMinimumToolVersion(t *testing.T) {
 	if err := validateManifestCompatibility(base); err != nil {
 		t.Fatalf("newer client must accept an older compatible baseline: %v", err)
 	}
-	base.MinimumSetupToolVersion = "0.7.1"
+	base.MinimumSetupToolVersion = "0.7.2"
 	if err := validateManifestCompatibility(base); err == nil {
 		t.Fatal("client must reject a package that requires a newer setup tool")
 	}

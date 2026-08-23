@@ -18,8 +18,13 @@ public:
         return _state.compare_exchange_strong(expected, WebWriting, std::memory_order_acq_rel);
     }
 
-    static void markReadyForCore() {
+    static uint32_t markReadyForCore(uint32_t settleMs = 0) {
+        const uint32_t generation =
+            _nextGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+        _pendingGeneration.store(generation, std::memory_order_release);
+        _readyAfterMs.store(millis() + settleMs, std::memory_order_release);
         _state.store(ReadyForCore, std::memory_order_release);
+        return generation;
     }
 
     // Called only by the web writer while it owns WebWriting. Ownership of
@@ -27,10 +32,11 @@ public:
     static uint32_t publishCandidate(char* data, size_t length, uint32_t settleMs = 0) {
         _pendingData = data;
         _pendingLength = length;
-        const uint32_t generation = _nextGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+        const uint32_t generation =
+            _nextGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         _pendingGeneration.store(generation, std::memory_order_release);
         _readyAfterMs.store(millis() + settleMs, std::memory_order_release);
-        markReadyForCore();
+        _state.store(ReadyForCore, std::memory_order_release);
         return generation;
     }
 
@@ -76,6 +82,19 @@ public:
     static bool tryBeginCoreApply() {
         const uint32_t ready = _readyAfterMs.load(std::memory_order_acquire);
         if (static_cast<int32_t>(millis() - ready) < 0) return false;
+        // ReadyForCore is a one-shot ticket, not merely a level. A stale ready
+        // state must never run Hardware::applyConfig() again: that operation is
+        // intentionally heavyweight and repeating it in the control loop
+        // starves Wi-Fi on Classic ESP32. Generation comparison also makes a
+        // duplicate/corrupted state transition fail closed without blocking a
+        // later, genuinely new web update.
+        const uint32_t pending = _pendingGeneration.load(std::memory_order_acquire);
+        if (!pending ||
+            pending == _completedGeneration.load(std::memory_order_acquire)) {
+            uint8_t stale = ReadyForCore;
+            _state.compare_exchange_strong(stale, Idle, std::memory_order_acq_rel);
+            return false;
+        }
         uint8_t expected = ReadyForCore;
         return _state.compare_exchange_strong(expected, CoreApplying, std::memory_order_acq_rel);
     }

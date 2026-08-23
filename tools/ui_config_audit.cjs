@@ -21,8 +21,8 @@ function auditConfigStructure() {
   const logSource = fs.readFileSync(path.join(root, 'data_src', 'log.html'), 'utf8');
   const toolsSource = fs.readFileSync(path.join(root, 'data_src', 'tools.html'), 'utf8');
   const configCpp = fs.readFileSync(path.join(root, 'src', 'system', 'Config.cpp'), 'utf8');
-  const schema = readConstExpression(configSource, 'const SCHEMA = ', '\n];');
-  const groups = readConstExpression(configSource, 'const WORKSPACE_GROUPS = ', '\n];');
+  const schema = readConstExpression(configSource, 'const ALL_CONFIG_SCHEMA = ', '\n];');
+  const groups = readConstExpression(configSource, 'const ALL_WORKSPACE_GROUPS = ', '\n];');
   const fields = schema.flatMap(section => section.fields.map(field => ({
     ...field, section: section.title, pathText: field.path.join('.')
   })));
@@ -34,8 +34,11 @@ function auditConfigStructure() {
   assert.equal(new Set(schema.map(section => section.title)).size, schema.length,
     'Config contains duplicate section titles');
   const assignments = groups.flatMap(group => group.sections);
-  assert.deepEqual([...assignments].sort(), schema.map(section => section.title).sort(),
-    'Every Config section must belong to exactly one logical workspace group');
+  const controllerOwnedSections = ['Automatic N2 Speed Control'];
+  assert.deepEqual([...assignments, ...controllerOwnedSections].sort(), schema.map(section => section.title).sort(),
+    'Every settings section must belong to a workspace group or one explicit output controller');
+  assert.equal(assignments.includes('Automatic N2 Speed Control'), false,
+    'N2 governing must not return as a duplicate standalone workspace');
   assert.equal(fields.some(field => field.pathText.startsWith('tools.')), false,
     'Bench-test settings must be owned only by Tools > Test settings');
   for (const key of ['sf_tit', 'sf_p1t', 'sf_p2t']) {
@@ -54,11 +57,11 @@ function auditConfigStructure() {
     'The current-session download must start disabled until its API confirms a log exists');
   assert.match(logSource, /No current session log; use Past Sessions above/,
     'The empty current-session state must not contradict the archived Past Sessions list');
-  assert.match(sequenceSource, /rule-mode-standby-/, 'Control rules must expose Standby as an active state');
-  assert.doesNotMatch(sequenceSource, /rule-mode-all-|All operating states/, 'Control rules must not hide states behind an all-operating shortcut');
-  assert.match(sequenceSource, /Output when switch is ON/, 'Binary rules must use direct ON/OFF output values');
-  assert.match(sequenceSource, />On<\/option><option value="0"/, 'Binary outputs must be presented as On/Off choices');
-  assert.match(sequenceSource, /ruleUnit\(sensor\) === '0\/1' \? 0\.5/, 'Binary rules must store a fixed midpoint threshold');
+  assert.match(configSource, /mode_mask:4/, 'Simple controls must be limited to the normal RUNNING owner phase');
+  assert.match(configSource, /On \/ Off with hysteresis/, 'Simple controls must expose an understandable binary method');
+  assert.match(configSource, /Map input to output/, 'Variable outputs must support proportional mapping');
+  assert.match(configSource, /One normal owner per output/, 'Controller ownership must be explicit');
+  assert.match(configSource, /Hold a feedback target/, 'Custom variable outputs must support feedback control');
 
   const firmwareToolKeys = [...new Set(
     [...configCpp.matchAll(/tl\["([^"]+)"\]\s*=/g)].map(match => match[1])
@@ -150,7 +153,7 @@ async function goto(page, route, waitSelector) {
     results.push('Config keys, paths, labels, section ownership, Tools ownership, and shared Sequence ranges are unique and consistent');
     await reset(page);
 
-    await goto(page, 'hardware.html', '#f-profile-id');
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     assert.equal(await page.locator('#f-saf-lowfuel').count(), 0);
     assert.equal(await page.evaluate(() => 'low_fuel' in (cfg.safety || {})), false);
     results.push('hardware page does not expose unsupported low-fuel flow safety');
@@ -302,26 +305,19 @@ async function goto(page, route, waitSelector) {
     results.push('disconnected I2C hardware cannot be newly selected and can remove all saved channel dependencies in one action');
 
     await reset(page);
-    await goto(page, 'hardware.html', '#f-profile-id');
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     await patchHardware(page, { platform: 'esp32s3' });
-    await goto(page, 'hardware.html', '#f-profile-id');
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     const s3Pins = await page.evaluate(() => ({
       output22: buildPinOptions(22, 'out').includes('value="22"'),
       adc1: buildPinOptions(1, 'adc').includes('value="1"')
     }));
     assert.deepEqual(s3Pins, { output22:false, adc1:true });
-    assert.equal(await page.locator('#f-cl-tx option[value="22"]').count(), 0);
-    assert.equal(await page.locator('#f-cl-rx option[value="22"]').count(), 0);
-    assert.equal(await page.locator('#f-cl-rx option[value="-1"]').count(), 1);
-    results.push('hardware GPIO lists switch to ESP32-S3-safe output, input, ADC, and cluster RX choices');
+    results.push('hardware GPIO lists switch to ESP32-S3-safe output and ADC choices');
 
     await reset(page);
     await goto(page, 'sequence.html', '#add-startup-sel');
     const seqDeps = await page.evaluate(() => {
-      function optionDisabled(selector, value) {
-        const opt = document.querySelector(`${selector} option[value="${value}"]`);
-        return opt ? opt.disabled : null;
-      }
       const fullSensors = getEnabledSensors().map(s => s.key);
       const fullActuators = getEnabledActuators().map(a => a.key);
       hwCfg.has_two_shaft = false;
@@ -330,16 +326,10 @@ async function goto(page, route, waitSelector) {
       hwCfg.actuators.ab_sol.enabled = true;
       hwCfg.actuators.ab_pump.enabled = true;
       populateAddSelects();
-      renderRules();
       const hiddenMaster = {
         sensors: getEnabledSensors().map(s => s.key),
         actuators: getEnabledActuators().map(a => a.key),
-        abPumpOptionCount: document.querySelectorAll('#add-afterburner-sel option[value="ABPumpOn"]').length,
-        ruleN2Disabled: optionDisabled('#rule-sensor-0', '6'),
-        ruleAbFlameDisabled: optionDisabled('#rule-sensor-0', '19'),
-        ruleAbInputDisabled: optionDisabled('#rule-sensor-0', '24'),
-        ruleAbSolDisabled: optionDisabled('#rule-act-0', '11'),
-        ruleAbPumpDisabled: optionDisabled('#rule-act-0', '12')
+        abPumpOptionCount: document.querySelectorAll('#add-afterburner-sel option[value="ABPumpOn"]').length
       };
       return { fullSensors, fullActuators, hiddenMaster };
     });
@@ -349,12 +339,7 @@ async function goto(page, route, waitSelector) {
     assert.equal(seqDeps.hiddenMaster.sensors.includes('n2_rpm'), true);
     assert.equal(seqDeps.hiddenMaster.actuators.includes('ab_sol'), true);
     assert.equal(seqDeps.hiddenMaster.abPumpOptionCount, 1);
-    assert.equal(seqDeps.hiddenMaster.ruleN2Disabled, false);
-    assert.equal(seqDeps.hiddenMaster.ruleAbFlameDisabled, false);
-    assert.equal(seqDeps.hiddenMaster.ruleAbInputDisabled, true);
-    assert.equal(seqDeps.hiddenMaster.ruleAbSolDisabled, false);
-    assert.equal(seqDeps.hiddenMaster.ruleAbPumpDisabled, false);
-    results.push('sequence and control rules follow fitted N2/afterburner devices regardless of obsolete masters');
+    results.push('sequence choices follow fitted N2/afterburner devices regardless of obsolete masters');
 
     await reset(page);
     await patchHardware(page, {
@@ -364,9 +349,11 @@ async function goto(page, route, waitSelector) {
       ab_trigger: { source: 0, switch_pin: -1, input_pin: 4 }
     });
     await patchData(page, { mode:'STANDBY', config_locked:false });
-    await goto(page, 'config.html', '#cf-tot_limit');
-    assert.equal(await page.locator('.config-group').count(), 6,
-      'Config workspace should render the canonical grouped navigation');
+    await goto(page, 'controllers.html', '#cf-tot_limit');
+    assert.ok(await page.locator('[data-controller-card]').count() >= 1,
+      'Controllers should render saved output-first controller definitions');
+    assert.equal(await page.locator('#controller-hardware-setup').count(), 0,
+      'Legacy controller-assignment toggles must not form a parallel control system');
     assert.equal(await page.locator('[data-group="bench"]').count(), 0,
       'Bench-test settings belong in Tools > Test settings, not Config');
     assert.equal(await page.locator('#btn-view-basic').getAttribute('class').then(v => v.includes('active')), true);
@@ -375,14 +362,14 @@ async function goto(page, route, waitSelector) {
     assert.ok(essentialCount <= 32, `Essentials should stay focused; rendered ${essentialCount} fields`);
     assert.match(await page.locator('#cf-lm_mt').evaluate(el => el.closest('.cfg-field')?.textContent || ''),
       /automatically because feedback used by an enabled protection\/controller becomes unhealthy/i);
-    await page.locator('#cfg-search').fill('governor');
+    await page.locator('#cfg-search').fill('relight');
     assert.match(await page.locator('#cfg-result-count').textContent(), /^\d+ settings?$/);
-    assert.equal(await shown(page, '[data-group="power"]'), true);
+    assert.equal(await shown(page, '[data-purpose="igniter"]'), true);
     assert.equal(await shown(page, '[data-group="engine"]'), false);
     await page.locator('#cfg-search').fill('');
     assert.ok(await page.locator('.cfg-help').count() > 100,
       'Long engineering help should remain available through progressive disclosure');
-    const incompleteHelp = await page.evaluate(() => Array.from(document.querySelectorAll('.cfg-field')).flatMap(field => {
+    const incompleteHelp = await page.evaluate(() => Array.from(document.querySelectorAll('.cfg-section:not([data-always-visible]) .cfg-field')).flatMap(field => {
       const help = (field.querySelector('.cfg-desc')?.textContent || '').trim();
       const label = (field.querySelector('.cfg-label')?.textContent || '').trim();
       return !help || /^(undefined|null|value|setting)$/i.test(help) ? [label] : [];
@@ -401,7 +388,6 @@ async function goto(page, route, waitSelector) {
       setNumber('rpm_limit', 50000);
       setCheck('pb_n1e', true); setNumber('pb_n1s', 50000); setNumber('pb_n1h', 52000);
       setNumber('di_src', 1); setNumber('di_tr', 30000);
-      setNumber('cl_n2', 30000);
       hwCfg.safety.hot_start = true;
       setNumber('tot_limit', 650); setNumber('sf_hs', 700); setNumber('sf_st', 0);
       setNumber('so_src', 0);
@@ -412,9 +398,7 @@ async function goto(page, route, waitSelector) {
     const n2WarningDetail = JSON.stringify(n2RelationshipWarnings);
     assert.ok(n2RelationshipWarnings.some(text => /pullback/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /N1 pullback/i.test(text)), n2WarningDetail);
-    assert.ok(n2RelationshipWarnings.some(text => /Governor target/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /Idle target/i.test(text)), n2WarningDetail);
-    assert.ok(n2RelationshipWarnings.some(text => /Cluster N2 warning/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /windmilling oil protection can never activate/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /both zero/i.test(text)), n2WarningDetail);
     assert.ok(n2RelationshipWarnings.some(text => /Pre-start EGT maximum/i.test(text)), n2WarningDetail);
@@ -428,7 +412,7 @@ async function goto(page, route, waitSelector) {
     assert.match(n1PullbackWithoutTrip, /Maximum N1 Speed/);
     assert.doesNotMatch(n1PullbackWithoutTrip, /hard N1 shutdown/);
     results.push('config warns about unsafe shaft, hot-start and windmilling-oil relationships');
-    await goto(page, 'config.html', '#cf-tot_limit');
+    await goto(page, 'controllers.html', '#cf-tot_limit');
     assert.equal(await page.locator('#dev-mode-tools-link').getAttribute('href'), '/tools.html#card-dev-mode');
     assert.equal(await page.locator('#btn-dev-mode').count(), 0,
       'Config must not bypass the guarded Developer Mode control on Tools');
@@ -471,7 +455,7 @@ async function goto(page, route, waitSelector) {
       fuel_press_min: 0, tit_limit: 0
     });
     await page.reload();
-    await page.waitForSelector('#cf-tot_limit');
+    await page.waitForSelector('#cf-tot_limit', {state:'attached'});
     assert.equal(await shown(page, '#safety-ext-section'), false);
     assert.equal(await shown(page, '#governor-cfg-section'), false);
     for (const selector of ['#ab-cfg-section', '#ab-ign-section', '#ab-flame-section', '#ab-run-section']) {
@@ -489,7 +473,7 @@ async function goto(page, route, waitSelector) {
       }
     });
     await patchData(page, { mode:'STANDBY', config_locked:false });
-    await goto(page, 'config.html', '#cf-th_ex');
+    await goto(page, 'controllers.html', '#cf-th_ex');
     assert.equal(await disabled(page, '#cf-th_ex'), true,
       'Throttle Expo must lock when the main fuel output exists but no physical throttle input is fitted');
     assert.match(await page.locator('#cf-th_ex').evaluate(el => el.closest('.cfg-field')?.title || ''),
@@ -502,7 +486,7 @@ async function goto(page, route, waitSelector) {
     await patchData(page, { mode:'STANDBY', config_locked:false });
     const beforePresetConfig = await (await page.request.get(`${base}/api/config`)).json();
     const beforePresetSequence = JSON.parse(JSON.stringify(beforePresetConfig.sequence));
-    await goto(page, 'config.html', '#preset-sel');
+    await goto(page, 'controllers.html', '#preset-sel');
     await page.locator('#preset-bar > summary').click();
     await page.locator('#preset-sel').selectOption('turboshaft');
     await page.waitForSelector('#ot-app-dialog.show');
@@ -517,7 +501,7 @@ async function goto(page, route, waitSelector) {
     await page.waitForSelector('#save-recap-modal', {state:'visible'});
     const presetRecap = await page.locator('#save-recap-body').textContent();
     assert.match(presetRecap, /Engine Protection Limits\s*\/\s*Maximum N1 Speed/i);
-    assert.match(presetRecap, /Automatic Idle Control\s*\/\s*Idle Target/i);
+    assert.match(presetRecap, /Idle\s*\/\s*Idle Target/i);
     assert.match(presetRecap, /Engine Protection Limits\s*\/\s*Begin N1 Throttle Reduction/i);
     assert.match(presetRecap, /Engine Protection Limits\s*\/\s*Full Temperature Reduction/i);
     assert.doesNotMatch(presetRecap, /live:/i);
@@ -642,8 +626,21 @@ async function goto(page, route, waitSelector) {
 
     await reset(page);
     await patchData(page, { mode:'STARTUP', dev_mode:true, config_locked:true });
-    await goto(page, 'config.html', '#cf-th_ru');
-    await page.waitForFunction(() => document.querySelector('#cfg-lock-badge')?.textContent.includes('Read-only'));
+    await goto(page, 'controllers.html', '#cf-th_ru');
+    await page.waitForFunction(() => document.querySelector('#cfg-lock-badge')?.textContent.includes('Read-only'), null, { timeout: 10000 })
+      .catch(async error => {
+        const state = await page.evaluate(() => ({
+          badge: document.querySelector('#cfg-lock-badge')?.textContent,
+          runtimeMode: typeof runtimeMode === 'undefined' ? 'undefined' : runtimeMode,
+          runtimeDevMode: typeof runtimeDevMode === 'undefined' ? 'undefined' : runtimeDevMode,
+          connected: document.querySelector('#conn-label')?.textContent,
+          applyDataType: typeof window.applyData,
+          extended: window.applyData?._configExtended || false,
+          installAttempts: typeof configTelemetryInstallAttempts === 'undefined' ? 'undefined' : configTelemetryInstallAttempts,
+          lastMode: typeof _lastData === 'undefined' ? 'undefined' : _lastData?.mode
+        }));
+        throw new Error(`${error.message}\nControllers runtime state=${JSON.stringify(state)}`);
+      });
     assert.equal(await disabled(page, '#cf-th_ru'), true);
     assert.equal(await disabled(page, '#cf-rpm_limit'), true);
     assert.equal(await disabled(page, '#preset-sel'), true);
@@ -658,8 +655,15 @@ async function goto(page, route, waitSelector) {
     results.push('STARTUP and SHUTDOWN stay read-only while RUNNING Developer Mode exposes only live-safe fields');
 
     const stalePage = await browser.newPage();
-    await stalePage.goto(`${base}/config.html`);
+    await stalePage.goto(`${base}/controllers.html`);
+    await stalePage.locator('[data-purpose="main_fuel"] > summary').click();
+    await stalePage.locator('.controller-subcard').filter({hasText:'Throttle Response'}).first().locator(':scope > summary').click();
     await stalePage.waitForSelector('#cf-th_rd');
+    if (!(await page.locator('[data-purpose="main_fuel"]').evaluate(el => el.open)))
+      await page.locator('[data-purpose="main_fuel"] > summary').click();
+    const liveThrottleCard = page.locator('[data-purpose="main_fuel"] .controller-subcard').filter({hasText:'Throttle Response'}).first();
+    if (!(await liveThrottleCard.evaluate(el => el.open)))
+      await liveThrottleCard.locator(':scope > summary').click();
     await page.locator('#cf-th_ru').fill('1700');
     await page.locator('#btn-save').click();
     if (await page.locator('#ot-app-dialog.show').isVisible()) await page.locator('#ot-dialog-confirm').click();

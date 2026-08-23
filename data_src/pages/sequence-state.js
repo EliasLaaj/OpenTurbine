@@ -55,7 +55,7 @@ function demandText(key, pct, label = 'on') {
 // °C/°F preference. This page never CHANGES the preference.
 // These were referenced but never defined — the resulting ReferenceError
 // was swallowed by the boot try/catch and silently blanked the AB criteria
-// and Control Rules rendering.
+// and afterburner criteria rendering.
 function tempUnit() {
   try { return (JSON.parse(localStorage.getItem('ot_units') || '{}').temp) || 'C'; }
   catch (e) { return 'C'; }
@@ -164,7 +164,7 @@ function revealSequenceDeepLink() {
   const id = decodeURIComponent(String(location.hash || '').replace(/^#/, ''));
   if (!id) return;
   const tab = id.startsWith('tab-') ? id.slice(4) : '';
-  if (['startup','shutdown','afterburner','rules'].includes(tab)) switchTab(tab);
+  if (['startup','shutdown','afterburner'].includes(tab)) switchTab(tab);
   const target = document.getElementById(id);
   if (!target || target.style.display === 'none') return;
   document.querySelectorAll('.deep-link-target').forEach(el => el.classList.remove('deep-link-target'));
@@ -194,7 +194,6 @@ async function loadAll() {
     render('ab-shut', lastIdleRaw);
     populateAddSelects();
     buildAbCriteriaHtml();
-    renderRules();
     // Show/hide afterburner tab based on hardware feature flag
     const abTabBtn = document.getElementById('tab-btn-afterburner');
     if (abTabBtn) abTabBtn.style.display = sequenceHasAfterburner() ? '' : 'none';
@@ -330,7 +329,7 @@ function render(tab, idleRaw, openKeys = new Set()) {
   const list = document.getElementById('list-' + tab);
   list.innerHTML = '';
   seq.forEach((bname, idx) => {
-    const card = buildCard(bname, idx, tab, seq.length);
+    const card = buildCard(bname, idx, tab);
     if (openKeys.has(`${bname}:${idx}`)) card.querySelector('.block-params')?.classList.add('open');
     list.appendChild(card);
   });

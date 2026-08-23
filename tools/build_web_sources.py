@@ -36,11 +36,29 @@ PAGE_MANIFEST = {
             "sequence-definitions.js",
             "sequence-state.js",
             "sequence-editor.js",
-            "sequence-rules-save.js",
             "sequence-runtime.js",
+            "sequence-save.js",
         ),
     ),
     "config.html": (
+        "config.shell.html",
+        (
+            "config-schema.js",
+            "config-render.js",
+            "config-validation-save.js",
+            "config-runtime.js",
+        ),
+    ),
+    "controllers.html": (
+        "config.shell.html",
+        (
+            "config-schema.js",
+            "config-render.js",
+            "config-validation-save.js",
+            "config-runtime.js",
+        ),
+    ),
+    "system.html": (
         "config.shell.html",
         (
             "config-schema.js",
@@ -59,13 +77,38 @@ GENERATED_NOTE = (
 
 def assemble(output_name: str, shell_name: str, script_names: tuple[str, ...]) -> None:
     shell = (PAGES / shell_name).read_text(encoding="utf-8")
+    surface = Path(output_name).stem
+    if shell_name == "config.shell.html":
+        effective_surface = "system" if surface == "system" else "controllers"
+        heading = "System" if effective_surface == "system" else "Controllers"
+        shell = shell.replace("<title>OpenTurbine — Config</title>",
+                              f"<title>OpenTurbine — {heading}</title>")
+        shell = shell.replace('class="ot-nav-controllers"',
+                              'class="active ot-nav-controllers"' if effective_surface == "controllers"
+                              else 'class="ot-nav-controllers"')
+        shell = shell.replace('class="ot-nav-system"',
+                              'class="active ot-nav-system"' if effective_surface == "system"
+                              else 'class="ot-nav-system"')
+        shell = shell.replace('<h1 class="cfg-workspace-title">Configuration</h1>',
+                              f'<h1 class="cfg-workspace-title">{heading}</h1>')
+        shell = shell.replace('placeholder="Search limits, oil, relight, N2, telemetry…"',
+                              'placeholder="Search ECU runtime and display settings…"' if effective_surface == "system"
+                              else 'placeholder="Search outputs, limits, oil, relight, N2…"')
+        if effective_surface == "system":
+            start = shell.index("  <!-- OT_CONTROLLER_PRESETS_START -->")
+            end = shell.index("  <!-- OT_CONTROLLER_PRESETS_END -->") + len("  <!-- OT_CONTROLLER_PRESETS_END -->")
+            shell = shell[:start] + shell[end:]
     if shell.count(PLACEHOLDER) != 1:
         raise RuntimeError(f"{shell_name} must contain exactly one {PLACEHOLDER}")
     scripts = []
     for name in script_names:
         body = (PAGES / name).read_text(encoding="utf-8").rstrip()
         scripts.append(f"// Source: data_src/pages/{name}\n{body}")
-    inline = "<script>\n" + "\n\n".join(scripts) + "\n</script>"
+    surface_bootstrap = ""
+    if shell_name == "config.shell.html":
+        effective_surface = "system" if surface == "system" else "controllers"
+        surface_bootstrap = f"window.OT_CONFIG_SURFACE='{effective_surface}';\n"
+    inline = "<script>\n" + surface_bootstrap + "\n\n".join(scripts) + "\n</script>"
     generated = shell.replace(PLACEHOLDER, inline)
     if not generated.startswith(GENERATED_NOTE):
         generated = GENERATED_NOTE + "\n" + generated

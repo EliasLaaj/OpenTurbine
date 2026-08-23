@@ -237,7 +237,7 @@ const setups = [
     hardware: {
       sensors: { n1_rpm: { enabled: true }, n2_rpm: { enabled: true }, tot: { enabled: true } },
       actuators: { throttle: { enabled: true, type: 0 }, prop_pitch: { enabled: false } },
-      controllers: { governor: true, dynamic_idle: false },
+      controllers: { governor: false, dynamic_idle: false },
       safety: { overspeed: true, n2_overspeed: true, overtemp: true },
       channel_registry: {
         version: 1,
@@ -259,7 +259,10 @@ const setups = [
     config: {
       engine: { rpm_limit: 90000, n2_rpm_limit: 32000, tot_limit: 700 },
       governor: { target_rpm: 28000, band_rpm: 300, kp: 0.0002, pitch_kp: 0 },
-      throttle: { fuel_pump_min_pct: 12 }
+      throttle: { fuel_pump_min_pct: 12 },
+      rules: [{ enabled:true, name:'Generator N2 fuel control', kind:2, source:'n2_main', target:'main_fuel',
+        target_source_type:0, target_fixed:28000, output_min:.12, output_max:1, response_gain:.0002,
+        integral_gain:.00002, deadband:300, off_value:.12, mode_mask:4 }]
     },
     commands: [{ cmd: 'IDLE_TEST' }]
   },
@@ -480,7 +483,7 @@ const setups = [
         assert.match(hwText, /Throttle Input/, 'internal throttle ID should render as plain label');
         assert.match(hwText, /PWM Duty Input/, 'generic PWM input should render as plain label');
         assert.match(hwText, /Telemetry Fan/, 'generic output should render its user-facing name');
-        assert.match(hwText, /Used by: .*Control rules|Monitoring only|Available to rules and sequences/, 'registry cards should show actual current use or a truthful available/monitoring state');
+        assert.match(hwText, /Used by: .*Simple control|Monitoring only|Available to controllers and sequences/, 'registry cards should show actual current use or a truthful available/monitoring state');
         assert.doesNotMatch(hwText, /Not used yet/, 'fitted channels must not be described as unused when they remain observable or addressable');
         assert.doesNotMatch(hwText, /Available to:/, 'hardware cards should not imply availability is actual usage');
         assert.doesNotMatch(hwText, /Used by \/ available to/, 'hardware cards should not use mixed dependency wording');
@@ -504,22 +507,17 @@ const setups = [
         assert.match(combined, /Flow sensing & monitoring/);
       }
       await api('POST', '/__sim/data', {mode:'STANDBY', config_locked:false});
-      await page.goto(`${base}/config.html#${setup.id}`);
+      await page.goto(`${base}/controllers.html#${setup.id}`);
       await page.waitForSelector('#btn-save');
       await assertVisibleTextClean(page, `${setup.id} config`);
       if (setup.id === 'fuel_governed_generator') {
-        const governorState = await page.evaluate(() => ({
-          visible: !!document.querySelector('#governor-cfg-section')?.offsetParent,
-          filterHidden: document.querySelector('#governor-cfg-section')?.classList.contains('filter-hidden'),
-          controller: !!hwCfg.controllers?.governor,
-          internalAvailable: _hasGovernorCfg,
-          n2Inputs: (hwCfg.channel_registry?.inputs || []).filter(c => c.purpose === 'n2_speed').length,
-          fuelOutputs: (hwCfg.channel_registry?.outputs || []).filter(c => c.purpose === 'main_fuel').length
-        }));
-        assert.equal(governorState.visible, true, JSON.stringify(governorState));
-        assert.equal(await page.locator('#cf-gv_tr').inputValue(), '28000');
-        assert.equal(await page.locator('#cf-gv_pk').isDisabled(), true,
-          'fuel-governed generator should not expose inactive prop-pitch tuning');
+        const controller = page.locator('#controller-overview [data-controller-output="main_fuel"]');
+        assert.equal(await controller.count(), 1);
+        assert.equal(await controller.locator('.cfg-label', {hasText:'Control method'}).locator('..').locator('select').inputValue(), '2');
+        assert.match(await controller.locator('.cfg-label', {hasText:'Feedback signal'}).locator('..').locator('option:checked').textContent(), /Generator Speed/);
+        assert.equal(await controller.locator('.cfg-label', {hasText:'Target'}).filter({hasText:/^Target$/}).locator('..').locator('input').inputValue(), '28000');
+        assert.equal(await page.locator('#governor-cfg-section').count(), 0,
+          'the unified output controller must replace the second legacy governor panel');
       }
       if (setup.id === 'n2_idle_turboshaft') {
         const idleState = await page.evaluate(() => ({
@@ -571,7 +569,7 @@ const setups = [
         assert.match(await page.locator('#torque-loadcell-wizard').textContent(), /NAU7802.*Capture zero.*known load/is);
       }
       await page.goto(`${base}/sequence.html#${setup.id}`);
-      await page.waitForSelector('#rules-list', { state: 'attached' });
+      await page.waitForSelector('#save-status', { state: 'attached' });
       await assertVisibleTextClean(page, `${setup.id} sequence`);
       if (setup.id === 'minimal_timer_turbojet') {
         const merged = await page.evaluate(() => mergeSequenceEdits(
@@ -589,18 +587,12 @@ const setups = [
         assert.match(shutdownOptions, /Close Drain Valve/);
         const sharedChannels = await page.evaluate(() => ({
           sensors: getEnabledSensors().map(item => item.key),
-          actuators: getEnabledActuators().map(item => item.key),
-          ruleSensors: ruleSensors().filter(item => item.ok()).map(item => item.id),
-          ruleOutputs: ruleOutputs().filter(item => item.ok()).map(item => item.id)
+          actuators: getEnabledActuators().map(item => item.key)
         }));
         assert.ok(sharedChannels.sensors.includes('scavenge_flow'),
           'custom blocks must expose an addressable I2C analog input without a local GPIO');
         assert.ok(sharedChannels.actuators.includes('drain_valve'),
           'custom blocks must expose an addressable I2C relay without a local GPIO');
-        assert.ok(sharedChannels.ruleSensors.includes('scavenge_flow'),
-          'control rules must expose an addressable I2C analog input');
-        assert.ok(sharedChannels.ruleOutputs.includes('drain_valve'),
-          'control rules must expose an addressable I2C relay');
         const renamedOwnership = await page.evaluate(() => {
           const original = hwCfg;
           const primary = {installed:true,id:'renamed_oil_pressure',purpose:'oil_pressure',role:'pressure',driver:1,pin:32};
@@ -618,14 +610,36 @@ const setups = [
         assert.deepEqual(renamedOwnership, {primary:true, secondary:false, pump:true, secondPump:false},
           'renamed canonical owners must stay core-bound while additional oil circuits remain selectable');
       }
+      if (setup.id === 'dry_sump_flow_monitored_turbine') {
+        await page.goto(`${base}/controllers.html#${setup.id}`);
+        await page.waitForSelector('#simple-controls');
+        const simpleChannels = await page.evaluate(() => ({
+          inputs: simpleControlInputs().map(item => item.id),
+          outputs: simpleControlOutputs().map(item => item.id)
+        }));
+        assert.ok(simpleChannels.inputs.includes('scavenge_flow'),
+          'simple controls must expose an addressable I2C analog input');
+        assert.ok(simpleChannels.outputs.includes('drain_valve'),
+          'simple controls must expose an addressable I2C relay');
+      }
       if (setup.id === 'rc_pwm_generic_rules') {
-        await page.evaluate(() => switchTab('rules'));
-        await page.waitForSelector('#rule-unit-0');
-        assert.equal(await page.locator('#rule-unit-0').textContent(), '%');
-        assert.equal(await page.locator('#rule-thresh-0').getAttribute('max'), '100');
-        assert.equal(await page.locator('#rule-thresh-0').getAttribute('step'), '1');
-        assert.match(await page.locator('#rule-sensor-0 option:checked').textContent(), /PWM Duty Input/);
-        assert.doesNotMatch(await page.locator('#rule-sensor-0 option:checked').textContent(), /generic_pwm/);
+        await page.goto(`${base}/controllers.html#${setup.id}`);
+        const card = page.locator('#controller-overview [data-controller-output="generic_pwm_output"]');
+        await page.waitForFunction(() => typeof cfg !== 'undefined' && Array.isArray(cfg?.rules));
+        const diagnostic = await page.evaluate(() => ({
+          url: location.href,
+          title: document.title,
+          surface: typeof CONFIG_SURFACE === 'undefined' ? 'missing' : CONFIG_SURFACE,
+          rules: cfg.rules,
+          inputs: (hwCfg?.channel_registry?.inputs || []).map(row => ({id:row.id,name:row.name,purpose:row.purpose})),
+          outputs: (hwCfg?.channel_registry?.outputs || []).map(row => ({id:row.id,name:row.name,purpose:row.purpose})),
+          text: document.getElementById('simple-controls')?.innerText || ''
+        }));
+        assert.equal(await card.count(), 1, JSON.stringify(diagnostic));
+        assert.equal(await card.locator('.cfg-field').filter({hasText:'Controller name'}).locator('input').inputValue(), 'Generic input to fan');
+        const source = card.locator('.cfg-field').filter({hasText:'Controlled by'}).locator('option:checked');
+        assert.match(await source.textContent(), /PWM Duty Input/);
+        assert.doesNotMatch(await source.textContent(), /generic_pwm/);
       }
       await page.goto(`${base}/tools.html#${setup.id}`);
       await page.waitForSelector('#btn-test-settings');

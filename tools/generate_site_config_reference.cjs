@@ -47,8 +47,8 @@ function html(value) {
   return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 }
 
-const schemaAt = source.indexOf('const SCHEMA');
-if (schemaAt < 0) throw new Error('Config SCHEMA was not found');
+const schemaAt = source.indexOf('const ALL_CONFIG_SCHEMA');
+if (schemaAt < 0) throw new Error('Shared Controllers/System schema was not found');
 const schemaOpen = source.indexOf('[', schemaAt);
 const schemaClose = matchingClose(source, schemaOpen, '[', ']');
 const sections = topLevelObjects(source, schemaOpen, schemaClose).map(sectionText => {
@@ -76,8 +76,8 @@ const body = sections.map(section => `
   </table></div>
 </details>`).join('\n');
 
-const output = `<!-- Generated from data_src/config.html by tools/generate_site_config_reference.cjs. Do not edit by hand. -->
-<p class="source-note"><strong>${fieldCount} fields in ${sections.length} sections.</strong> This reference is generated from the same schema that renders the ECU Config page, so names and explanations match the current code.</p>
+const output = `<!-- Generated from the shared Controllers/System schema by tools/generate_site_config_reference.cjs. Do not edit by hand. -->
+<p class="source-note"><strong>${fieldCount} fields in ${sections.length} sections.</strong> This reference is generated from the same schema that renders the ECU Controllers and System pages, so names and explanations match the current code.</p>
 ${body}
 `;
 

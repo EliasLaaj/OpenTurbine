@@ -4,9 +4,10 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <title>OpenTurbine - Sequence</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260814g',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260814g');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -34,7 +35,6 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
   border-style:dashed;
 }
 .rule-preset-unavailable:hover { border-color:var(--yellow); color:var(--yellow); }
-#tab-rules>.tool-card{max-width:none}
 @media(max-width:850px){.automation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.automation-topline{grid-template-columns:1fr 1fr}.automation-enabled{grid-column:span 2}}@media(max-width:560px){.automation-intro{display:block}.rule-presets{flex-wrap:wrap;overflow-x:visible;padding-bottom:.25rem}.rule-preset-btn{flex:1 1 12rem;white-space:normal}.automation-grid,.automation-topline{grid-template-columns:minmax(0,1fr)}.automation-field.wide,.automation-enabled{grid-column:auto}.automation-card>summary{padding:.6rem}.automation-kind{display:none}.automation-body{padding:.7rem}.automation-sentence{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}}
 .block-card.block-hardware-missing {
   border-color: rgba(220,50,50,.72);
@@ -51,9 +51,10 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
+  <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
-  <a href="/sequence.html" class="active" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
+  <a href="/sequence.html" class="active" title="Edit startup, shutdown, and afterburner transitions and block timings.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
   <a href="/tools.html" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
   <span id="conn" class="conn-dot disconnected" title="WebSocket"></span><span id="conn-label" class="conn-label">Disconnected</span>
@@ -62,7 +63,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
 <div class="page-heading">
   <div class="page-heading-main">
     <h1 class="page-title">Sequence Editor</h1>
-    <p class="page-subtitle">Edit startup, shutdown, afterburner and simple control rules. Sequence order and parameters are saved together and applied after reboot.</p>
+    <p class="page-subtitle">Edit startup, shutdown, and afterburner transitions. Normal running controls are configured on Controllers.</p>
   </div>
 </div>
 
@@ -72,25 +73,6 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
   <button class="seq-tab active" onclick="switchTab('startup')">Startup</button>
   <button class="seq-tab"        onclick="switchTab('shutdown')">Shutdown</button>
   <button class="seq-tab" id="tab-btn-afterburner" onclick="switchTab('afterburner')">Afterburner</button>
-  <button class="seq-tab"        onclick="switchTab('rules')">Control Rules</button>
-</div>
-<div id="tab-rules" style="display:none">
-  <div class="tool-card" style="padding:1rem;line-height:1.55">
-    <div class="automation-intro">
-      <div class="automation-copy">
-        <h3 style="margin:.1rem 0 .35rem">Control Rules</h3>
-        <p>Turn an output on at a threshold, or map an input directly to a variable output. Each output can have one rule, so the result is always predictable.</p>
-        <p>Outside the selected engine states, the rule releases the output and its normal sequencer/controller command resumes. In a selected state, a false or unavailable input applies the configured off value. Fault hands control to the output's hardware-safe setting.</p>
-      </div>
-      <span id="rules-count-label" style="font-size:.72rem;color:var(--dim);white-space:nowrap">0 / 16 rules</span>
-    </div>
-    <div id="rule-presets" class="rule-presets"></div>
-    <div id="rules-list" class="automation-list"></div>
-    <div id="rules-warnings" style="display:none;margin-top:.45rem;font-size:.72rem;color:var(--yellow);line-height:1.45"></div>
-    <div style="margin-top:.5rem;display:flex;align-items:center;gap:.75rem">
-      <button id="btn-add-rule" onclick="addRule()" class="add-btn">+ Add control rule</button>
-    </div>
-  </div>
 </div>
 
 <div id="tab-startup">
@@ -116,7 +98,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     Afterburner operation has two parts: choose the trigger source and wiring in
     <a href="/hardware.html#grp-ab-trigger">Hardware - AB Trigger &amp; Arming</a>,
     then tune the trigger value, gate limits and light-up/light-off actions here.
-    Advanced ignition and pump behavior remains under <a href="/config.html#ab-cfg-section">Config - Afterburner</a>.
+    Advanced ignition and pump behavior remains under <a href="/controllers.html#ab-cfg-section">Controllers - Afterburner</a>.
   </div>
 
   <!-- Entry criteria info box, populated by buildAbCriteriaHtml() -->

@@ -207,6 +207,7 @@ main { padding: 1.5rem; max-width: 920px; margin: 0 auto; }
 }
 .dot.ok    { background: var(--green); box-shadow: 0 0 5px color-mix(in srgb, var(--green) 50%, transparent); }
 .dot.fault { background: var(--red);   box-shadow: 0 0 5px color-mix(in srgb, var(--red) 50%, transparent); }
+#btn-confirm-start.limited-start-confirm { border-color:var(--yellow); color:var(--yellow); }
 
 /* ── Mode row ───────────────────────────────────────────────── */
 .mode-row {
@@ -982,6 +983,8 @@ body[data-page="tools"] main { max-width: 1180px; }
 
 /* ── Misc utility ────────────────────────────────────────────── */
 .oil-sub       { font-size: 0.66rem; color: var(--dim); margin-top: 0.2rem; font-family: var(--font-ui); }
+.command-details{margin-top:.45rem}.command-details summary{cursor:pointer;color:var(--muted);font-size:.78rem}.command-details[open] summary{margin-bottom:.25rem}
+.safety-local-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.5rem;margin:.55rem 0}.safety-local-toggle{display:grid;gap:.2rem;padding:.55rem .65rem;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)}.safety-local-toggle label{font-weight:700;font-size:.76rem}.safety-local-toggle span{font-size:.65rem;color:var(--dim);line-height:1.4}
 .last-event-val { font-size: 0.84rem; color: var(--text); word-break: break-word; line-height: 1.4; margin-top: 0.15rem; }
 .stop-warn     { font-size: 0.7rem; color: var(--red); margin-top: 0.25rem; display: none; }
 .flame-raw-val { font-size: 0.73rem; color: var(--dim); margin-top: 0.15rem; font-family: var(--font-mono); }
@@ -1739,6 +1742,11 @@ select option.pin-inonly { color: #5ba3e0; }
   transition: border-color 0.15s;
 }
 .block-card:hover     { border-color: var(--accent); }
+.block-card.block-dragging {
+  opacity: .72;
+  border-color: var(--accent);
+  box-shadow: 0 .45rem 1.2rem rgba(0,0,0,.24);
+}
 
 .block-header {
   display: flex; align-items: center; gap: 0.7rem;
@@ -1768,22 +1776,26 @@ select option.pin-inonly { color: #5ba3e0; }
   color: var(--dim); cursor: pointer; padding: 0.2rem 0.45rem; font-size: 0.75rem;
   transition: border-color 0.12s, color 0.12s; font-family: var(--font-ui);
 }
-.blk-btn.icon-btn,
-.blk-btn-spacer {
-  width: 1.85rem;
-  min-width: 1.85rem;
-  height: 1.55rem;
+.blk-btn:hover     { border-color: var(--accent); color: var(--text); }
+.blk-btn.del:hover { border-color: var(--red); color: var(--red); }
+.blk-btn.drag-handle {
+  width: 2rem;
+  min-width: 2rem;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  cursor: grab;
+  touch-action: none;
 }
-.blk-btn-spacer {
-  border: 1px solid transparent;
-  pointer-events: none;
+.blk-btn.drag-handle:active { cursor: grabbing; }
+.drag-grip {
+  width: .78rem;
+  height: 1rem;
+  opacity: .8;
+  background-image: radial-gradient(circle, currentColor 1.4px, transparent 1.6px);
+  background-size: .39rem .34rem;
 }
-.blk-btn:hover     { border-color: var(--accent); color: var(--text); }
-.blk-btn.del:hover { border-color: var(--red); color: var(--red); }
 
 @media (max-width: 600px) {
   .block-header {
@@ -1803,12 +1815,7 @@ select option.pin-inonly { color: #5ba3e0; }
     min-height: 36px;
     padding: 0.35rem 0.7rem;
   }
-  .blk-btn.icon-btn,
-  .blk-btn-spacer {
-    width: 2.25rem;
-    min-width: 2.25rem;
-    height: 2.25rem;
-  }
+  .blk-btn.drag-handle { width: 2.4rem; min-width: 2.4rem; }
 }
 
 .timeout-pill {
@@ -1841,8 +1848,8 @@ select option.pin-inonly { color: #5ba3e0; }
   background: var(--surface-2); overflow: hidden;
 }
 .fs-header { padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--border); font-size: 0.68rem; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: 0.07em; font-family: var(--font-ui); }
-.fs-grid  { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 0.45rem 1rem; padding: 0.6rem 0.75rem; }
-.fs-row   { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, 1.15fr); align-items: start; gap: 0.5rem; font-size: 0.75rem; min-width: 0; }
+.fs-grid  { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.45rem; padding: 0.6rem 0.75rem; }
+.fs-row   { display: grid; grid-template-columns: minmax(220px, .32fr) minmax(0, 1fr); align-items: start; gap: 0.8rem; font-size: 0.75rem; min-width: 0; }
 .fs-label { color: var(--dim); min-width: 0; font-family: var(--font-ui); overflow-wrap: anywhere; }
 .fs-val   { color: var(--text); min-width: 0; font-weight: 500; font-family: var(--font-mono); overflow-wrap: anywhere; }
 

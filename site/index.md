@@ -16,7 +16,7 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
 <section class="section"><div class="shell">
 <p class="eyebrow">Plan a complete system</p>
 <h2>What can OpenTurbine do?</h2>
-<p class="lede">Use the common functions directly, or combine fitted hardware, editable sequences and simple control rules for an unusual turbine. Features stay out of the normal setup until their required hardware is present.</p>
+<p class="lede">Use the common turbine controllers directly, or combine fitted hardware, editable sequences and compact custom controllers for an unusual system. Features stay out of the normal setup until their required hardware is present.</p>
 <div class="card-grid four">
   <div class="card"><h3>Start and stop the engine</h3><p>Build timed or feedback-driven startup and shutdown sequences around electric starters, air starters, fuel valves and pumps, igniters, glow systems, purge, cooldown and oil scavenge hardware.</p></div>
   <div class="card"><h3>Hold idle and govern a shaft</h3><p>Automatically hold idle from N1, N2, P1 or P2 feedback; regulate oil pressure; and govern a free power turbine through main fuel or propeller pitch.</p></div>
@@ -41,7 +41,7 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
   <li>Speed, temperature, pressure and controller limits</li>
   <li>Native, SPI, OneWire and discovered I²C sensor hardware</li>
   <li>PCB-profile ports, torque/thrust load cells and oil-flow monitoring</li>
-  <li>Threshold and input-to-output control rules</li>
+  <li>Simple threshold and input-to-output controls</li>
   <li>Browser monitoring, backups, event logs and run logs</li>
 </ul>
 </div><figure><img class="screenshot" src="{{ '/assets/images/hardware-page.png' | relative_url }}?v=20260814a" width="1800" height="1050" loading="lazy" alt="OpenTurbine Hardware page showing a conflict-free example turbine channel inventory"><figcaption>Hardware contains only the sensors and actuators fitted to this example. Values shown throughout the documentation are examples, not settings to copy.</figcaption></figure></div></section>

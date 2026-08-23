@@ -13,7 +13,7 @@
 
 ## What is OpenTurbine?
 
-OpenTurbine is experimental open-source turbine engine controller software for turbojets, APUs, generators, turboshafts, turboprops, and other small turbine systems. It runs on supported ESP32 boards and provides configurable startup and shutdown sequences, hardware-aware settings, simple control rules, fuel and oil control, monitoring, fault handling, calibration, logging, and a browser-based interface.
+OpenTurbine is experimental open-source turbine engine controller software for turbojets, APUs, generators, turboshafts, turboprops, and other small turbine systems. It runs on supported ESP32 boards and provides configurable startup and shutdown sequences, output-oriented controllers, fuel and oil control, monitoring, fault handling, calibration, logging, and a browser-based interface.
 
 The normal Windows installation does not require Git, PlatformIO, or source-code compilation.
 
@@ -23,16 +23,14 @@ The normal Windows installation does not require Git, PlatformIO, or source-code
 - Automatic shared-I²C discovery for TCA9554 digital I/O, TLA2528 analog inputs, and NAU7802 torque/thrust load cells
 - One shared SPI setup for MAX6675/MAX31855/MAX31856 thermocouple interfaces, plus native OneWire DS18B20 support
 - Optional flash-time PCB profiles that replace raw GPIO setup with board-labelled, capability-filtered connections
-- Per-pump oil-flow monitoring, electric drain-valve sequencing/rules, and calibrated torque/thrust measurement
+- Per-pump oil-flow monitoring, electric drain-valve sequencing/controllers, and calibrated torque/thrust measurement
 - Simple and rate-predictive gradual fuel limiting for N1, N2, TOT/TIT, P1, P2, and torque, backed by independent hard trips
-- Searchable grouped configuration with Essentials, Configured system, Explore all features, and Changed views
+- Dedicated Controllers and System workspaces with Essentials, Configured system, Explore all features, and Changed views
 - Startup, shutdown, afterburner, and custom sequence blocks with final-state previews
-- Simple threshold/hysteresis rules and direct input-to-variable-output mapping
+- Simple threshold/hysteresis and direct input-to-variable-output controls on Controllers
 - Guided calibration, standby-only actuator tests, complete engine-file backup/restore, event logs, and per-run session data
 
-| Configuration | Control Rules |
-| --- | --- |
-| ![Searchable OpenTurbine configuration workspace](site/assets/images/config-page.png) | ![OpenTurbine Control Rules editor](site/assets/images/control-rules-page.png) |
+The setup flow is **Hardware → Controllers → System → Calibration → Sequence → Tools → Dashboard**. Hardware says what physically exists; Controllers shows what owns each output; System contains ECU-wide runtime and communications settings; Sequence owns ordered transitions.
 
 ## What you need
 

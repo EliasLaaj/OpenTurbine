@@ -13,6 +13,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from phase2_safety_hil import SafetyQualification  # noqa: E402
+from classic_safety_hil import ClassicSafetyHil  # noqa: E402
 
 
 SESSION_FIELDS = (
@@ -29,19 +30,57 @@ def session_cfg(**enabled):
     return {"session_log": cfg}
 
 
+def wait_session_cfg(expected, timeout=25):
+    """Wait for the persisted generation to become the live ECU generation."""
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen("http://192.168.4.1/api/status", timeout=3) as response:
+                status = json.loads(response.read().decode("utf-8"))
+            with urllib.request.urlopen("http://192.168.4.1/api/config", timeout=5) as response:
+                config = json.loads(response.read().decode("utf-8"))
+            last = (status, config.get("session_log", {}))
+            if not status.get("config_apply_busy") and all(
+                config.get("session_log", {}).get(key) == value
+                for key, value in expected["session_log"].items()
+            ):
+                return
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+        time.sleep(0.5)
+    raise RuntimeError(f"session settings did not become live: {last}")
+
+
 def main():
-    q = SafetyQualification()
+    with urllib.request.urlopen("http://192.168.4.1/api/device_info", timeout=10) as response:
+        target = json.loads(response.read().decode("utf-8")).get("target", "")
+    classic = target == "esp32dev"
+    if classic:
+        q = ClassicSafetyHil()
+        # Keep the rest of this behavior test shared. The reversed S3 tester
+        # has no DAC channels, so use the Classic-specific N1/fuel profile
+        # instead of pretending THROTTLE_IN/OILP analog stimulus exists.
+        q.runner = type("ClassicSessionRunner", (), {"dc": q.dc})()
+        q.t = q.tester
+        q.firmware_before = q.dut.data().get("fw_version", "unknown")
+        original_session_cfg = dict(q.original_cfg.get("session_log", {}))
+    else:
+        q = SafetyQualification()
+        original_session_cfg = None
     rows = []
     restored = False
     error = None
     try:
         q.install()
-        q.set_safeties()
+        if not classic:
+            q.set_safeties()
 
-        ok, response = q.runner.dc.patch_cfg(session_cfg())
+        disabled_cfg = session_cfg()
+        ok, response = q.runner.dc.patch_cfg(disabled_cfg)
         if not ok:
             raise RuntimeError(f"could not disable all session fields: {response}")
-        time.sleep(0.5)
+        wait_session_cfg(disabled_cfg)
         before_path = q.dut.data().get("session_log_path") or ""
         q.start_running()
         time.sleep(3)
@@ -56,16 +95,18 @@ def main():
         })
         print(f"[{'PASS' if disabled_ok else 'FAIL'}] NO_FIELDS_CREATES_NO_SESSION_FILE")
 
-        ok, response = q.runner.dc.patch_cfg(session_cfg(n1=True, throttle=True, mode=True, loop=True))
+        enabled_cfg = session_cfg(n1=True, throttle=True, mode=True, loop=True)
+        ok, response = q.runner.dc.patch_cfg(enabled_cfg)
         if not ok:
             raise RuntimeError(f"could not enable session fields: {response}")
-        time.sleep(0.5)
+        wait_session_cfg(enabled_cfg)
         q.start_running()
         web_samples = 0
         deadline = time.time() + 10
         last = {}
         active_path = ""
         max_active_loop_exec_ms = 0.0
+        max_queued_rows = 0
         while time.time() < deadline:
             last = q.dut.data()
             active_path = last.get("session_log_path") or active_path
@@ -73,6 +114,7 @@ def main():
                 max_active_loop_exec_ms,
                 float(last.get("loop_exec_max_ms") or 0.0),
             )
+            max_queued_rows = max(max_queued_rows, int(last.get("session_queued_rows") or 0))
             web_samples += 1
             time.sleep(0.2)
         q.recover()
@@ -111,6 +153,7 @@ def main():
             "header_ok": header_ok,
             "web_samples": web_samples,
             "max_active_loop_exec_ms": max_active_loop_exec_ms,
+            "max_queued_rows": max_queued_rows,
             "logger_healthy": last.get("session_logger_healthy"),
             "dropped_rows": last.get("session_dropped_rows"),
         })
@@ -122,7 +165,14 @@ def main():
         print("ERROR:", error)
     finally:
         try:
-            restored = q.close()
+            if classic:
+                q.restore()
+                ok, detail = q.dc.patch_cfg({"session_log": original_session_cfg})
+                if not ok:
+                    raise RuntimeError(f"session settings restore failed: {detail}")
+                restored = True
+            else:
+                restored = q.close()
         except Exception as exc:  # noqa: BLE001
             error = error or f"restore: {type(exc).__name__}: {exc}"
 

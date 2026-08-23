@@ -5,14 +5,16 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Log</title>
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260814g',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260814g');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body>
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
+  <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" class="active" title="View fault/event history and per-run CSV session logs.">Log</a>
@@ -224,12 +226,12 @@ function showTab(tab) {
 async function loadPersistenceHealth() {
   const el = document.getElementById('persistence-health');
   if (!el) return;
+  el.textContent = 'Loading recorder health…';
+  el.style.color = 'var(--dim)';
   const sessionErrors = ['OK','queue unavailable','file open failed','CSV header failed','RAM backlog/dropped rows','storage reserve reached','file write failed','run identity failed'];
   const eventErrors = ['OK','recorder mutex unavailable','event file open failed','event write failed'];
   try {
-    const response = await fetch('/api/data');
-    const d = await response.json();
-    if (!response.ok) throw new Error(d.error || `HTTP ${response.status}`);
+    const d = await fetchJsonWithRetry('/api/data', 5);
     const sessionCode = Number(d.session_logger_error || 0);
     const eventCode = Number(d.event_recorder_error || 0);
     const sessionState = d.session_logger_healthy === false
@@ -255,8 +257,8 @@ async function loadPersistenceHealth() {
     el.textContent = `${sessionState} · ${detail} · ${statsState}`;
     el.style.color = (d.session_logger_healthy === false || d.event_recorder_healthy === false || d.runtime_stats_healthy === false) ? 'var(--yellow)' : 'var(--dim)';
   } catch (error) {
-    el.textContent = `Recorder health unavailable: ${error.message || error}`;
-    el.style.color = 'var(--red)';
+    el.textContent = `Recorder health could not be read. Refresh this tab in a moment.`;
+    el.style.color = 'var(--yellow)';
   }
 }
 
@@ -783,7 +785,7 @@ function _applyLogHwVisibility(hw) {
       input.checked     = false;
       lbl.style.opacity = '0.35';
       lbl.style.cursor  = 'not-allowed';
-      lbl.title         = (hwLabel[bit] || bit) + ' is not configured — enable it on the Hardware Config page to log this value';
+      lbl.title         = (hwLabel[bit] || bit) + ' is not configured — add it on Hardware to log this value';
     }
   });
 }
@@ -833,7 +835,7 @@ async function fetchJsonWithRetry(url, attempts = 3) {
       return await fetchJsonWithTimeout(url);
     } catch (e) {
       lastError = e;
-      await new Promise(resolve => setTimeout(resolve, 200 + i * 300));
+      await new Promise(resolve => setTimeout(resolve, 250 + i * 350));
     }
   }
   throw lastError;

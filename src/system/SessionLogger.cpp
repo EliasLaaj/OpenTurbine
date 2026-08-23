@@ -46,7 +46,8 @@ static char              _currentPath[40] = {};
 static QueueHandle_t     _rowQueue  = nullptr;
 static volatile bool     _startPending = false;
 static volatile bool     _endPending   = false;
-static constexpr size_t  SESSION_MIN_FREE_BYTES = 150 * 1024;
+static constexpr size_t  SESSION_MAX_RESERVE_BYTES = 150 * 1024;
+static constexpr size_t  SESSION_MIN_RESERVE_BYTES = 32 * 1024;
 static constexpr uint32_t SESSION_FREE_CHECK_MS = 5000;
 static uint32_t          _lastFreeCheckMs = 0;
 static bool              _lowSpaceDropActive = false;
@@ -61,10 +62,24 @@ const char* SessionLogger::currentPath() {
 }
 
 uint32_t SessionLogger::droppedRows() { return _droppedRows; }
+uint32_t SessionLogger::queuedRows() {
+    return _rowQueue ? (uint32_t)uxQueueMessagesWaiting(_rowQueue) : 0U;
+}
 uint32_t SessionLogger::evictionCount() { return _evictionCount; }
 uint32_t SessionLogger::lastEvictedSession() { return _lastEvictedSession; }
 size_t SessionLogger::freeBytes() { return LittleFS.totalBytes() - LittleFS.usedBytes(); }
-size_t SessionLogger::reserveBytes() { return SESSION_MIN_FREE_BYTES; }
+static size_t _sessionReserveBytes() {
+    // A fixed 150 KiB reserve is appropriate on S3, but the Classic build's
+    // complete web UI leaves a much smaller 576 KiB LittleFS volume. Requiring
+    // 150 KiB there disables session logging entirely even though a bounded
+    // 64-row run fits comfortably. Keep one eighth of the filesystem free,
+    // bounded to retain useful configuration/restore headroom on every target.
+    const size_t proportional = LittleFS.totalBytes() / 8U;
+    return min(SESSION_MAX_RESERVE_BYTES,
+               max(SESSION_MIN_RESERVE_BYTES, proportional));
+}
+
+size_t SessionLogger::reserveBytes() { return _sessionReserveBytes(); }
 bool SessionLogger::healthy() { return _healthy; }
 uint8_t SessionLogger::errorCode() { return _errorCode; }
 
@@ -185,12 +200,12 @@ static void _writeRow(const SessionRow& row) {
     const uint32_t nowMs = millis();
     if (_lowSpaceDropActive || nowMs - _lastFreeCheckMs >= SESSION_FREE_CHECK_MS) {
         _lastFreeCheckMs = nowMs;
-        _lowSpaceDropActive = (LittleFS.totalBytes() - LittleFS.usedBytes()) < SESSION_MIN_FREE_BYTES;
+        _lowSpaceDropActive = (LittleFS.totalBytes() - LittleFS.usedBytes()) < _sessionReserveBytes();
     }
     if (_lowSpaceDropActive) {
         _evictOldSessions();
         _lastFreeCheckMs = nowMs;
-        _lowSpaceDropActive = (LittleFS.totalBytes() - LittleFS.usedBytes()) < SESSION_MIN_FREE_BYTES;
+        _lowSpaceDropActive = (LittleFS.totalBytes() - LittleFS.usedBytes()) < _sessionReserveBytes();
         if (_lowSpaceDropActive) {
             _droppedRows = _droppedRows + 1;
             _healthy = false;
@@ -219,7 +234,7 @@ bool SessionLogger::begin() {
 
 // ── Evict oldest session files if flash is low ────────────────
 static void _evictOldSessions() {
-    while (LittleFS.totalBytes() - LittleFS.usedBytes() < SESSION_MIN_FREE_BYTES) {
+    while (LittleFS.totalBytes() - LittleFS.usedBytes() < _sessionReserveBytes()) {
         File dir = LittleFS.open("/logs");
         if (!dir) break;
 

@@ -335,7 +335,9 @@ bool Config::applyJsonRuntimeOnly(const JsonDocument& doc, bool allowActiveLive,
     return true;
 }
 
-bool Config::persistJsonCandidateReleasing(JsonDocument& doc, char*& outJson, size_t& outLen) {
+bool Config::persistJsonCandidateReleasing(JsonDocument& doc, char*& outJson,
+                                           size_t& outLen, char* scratch,
+                                           size_t scratchLen) {
     outJson = nullptr;
     outLen = 0;
     if (!validateJson(doc)) return false;
@@ -344,29 +346,23 @@ bool Config::persistJsonCandidateReleasing(JsonDocument& doc, char*& outJson, si
     const size_t required = measureJson(doc);
     if (required == 0 || required > 32768) return false;
 #if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
-    // On either ESP32 target, do not allocate a transfer buffer while the complete
-    // ArduinoJson tree is still resident. A two-byte settings growth was
-    // enough to cross the largest-free-block boundary on a real board. Stage
-    // the validated tree first, release its pool, then read the compact text
-    // back. The same staged generation is used by the unified-config storage
-    // transaction and by the ECU-core apply.
-    static constexpr const char* APPLY_PATH = "/config_apply.tmp";
-    if (!acquireStorageWrite()) {
-        Serial.println("[Config] Candidate staging mutex timeout");
-        return false;
-    }
-    File staged = LittleFS.open(APPLY_PATH, "w");
-    const bool stagedOk = staged && serializeJson(doc, staged) == required;
-    if (staged) staged.close();
-    if (!stagedOk) LittleFS.remove(APPLY_PATH);
-    releaseStorageWrite();
-    if (!stagedOk) {
-        Serial.println("[Config] Candidate staging write failed");
+    // The web server owns two fixed transfer buffers already. Serialize into
+    // its unused response buffer, release the complete merged ArduinoJson tree,
+    // and only then call LittleFS.open(). Arduino FS constructs a heap-backed
+    // shared_ptr internally; opening the file while the tree was resident could
+    // throw bad_alloc and abort Classic ESP32 before its error path could run.
+    if (!scratch || required >= scratchLen ||
+        serializeJson(doc, scratch, scratchLen) != required) {
+        Serial.println("[Config] Candidate does not fit the reserved web scratch buffer");
         return false;
     }
     doc.clear();
     doc.shrinkToFit();
     delay(0);
+    if (ESP.getMaxAllocHeap() < 4096) {
+        Serial.println("[Config] Candidate staging deferred - low contiguous heap after release");
+        return false;
+    }
     // The exact validated generation is already staged.  Do not read it into
     // a second heap buffer merely to write the same bytes back to the staging
     // file and then parse them on the ECU core.  Apart from being redundant,
@@ -384,7 +380,8 @@ bool Config::persistJsonCandidateReleasing(JsonDocument& doc, char*& outJson, si
     doc.clear();
     doc.shrinkToFit();
 #endif
-    if (!_saveSettingsJson(candidate, required)) {
+    const char* persistedCandidate = candidate ? candidate : scratch;
+    if (!_saveSettingsJson(persistedCandidate, required)) {
         free(candidate);
         return false;
     }
@@ -476,10 +473,10 @@ void Config::_applyDefaults() {
     idleUseN2 = ConfigInternal::idleUseN2Default; idleIGain = 0.0f; idleIMax = 0.10f;
     idleSource = ConfigInternal::idleUseN2Default ? 1 : 0;
     idleTargetPressure = 1.0f; idlePressureDeadband = 0.03f; idlePressureLimit = 2.0f;
-    idleMode = 0; idleDecelEnterRpm = 1000.0f; idleDecelDropPct = 2.0f; idleLookaheadMs = 2500.0f;
+    idleMode = 0; idleDecelEnterRpm = 0.0f; idleDecelDropPct = 0.0f; idleLookaheadMs = 2500.0f;
     idleSettleBandRpm = 1500.0f; idleFullResponseRpm = 12000.0f; idleTrimUpPctPerSec = 4.0f;
     idleTrimDownPctPerSec = 2.0f; idleLearnRate = 0.02f; idleLearnAccelMax = 1200.0f;
-    idlePressureDecelEnter = 0.12f; idlePressureSettleBand = 0.03f;
+    idlePressureDecelEnter = 0.0f; idlePressureSettleBand = 0.03f;
     idlePressureFullResponse = 0.25f; idlePressureLearnRateMax = 1.0f;
     safetyCheckIntervalMs = 100; flameoutShutdownMs = 3000;
     lowOilConfirmMs = 500; oilZeroConfirmMs = 100; oilTempConfirmMs = 1000;
@@ -532,6 +529,7 @@ void Config::_applyDefaults() {
     fuelPressRawMin = 0; fuelPressRawMax = 4095; fuelPressValMax = 10.0f;
     fuelFlowRawMin = 0; fuelFlowRawMax = 4095; fuelFlowValMax = 10.0f;
     sessionLogMask = SLOG_DEFAULT; sessionLogIntervalMs = 1000;
+    controllerSchema = 0;
     ruleCount = 0;
     for (int i = 0; i < MAX_RULES; i++) rules[i] = {};
     loadWarning[0] = '\0';
@@ -539,6 +537,7 @@ void Config::_applyDefaults() {
 }
 
 void Config::_fromDoc(const JsonDocument& doc) {
+    controllerSchema = constrain((int)(doc["controller_schema"] | 0), 0, 1);
     // Warn if an expected top-level section is entirely absent.
     // This typically means the file is truncated or severely corrupted —
     // individual missing fields within a section are normal during version upgrades
@@ -593,10 +592,9 @@ void Config::_fromDoc(const JsonDocument& doc) {
     const bool idleSourceMissing = di["source"].isNull();
     readConfigFields(di, IDLE_INT_FIELDS);
     if (idleSourceMissing) idleSource = idleUseN2 ? 1 : 0;
-    // Preserve the former derived pressure-mode behavior when upgrading a file
-    // that predates explicit pressure-domain predictive tuning.
-    if (!hasPressureDecelEnter)
-        idlePressureDecelEnter = max(idlePressureDeadband * 4.0f, idleTargetPressure * 0.05f);
+    // Predictive deceleration catch is opt-in. Older files without this field
+    // must not silently acquire a fuel-drop behavior after an update.
+    if (!hasPressureDecelEnter) idlePressureDecelEnter = 0.0f;
     if (!hasPressureSettleBand)
         idlePressureSettleBand = max(idlePressureDeadband, idleTargetPressure * 0.01f);
     if (!hasPressureFullResponse)
@@ -744,18 +742,35 @@ void Config::_fromDoc(const JsonDocument& doc) {
             r.inputMax  = jr["input_max"]  | 1.0f;
             r.outputMin = jr["output_min"] | 0.0f;
             r.outputMax = jr["output_max"] | 1.0f;
+            r.targetSourceType = (uint8_t)(jr["target_source_type"] | 0);
+            r.targetFixed = jr["target_fixed"] | 0.0f;
+            r.targetLow = jr["target_low"] | 0.0f;
+            r.targetHigh = jr["target_high"] | 1.0f;
+            r.targetInputMin = jr["target_input_min"] | 0.0f;
+            r.targetInputMax = jr["target_input_max"] | 1.0f;
+            r.responseGain = jr["response_gain"] | 0.01f;
+            r.integralGain = jr["integral_gain"] | 0.001f;
+            r.deadband = jr["deadband"] | 0.0f;
             r.modeMask  = (uint8_t)(jr["mode_mask"] | 0x0E);
             const char* n = jr["name"] | "";
             strncpy(r.name, n, sizeof(r.name) - 1);
             r.name[sizeof(r.name) - 1] = '\0';
             const char* source = jr["source"] | "";
             const char* target = jr["target"] | "";
+            const char* targetSource = jr["target_source"] | "";
             strlcpy(r.sourceId, source, sizeof(r.sourceId));
             strlcpy(r.targetId, target, sizeof(r.targetId));
+            strlcpy(r.targetSourceId, targetSource, sizeof(r.targetSourceId));
             int8_t sourceHandle = ConfigInternal::ruleSourceHandle(r.sourceId);
             int8_t targetHandle = ConfigInternal::ruleTargetHandle(r.targetId);
-            if (sourceHandle < 0 || targetHandle < 0) r.enabled = false;
-            else { r.sensor = (uint8_t)sourceHandle; r.actuator = (uint8_t)targetHandle; }
+            const int8_t targetSourceHandle = r.targetSourceType == 0 ? 0 :
+                ConfigInternal::ruleSourceHandle(r.targetSourceId);
+            if (sourceHandle < 0 || targetHandle < 0 || targetSourceHandle < 0) r.enabled = false;
+            else {
+                r.sensor = (uint8_t)sourceHandle;
+                r.actuator = (uint8_t)targetHandle;
+                r.targetSensor = (uint8_t)targetSourceHandle;
+            }
         }
     }
 
@@ -846,7 +861,7 @@ void Config::_fromDoc(const JsonDocument& doc) {
         if (rules[i].sensor > RulesEngine::THRUST &&
             !ChannelRegistry::isInputSensor(rules[i].sensor))
             rules[i].enabled = false;
-        rules[i].kind = constrain(rules[i].kind, 0, 1);
+        rules[i].kind = constrain(rules[i].kind, 0, 2);
         rules[i].op = constrain(rules[i].op, 0, 1);
         if (rules[i].actuator > 17 && !ChannelRegistry::isOutputActuator(rules[i].actuator))
             rules[i].enabled = false;
@@ -855,8 +870,18 @@ void Config::_fromDoc(const JsonDocument& doc) {
         rules[i].offValue = constrain(rules[i].offValue, 0.0f, 1.0f);
         rules[i].outputMin = constrain(rules[i].outputMin, 0.0f, 1.0f);
         rules[i].outputMax = constrain(rules[i].outputMax, 0.0f, 1.0f);
+        rules[i].targetSourceType = constrain(rules[i].targetSourceType, 0, 2);
+        if (!isfinite(rules[i].targetFixed)) rules[i].targetFixed = 0.0f;
+        if (!isfinite(rules[i].targetLow)) rules[i].targetLow = 0.0f;
+        if (!isfinite(rules[i].targetHigh)) rules[i].targetHigh = 1.0f;
+        if (!isfinite(rules[i].targetInputMin)) rules[i].targetInputMin = 0.0f;
+        if (!isfinite(rules[i].targetInputMax) || rules[i].targetInputMax == rules[i].targetInputMin)
+            rules[i].targetInputMax = rules[i].targetInputMin + 1.0f;
+        if (!isfinite(rules[i].responseGain) || rules[i].responseGain < 0.0f) rules[i].responseGain = 0.01f;
+        if (!isfinite(rules[i].integralGain) || rules[i].integralGain < 0.0f) rules[i].integralGain = 0.001f;
+        if (!isfinite(rules[i].deadband) || rules[i].deadband < 0.0f) rules[i].deadband = 0.0f;
         if (!isfinite(rules[i].inputMin)) rules[i].inputMin = 0.0f;
-        if (!isfinite(rules[i].inputMax) || rules[i].inputMax <= rules[i].inputMin) rules[i].inputMax = rules[i].inputMin + 1.0f;
+        if (!isfinite(rules[i].inputMax) || rules[i].inputMax == rules[i].inputMin) rules[i].inputMax = rules[i].inputMin + 1.0f;
         rules[i].modeMask &= 0x0F;
         if (rules[i].modeMask == 0) rules[i].enabled = false;
     }
@@ -1072,6 +1097,7 @@ void Config::_writeDoc(JsonObject doc) {
     sanitizeForHardware();
     doc["profile_id"]     = HardwareConfig::profileId[0] ? HardwareConfig::profileId : OT_PROFILE_ID;
     doc["config_version"] = CONFIG_VERSION;
+    doc["controller_schema"] = controllerSchema;
     doc["ui_theme"]       = uiTheme;
 
     auto eng = doc["engine"].to<JsonObject>();
@@ -1224,6 +1250,16 @@ void Config::_writeDoc(JsonObject doc) {
             jr["input_max"] = r.inputMax;
             jr["output_min"]= r.outputMin;
             jr["output_max"]= r.outputMax;
+            jr["target_source_type"] = r.targetSourceType;
+            jr["target_source"] = r.targetSourceId;
+            jr["target_fixed"] = r.targetFixed;
+            jr["target_low"] = r.targetLow;
+            jr["target_high"] = r.targetHigh;
+            jr["target_input_min"] = r.targetInputMin;
+            jr["target_input_max"] = r.targetInputMax;
+            jr["response_gain"] = r.responseGain;
+            jr["integral_gain"] = r.integralGain;
+            jr["deadband"] = r.deadband;
             jr["mode_mask"] = r.modeMask;
             jr["name"]      = r.name;
             jr["source"]    = r.sourceId;

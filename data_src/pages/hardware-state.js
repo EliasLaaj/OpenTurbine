@@ -10,6 +10,32 @@ let _loadedProfileId = 'OpenTurbine';
 let _loadedHardwareCfg = {};
 let _loadedSettingsCfg = {};
 
+// Hardware changes can affect wiring and safety ownership. Never let an
+// ordinary in-app link silently discard them. Browser refresh/close keeps the
+// native warning, while same-origin navigation gets a clear three-way choice
+// through the existing dialog system.
+window.addEventListener('beforeunload', event => {
+  if (!_hwDirty) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+document.addEventListener('click', async event => {
+  const link = event.target.closest?.('a[href]');
+  if (!link || !_hwDirty || event.defaultPrevented || event.button !== 0 ||
+      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  const url = new URL(link.href, location.href);
+  if (url.origin !== location.origin || url.href === location.href) return;
+  event.preventDefault();
+  const leave = await OTDialog.confirm(
+    'Hardware has unsaved changes. Leave this page and discard them?',
+    {title:'Unsaved hardware changes', confirmText:'Discard and leave', danger:true}
+  );
+  if (leave) {
+    _hwDirty = false;
+    location.href = url.href;
+  }
+}, true);
+
 function cloneHardwareJson(value) {
   return JSON.parse(JSON.stringify(value ?? {}));
 }
@@ -106,12 +132,26 @@ let wsPullTimer = null;
 let statusPollTimer = null;
 let hardwareStatusInFlight = false;
 let wsClosingForNavigation = false;
+let hardwareWsRequestInFlight = false;
+window.OTWaitForPageTelemetryIdle = (timeoutMs = 1500) => new Promise(resolve => {
+  const started = Date.now();
+  const poll = () => {
+    if (!hardwareWsRequestInFlight) resolve(true);
+    else if (Date.now() - started >= timeoutMs) resolve(false);
+    else setTimeout(poll, 25);
+  };
+  poll();
+});
 function requestHardwareTelemetry() {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send('p');
+  if (ws && ws.readyState === WebSocket.OPEN && !hardwareWsRequestInFlight) {
+    hardwareWsRequestInFlight = true;
+    ws.send('p');
+  }
 }
 function stopHardwareTelemetry() {
   wsClosingForNavigation = true;
   if (wsPullTimer) { clearInterval(wsPullTimer); wsPullTimer = null; }
+  hardwareWsRequestInFlight = false;
   if (i2cDiscoveryTimer) { clearInterval(i2cDiscoveryTimer); i2cDiscoveryTimer = null; }
   stopStatusPoll();
   if (ws) {
@@ -123,6 +163,12 @@ function stopHardwareTelemetry() {
     } catch(_) {}
     ws = null;
   }
+}
+function prepareHardwareTelemetryNavigation() {
+  wsClosingForNavigation = true;
+  if (wsPullTimer) { clearInterval(wsPullTimer); wsPullTimer = null; }
+  if (i2cDiscoveryTimer) { clearInterval(i2cDiscoveryTimer); i2cDiscoveryTimer = null; }
+  stopStatusPoll();
 }
 function connectWs() {
   if (wsClosingForNavigation) return;
@@ -136,6 +182,7 @@ function connectWs() {
     wsPullTimer = setInterval(requestHardwareTelemetry, 1000);
   };
   ws.onclose = () => {
+    hardwareWsRequestInFlight = false;
     if (wsPullTimer) { clearInterval(wsPullTimer); wsPullTimer = null; }
     setConn(false, 'Reconnecting');
     if (!wsClosingForNavigation) {
@@ -145,7 +192,11 @@ function connectWs() {
   };
   ws.onerror = () => { try { ws.close(); } catch(_) {} };
   ws.onmessage = (e) => {
-    try { applyHardwareTelemetry(JSON.parse(e.data)); } catch(_) {}
+    try {
+      const d = JSON.parse(e.data);
+      if (d._frame_more !== true) hardwareWsRequestInFlight = false;
+      applyHardwareTelemetry(d);
+    } catch(_) {}
   };
 }
 function applyHardwareTelemetry(d) {
@@ -163,12 +214,12 @@ function applyHardwareTelemetry(d) {
 }
 window.addEventListener('pagehide', stopHardwareTelemetry);
 window.addEventListener('beforeunload', stopHardwareTelemetry);
+window.addEventListener('ot:navigation-prepare', prepareHardwareTelemetryNavigation);
 window.addEventListener('ot:navigation-start', stopHardwareTelemetry);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
   wsClosingForNavigation = false;
-  if (cfg?.platform === 'esp32') startStatusPoll();
-  else connectWs();
+  connectWs();
 });
 function setConn(ok, text) {
   const dot = document.getElementById('conn');
@@ -833,7 +884,7 @@ async function dependencyWarning(kind, key) {
   (dep.controllers || []).forEach(k => { if (cfg.controllers?.[k]) impacted.add('Controller: ' + k.replaceAll('_',' ')); });
   (dep.logs || []).forEach(k => { if (s.session_log?.[k]) impacted.add('Session log: ' + k.replaceAll('_',' ')); });
   if (dep.rules?.length && Array.isArray(s.rules) && s.rules.some(r => dep.rules.includes(Number(kind === 'sensor' ? r.sensor : r.actuator)))) {
-    impacted.add('Control rules using this ' + kind);
+    impacted.add('Simple controls using this ' + kind);
   }
   if (kind === 'actuator') {
     const actVal = ACT_RULE_ENUM[key];

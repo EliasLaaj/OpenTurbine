@@ -543,6 +543,9 @@ bool validateOilLoops(JsonVariantConst loops, const ChannelRegistry* registry) {
             !inRange(loop, "speed_min_rpm", 0.0f, 6553500.0f) ||
             !inRange(loop, "speed_max_rpm", 0.0f, 6553500.0f) ||
             !inRange(loop, "deadband_bar", 0.0f, 5.0f) ||
+            !inRange(loop, "response_gain", 0.0f, 100.0f) ||
+            !inRange(loop, "failsafe_delay_ms", 0.0f, 60000.0f) ||
+            !inRange(loop, "failsafe_demand", 0.0f, 1.0f) ||
             !inRange(loop, "min_demand", 0.0f, 1.0f) ||
             !inRange(loop, "max_demand", 0.0f, 1.0f)) return false;
         const int targetSource = loop["target_source"] | 0;
@@ -4306,6 +4309,9 @@ void HardwareConfig::_fromDoc(const JsonDocument& doc) {
             l.speedMinHundredRpm = (uint16_t)constrain((int)((src["speed_min_rpm"] | 0.0f) / 100.0f), 0, 65535);
             l.speedMaxHundredRpm = (uint16_t)constrain((int)((src["speed_max_rpm"] | 20000.0f) / 100.0f), 0, 65535);
             l.deadbandCentiBar = (uint16_t)constrain((int)((src["deadband_bar"] | 0.2f) * 100.0f), 0, 500);
+            l.adjustScaleCenti = (uint16_t)constrain((int)((src["response_gain"] | Config::oilAdjustScale) * 100.0f), 0, 10000);
+            l.failsafeDelayMs = (uint16_t)constrain(src["failsafe_delay_ms"] | Config::oilFailsafeDelayMs, 0, 60000);
+            l.failsafeDemandPct = (uint8_t)constrain((int)((src["failsafe_demand"] | (Config::oilFailsafePct / 100.0f)) * 100.0f), 0, 100);
             l.minDemandPct = (uint8_t)constrain((int)((src["min_demand"] | 0.18f) * 100.0f), 0, 100);
             l.maxDemandPct = (uint8_t)constrain((int)((src["max_demand"] | 1.0f) * 100.0f), l.minDemandPct, 100);
             if (l.enabled && !anyEnabledLoop) {

@@ -77,6 +77,7 @@ def main() -> int:
                 str(ROOT / "src" / "system" / "CommandQueue.cpp"),
             ]),
             ("controllers", [str(ROOT / "dev" / "host" / "controller_behavior.cpp")]),
+            ("feedback_control", [str(ROOT / "dev" / "host" / "feedback_control_behavior.cpp")]),
         ]
         for name, sources in tests:
             exe = Path(tmp) / (name + (".exe" if os.name == "nt" else ""))

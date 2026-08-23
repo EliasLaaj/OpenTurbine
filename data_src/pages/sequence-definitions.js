@@ -291,7 +291,7 @@ const BLOCKS = {
     params:[
       {key:'oil_pump_on_pct', label:'Startup oil pump demand', unit:'%', type:'float', min:0, max:100, step:5, def:100, configKey:'oil_pump_on_pct',
         visibleIf: hw => actuatorHasProportionalOutput('oil_pump'),
-        desc:'Direct PWM output for this sequence step; it is not limited by Config > Oil System > Controller Minimum Duty.'},
+        desc:'Direct PWM output for this sequence step; it is not limited by Controllers > Oil & Lubrication Controllers > Minimum Pump Command.'},
     ]
   },
   OilPumpOff: {
@@ -811,35 +811,35 @@ const BLOCK_INFO = {
   FlameConfirm: {
     desc: 'Waits until the flame sensor fires N consecutive times. Can turn off all ignition outputs on exit.',
     links: [
-      { label: 'Combustion-Loss Confirmation Time', url: '/config.html#safety-monitor' },
+      { label: 'Combustion-Loss Confirmation Time', url: '/controllers.html#safety-monitor' },
     ]
   },
   TempConfirm: {
     desc: 'Waits until selected EGT rises above the configured threshold. Alternative to FlameConfirm when no flame sensor is fitted.',
     links: [
-      { label: 'Engine Temperature Source', url: '/config.html#engine-limits' },
-      { label: 'Cooldown Target', url: '/config.html#engine-limits' },
+      { label: 'Engine Temperature Source', url: '/controllers.html#engine-limits' },
+      { label: 'Cooldown Target', url: '/controllers.html#engine-limits' },
     ]
   },
   Spool: {
     desc: 'Holds fuel/throttle at the calibrated minimum reliable fuel-pump output and waits for N1 to reach the idle-entry target. Flame monitoring remains active.',
     links: [
       { label: 'Minimum Reliable Fuel-Pump Output', url: '/calibration.html#fuelpump-min-cal-row' },
-      { label: 'Throttle Open Speed', url: '/config.html#throttle' },
-      { label: 'Running Oil Min',     url: '/config.html#oil-config-section' },
+      { label: 'Throttle Open Speed', url: '/controllers.html#throttle' },
+      { label: 'Running Oil Min',     url: '/controllers.html#oil-config-section' },
     ]
   },
   SafetyHold: {
     desc: 'Requires all enabled final sensor checks to remain continuously stable before RUNNING. Optional exit actions can turn off starter and ignition outputs.',
     links: [
-      { label: 'Min RPM',         url: '/config.html#engine-limits' },
-      { label: 'Running Oil Min', url: '/config.html#oil-config-section' },
+      { label: 'Min RPM',         url: '/controllers.html#engine-limits' },
+      { label: 'Running Oil Min', url: '/controllers.html#oil-config-section' },
     ]
   },
   CooldownSpin: {
     desc: 'Spins starter and/or runs oil pump to cool EGT below target temperature. Skipped if fuel was never opened.',
     links: [
-      { label: 'Cooldown EGT Target', url: '/config.html#engine-limits' },
+      { label: 'Cooldown EGT Target', url: '/controllers.html#engine-limits' },
     ]
   },
   FinalStop: {
@@ -849,7 +849,7 @@ const BLOCK_INFO = {
   RPMDrop: {
     desc: 'Waits for N1 to fall below threshold RPM before proceeding to cooldown. Continues on timeout.',
     links: [
-      { label: 'Min RPM', url: '/config.html#engine-limits' },
+      { label: 'Min RPM', url: '/controllers.html#engine-limits' },
     ]
   },
   ImmediateCut: {
@@ -866,7 +866,7 @@ const BLOCK_INFO = {
     desc: 'Sets fuel/throttle demand from the calibrated minimum reliable fuel-pump output to the configured maximum idle output, then applies the multiplier.',
     links: [
       { label: 'Minimum Reliable Fuel-Pump Output', url: '/calibration.html#fuelpump-min-cal-row' },
-      { label: 'Throttle Idle Max %', url: '/config.html#throttle' },
+      { label: 'Throttle Idle Max %', url: '/controllers.html#throttle' },
     ]
   },
   TimedDelay: {
@@ -876,43 +876,43 @@ const BLOCK_INFO = {
   PreHeat: {
     desc: 'Turns the selected ignition output on for a fixed duration without opening fuel.',
     links: [
-      { label: 'Glow Plug Preheat', url: '/config.html#glow-cfg-section' },
+      { label: 'Glow Plug Preheat', url: '/controllers.html#glow-cfg-section' },
     ]
   },
   ABCheckReady: {
     desc: 'Gate block: checks N1, selected EGT, and throttle conditions before proceeding with AB ignition.',
     links: [
-      { label: 'AB Ignition Conditions', url: '/config.html#ab-cfg-section' },
+      { label: 'AB Ignition Conditions', url: '/controllers.html#ab-cfg-section' },
     ]
   },
   ABIgnite: {
     desc: 'Fires AB ignition - torch (fuel spike through turbine), AB igniter, or both.',
     links: [
-      { label: 'Afterburner Ignition Method', url: '/config.html#ab-ign-section' },
+      { label: 'Afterburner Ignition Method', url: '/controllers.html#ab-ign-section' },
     ]
   },
   ABFlameConfirm: {
     desc: 'Waits for AB flame confirmation using sensor, selected EGT rise, or timed mode.',
     links: [
-      { label: 'AB Flame Confirmation Config', url: '/config.html#ab-flame-section' },
+      { label: 'AB Flame Confirmation Config', url: '/controllers.html#ab-flame-section' },
     ]
   },
   ABStabilize: {
     desc: 'Hold period after AB lights. Monitors selected EGT - faults if too hot. Transitions to AB Running on exit.',
     links: [
-      { label: 'AB Running Config', url: '/config.html#ab-run-section' },
+      { label: 'AB Running Config', url: '/controllers.html#ab-run-section' },
     ]
   },
   GlowPreheat: {
     desc: 'Ramps glow plug power, then holds. Wet glow start fuel follows the hardware fuel delay.',
     links: [
-      { label: 'Glow Plug Preheat', url: '/config.html#glow-cfg-section' },
+      { label: 'Glow Plug Preheat', url: '/controllers.html#glow-cfg-section' },
     ]
   },
   GovernorHold: {
     desc: 'Waits until N2 is within bandRpm of the governor target RPM before completing.',
     links: [
-      { label: 'Automatic N2 Speed Control', url: '/config.html#governor-cfg-section' },
+      { label: 'Automatic N2 Speed Control', url: '/controllers.html#governor-cfg-section' },
     ]
   },
   FuelPumpRamp: {

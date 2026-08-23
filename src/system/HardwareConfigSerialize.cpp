@@ -281,6 +281,9 @@ void HardwareConfig::_toDoc(JsonObject doc) {
         o["speed_min_rpm"] = (uint32_t)l.speedMinHundredRpm * 100U;
         o["speed_max_rpm"] = (uint32_t)l.speedMaxHundredRpm * 100U;
         o["deadband_bar"] = l.deadbandCentiBar / 100.0f;
+        o["response_gain"] = l.adjustScaleCenti / 100.0f;
+        o["failsafe_delay_ms"] = l.failsafeDelayMs;
+        o["failsafe_demand"] = l.failsafeDemandPct / 100.0f;
         o["min_demand"] = l.minDemandPct / 100.0f;
         o["max_demand"] = l.maxDemandPct / 100.0f;
     }

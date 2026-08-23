@@ -1,0 +1,38 @@
+[WebServer] POST /api/ecu_config: 17479 bytes - reboot in 1s
+[WebServer] Restarting: engine config restore
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4037dbbd
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x10cc
+load:0x403c8700,len:0xc2c
+load:0x403cb700,len:0x30c0
+entry 0x403c88b8
+
+[OT] OpenTurbine booting - default profile: OpenTurbine
+[OT] LittleFS OK
+[OT] Boot #1857
+[OT] Reset reason: SOFTWARE (3)
+[OT] system diagnostics ready
+[HWCfg] Loaded OK - profile: OpenTurbine
+[Config] Loaded OK - profile: OpenTurbine
+[OT] Sequences: startup=8, shutdown=3, ab_ign=0, ab_shut=0 blocks
+[VALIDATE] WARN Oil Sensor: Oil pressure is uncalibrated (reads 0 bar) - calibrate it or expect low-oil aborts
+[OT] Starting web server
+[WiFi] AP: OpenTurbine  IP: 192.168.4.1  (open network)  TX=8 dBm
+[WiFi] Captive portal DNS started
+[WiFi] mDNS: http://ot.local
+[WebServer] Started on port 80
+[OT] Web server ready
+[THROTTLE_SRV] servo attach pin=40 freq=50Hz bits=14 OK
+[STARTER_LEDC] LEDC attach pin=11 freq=5000Hz bits=12 OK
+[OT] Setup complete
+[WebSocket] Telemetry deferred - low heap (frame=5569 free=29952 max_alloc=18420)
+[WebSocket] Telemetry deferred - low heap (frame=5569 free=27820 max_alloc=17396)
+[WebSocket] Telemetry deferred - low heap (frame=5565 free=28120 max_alloc=18420)
+[WebSocket] Telemetry deferred - low heap (frame=5571 free=26096 max_alloc=16372)
+[WebSocket] Telemetry deferred - low heap (frame=5570 free=29176 max_alloc=17396)
+[WebSocket] Telemetry deferred - low heap (frame=5570 free=34872 max_alloc=12788)
+[WebSocket] Telemetry deferred - low heap (frame=5572 free=28892 max_alloc=11764)

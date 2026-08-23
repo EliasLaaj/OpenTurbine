@@ -2,7 +2,7 @@
 
 OpenTurbine is an open-source ESP32 turbine engine controller with a built-in web interface. It is intended for experimental turbojets, APUs, generators, turboshafts, turboprops, and other small turbine installations.
 
-The project aims to support the variety found in hobby turbines instead of prescribing one engine layout. The normal interface keeps common setup simple and shows only controls relevant to the fitted hardware; Advanced views, configurable sequences, rules, sensor models, and actuator choices remain available for unusual installations. Suggestions are starting points to verify, not mandatory engine settings. OpenTurbine should require an action only when needed to prevent an immediate unsafe operation, destructive data loss, or an internally invalid configuration.
+The project aims to support the variety found in hobby turbines instead of prescribing one engine layout. The normal interface keeps common setup simple and shows only controls relevant to the fitted hardware; Advanced views, configurable sequences, custom controls, sensor models, and actuator choices remain available for unusual installations. Suggestions are starting points to verify, not mandatory engine settings. OpenTurbine should require an action only when needed to prevent an immediate unsafe operation, destructive data loss, or an internally invalid configuration.
 
 > **Experimental engine control software:** A turbine can cause fire, burns, overspeed failure, fuel spray, projectiles, hearing damage, and death. OpenTurbine does not know the safe limits of your engine. You must verify every limit, output direction, shutdown path, and sequence on a safe test stand before introducing fuel.
 
@@ -139,7 +139,7 @@ it read-only.
 - **TLA2528** adds eight analog inputs. Enter its real reference/supply voltage, valid voltage window, physical scale, and optional input filtering.
 - **NAU7802** adds two bridge/load-cell channels. One chip can measure thrust and torque together when each uses a different channel; both channels share gain and sample rate.
 - If a device stops responding, its saved assignments remain visible as **Disconnected**, but readings become unhealthy and unavailable.
-- A disconnected device card offers **Remove device and assignments** to clear all of its channels, bindings, rules, and newly invalid controller/safety dependencies in one reviewed operation.
+- A disconnected device card offers **Remove device and assignments** to clear all of its channels, bindings, simple controls, and newly invalid controller/safety dependencies in one reviewed operation.
 
 Native ESP32 GPIO is strongly recommended for fuel, ignition, starter, shutdown, and other safety-related outputs. If a TCA9554 or its bus is disconnected, the physical expander output may retain its last latch state. OpenTurbine blocks START when an engine-affecting expander output is unavailable and faults an operating engine on loss, but software cannot force a disconnected chip to change state. Use independent hardware shutdown and power isolation.
 
@@ -275,11 +275,12 @@ with a pull-up keeping the released input high. For long/noisy wiring, use suita
 The web interface is organized in the order a new installation should normally follow:
 
 1. **Hardware** — add only what is physically fitted, select signal types, assign pins, and resolve inventory requirements.
-2. **Config** — search and filter verified engine limits, oil targets, and essential behavior.
-3. **Calibration** — calibrate inputs and find minimum reliable pump outputs.
-4. **Sequence** — review startup/shutdown blocks and any simple Control Rules.
-5. **Tools** — test one output at a time with fuel and ignition made safe.
-6. **Dashboard** — perform dry sequences before any fueled attempt.
+2. **Controllers** — choose what owns each output and configure its local tuning and safety limits.
+3. **System** — configure ECU-wide runtime, communications, logging, display, and housekeeping behavior.
+4. **Calibration** — calibrate inputs and find minimum reliable pump outputs.
+5. **Sequence** — review ordered startup, shutdown, and afterburner transitions.
+6. **Tools** — test one output at a time with fuel and ignition made safe.
+7. **Dashboard** — perform dry sequences before any fueled attempt.
 
 Settings that cannot apply to the fitted hardware are hidden or ghosted in normal use. Use **Essentials** for commissioning and **Configured system** for everything that can affect the fitted turbine. **Explore all features** exposes every hardware-dependent value for advance planning: amber-bordered tuning values can be edited and saved, but remain inactive until their stated sensor, output, or controller prerequisite is configured in Hardware. Enable switches and choices that name missing hardware stay locked, so browsing or preparing values cannot arm a feature unexpectedly. **Changed** reviews pending edits; search also finds unavailable features.
 
@@ -291,13 +292,13 @@ This is the literal path from an unopened board to a dry-tested ECU.
 2. **Power only the ECU.** Keep every actuator/load power supply disconnected. Leave fuel and ignition energy physically isolated.
 3. **Join the ECU Wi-Fi.** A fresh default installation advertises `OpenTurbine` with no password. Join it and open `http://192.168.4.1`. If you later change the profile id, the Wi-Fi name changes with it.
 4. **Acknowledge the safety notice and choose a theme.** Confirm that the Dashboard loads and remains connected.
-5. **Set identity and Wi-Fi security.** In Hardware, set a recognizable profile id and an 8–63 character AP password if the ECU should not remain open. Save, let it reboot, then reconnect using the new network name/password.
+5. **Set identity and Wi-Fi security.** In System, set a recognizable engine name and an 8–63 character AP password if the ECU should not remain open. Save, let it reboot, then reconnect using the new network name/password.
 6. **Configure one device at a time.** In Hardware, select the correct target, enable only fitted devices, choose electrical types, assign pins, and resolve every warning. Save and reboot.
 7. **Verify the saved hardware.** Reopen Hardware after reboot and compare every pin/type with the wiring before applying actuator power.
 8. **Check live inputs.** Power sensors only. Open Dashboard/Calibration and confirm plausible raw/live response. Do not enable a safety based on an uncalibrated sensor.
-9. **Enter verified essential settings.** Use Config search and the Essentials filter. Do not use example suggestions as authority.
+9. **Configure control and safety.** Use Controllers search and the Essentials filter. Then review ECU-wide settings on System. Do not use example suggestions as authority.
 10. **Calibrate inputs and pump minimums.** Follow the visible Calibration wizards with fuel/ignition made safe.
-11. **Review sequences and rules.** Confirm startup/shutdown order, timing, sensor gates, abort behavior, active rule states, hysteresis, mappings, and off values.
+11. **Review sequences and simple controls.** Confirm startup/shutdown order, timing, sensor gates, abort behavior, output ownership, hysteresis, mappings, and safe inactive values.
 12. **Test outputs at logic level.** With load power still isolated, confirm output polarity using a meter or test indicator.
 13. **Connect and test loads individually.** Use Tools in STANDBY. Begin with short duration and conservative proportional output. Keep fuel and ignition separated until each path is proven.
 14. **Test every stop path.** Verify web STOP, physical STOP, loss-of-signal behavior, and fuel shutoff. Do not continue if any stop path is ambiguous.
@@ -309,11 +310,11 @@ This is the literal path from an unopened board to a dry-tested ECU.
 
 Open **Hardware** and describe the actual installation. Do not enable a sensor or actuator merely because it appears in the list.
 
-- Use **Installed Channel Inventory** for channels that rules, sequences, and controller bindings need to reference by ID. The stable ID is the machine key; keep it short, unique, and unchanged after other features reference it. The display name is safe to edit.
+- Use **Installed Channel Inventory** for channels that controllers, sequences, and bindings need to reference by ID. The stable ID is the machine key; keep it short, unique, and unchanged after other features reference it. The display name is safe to edit.
 - Inventory inputs can be digital, analog, pulse/frequency, or RC PWM. Digital switch roles can feed existing DI behaviors such as inhibit-start, E-stop, AB arm/fire, limp mode, sequence gate, and fault inputs. Registry-driven DI behavior currently uses the existing active-low/pull-up default unless a legacy DI channel supplies richer switch metadata.
-- Inventory outputs can be relay, PWM, or servo/ESC. Relay outputs quantize at the driver boundary; PWM and servo outputs preserve the full 0-100% demand used by rules, sequences, tools, and controllers.
+- Inventory outputs can be relay, PWM, or servo/ESC. Relay outputs quantize at the driver boundary; PWM and servo outputs preserve the full 0-100% demand used by controllers, sequences, and Tools.
 - General valves, bleed valves, purge/start-fuel valves, and air-starter actuators may use relay, PWM, or servo endpoints. The standard air-starter sequence blocks remain deliberately on/off, so a PWM/servo air-starter card moves between its configured 0% and 100% endpoints. Dedicated hard fuel-shutoff and afterburner-shutoff purposes remain relay-only.
-- Repeatable outputs with the same role are allowed. For example, `Oil Pump 1` can be the main bound pump while `Oil Pump 2` is controlled by rules, sequences, tools, or another oil loop.
+- Repeatable outputs with the same role are allowed. For example, `Oil Pump 1` can be the main bound pump while `Oil Pump 2` is controlled by another oil-pressure controller, a simple control, Sequence, or Tools.
 - The standard `AB igniter` inventory output bridges to the existing Igniter 2 / afterburner ignition path when it uses the standard `ab_igniter` or `igniter2_main` ID.
 - Confirm the correct ESP32 target.
 - With a flashed PCB profile, select the labelled **Connected to** port instead of a GPIO. An unavailable fixed I²C port means its chip is not responding; correct the hardware or remove the dependent channel.
@@ -326,9 +327,9 @@ Open **Hardware** and describe the actual installation. Do not enable a sensor o
 
 After reboot, return to Hardware and verify that every saved device and pin is still correct.
 
-### 2. Essential configuration
+### 2. Controllers and System
 
-Open **Config** and begin with **Essentials**. Use **Configured system** for deeper applicable tuning, **Explore all features** to inspect or preconfigure optional hardware values, and **Changed** to review pending edits. Amber-bordered tuning values save for future use but do nothing until Hardware satisfies the displayed prerequisite. Unavailable enable switches and missing-hardware choices remain locked. Search spans both available and unavailable features. Example suggestions are editable examples only; they are not safe values for your turbine.
+Open **Controllers** and begin with **Essentials**. Start from the output: confirm what controls it, the relevant mapping or target, local response tuning, and its safety overrides. Use **Configured system** for deeper applicable tuning, **Explore all features** to inspect future options, and **Changed** to review pending edits. Then open **System** for ECU-wide runtime, communications, logging, display, and housekeeping settings. Example suggestions are editable examples only; they are not safe values for your turbine.
 
 Review at least:
 
@@ -343,7 +344,7 @@ Review at least:
 
 For a two-shaft engine, also review the hard N2 shutdown limit, N2 gradual-pullback points, governor target/band, any N2-based idle target, and the external-cluster N2 warning. OpenTurbine warns when those values do not leave sensible ordering below the hard trip, but the operator remains responsible for the actual margins.
 
-If using multiple oil systems, define each oil loop with its pressure input, pump output, target pressure, deadband, and min/max demand. The first enabled loop feeds primary oil status and cooldown control; additional loops drive their own explicitly selected pumps. A target may be fixed, follow the previous final effective core-fuel demand, or map from N1/N2 shaft speed. Fuel-following deliberately uses the final protected/rule-adjusted core-fuel command from the preceding control tick, not afterburner fuel. Relay pumps use true on/off pressure hysteresis for accumulator/relief systems; PWM/servo pumps expose proportional minimum and maximum demand. Rules run afterward and therefore remain the final optional command owner.
+If using multiple oil systems, define each oil loop with its pressure input, pump output, target pressure, deadband, and min/max demand. The first enabled loop feeds primary oil status and cooldown control; additional loops drive their own explicitly selected pumps. A target may be fixed, follow the previous final effective core-fuel demand, or map from N1/N2 shaft speed. Fuel-following deliberately uses the final protected core-fuel command from the preceding control tick, not afterburner fuel. Relay pumps use true on/off pressure hysteresis for accumulator/relief systems; PWM/servo pumps expose proportional minimum and maximum demand. Each enabled oil loop is the single normal owner of its selected pump.
 
 `0` can mean disabled, automatic, or unlimited depending on the field. Read the description beside that specific control.
 
@@ -364,13 +365,13 @@ The Dashboard N2 gauge uses the hard shutdown limit. `OFF` means the hard N2 saf
 ### Controller and limiter behavior
 
 - **Throttle slew** limits how quickly effective fuel/throttle demand can rise or fall. Verify both directions with the turbine unfueled. Emergency shutdown bypasses normal gradual movement and commands the safe state immediately.
-- **N1, N2, EGT, P1, P2, and torque protection** is presented as one expandable card per measurement under Config → Engine Limits & Protection. Each card keeps gradual fuel reduction beside its independent hard shutdown. The soft point begins intervention. At the full point, strength 1.0 reaches the configured Minimum Fuel During Gradual Protection; lower strength is gentler and greater than 1 reaches the floor sooner. When several are active, the lowest permitted fuel ceiling wins. Gradual reduction lowers the fuel ceiling; it never replaces the hard shutdown.
+- **N1, N2, EGT, P1, P2, and torque protection** is presented as one expandable card per measurement under Controllers → Engine Limits & Protection. Each card keeps gradual fuel reduction beside its independent hard shutdown. The soft point begins intervention. At the full point, strength 1.0 reaches the configured Minimum Fuel During Gradual Protection; lower strength is gentler and greater than 1 reaches the floor sooner. When several are active, the lowest permitted fuel ceiling wins. Gradual reduction lowers the fuel ceiling; it never replaces the hard shutdown.
 - **Predictive limit protection** projects N1/N2 speed, P1/P2 pressure, selected TOT/TIT, and torque from their measured rise rates, then begins a gentler approach before the current reading reaches the soft point. Start with reactive/simple behavior unless predictive tuning has been validated on the engine.
 - **Sensor timing** is tied to real samples rather than Dashboard/control-loop refreshes. Shaft pulse inputs average over a longer window at low pulse rates and automatically publish faster as speed rises. Pressure, torque, and temperature rates update only when their driver reports a new measurement, so increasing the web refresh rate does not change controller behavior.
 - **Automatic Idle Control** trims fuel near idle using one selected N1, N2, P1, or P2 source. N1/N2 speed control is the normal proven approach; P1/P2 control is explicitly experimental. RPM and pressure sources have separate target, deadband, and disengagement values. Verify the selected sensor is calibrated and that disconnecting it enters reduced-power mode without a fuel increase.
 - **Automatic N2 speed control** uses proportional fuel, proportional propeller pitch, or deliberate fine/coarse relay pitch. Start response gains low, verify correction direction with a simulated speed error, and increase gains only while watching for hunting.
 - **Oil-pressure control** adjusts each explicitly selected pump to its configured fixed, effective-fuel, N1, or N2 pressure target. Its target must remain above the low-pressure shutdown threshold. A relay pump switches fully off/on around its target and deadband; use that only with plumbing designed for two-position pressure control. Sensor failure uses the configured delay and fallback demand; validate that fallback physically.
-- **Reduced-power mode** caps throttle after its configured digital input or rule requests it. Treat it as a degraded-operation feature, not a substitute for stopping after a mechanical or lubrication fault.
+- **Reduced-power mode** caps throttle after its configured input, an eligible feedback failure, or an explicit standby/tool request activates it. Treat it as a degraded-operation feature, not a substitute for stopping after a mechanical or lubrication fault.
 - **Pulsed Starter Assist** repeatedly applies and releases proportional starter output during `StarterSpin` while healthy N1 remains below its configured threshold. These torque impulses can help Bendix drives and splined couplings engage; once the threshold is reached, normal ramped starter control continues. It needs no runtime arming, never operates in RUNNING, and cancels for that startup attempt if N1 becomes unhealthy. With load power isolated, use the short STANDBY-only Tools test to verify direction and output before a live start.
 - **Windmilling oil protection** can run the oil pump in STANDBY while N1 or N2 remains above its threshold. A zero pressure target uses the configured fixed pump output. A nonzero target uses the normal oil-pressure controller, with that pump output as its minimum floor. Verify the selected shaft, mode, and that the pump releases after rotation stops.
 
@@ -447,17 +448,17 @@ Use dry runs with fuel physically disconnected before a fueled test.
 
 The editor also supports entry conditions, per-step enter/exit side actions, afterburner sequences, and bounded custom blocks. A custom condition can require continuous stability or measure its threshold relative to the reading at block entry. The three compressor-pressure buttons create guided versions of those checks; place them deliberately around ignition and light-off. Red structural errors block START; yellow warnings describe arrangements that may be intentional but require review. Never use Bench Mode to make an invalid real-engine sequence appear acceptable.
 
-### 5. Simple control rules
+### 5. Custom controllers
 
-Open **Sequence → Control Rules** for small automations that do not belong in the ordered startup or shutdown sequence. A rule can switch one output at a threshold with hysteresis, or map a fitted input range linearly to a variable PWM/servo output range.
+Open **Controllers → Custom controllers** when a fitted output needs behavior not covered by a common turbine controller. Any fitted sensor, switch, or operator input can switch an unowned compatible output at a threshold with hysteresis, map an input range to a variable output, or hold a feedback target. Feedback targets may be fixed, selected by a switch, or mapped from another variable input.
 
-- Select All states, or Starting, Running, and/or Shutdown.
-- Outside those states, the rule releases ownership and the last applicable non-rule command resumes. While a selected state is active, a false or unavailable condition applies the configured off value.
+- RUNNING is the default. Advanced builds may select STANDBY, STARTUP, RUNNING, and/or SHUTDOWN for each custom controller. Outside the selected states, Sequence or the previous ordinary owner resumes control. Custom controllers are always released in FAULT.
 - Hysteresis prevents rapid switching near a threshold. For “above 100 °C” with 5 °C hysteresis, the output turns on above 100 °C and stays on until the input falls to 95 °C.
 - Mapping clamps below/above its input limits and is useful for testing proportional outputs from a potentiometer.
-- Keep one enabled rule per output. Hardware fault-safe behavior still owns faults.
-- A drain valve is an ordinary fitted output here, so it may also follow a switch or sensor rule instead of a sequence block.
-- Give registry channels stable IDs before rules reference them. Removing a referenced source or target is rejected rather than leaving an orphaned automation.
+- Keep one enabled normal controller per output. The UI will not offer an output already owned by an enabled dedicated controller. STOP, shutdown, and Hardware fault-safe behavior remain authoritative.
+- A drain valve is an ordinary fitted output here, so it may also follow a switch or sensor controller instead of a sequence block.
+- Feedback control inherits the exact pre-handover output on its first tick. Begin with gentle response values and verify direction, loss behavior, and stability on a safe bench setup before connecting a live process.
+- Give registry channels stable IDs before controls reference them. Removing a referenced source or target also removes or disables the dependent control rather than leaving an orphaned owner.
 - After saving, test minimum, midpoint, maximum, mode exit, sensor loss, reboot persistence, and physical output direction.
 
 Add each main or scavenge flow meter inside its pump's **Flow sensing &
@@ -466,7 +467,7 @@ Select its pulse, analog, or supported I²C signal there and enter its
 pulses-per-litre or analog calibration. Oil-flow monitoring warns when a
 commanded pump remains below its Hardware threshold. It does not shut the
 engine down by default. Enable
-**Config → Shutdown on Confirmed Low Oil Flow** only after both the meter and
+**Controllers → Shutdown on Confirmed Low Oil Flow** only after both the meter and
 threshold have been tested; the shared confirmation delay is configured beside
 that option.
 

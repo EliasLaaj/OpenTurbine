@@ -6,7 +6,7 @@ function esc(value) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function buildCard(bname, idx, tab, total) {
+function buildCard(bname, idx, tab) {
   const def = BLOCKS[bname] || customBlocks[bname];
   const card = document.createElement('div');
   const hardwareMissing = !def || !!(def.visibleIf && !def.visibleIf(hwCfg));
@@ -30,15 +30,6 @@ function buildCard(bname, idx, tab, total) {
 
   const badge = def ? `<span class="block-badge ${esc(def.badgeClass)}">${esc(def.type.toUpperCase())}</span>` : '';
   const condHtml = condText ? `<span class="block-cond">${esc(condText)}</span>` : '';
-  const canMoveUp = idx > 0;
-  const canMoveDown = idx < total - 1;
-  const moveUpHtml = canMoveUp
-    ? `<button class="blk-btn icon-btn" onclick="moveBlock('${tab}',${idx},-1)" title="Move up" aria-label="Move block up">^</button>`
-    : `<span class="blk-btn-spacer" aria-hidden="true"></span>`;
-  const moveDownHtml = canMoveDown
-    ? `<button class="blk-btn icon-btn" onclick="moveBlock('${tab}',${idx},+1)" title="Move down" aria-label="Move block down">v</button>`
-    : `<span class="blk-btn-spacer" aria-hidden="true"></span>`;
-
   card.innerHTML = `
   <div class="block-header" title="${esc(def?.desc || 'Sequence block')}" onclick="toggleParams(this)">
     ${badge}
@@ -47,8 +38,7 @@ function buildCard(bname, idx, tab, total) {
     ${toPill}
     ${hardwareMissing ? `<span class="block-hardware-pill">${def ? 'Missing hardware' : 'Unknown block'}</span>` : ''}
     <div class="block-actions" onclick="event.stopPropagation()">
-      ${moveUpHtml}
-      ${moveDownHtml}
+      <button type="button" class="blk-btn drag-handle" title="Drag to reorder; arrow keys also work" aria-label="Drag to reorder block; use up and down arrow keys"><span class="drag-grip" aria-hidden="true"></span></button>
       ${customBlocks[bname] ? `<button class="blk-btn" onclick="editCustomBlock('${bname}','${tab}')">Edit</button>` : ''}
       ${BLOCK_INFO[bname] ? `<button class="blk-btn bip-btn" aria-label="Explain ${esc(def?.label ?? bname)}" title="${esc(def?.desc || 'What does this block use?')}" onclick="showBlockInfo('${bname}')">?</button>` : ''}
       <button class="blk-btn del" title="Remove this sequence block" aria-label="Remove this sequence block" onclick="removeBlock('${tab}',${idx})">Remove</button>
@@ -56,7 +46,46 @@ function buildCard(bname, idx, tab, total) {
   </div>
   ${buildParamsHtml(bname, idx, tab)}`;
 
+  wireBlockDragHandle(card, tab, idx);
+
   return card;
+}
+
+function wireBlockDragHandle(card, tab, originalIdx) {
+  const handle = card.querySelector('.drag-handle');
+  if (!handle) return;
+  handle.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    moveBlock(tab, originalIdx, event.key === 'ArrowUp' ? -1 : 1);
+  });
+  handle.addEventListener('pointerdown', event => {
+    if (event.button !== undefined && event.button !== 0) return;
+    const list = card.parentElement;
+    if (!list) return;
+    event.preventDefault();
+    event.stopPropagation();
+    card.classList.add('block-dragging');
+
+    const move = pointerEvent => {
+      pointerEvent.preventDefault();
+      const target = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)?.closest('.block-card');
+      if (!target || target === card || target.parentElement !== list) return;
+      const bounds = target.getBoundingClientRect();
+      list.insertBefore(card, pointerEvent.clientY < bounds.top + bounds.height / 2 ? target : target.nextSibling);
+    };
+    const finish = pointerEvent => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', finish);
+      document.removeEventListener('pointercancel', finish);
+      card.classList.remove('block-dragging');
+      const newIdx = Array.from(list.children).filter(node => node.classList?.contains('block-card')).indexOf(card);
+      if (newIdx >= 0 && newIdx !== originalIdx) moveBlockTo(tab, originalIdx, newIdx);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', finish);
+    document.addEventListener('pointercancel', finish);
+  });
 }
 
 function buildSideActionsHtml(tab, idx) {
@@ -409,23 +438,29 @@ function onParamChangeBool(bname, pkey, configKey, checked) {
 
 // ------ Sequence order edits ---------------------------------------------------------------------------------------------------------------------------------------------------------
 function moveBlock(tab, idx, dir) {
+  moveBlockTo(tab, idx, idx + dir);
+}
+
+function moveBlockTo(tab, idx, ni) {
   const key = seqKey(tab);
   const seq = hwCfg[key];
   if (!seq) return;
-  const ni = idx + dir;
   if (ni < 0 || ni >= seq.length) return;
-  [seq[idx], seq[ni]] = [seq[ni], seq[idx]];
   ensureDelaySlots(tab);
   ensureActionSlots(tab);
   ensureIgnitionTargetSlots(tab);
-  const delays = hwCfg[delaySeqKey(tab)];
-  [delays[idx], delays[ni]] = [delays[ni], delays[idx]];
-  const targets = hwCfg[ignitionTargetSeqKey(tab)];
-  [targets[idx], targets[ni]] = [targets[ni], targets[idx]];
+  const reorder = rows => {
+    if (!Array.isArray(rows)) return;
+    const [item] = rows.splice(idx, 1);
+    rows.splice(ni, 0, item);
+  };
+  reorder(seq);
+  reorder(hwCfg[delaySeqKey(tab)]);
+  reorder(hwCfg[ignitionTargetSeqKey(tab)]);
   for (const phase of ['enter','exit']) {
     const ak = actionKey(tab, phase);
     if (!ak || !hwCfg[ak]) continue;
-    [hwCfg[ak][idx], hwCfg[ak][ni]] = [hwCfg[ak][ni], hwCfg[ak][idx]];
+    reorder(hwCfg[ak]);
   }
   renderFast(tab);
 }
@@ -527,6 +562,53 @@ function registryChannelInstalled(channel) {
       Number(channel.spi_miso) >= 0 && (tempInterface !== 3 || Number(channel.spi_mosi) >= 0);
   }
   return Number(channel.pin) >= 0;
+}
+const SEQUENCE_CORE_INPUT_IDS = new Set([
+  'n1_main','primary_n1','n2_main','primary_n2','tot_main','primary_egt','tit_main',
+  'oil_pressure_main','oil_temperature','fuel_pressure','fuel_flow','p1_main','p2_main',
+  'torque_main','flame_main','thrust_main','operator_throttle','operator_idle',
+  'battery_voltage','ab_flame_main','ab_command','start_switch','stop_switch'
+]);
+const SEQUENCE_CORE_INPUT_PURPOSES = new Set([
+  'n1_speed','n2_speed','tot','tit','oil_pressure','oil_temperature','fuel_pressure',
+  'fuel_flow','p1_pressure','p2_pressure','torque','thrust','flame','battery_voltage',
+  'throttle','idle','ab_flame','ab_command','start_switch','stop_switch'
+]);
+const SEQUENCE_CORE_OUTPUT_IDS = new Set([
+  'main_fuel_output','main_fuel','main_starter','starter','starter_main','starter_enable',
+  'oil_pump','oil_pump_main','cooling_fan','cooling_fan_main','oil_scavenge_main',
+  'scavenge_pump','bleed_valve','bleed_valve_main','igniter','ab_igniter','igniter2_main',
+  'main_fuel_shutoff','fuel_shutoff','ab_solenoid','air_starter','fuel_pump','ab_pump',
+  'prop_pitch','glow_plug'
+]);
+const SEQUENCE_CORE_OUTPUT_PURPOSES = new Set([
+  'main_fuel','fuel_shutoff','starter','starter_enable','oil_pump','scavenge_pump',
+  'cooling_fan','fuel_pump','igniter','ab_igniter','ab_valve','glow_plug','ab_pump',
+  'prop_pitch','air_starter'
+]);
+function registryInputCoreBound(channel) {
+  if (!channel) return false;
+  if (SEQUENCE_CORE_INPUT_IDS.has(String(channel.id || ''))) return true;
+  const purpose = String(channel.purpose || '');
+  if (!SEQUENCE_CORE_INPUT_PURPOSES.has(purpose)) return false;
+  const peers = (hwCfg.channel_registry?.inputs || []).filter(item =>
+    registryChannelInstalled(item) && String(item.purpose || '') === purpose);
+  const preferred = peers.find(item => SEQUENCE_CORE_INPUT_IDS.has(String(item.id || '')));
+  return (preferred || peers[0]) === channel;
+}
+function registryOutputCoreBound(channel) {
+  if (!channel?.id) return false;
+  const id = String(channel.id);
+  const purpose = String(channel.purpose || '');
+  if (!SEQUENCE_CORE_OUTPUT_PURPOSES.has(purpose)) return false;
+  const bindingKey = ({main_fuel:'main_fuel_output',fuel_shutoff:'main_fuel_shutoff',starter:'main_starter'})[purpose];
+  const binding = bindingKey && (hwCfg.channel_registry?.bindings || []).find(row => String(row?.key || '') === bindingKey);
+  if (binding) return String(binding.channel || '') === id;
+  if (SEQUENCE_CORE_OUTPUT_IDS.has(id)) return true;
+  const peers = (hwCfg.channel_registry?.outputs || []).filter(item =>
+    registryChannelInstalled(item) && String(item.purpose || '') === purpose);
+  const preferred = peers.find(item => SEQUENCE_CORE_OUTPUT_IDS.has(String(item.id || '')));
+  return (preferred || peers[0]) === channel;
 }
 function registryInputPurpose(purpose) {
   return (hwCfg.channel_registry?.inputs || []).find(channel =>
@@ -758,10 +840,10 @@ function _renderStepRows() {
     row.className = 'cblk-output-row';
     const isDelay = step.type === 'delay_ms';
     const upBtn   = i > 0
-      ? `<button class="cblk-mv-btn" onclick="moveStep(${i},-1)" title="Move up" aria-label="Move step up">^</button>`
+      ? `<button class="cblk-mv-btn" onclick="moveStep(${i},-1)" title="Move up" aria-label="Move step up">↑</button>`
       : '<span class="cblk-mv-spacer" aria-hidden="true"></span>';
     const dnBtn   = i < _cblkSteps.length-1
-      ? `<button class="cblk-mv-btn" onclick="moveStep(${i},1)" title="Move down" aria-label="Move step down">v</button>`
+      ? `<button class="cblk-mv-btn" onclick="moveStep(${i},1)" title="Move down" aria-label="Move step down">↓</button>`
       : '<span class="cblk-mv-spacer" aria-hidden="true"></span>';
     if (isDelay) {
       row.innerHTML = `

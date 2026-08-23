@@ -326,14 +326,17 @@ static IgnitionCommandBlock* const _abShutIgnitionBlocks =
     _sequenceIgnitionBlockStorage
         ? _sequenceIgnitionBlockStorage + HardwareConfig::MAX_SEQ_BLOCKS * 3 : nullptr;
 static int     _abShutCount   = 0;
-static void validateSequences();  // defined after buildSequences
+static void validateSequences(bool report = true);  // defined after buildSequences
 static bool _configApplyDeferred = false;
 
-static void applyConfigOnEcuCore(const char* reason) {
+static void applyConfigOnEcuCore() {
     Hardware::applyConfig();
-    validateSequences();
+    // The web transaction can overlap Core-0 network diagnostics. Keep the
+    // authoritative readiness cache up to date without writing routine
+    // validation chatter to the shared UART from Core 1; concurrent Serial
+    // writes can corrupt the Arduino TX ring and block both cores.
+    validateSequences(false);
     ClusterSerial::beginIfNeeded();
-    Serial.printf("[OT] Config block/hardware apply complete (%s)\n", reason);
 }
 
 static void buildSequences() {
@@ -423,7 +426,7 @@ static void buildSequences() {
 // Errors (isError=true) block the START command unless bench mode is on.
 // Warnings (isError=false) are informational — the sequence will proceed
 // but may time out or behave differently than expected.
-static void validateSequences() {
+static void validateSequences(bool report) {
     auto& hw = HardwareConfig::instance();
     auto& ed = EngineData::instance();
     ed.seqIssueCount = 0;
@@ -447,8 +450,10 @@ static void validateSequences() {
         strncpy(iss.reason, reason, sizeof(iss.reason) - 1);
         iss.reason[sizeof(iss.reason) - 1] = '\0';
         iss.isError = isError;
-        Serial.printf("[VALIDATE] %s %s: %s\n",
-                      isError ? "ERROR" : "WARN", block, reason);
+        if (report) {
+            Serial.printf("[VALIDATE] %s %s: %s\n",
+                          isError ? "ERROR" : "WARN", block, reason);
+        }
     };
 
     // ── Check for unrecognized block names ────────────────────
@@ -1161,7 +1166,7 @@ static void validateSequences() {
             addIssue("AutoRelight", "Relight timeout is 0 - the ECU will use its hardcoded 30 second maximum", false);
     }
 
-    if (ed.seqIssueCount == 0)
+    if (report && ed.seqIssueCount == 0)
         Serial.println("[VALIDATE] All sequences OK");
 }
 
@@ -3931,9 +3936,6 @@ void loop() {
             if (candidateError == DeserializationError::NoMemory) {
                 ConfigApplyGate::retryStagedCandidate(candidateLen, 250);
                 Serial.println("[OT] Config staged apply waiting for a contiguous heap block");
-            } else {
-                Serial.printf("[OT] Config candidate applied from staged stream: %s\n",
-                              candidateApplied ? "OK" : "FAILED");
             }
         }
         if (candidateJson) free(candidateJson);
@@ -3951,7 +3953,7 @@ void loop() {
         } else if (!candidateApplied) {
             Serial.println("[OT] ERROR: persisted configuration candidate could not be published");
         } else if (configMode == SysMode::STANDBY || configMode == SysMode::FAULT) {
-            applyConfigOnEcuCore("web update");
+            applyConfigOnEcuCore();
             _configApplyDeferred = false;
         } else if (configMode == SysMode::RUNNING) {
             Hardware::applyLiveControllerTuning();
@@ -3963,10 +3965,8 @@ void loop() {
             _configApplyDeferred = true;
             Serial.println("[OT] Config apply deferred until STANDBY");
         }
-        if (hasCandidate && !retryForHeap)
+        if (!retryForHeap)
             ConfigApplyGate::completeCoreApply(candidateGeneration, candidateApplied);
-        else if (!hasCandidate)
-            ConfigApplyGate::release();
         if (retryForHeap && configHeapRetryCount >= 8 &&
             (configMode == SysMode::STANDBY || configMode == SysMode::FAULT)) {
             // The exact validated generation is already atomically persisted.
@@ -3989,7 +3989,7 @@ void loop() {
     if (_configApplyDeferred &&
         (deferredMode == SysMode::STANDBY || deferredMode == SysMode::FAULT) &&
         ConfigApplyGate::tryBeginDeferredCoreApply()) {
-        applyConfigOnEcuCore("deferred update at STANDBY");
+        applyConfigOnEcuCore();
         _configApplyDeferred = false;
         ConfigApplyGate::release();
     }

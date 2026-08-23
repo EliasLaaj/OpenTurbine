@@ -5,9 +5,10 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <title>OpenTurbine - Sequence</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260814g',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260814g');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -35,7 +36,6 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
   border-style:dashed;
 }
 .rule-preset-unavailable:hover { border-color:var(--yellow); color:var(--yellow); }
-#tab-rules>.tool-card{max-width:none}
 @media(max-width:850px){.automation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.automation-topline{grid-template-columns:1fr 1fr}.automation-enabled{grid-column:span 2}}@media(max-width:560px){.automation-intro{display:block}.rule-presets{flex-wrap:wrap;overflow-x:visible;padding-bottom:.25rem}.rule-preset-btn{flex:1 1 12rem;white-space:normal}.automation-grid,.automation-topline{grid-template-columns:minmax(0,1fr)}.automation-field.wide,.automation-enabled{grid-column:auto}.automation-card>summary{padding:.6rem}.automation-kind{display:none}.automation-body{padding:.7rem}.automation-sentence{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}}
 .block-card.block-hardware-missing {
   border-color: rgba(220,50,50,.72);
@@ -52,9 +52,10 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
+  <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
-  <a href="/sequence.html" class="active" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
+  <a href="/sequence.html" class="active" title="Edit startup, shutdown, and afterburner transitions and block timings.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
   <a href="/tools.html" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
   <span id="conn" class="conn-dot disconnected" title="WebSocket"></span><span id="conn-label" class="conn-label">Disconnected</span>
@@ -63,7 +64,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
 <div class="page-heading">
   <div class="page-heading-main">
     <h1 class="page-title">Sequence Editor</h1>
-    <p class="page-subtitle">Edit startup, shutdown, afterburner and simple control rules. Sequence order and parameters are saved together and applied after reboot.</p>
+    <p class="page-subtitle">Edit startup, shutdown, and afterburner transitions. Normal running controls are configured on Controllers.</p>
   </div>
 </div>
 
@@ -73,25 +74,6 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
   <button class="seq-tab active" onclick="switchTab('startup')">Startup</button>
   <button class="seq-tab"        onclick="switchTab('shutdown')">Shutdown</button>
   <button class="seq-tab" id="tab-btn-afterburner" onclick="switchTab('afterburner')">Afterburner</button>
-  <button class="seq-tab"        onclick="switchTab('rules')">Control Rules</button>
-</div>
-<div id="tab-rules" style="display:none">
-  <div class="tool-card" style="padding:1rem;line-height:1.55">
-    <div class="automation-intro">
-      <div class="automation-copy">
-        <h3 style="margin:.1rem 0 .35rem">Control Rules</h3>
-        <p>Turn an output on at a threshold, or map an input directly to a variable output. Each output can have one rule, so the result is always predictable.</p>
-        <p>Outside the selected engine states, the rule releases the output and its normal sequencer/controller command resumes. In a selected state, a false or unavailable input applies the configured off value. Fault hands control to the output's hardware-safe setting.</p>
-      </div>
-      <span id="rules-count-label" style="font-size:.72rem;color:var(--dim);white-space:nowrap">0 / 16 rules</span>
-    </div>
-    <div id="rule-presets" class="rule-presets"></div>
-    <div id="rules-list" class="automation-list"></div>
-    <div id="rules-warnings" style="display:none;margin-top:.45rem;font-size:.72rem;color:var(--yellow);line-height:1.45"></div>
-    <div style="margin-top:.5rem;display:flex;align-items:center;gap:.75rem">
-      <button id="btn-add-rule" onclick="addRule()" class="add-btn">+ Add control rule</button>
-    </div>
-  </div>
 </div>
 
 <div id="tab-startup">
@@ -117,7 +99,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     Afterburner operation has two parts: choose the trigger source and wiring in
     <a href="/hardware.html#grp-ab-trigger">Hardware - AB Trigger &amp; Arming</a>,
     then tune the trigger value, gate limits and light-up/light-off actions here.
-    Advanced ignition and pump behavior remains under <a href="/config.html#ab-cfg-section">Config - Afterburner</a>.
+    Advanced ignition and pump behavior remains under <a href="/controllers.html#ab-cfg-section">Controllers - Afterburner</a>.
   </div>
 
   <!-- Entry criteria info box, populated by buildAbCriteriaHtml() -->
@@ -614,7 +596,7 @@ const BLOCKS = {
     params:[
       {key:'oil_pump_on_pct', label:'Startup oil pump demand', unit:'%', type:'float', min:0, max:100, step:5, def:100, configKey:'oil_pump_on_pct',
         visibleIf: hw => actuatorHasProportionalOutput('oil_pump'),
-        desc:'Direct PWM output for this sequence step; it is not limited by Config > Oil System > Controller Minimum Duty.'},
+        desc:'Direct PWM output for this sequence step; it is not limited by Controllers > Oil & Lubrication Controllers > Minimum Pump Command.'},
     ]
   },
   OilPumpOff: {
@@ -1134,35 +1116,35 @@ const BLOCK_INFO = {
   FlameConfirm: {
     desc: 'Waits until the flame sensor fires N consecutive times. Can turn off all ignition outputs on exit.',
     links: [
-      { label: 'Combustion-Loss Confirmation Time', url: '/config.html#safety-monitor' },
+      { label: 'Combustion-Loss Confirmation Time', url: '/controllers.html#safety-monitor' },
     ]
   },
   TempConfirm: {
     desc: 'Waits until selected EGT rises above the configured threshold. Alternative to FlameConfirm when no flame sensor is fitted.',
     links: [
-      { label: 'Engine Temperature Source', url: '/config.html#engine-limits' },
-      { label: 'Cooldown Target', url: '/config.html#engine-limits' },
+      { label: 'Engine Temperature Source', url: '/controllers.html#engine-limits' },
+      { label: 'Cooldown Target', url: '/controllers.html#engine-limits' },
     ]
   },
   Spool: {
     desc: 'Holds fuel/throttle at the calibrated minimum reliable fuel-pump output and waits for N1 to reach the idle-entry target. Flame monitoring remains active.',
     links: [
       { label: 'Minimum Reliable Fuel-Pump Output', url: '/calibration.html#fuelpump-min-cal-row' },
-      { label: 'Throttle Open Speed', url: '/config.html#throttle' },
-      { label: 'Running Oil Min',     url: '/config.html#oil-config-section' },
+      { label: 'Throttle Open Speed', url: '/controllers.html#throttle' },
+      { label: 'Running Oil Min',     url: '/controllers.html#oil-config-section' },
     ]
   },
   SafetyHold: {
     desc: 'Requires all enabled final sensor checks to remain continuously stable before RUNNING. Optional exit actions can turn off starter and ignition outputs.',
     links: [
-      { label: 'Min RPM',         url: '/config.html#engine-limits' },
-      { label: 'Running Oil Min', url: '/config.html#oil-config-section' },
+      { label: 'Min RPM',         url: '/controllers.html#engine-limits' },
+      { label: 'Running Oil Min', url: '/controllers.html#oil-config-section' },
     ]
   },
   CooldownSpin: {
     desc: 'Spins starter and/or runs oil pump to cool EGT below target temperature. Skipped if fuel was never opened.',
     links: [
-      { label: 'Cooldown EGT Target', url: '/config.html#engine-limits' },
+      { label: 'Cooldown EGT Target', url: '/controllers.html#engine-limits' },
     ]
   },
   FinalStop: {
@@ -1172,7 +1154,7 @@ const BLOCK_INFO = {
   RPMDrop: {
     desc: 'Waits for N1 to fall below threshold RPM before proceeding to cooldown. Continues on timeout.',
     links: [
-      { label: 'Min RPM', url: '/config.html#engine-limits' },
+      { label: 'Min RPM', url: '/controllers.html#engine-limits' },
     ]
   },
   ImmediateCut: {
@@ -1189,7 +1171,7 @@ const BLOCK_INFO = {
     desc: 'Sets fuel/throttle demand from the calibrated minimum reliable fuel-pump output to the configured maximum idle output, then applies the multiplier.',
     links: [
       { label: 'Minimum Reliable Fuel-Pump Output', url: '/calibration.html#fuelpump-min-cal-row' },
-      { label: 'Throttle Idle Max %', url: '/config.html#throttle' },
+      { label: 'Throttle Idle Max %', url: '/controllers.html#throttle' },
     ]
   },
   TimedDelay: {
@@ -1199,43 +1181,43 @@ const BLOCK_INFO = {
   PreHeat: {
     desc: 'Turns the selected ignition output on for a fixed duration without opening fuel.',
     links: [
-      { label: 'Glow Plug Preheat', url: '/config.html#glow-cfg-section' },
+      { label: 'Glow Plug Preheat', url: '/controllers.html#glow-cfg-section' },
     ]
   },
   ABCheckReady: {
     desc: 'Gate block: checks N1, selected EGT, and throttle conditions before proceeding with AB ignition.',
     links: [
-      { label: 'AB Ignition Conditions', url: '/config.html#ab-cfg-section' },
+      { label: 'AB Ignition Conditions', url: '/controllers.html#ab-cfg-section' },
     ]
   },
   ABIgnite: {
     desc: 'Fires AB ignition - torch (fuel spike through turbine), AB igniter, or both.',
     links: [
-      { label: 'Afterburner Ignition Method', url: '/config.html#ab-ign-section' },
+      { label: 'Afterburner Ignition Method', url: '/controllers.html#ab-ign-section' },
     ]
   },
   ABFlameConfirm: {
     desc: 'Waits for AB flame confirmation using sensor, selected EGT rise, or timed mode.',
     links: [
-      { label: 'AB Flame Confirmation Config', url: '/config.html#ab-flame-section' },
+      { label: 'AB Flame Confirmation Config', url: '/controllers.html#ab-flame-section' },
     ]
   },
   ABStabilize: {
     desc: 'Hold period after AB lights. Monitors selected EGT - faults if too hot. Transitions to AB Running on exit.',
     links: [
-      { label: 'AB Running Config', url: '/config.html#ab-run-section' },
+      { label: 'AB Running Config', url: '/controllers.html#ab-run-section' },
     ]
   },
   GlowPreheat: {
     desc: 'Ramps glow plug power, then holds. Wet glow start fuel follows the hardware fuel delay.',
     links: [
-      { label: 'Glow Plug Preheat', url: '/config.html#glow-cfg-section' },
+      { label: 'Glow Plug Preheat', url: '/controllers.html#glow-cfg-section' },
     ]
   },
   GovernorHold: {
     desc: 'Waits until N2 is within bandRpm of the governor target RPM before completing.',
     links: [
-      { label: 'Automatic N2 Speed Control', url: '/config.html#governor-cfg-section' },
+      { label: 'Automatic N2 Speed Control', url: '/controllers.html#governor-cfg-section' },
     ]
   },
   FuelPumpRamp: {
@@ -1353,7 +1335,7 @@ function demandText(key, pct, label = 'on') {
 // °C/°F preference. This page never CHANGES the preference.
 // These were referenced but never defined — the resulting ReferenceError
 // was swallowed by the boot try/catch and silently blanked the AB criteria
-// and Control Rules rendering.
+// and afterburner criteria rendering.
 function tempUnit() {
   try { return (JSON.parse(localStorage.getItem('ot_units') || '{}').temp) || 'C'; }
   catch (e) { return 'C'; }
@@ -1462,7 +1444,7 @@ function revealSequenceDeepLink() {
   const id = decodeURIComponent(String(location.hash || '').replace(/^#/, ''));
   if (!id) return;
   const tab = id.startsWith('tab-') ? id.slice(4) : '';
-  if (['startup','shutdown','afterburner','rules'].includes(tab)) switchTab(tab);
+  if (['startup','shutdown','afterburner'].includes(tab)) switchTab(tab);
   const target = document.getElementById(id);
   if (!target || target.style.display === 'none') return;
   document.querySelectorAll('.deep-link-target').forEach(el => el.classList.remove('deep-link-target'));
@@ -1492,7 +1474,6 @@ async function loadAll() {
     render('ab-shut', lastIdleRaw);
     populateAddSelects();
     buildAbCriteriaHtml();
-    renderRules();
     // Show/hide afterburner tab based on hardware feature flag
     const abTabBtn = document.getElementById('tab-btn-afterburner');
     if (abTabBtn) abTabBtn.style.display = sequenceHasAfterburner() ? '' : 'none';
@@ -1628,7 +1609,7 @@ function render(tab, idleRaw, openKeys = new Set()) {
   const list = document.getElementById('list-' + tab);
   list.innerHTML = '';
   seq.forEach((bname, idx) => {
-    const card = buildCard(bname, idx, tab, seq.length);
+    const card = buildCard(bname, idx, tab);
     if (openKeys.has(`${bname}:${idx}`)) card.querySelector('.block-params')?.classList.add('open');
     list.appendChild(card);
   });
@@ -2080,7 +2061,7 @@ function esc(value) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-function buildCard(bname, idx, tab, total) {
+function buildCard(bname, idx, tab) {
   const def = BLOCKS[bname] || customBlocks[bname];
   const card = document.createElement('div');
   const hardwareMissing = !def || !!(def.visibleIf && !def.visibleIf(hwCfg));
@@ -2104,15 +2085,6 @@ function buildCard(bname, idx, tab, total) {
 
   const badge = def ? `<span class="block-badge ${esc(def.badgeClass)}">${esc(def.type.toUpperCase())}</span>` : '';
   const condHtml = condText ? `<span class="block-cond">${esc(condText)}</span>` : '';
-  const canMoveUp = idx > 0;
-  const canMoveDown = idx < total - 1;
-  const moveUpHtml = canMoveUp
-    ? `<button class="blk-btn icon-btn" onclick="moveBlock('${tab}',${idx},-1)" title="Move up" aria-label="Move block up">^</button>`
-    : `<span class="blk-btn-spacer" aria-hidden="true"></span>`;
-  const moveDownHtml = canMoveDown
-    ? `<button class="blk-btn icon-btn" onclick="moveBlock('${tab}',${idx},+1)" title="Move down" aria-label="Move block down">v</button>`
-    : `<span class="blk-btn-spacer" aria-hidden="true"></span>`;
-
   card.innerHTML = `
   <div class="block-header" title="${esc(def?.desc || 'Sequence block')}" onclick="toggleParams(this)">
     ${badge}
@@ -2121,8 +2093,7 @@ function buildCard(bname, idx, tab, total) {
     ${toPill}
     ${hardwareMissing ? `<span class="block-hardware-pill">${def ? 'Missing hardware' : 'Unknown block'}</span>` : ''}
     <div class="block-actions" onclick="event.stopPropagation()">
-      ${moveUpHtml}
-      ${moveDownHtml}
+      <button type="button" class="blk-btn drag-handle" title="Drag to reorder; arrow keys also work" aria-label="Drag to reorder block; use up and down arrow keys"><span class="drag-grip" aria-hidden="true"></span></button>
       ${customBlocks[bname] ? `<button class="blk-btn" onclick="editCustomBlock('${bname}','${tab}')">Edit</button>` : ''}
       ${BLOCK_INFO[bname] ? `<button class="blk-btn bip-btn" aria-label="Explain ${esc(def?.label ?? bname)}" title="${esc(def?.desc || 'What does this block use?')}" onclick="showBlockInfo('${bname}')">?</button>` : ''}
       <button class="blk-btn del" title="Remove this sequence block" aria-label="Remove this sequence block" onclick="removeBlock('${tab}',${idx})">Remove</button>
@@ -2130,7 +2101,46 @@ function buildCard(bname, idx, tab, total) {
   </div>
   ${buildParamsHtml(bname, idx, tab)}`;
 
+  wireBlockDragHandle(card, tab, idx);
+
   return card;
+}
+
+function wireBlockDragHandle(card, tab, originalIdx) {
+  const handle = card.querySelector('.drag-handle');
+  if (!handle) return;
+  handle.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    moveBlock(tab, originalIdx, event.key === 'ArrowUp' ? -1 : 1);
+  });
+  handle.addEventListener('pointerdown', event => {
+    if (event.button !== undefined && event.button !== 0) return;
+    const list = card.parentElement;
+    if (!list) return;
+    event.preventDefault();
+    event.stopPropagation();
+    card.classList.add('block-dragging');
+
+    const move = pointerEvent => {
+      pointerEvent.preventDefault();
+      const target = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY)?.closest('.block-card');
+      if (!target || target === card || target.parentElement !== list) return;
+      const bounds = target.getBoundingClientRect();
+      list.insertBefore(card, pointerEvent.clientY < bounds.top + bounds.height / 2 ? target : target.nextSibling);
+    };
+    const finish = pointerEvent => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', finish);
+      document.removeEventListener('pointercancel', finish);
+      card.classList.remove('block-dragging');
+      const newIdx = Array.from(list.children).filter(node => node.classList?.contains('block-card')).indexOf(card);
+      if (newIdx >= 0 && newIdx !== originalIdx) moveBlockTo(tab, originalIdx, newIdx);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', finish);
+    document.addEventListener('pointercancel', finish);
+  });
 }
 
 function buildSideActionsHtml(tab, idx) {
@@ -2483,23 +2493,29 @@ function onParamChangeBool(bname, pkey, configKey, checked) {
 
 // ------ Sequence order edits ---------------------------------------------------------------------------------------------------------------------------------------------------------
 function moveBlock(tab, idx, dir) {
+  moveBlockTo(tab, idx, idx + dir);
+}
+
+function moveBlockTo(tab, idx, ni) {
   const key = seqKey(tab);
   const seq = hwCfg[key];
   if (!seq) return;
-  const ni = idx + dir;
   if (ni < 0 || ni >= seq.length) return;
-  [seq[idx], seq[ni]] = [seq[ni], seq[idx]];
   ensureDelaySlots(tab);
   ensureActionSlots(tab);
   ensureIgnitionTargetSlots(tab);
-  const delays = hwCfg[delaySeqKey(tab)];
-  [delays[idx], delays[ni]] = [delays[ni], delays[idx]];
-  const targets = hwCfg[ignitionTargetSeqKey(tab)];
-  [targets[idx], targets[ni]] = [targets[ni], targets[idx]];
+  const reorder = rows => {
+    if (!Array.isArray(rows)) return;
+    const [item] = rows.splice(idx, 1);
+    rows.splice(ni, 0, item);
+  };
+  reorder(seq);
+  reorder(hwCfg[delaySeqKey(tab)]);
+  reorder(hwCfg[ignitionTargetSeqKey(tab)]);
   for (const phase of ['enter','exit']) {
     const ak = actionKey(tab, phase);
     if (!ak || !hwCfg[ak]) continue;
-    [hwCfg[ak][idx], hwCfg[ak][ni]] = [hwCfg[ak][ni], hwCfg[ak][idx]];
+    reorder(hwCfg[ak]);
   }
   renderFast(tab);
 }
@@ -2601,6 +2617,53 @@ function registryChannelInstalled(channel) {
       Number(channel.spi_miso) >= 0 && (tempInterface !== 3 || Number(channel.spi_mosi) >= 0);
   }
   return Number(channel.pin) >= 0;
+}
+const SEQUENCE_CORE_INPUT_IDS = new Set([
+  'n1_main','primary_n1','n2_main','primary_n2','tot_main','primary_egt','tit_main',
+  'oil_pressure_main','oil_temperature','fuel_pressure','fuel_flow','p1_main','p2_main',
+  'torque_main','flame_main','thrust_main','operator_throttle','operator_idle',
+  'battery_voltage','ab_flame_main','ab_command','start_switch','stop_switch'
+]);
+const SEQUENCE_CORE_INPUT_PURPOSES = new Set([
+  'n1_speed','n2_speed','tot','tit','oil_pressure','oil_temperature','fuel_pressure',
+  'fuel_flow','p1_pressure','p2_pressure','torque','thrust','flame','battery_voltage',
+  'throttle','idle','ab_flame','ab_command','start_switch','stop_switch'
+]);
+const SEQUENCE_CORE_OUTPUT_IDS = new Set([
+  'main_fuel_output','main_fuel','main_starter','starter','starter_main','starter_enable',
+  'oil_pump','oil_pump_main','cooling_fan','cooling_fan_main','oil_scavenge_main',
+  'scavenge_pump','bleed_valve','bleed_valve_main','igniter','ab_igniter','igniter2_main',
+  'main_fuel_shutoff','fuel_shutoff','ab_solenoid','air_starter','fuel_pump','ab_pump',
+  'prop_pitch','glow_plug'
+]);
+const SEQUENCE_CORE_OUTPUT_PURPOSES = new Set([
+  'main_fuel','fuel_shutoff','starter','starter_enable','oil_pump','scavenge_pump',
+  'cooling_fan','fuel_pump','igniter','ab_igniter','ab_valve','glow_plug','ab_pump',
+  'prop_pitch','air_starter'
+]);
+function registryInputCoreBound(channel) {
+  if (!channel) return false;
+  if (SEQUENCE_CORE_INPUT_IDS.has(String(channel.id || ''))) return true;
+  const purpose = String(channel.purpose || '');
+  if (!SEQUENCE_CORE_INPUT_PURPOSES.has(purpose)) return false;
+  const peers = (hwCfg.channel_registry?.inputs || []).filter(item =>
+    registryChannelInstalled(item) && String(item.purpose || '') === purpose);
+  const preferred = peers.find(item => SEQUENCE_CORE_INPUT_IDS.has(String(item.id || '')));
+  return (preferred || peers[0]) === channel;
+}
+function registryOutputCoreBound(channel) {
+  if (!channel?.id) return false;
+  const id = String(channel.id);
+  const purpose = String(channel.purpose || '');
+  if (!SEQUENCE_CORE_OUTPUT_PURPOSES.has(purpose)) return false;
+  const bindingKey = ({main_fuel:'main_fuel_output',fuel_shutoff:'main_fuel_shutoff',starter:'main_starter'})[purpose];
+  const binding = bindingKey && (hwCfg.channel_registry?.bindings || []).find(row => String(row?.key || '') === bindingKey);
+  if (binding) return String(binding.channel || '') === id;
+  if (SEQUENCE_CORE_OUTPUT_IDS.has(id)) return true;
+  const peers = (hwCfg.channel_registry?.outputs || []).filter(item =>
+    registryChannelInstalled(item) && String(item.purpose || '') === purpose);
+  const preferred = peers.find(item => SEQUENCE_CORE_OUTPUT_IDS.has(String(item.id || '')));
+  return (preferred || peers[0]) === channel;
 }
 function registryInputPurpose(purpose) {
   return (hwCfg.channel_registry?.inputs || []).find(channel =>
@@ -2832,10 +2895,10 @@ function _renderStepRows() {
     row.className = 'cblk-output-row';
     const isDelay = step.type === 'delay_ms';
     const upBtn   = i > 0
-      ? `<button class="cblk-mv-btn" onclick="moveStep(${i},-1)" title="Move up" aria-label="Move step up">^</button>`
+      ? `<button class="cblk-mv-btn" onclick="moveStep(${i},-1)" title="Move up" aria-label="Move step up">↑</button>`
       : '<span class="cblk-mv-spacer" aria-hidden="true"></span>';
     const dnBtn   = i < _cblkSteps.length-1
-      ? `<button class="cblk-mv-btn" onclick="moveStep(${i},1)" title="Move down" aria-label="Move step down">v</button>`
+      ? `<button class="cblk-mv-btn" onclick="moveStep(${i},1)" title="Move down" aria-label="Move step down">↓</button>`
       : '<span class="cblk-mv-spacer" aria-hidden="true"></span>';
     if (isDelay) {
       row.innerHTML = `
@@ -3034,852 +3097,6 @@ function _validateSequence(blocks) {
   return warnings;
 }
 
-// Source: data_src/pages/sequence-rules-save.js
-// ------ Save ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-// Control rules are edited here because they alter sequence-time actuator behavior.
-const RULE_SENSORS = [
-  {v:0,l:'Oil Temp',u:'deg C',id:'oil_temp',ok:()=>sensorEnabled('oil_temp')},
-  {v:1,l:'TOT',u:'deg C',id:'tot_main',ok:()=>sensorEnabled('tot')},
-  {v:2,l:'N1 RPM',u:'RPM',id:'n1_main',ok:()=>sensorEnabled('n1_rpm')},
-  {v:3,l:'Oil Pressure',u:'bar',id:'oil_pressure_main',ok:()=>sensorEnabled('oil_press')},
-  {v:4,l:'TIT',u:'deg C',id:'tit_main',ok:()=>sensorEnabled('tit')},
-  {v:5,l:'Battery V',u:'V',id:'batt_voltage',ok:()=>sensorEnabled('batt_voltage')},
-  {v:6,l:'N2 RPM',u:'RPM',id:'n2_main',ok:()=>sensorEnabled('n2_rpm')},
-  {v:7,l:'DI Channel 1',u:'0/1',id:'di0',ok:()=>((hwCfg.di_channels?.[0]?.pin ?? -1) >= 0)},
-  {v:8,l:'DI Channel 2',u:'0/1',id:'di1',ok:()=>((hwCfg.di_channels?.[1]?.pin ?? -1) >= 0)},
-  {v:9,l:'DI Channel 3',u:'0/1',id:'di2',ok:()=>((hwCfg.di_channels?.[2]?.pin ?? -1) >= 0)},
-  {v:10,l:'DI Channel 4',u:'0/1',id:'di3',ok:()=>((hwCfg.di_channels?.[3]?.pin ?? -1) >= 0)},
-  {v:11,l:'Fuel Pressure',u:'bar',id:'fuel_press',ok:()=>sensorEnabled('fuel_press')},
-  {v:12,l:'Fuel Flow',u:'',id:'fuel_flow',ok:()=>sensorEnabled('fuel_flow')},
-  {v:13,get l(){return registryLabel(registryInputPurpose('p1_pressure'), 'Pressure 1')},u:'bar',id:'p1',ok:()=>sensorEnabled('p1')},
-  {v:14,get l(){return registryLabel(registryInputPurpose('p2_pressure'), 'Pressure 2')},u:'bar',id:'p2',ok:()=>sensorEnabled('p2')},
-  {v:15,l:'Torque',u:'',id:'torque',ok:()=>sensorEnabled('torque')},
-  {v:16,l:'Flame Detected',u:'0/1',id:'flame',ok:()=>sensorEnabled('flame')},
-  {v:17,l:'Throttle Input',u:'%',id:'operator_throttle',ok:()=>sensorEnabled('throttle_input')},
-  {v:18,l:'Idle Input',u:'%',id:'operator_idle',ok:()=>sensorEnabled('idle_input')},
-  {v:19,l:'AB Flame',u:'0/1',id:'ab_flame',ok:()=>sensorEnabled('ab_flame')},
-  {v:20,l:'Glow Current',u:'A',id:'glow_current',ok:()=>actuatorEnabled('glow_plug') && !!hwCfg.actuators?.glow_plug?.has_current},
-  {v:21,l:'Igniter 1 Current',u:'A',id:'igniter_current',ok:()=>actuatorEnabled('igniter') && !!hwCfg.actuators?.igniter?.has_current},
-  {v:22,l:'Secondary Igniter Current',u:'A',id:'igniter2_current',ok:()=>actuatorEnabled('igniter2') && !!hwCfg.actuators?.igniter2?.has_current},
-  {v:23,l:'Oil Pump Current',u:'A',id:'oil_pump_current',ok:()=>actuatorEnabled('oil_pump') && !!hwCfg.actuators?.oil_pump?.has_current},
-  {v:24,l:'AB Input',u:'%',id:'ab_input',ok:()=>((hwCfg.ab_trigger?.input_pin ?? -1) >= 0 || !!registryInputPurpose('ab_command'))},
-  {v:25,l:'Start Switch',u:'0/1',id:'start_switch',ok:()=>((hwCfg.controls?.start_pin ?? -1) >= 0 || !!registryInputPurpose('start_switch'))},
-  {v:26,l:'Stop Switch',u:'0/1',id:'stop_switch',ok:()=>((hwCfg.controls?.stop_pin ?? -1) >= 0 || !!registryInputPurpose('stop_switch'))},
-  {v:27,l:'Thrust',u:'N',id:'thrust',ok:()=>!!registryInputPurpose('thrust')}
-];
-const RULE_OPS = [
-  {v:0,l:'Goes above'},
-  {v:1,l:'Goes below'}
-];
-const RULE_OUTPUTS = [
-  {v:0,l:'Cooling Fan',id:'cooling_fan_main',ok:()=>actuatorEnabled('cool_fan')},
-  {v:1,l:'Bleed Valve',id:'bleed_valve_main',ok:()=>actuatorEnabled('bleed_valve')},
-  {v:2,l:'Secondary / Auxiliary Fuel Pump',id:'fuel_pump',ok:()=>actuatorEnabled('fuel_pump2')},
-  {v:3,l:'Oil Scavenge Pump',id:'oil_scavenge_main',ok:()=>actuatorEnabled('oil_scavenge_pump')},
-  {v:4,l:'Throttle Demand',id:'main_fuel',ok:()=>actuatorEnabled('throttle')},
-  {v:5,l:'Starter Demand',id:'starter_main',ok:()=>actuatorEnabled('starter')},
-  {v:7,l:'Oil Pump Demand',id:'oil_pump_main',ok:()=>actuatorEnabled('oil_pump')},
-  {v:8,l:'Main Fuel Shutoff',id:'fuel_shutoff',ok:()=>actuatorEnabled('fuel_sol')},
-  {v:9,l:'Igniter',id:'igniter',ok:()=>actuatorEnabled('igniter')},
-  {v:10,l:'Secondary Igniter',id:'ab_igniter',ok:()=>actuatorEnabled('igniter2')},
-  {v:11,l:'Afterburner Fuel Valve',id:'ab_solenoid',ok:()=>actuatorEnabled('ab_sol')},
-  {v:12,l:'Afterburner Fuel Pump',id:'ab_pump',ok:()=>actuatorEnabled('ab_pump')},
-  {v:13,l:'Request Shutdown',id:'request_shutdown',ok:()=>true},
-  {v:14,l:'Fault + Shutdown',id:'request_fault',ok:()=>true},
-  {v:15,l:'Air Starter Valve',id:'air_starter',ok:()=>actuatorEnabled('airstarter_sol')},
-  {v:16,l:'Glow Plug',id:'glow_plug',ok:()=>actuatorEnabled('glow_plug')},
-  {v:17,l:'Prop Pitch',id:'prop_pitch',ok:()=>actuatorEnabled('prop_pitch')}
-];
-const RULE_PRESETS = [
-  {kind:'oil_temp_fan', label:'Cooling fan from oil temperature', desc:'Simple on/off example: run the configured cooling fan above an oil-temperature threshold.'},
-  {kind:'adc_pwm_dimmer', label:'ADC to PWM dimmer example', desc:'Map a fitted generic analog input to a fitted generic PWM output, for example to dim a warning lamp.'}
-];
-const RULE_REGISTRY_INPUT_BASE = 80;
-const RULE_REGISTRY_OUTPUT_BASE = 64;
-const RULE_CORE_INPUT_IDS = new Set([
-  'n1_main','primary_n1','n2_main','primary_n2','tot_main','primary_egt',
-  'tit_main','oil_pressure_main','oil_temperature','fuel_pressure','fuel_flow',
-  'p1_main','p2_main','torque_main','flame_main','thrust_main',
-  'operator_throttle','operator_idle','idle_input','idle_input_main',
-  'battery_voltage','batt_voltage','batt_voltage_main','ab_flame_main',
-  'ab_command','start_switch','stop_switch'
-]);
-const RULE_CORE_INPUT_PURPOSES = new Set([
-  'n1_speed','n2_speed','tot','tit','oil_pressure','oil_temperature','fuel_pressure',
-  'fuel_flow','p1_pressure','p2_pressure','torque','thrust','flame','battery_voltage',
-  'throttle','idle','ab_flame','ab_command','start_switch','stop_switch'
-]);
-const RULE_CORE_OUTPUT_IDS = new Set([
-  'main_fuel_output','main_fuel',
-  'main_starter','starter','starter_main',
-  'starter_enable',
-  'oil_pump','oil_pump_main',
-  'cooling_fan','cooling_fan_main',
-  'oil_scavenge_main','scavenge_pump',
-  'bleed_valve','bleed_valve_main',
-  'igniter','ab_igniter','igniter2_main',
-  'main_fuel_shutoff','fuel_shutoff',
-  'ab_solenoid','air_starter','fuel_pump','ab_pump','prop_pitch','glow_plug'
-]);
-const RULE_CORE_OUTPUT_BINDINGS = new Set(['main_fuel_output','main_fuel_shutoff','main_starter']);
-const RULE_CORE_OUTPUT_PURPOSES = new Set([
-  'main_fuel','fuel_shutoff','starter','starter_enable','oil_pump','scavenge_pump',
-  'cooling_fan','fuel_pump','igniter','ab_igniter','ab_valve','glow_plug','ab_pump',
-  'prop_pitch','air_starter'
-]);
-function plainRegistryName(raw, fallback = '') {
-  const text = String(raw || '').trim();
-  const key = text.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-  const direct = {
-    user_throttle:'Throttle Input', operator_throttle:'Throttle Input', operator_thrott:'Throttle Input', throttle_input:'Throttle Input',
-    user_idle:'Idle Input', operator_idle:'Idle Input', idle_input:'Idle Input',
-    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Secondary / Auxiliary Fuel Pump', main_fuel:'Main Fuel Pump',
-    flame:'Flame Sensor', flame_main:'Flame Sensor', coolant_pump:'Coolant Pump',
-    coolant_temperature:'Coolant Temperature', pilot_fuel:'Start Fuel', purge_valve:'Purge Valve',
-    air_starter:'Air Starter', prop_pitch:'Prop Pitch', nozzle_actuator:'Nozzle Actuator'
-  };
-  if (direct[key]) return direct[key];
-  if (key.includes('throttle') || key.includes('thrott')) return 'Throttle Input';
-  if (key.includes('idle')) return 'Idle Input';
-  if (key.includes('flame')) return 'Flame Sensor';
-  if (key.includes('oil') && key.includes('pump')) return 'Oil Pump';
-  if (key.includes('fuel') && key.includes('pump')) return 'Fuel Pump';
-  const out = key.split('_').filter(Boolean).map(part => {
-    const upper = {n1:'N1', n2:'N2', tot:'TOT', tit:'TIT', egt:'EGT', ab:'AB', rc:'RC', pwm:'PWM', adc:'ADC', esc:'ESC', gpio:'GPIO', rpm:'RPM'};
-    return upper[part] || part.charAt(0).toUpperCase() + part.slice(1);
-  }).join(' ');
-  return out || fallback;
-}
-
-function validateSequenceHardwareForSave() {
-  const errors = [];
-  const tabs = [
-    ['Startup', 'startup'],
-    ['Shutdown', 'shutdown'],
-    ['Afterburner', 'afterburner'],
-    ['Afterburner shutdown', 'ab-shut']
-  ];
-  tabs.forEach(([tabLabel, tab]) => {
-    (hwCfg[seqKey(tab)] || []).forEach((bname, index) => {
-      const def = BLOCKS[bname] || customBlocks[bname];
-      if (!def) {
-        errors.push(`${tabLabel} block ${index + 1} (${bname}) is unknown to this firmware.`);
-      } else if (def.visibleIf && !def.visibleIf(hwCfg)) {
-        errors.push(`${tabLabel} block ${index + 1} (${def.label || bname}) cannot run with the fitted hardware.`);
-      }
-    });
-  });
-  return errors;
-}
-function registryChannelLabel(c, fallback) {
-  const name = (c?.name && c.name.trim()) || c?.id || fallback;
-  return String(name || '').includes('_') ? plainRegistryName(name, fallback) : name;
-}
-function registryRuleUnit(c) {
-  if (!c) return '';
-  if (c.driver === 0 || c.role === 'digital_switch' || c.role === 'fault' ||
-      c.role === 'estop' || c.role === 'inhibit_start' || c.role === 'sequence_gate' ||
-      c.role === 'ab_arm' || c.role === 'ab_fire' || c.role === 'limp_mode' || c.role === 'flame') return '0/1';
-  if (c.role === 'speed') return 'RPM';
-  if (c.role === 'pressure') return 'bar';
-  if (c.role === 'temperature') return 'deg C';
-  if (c.role === 'voltage') return 'V';
-  if (c.role === 'flow') return 'L/min';
-  if (c.role === 'torque') return 'Nm';
-  if (c.role === 'thrust') return 'N';
-  if (c.role === 'operator') return '%';
-  if (c.role === 'generic') return '%';
-  return '';
-}
-function registryInputCoreBound(c) {
-  if (!c) return false;
-  if (RULE_CORE_INPUT_IDS.has(String(c.id || ''))) return true;
-  const purpose = String(c.purpose || '');
-  if (!RULE_CORE_INPUT_PURPOSES.has(purpose)) return false;
-  const peers = (hwCfg.channel_registry?.inputs || []).filter(item =>
-    registryChannelInstalled(item) && String(item.purpose || '') === purpose);
-  const preferred = peers.find(item => RULE_CORE_INPUT_IDS.has(String(item.id || '')));
-  return (preferred || peers[0]) === c;
-}
-function registryRuleSensors() {
-  const inputs = hwCfg.channel_registry?.inputs || [];
-  const visible = inputs.map((c, i) => ({c, i})).filter(({c}) =>
-    registryChannelInstalled(c) && !registryInputCoreBound(c));
-  return visible.map(({c, i}) => ({
-    v: RULE_REGISTRY_INPUT_BASE + i,
-    id: c.id,
-    l: registryChannelLabel(c, `Input ${i + 1}`),
-    u: registryRuleUnit(c),
-    ok: () => registryChannelInstalled(c)
-  }));
-}
-function registryOutputCoreBound(c) {
-  if (!c?.id) return false;
-  const id = String(c.id || '');
-  const purpose = String(c.purpose || '');
-  if (!RULE_CORE_OUTPUT_PURPOSES.has(purpose)) return false;
-  const bindingKey = ({main_fuel:'main_fuel_output',fuel_shutoff:'main_fuel_shutoff',starter:'main_starter'})[purpose];
-  const binding = bindingKey && (hwCfg.channel_registry?.bindings || []).find(b => String(b?.key || '') === bindingKey);
-  if (binding) return String(binding.channel || '') === id;
-  if (RULE_CORE_OUTPUT_IDS.has(id)) return true;
-  const peers = (hwCfg.channel_registry?.outputs || []).filter(item =>
-    registryChannelInstalled(item) && String(item.purpose || '') === purpose);
-  const preferred = peers.find(item => RULE_CORE_OUTPUT_IDS.has(String(item.id || '')));
-  return (preferred || peers[0]) === c;
-}
-function registryRuleOutputs() {
-  const outputs = hwCfg.channel_registry?.outputs || [];
-  return outputs.map((c, i) => ({
-    v: RULE_REGISTRY_OUTPUT_BASE + i,
-    id: c.id,
-    driver: c.driver,
-    l: `${registryChannelLabel(c, `Output ${i + 1}`)} (custom output)`,
-    ok: () => registryChannelInstalled(c) && !registryOutputCoreBound(c)
-  }));
-}
-function ruleSensors() { return RULE_SENSORS.concat(registryRuleSensors()); }
-function ruleOutputs() { return RULE_OUTPUTS.concat(registryRuleOutputs()); }
-function ruleEsc(value) {
-  return String(value).replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function ruleOption(item, selected, selectedId = '', allowed = true) {
-  const available = item.ok() && allowed;
-  const isSelected = (selectedId && item.id === selectedId) || (!selectedId && item.v === selected);
-  const idAttr = item.id ? ` data-id="${ruleEsc(item.id)}"` : '';
-  const hidden = !available && !isSelected ? ' hidden style="display:none"' : '';
-  return `<option value="${item.v}"${idAttr}${isSelected ? ' selected' : ''}${available ? '' : ' disabled'}${hidden}>${ruleEsc(item.l)}${available ? '' : ' (not configured)'}</option>`;
-}
-function missingRuleOption(id, selected, label = 'Missing') {
-  return `<option value="${selected}" data-id="${ruleEsc(id)}" selected disabled>${ruleEsc(label)}: ${ruleEsc(id)}</option>`;
-}
-function ruleUnit(index) { return ruleSensors().find(s => s.v === index)?.u || ''; }
-function ruleSensorScale(index) { return ruleUnit(index) === '%' ? 100 : 1; }
-function ruleDisplaySensorValue(sensor, value) {
-  const scale = ruleSensorScale(sensor);
-  const v = Number(value ?? 0) * scale;
-  return Number.isFinite(v) ? +v.toFixed(scale === 100 ? 1 : 3) : 0;
-}
-function ruleSensorValueToStored(sensor, displayValue) {
-  const scale = ruleSensorScale(sensor);
-  const v = Number(displayValue) || 0;
-  return scale === 100 ? Math.max(0, Math.min(100, v)) / 100 : v;
-}
-function ruleDisplayThreshold(rule) {
-  const scale = ruleSensorScale(rule.sensor);
-  const v = Number(rule.threshold ?? 0) * scale;
-  return Number.isFinite(v) ? +v.toFixed(scale === 100 ? 1 : 3) : 0;
-}
-function ruleThresholdToStored(sensor, displayValue) { return ruleSensorValueToStored(sensor, displayValue); }
-function ruleDisplayHysteresis(rule) {
-  const scale = ruleSensorScale(rule.sensor);
-  const v = Number(rule.hysteresis ?? 0) * scale;
-  return Number.isFinite(v) ? +v.toFixed(scale === 100 ? 1 : 3) : 0;
-}
-function ruleHysteresisToStored(sensor, displayValue) {
-  const scale = ruleSensorScale(sensor);
-  const v = Math.max(0, Number(displayValue) || 0);
-  return scale === 100 ? Math.min(100, v) / 100 : v;
-}
-const RULE_ANALOG_ACTUATOR_KEYS = {
-  2:'fuel_pump2',
-  4:'throttle',
-  5:'starter',
-  7:'oil_pump',
-  12:'ab_pump',
-  17:'prop_pitch'
-};
-function ruleOutputIsAnalog(actuator) {
-  const act = +actuator;
-  if (act >= RULE_REGISTRY_OUTPUT_BASE) {
-    const reg = ruleOutputs().find(o => o.v === act);
-    return reg?.driver === 5 || reg?.driver === 6;
-  }
-  if (act === 16) return !actuatorIsRelay('glow_plug');
-  const key = RULE_ANALOG_ACTUATOR_KEYS[act];
-  if (!key) return false;
-  return Number(hwCfg.actuators?.[key]?.type ?? 0) !== 2;
-}
-function ruleDisplayOutput(actuator, value) {
-  const v = Number(value ?? 0);
-  return ruleOutputIsAnalog(actuator) ? +(v * 100).toFixed(1) : (v >= 0.5 ? 1 : 0);
-}
-function ruleOutputText(actuator, value) {
-  return ruleOutputIsAnalog(actuator)
-    ? String(ruleDisplayOutput(actuator, value))
-    : (Number(value ?? 0) >= 0.5 ? 'On' : 'Off');
-}
-function ruleOutputEditor(id, actuator, value, index) {
-  if (ruleOutputIsAnalog(actuator)) {
-    return `<div class="automation-unit-input"><input id="${id}" type="number" value="${ruleDisplayOutput(actuator, value)}" min="0" max="100" step="1" oninput="markRulesEdited(${index})"><span class="automation-unit">%</span></div>`;
-  }
-  const on = Number(value ?? 0) >= 0.5;
-  return `<select id="${id}" onchange="markRulesEdited(${index})"><option value="1"${on ? ' selected' : ''}>On</option><option value="0"${on ? '' : ' selected'}>Off</option></select>`;
-}
-function ruleOutputToStored(actuator, value) {
-  const v = Number(value) || 0;
-  return ruleOutputIsAnalog(actuator) ? Math.max(0, Math.min(100, v)) / 100 : (v >= 0.5 ? 1 : 0);
-}
-function updateRuleAndRender(index) {
-  collectRules();
-  renderRules(index);
-  markRulesEdited(index);
-}
-function changeRuleSource(index) {
-  collectRules();
-  const rule = cfg.rules?.[index];
-  if (!rule) return;
-  rule.threshold = 0;
-  rule.hysteresis = 0;
-  rule.input_min = 0;
-  rule.input_max = 1;
-  if (ruleUnit(rule.sensor) === '0/1') {
-    rule.kind = 0;
-    rule.op = 0;
-    rule.threshold = 0.5;
-  }
-  renderRules(index);
-  markRulesEdited(index);
-}
-function changeRuleOutput(index) {
-  collectRules();
-  const rule = cfg.rules?.[index];
-  if (!rule) return;
-  rule.on_value = 1;
-  rule.off_value = 0;
-  rule.output_min = 0;
-  rule.output_max = 1;
-  renderRules(index);
-  markRulesEdited(index);
-}
-function ruleStateSummary(mask) {
-  const states = [];
-  if (mask & 1) states.push('Standby');
-  if (mask & 2) states.push('Starting');
-  if (mask & 4) states.push('Running');
-  if (mask & 8) states.push('Shutdown');
-  return states.join(' + ') || 'No states';
-}
-function ruleSentence(rule) {
-  const source = ruleSensors().find(s => (rule.source && s.id === rule.source) || (!rule.source && s.v === Number(rule.sensor)))?.l || 'Input';
-  const target = ruleOutputs().find(o => (rule.target && o.id === rule.target) || (!rule.target && o.v === Number(rule.actuator)))?.l || 'Output';
-  const states = ruleStateSummary(rule.mode_mask ?? 14);
-  if (ruleUnit(rule.sensor) === '0/1') {
-    const suffix = ruleOutputIsAnalog(rule.actuator) ? '%' : '';
-    return `${source} on → ${target} ${ruleOutputText(rule.actuator, rule.on_value ?? 1)}${suffix}; off → ${ruleOutputText(rule.actuator, rule.off_value ?? 0)}${suffix} · ${states}`;
-  }
-  if (Number(rule.kind || 0) === 1) {
-    return `${source} ${ruleDisplaySensorValue(rule.sensor, rule.input_min ?? 0)}–${ruleDisplaySensorValue(rule.sensor, rule.input_max ?? 1)} ${ruleUnit(rule.sensor)} → ${target} ${ruleDisplayOutput(rule.actuator, rule.output_min ?? 0)}–${ruleDisplayOutput(rule.actuator, rule.output_max ?? 1)}${ruleOutputIsAnalog(rule.actuator) ? '%' : ''} · ${states}`;
-  }
-  const op = Number(rule.op || 0) === 1 ? 'below' : 'above';
-  return `${source} ${op} ${ruleDisplayThreshold(rule)} ${ruleUnit(rule.sensor)} → ${target} ${ruleOutputText(rule.actuator, rule.on_value ?? 1)}${ruleOutputIsAnalog(rule.actuator) ? '%' : ''} · ${states}`;
-}
-function buildRuleRow(rule, index, forceOpen = false) {
-  const binary = ruleUnit(rule.sensor) === '0/1';
-  const pctSensor = ruleUnit(rule.sensor) === '%';
-  const analogOut = ruleOutputIsAnalog(rule.actuator);
-  const isMap = !binary && Number(rule.kind || 0) === 1;
-  const sourceId = rule.source || '';
-  const targetId = rule.target || '';
-  let sensors = ruleSensors().map(s => ruleOption(s, rule.sensor, sourceId)).join('');
-  let outputs = ruleOutputs().map(a => ruleOption(a, rule.actuator, targetId, !isMap || ruleOutputIsAnalog(a.v))).join('');
-  if (sourceId && !ruleSensors().some(s => s.id === sourceId)) sensors += missingRuleOption(sourceId, rule.sensor);
-  if (targetId && !ruleOutputs().some(a => a.id === targetId)) outputs += missingRuleOption(targetId, rule.actuator);
-  if (!sourceId && !ruleSensors().some(s => s.v === Number(rule.sensor))) sensors += missingRuleOption('sensor ' + rule.sensor, rule.sensor, 'Unavailable');
-  if (!targetId && !ruleOutputs().some(a => a.v === Number(rule.actuator))) outputs += missingRuleOption('output ' + rule.actuator, rule.actuator, 'Unavailable');
-  const ops = RULE_OPS.map(o => `<option value="${o.v}"${o.v === rule.op ? ' selected' : ''}>${o.l}</option>`).join('');
-  const modeMask = rule.mode_mask ?? 14;
-  const sourceAttrs = binary ? 'min="0" max="1" step="1"' : (pctSensor ? 'min="0" max="100" step="1"' : 'step="any"');
-  const outputAttrs = `min="0" max="${analogOut ? 100 : 1}" step="1"`;
-  const inputUnit = ruleUnit(rule.sensor);
-  const outputUnit = analogOut ? '%' : '0/1';
-  const mapFields = `<div class="automation-field"><label>Input minimum</label><div class="automation-unit-input"><input id="rule-in-min-${index}" type="number" value="${ruleDisplaySensorValue(rule.sensor, rule.input_min ?? 0)}" ${sourceAttrs} oninput="markRulesEdited(${index})"><span class="automation-unit">${inputUnit}</span></div></div>
-    <div class="automation-field"><label>Input maximum</label><div class="automation-unit-input"><input id="rule-in-max-${index}" type="number" value="${ruleDisplaySensorValue(rule.sensor, rule.input_max ?? 1)}" ${sourceAttrs} oninput="markRulesEdited(${index})"><span class="automation-unit">${inputUnit}</span></div></div>
-    <div class="automation-field"><label>Output at minimum</label><div class="automation-unit-input"><input id="rule-out-min-${index}" type="number" value="${ruleDisplayOutput(rule.actuator, rule.output_min ?? 0)}" ${outputAttrs} oninput="markRulesEdited(${index})"><span class="automation-unit">${outputUnit}</span></div></div>
-    <div class="automation-field"><label>Output at maximum</label><div class="automation-unit-input"><input id="rule-out-max-${index}" type="number" value="${ruleDisplayOutput(rule.actuator, rule.output_max ?? 1)}" ${outputAttrs} oninput="markRulesEdited(${index})"><span class="automation-unit">${outputUnit}</span></div></div>`;
-  const switchFields = binary ? `<div class="automation-field wide"><span class="automation-label">Binary input behaviour</span><div class="automation-help">The output follows the switch directly. Set the desired output for each switch state.</div><input id="rule-op-${index}" type="hidden" value="0"><input id="rule-thresh-${index}" type="hidden" value="0.5"><input id="rule-hyst-${index}" type="hidden" value="0"></div>
-    <div class="automation-field"><label>Output when switch is ON</label>${ruleOutputEditor(`rule-on-${index}`, rule.actuator, rule.on_value ?? 1, index)}</div>` : `<div class="automation-field"><label>Switch when input</label><select id="rule-op-${index}" onchange="markRulesEdited(${index})">${ops}</select></div>
-    <div class="automation-field"><label>Threshold</label><div class="automation-unit-input"><input id="rule-thresh-${index}" type="number" value="${ruleDisplayThreshold(rule)}" ${sourceAttrs} oninput="markRulesEdited(${index})"><span id="rule-unit-${index}" class="automation-unit">${inputUnit}</span></div></div>
-    <div class="automation-field"><label>Hysteresis <span class="automation-tip" title="Prevents rapid on/off switching near the threshold. Example: with 'Goes above 100 °C' and 5 °C hysteresis, the output turns on above 100 °C and stays on until the input falls to 95 °C.">(what is this?)</span></label><div class="automation-unit-input"><input id="rule-hyst-${index}" type="number" value="${ruleDisplayHysteresis(rule)}" min="0" ${pctSensor ? 'max="100"' : ''} step="${pctSensor ? '1' : 'any'}"${binary ? ' disabled' : ''} oninput="markRulesEdited(${index})"><span id="rule-hyst-unit-${index}" class="automation-unit">${inputUnit}</span></div></div>
-    <div class="automation-field"><label>Output when on</label>${ruleOutputEditor(`rule-on-${index}`, rule.actuator, rule.on_value ?? 1, index)}</div>`;
-  return `<details class="automation-card" data-rule-index="${index}"${forceOpen || index === 0 ? ' open' : ''}>
-    <summary><span class="automation-summary"><span id="rule-title-${index}" class="automation-title">${ruleEsc(rule.name || `Control rule ${index + 1}`)}</span><span id="rule-summary-${index}" class="automation-sentence">${ruleEsc(ruleSentence(rule))}</span></span><span class="automation-kind">${isMap ? 'Map' : 'On / Off'}</span><span class="automation-chevron">›</span></summary>
-    <div class="automation-body">
-      <div class="automation-topline">
-        <div class="automation-field"><label for="rule-name-${index}">Rule name</label><input type="text" id="rule-name-${index}" maxlength="23" value="${ruleEsc(rule.name || '')}" placeholder="Example: Starter test" oninput="markRulesEdited(${index})"></div>
-        <div class="automation-field"><label for="rule-kind-${index}">Behaviour</label><select id="rule-kind-${index}" onchange="updateRuleAndRender(${index})"${binary ? ' disabled' : ''}><option value="0"${isMap ? '' : ' selected'}>${binary ? 'Follow switch state' : 'On / Off'}</option>${binary ? '' : `<option value="1"${isMap ? ' selected' : ''}>Map input to output</option>`}</select></div>
-        <label class="automation-enabled"><input type="checkbox" id="rule-en-${index}" ${rule.enabled ? 'checked' : ''} onchange="markRulesEdited(${index})"> Rule enabled</label>
-      </div>
-      <div class="automation-grid">
-        <div class="automation-field wide"><label for="rule-sensor-${index}">Input</label><select id="rule-sensor-${index}" onchange="changeRuleSource(${index})">${sensors}</select></div>
-        <div class="automation-field wide"><label for="rule-act-${index}">Output</label><select id="rule-act-${index}" onchange="changeRuleOutput(${index})">${outputs}</select></div>
-        ${isMap ? mapFields : switchFields}
-        <div class="automation-field"><label>${binary ? 'Output when switch is OFF' : 'Off value'}</label>${ruleOutputEditor(`rule-off-${index}`, rule.actuator, rule.off_value ?? 0, index)}</div>
-        <div class="automation-field wide"><span class="automation-label">Active engine states</span><div class="automation-states"><label class="automation-state"><input id="rule-mode-standby-${index}" type="checkbox" ${(modeMask & 1) ? 'checked' : ''} onchange="markRulesEdited(${index})">Standby</label><label class="automation-state"><input id="rule-mode-startup-${index}" type="checkbox" ${(modeMask & 2) ? 'checked' : ''} onchange="markRulesEdited(${index})">Starting</label><label class="automation-state"><input id="rule-mode-running-${index}" type="checkbox" ${(modeMask & 4) ? 'checked' : ''} onchange="markRulesEdited(${index})">Running</label><label class="automation-state"><input id="rule-mode-shutdown-${index}" type="checkbox" ${(modeMask & 8) ? 'checked' : ''} onchange="markRulesEdited(${index})">Shutdown</label></div></div>
-      </div>
-      <div class="automation-actions"><span class="automation-help">${isMap ? 'Values between the input limits are mapped linearly. Outside them, output is clamped.' : binary ? 'The rule applies the ON or OFF output value directly from the switch state.' : 'Hysteresis prevents the output chattering near the threshold.'}</span><button class="blk-btn del" title="Remove this control rule" onclick="removeRule(${index})">Remove</button></div>
-    </div>
-  </details>`;
-}
-function resolveRuleDisplayHandles(rule) {
-  if (!rule) return;
-  const source = ruleSensors().find(item => item.id && item.id === String(rule.source || ''));
-  const target = ruleOutputs().find(item => item.id && item.id === String(rule.target || ''));
-  if (source) rule.sensor = source.v;
-  if (target) rule.actuator = target.v;
-}
-function renderRules(forceOpen = -1) {
-  const list = document.getElementById('rules-list');
-  if (!list) return;
-  const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
-  rules.forEach(resolveRuleDisplayHandles);
-  list.innerHTML = rules.length ? rules.map((rule,index) => buildRuleRow(rule,index,index === forceOpen)).join('') :
-    '<div style="padding:1rem;border:1px dashed var(--border);border-radius:10px;font-size:.78rem;color:var(--dim)">No control rules yet. Add one below or choose a ready-made example.</div>';
-  document.getElementById('rules-count-label').textContent = `${rules.length} / 16 rules`;
-  const addBtn = document.getElementById('btn-add-rule');
-  if (addBtn) addBtn.disabled = rules.length >= 16 || !hasAvailableRuleSensor() || !hasAvailableRuleOutput();
-  renderRulePresets();
-  renderRuleWarnings();
-}
-function hasAvailableRuleSensor() { return ruleSensors().some(item => item.ok()); }
-function hasAvailableRuleOutput() { return ruleOutputs().some(item => item.ok()); }
-function firstAvailable(list) {
-  const item = list.find(item => item.ok());
-  return item ? item.v : null;
-}
-function firstUnclaimedRuleOutput() {
-  const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
-  return ruleOutputs().find(item => {
-    if (!item.ok()) return false;
-    if (Number(item.v) === 13 || Number(item.v) === 14) return true;
-    return !rules.some(rule => item.id
-      ? String(rule.target || '') === String(item.id)
-      : !rule.target && Number(rule.actuator) === Number(item.v));
-  })?.v ?? null;
-}
-function ruleSensorAvailable(v) {
-  return !!ruleSensors().find(s => Number(s.v) === Number(v))?.ok();
-}
-function ruleOutputAvailable(v) {
-  return !!ruleOutputs().find(o => Number(o.v) === Number(v))?.ok();
-}
-function ruleSensorLabel(v) {
-  return ruleSensors().find(s => Number(s.v) === Number(v))?.l || `sensor ${v}`;
-}
-function ruleOutputLabel(v) {
-  return ruleOutputs().find(o => Number(o.v) === Number(v))?.l || `output ${v}`;
-}
-function firstGenericAnalogRuleSensor() {
-  const inputs = hwCfg.channel_registry?.inputs || [];
-  const index = inputs.findIndex(c => registryChannelInstalled(c) &&
-    [1,9].includes(Number(c.driver)) && c.role === 'generic' && !registryInputCoreBound(c));
-  return index >= 0 ? RULE_REGISTRY_INPUT_BASE + index : undefined;
-}
-function firstGenericPwmRuleOutput() {
-  const outputs = hwCfg.channel_registry?.outputs || [];
-  const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
-  const index = outputs.findIndex((c, i) => c?.installed !== false && (c?.pin ?? -1) >= 0 &&
-    Number(c.driver) === 5 && c.role === 'generic' && !registryOutputCoreBound(c) &&
-    !rules.some(rule => String(rule.target || '') === String(c.id || '') ||
-      (!rule.target && Number(rule.actuator) === RULE_REGISTRY_OUTPUT_BASE + i)));
-  return index >= 0 ? RULE_REGISTRY_OUTPUT_BASE + index : undefined;
-}
-function rulePresetStatus(kind) {
-  const missing = [];
-  if ((cfg.rules || []).length >= 16) missing.push('maximum of 16 control rules reached');
-  const needSensor = v => { if (!ruleSensorAvailable(v)) missing.push(`${ruleSensorLabel(v)} input in Hardware`); };
-  const needOutput = v => { if (!ruleOutputAvailable(v)) missing.push(`${ruleOutputLabel(v)} output in Hardware`); };
-  if (kind === 'adc_pwm_dimmer') {
-    if (firstGenericAnalogRuleSensor() === undefined) missing.push('fitted generic analog input in Hardware');
-    if (firstGenericPwmRuleOutput() === undefined) missing.push('fitted generic PWM output in Hardware');
-  } else if (kind === 'oil_temp_fan') {
-    needSensor(0);
-    needOutput(0);
-  }
-  return {available: missing.length === 0, missing};
-}
-function renderRulePresets() {
-  const host = document.getElementById('rule-presets');
-  if (!host) return;
-  host.innerHTML = RULE_PRESETS.map(preset => {
-    const status = rulePresetStatus(preset.kind);
-    const title = status.available
-      ? preset.desc
-      : `Unavailable - missing: ${status.missing.join(', ')}`;
-    const cls = status.available ? 'rule-preset-btn' : 'rule-preset-btn rule-preset-unavailable';
-    const aria = status.available ? 'false' : 'true';
-    return `<button type="button" class="${cls}" data-rule-preset="${ruleEsc(preset.kind)}" aria-disabled="${aria}" title="${ruleEsc(title)}" onclick="if(this.getAttribute('aria-disabled')!=='true')addRulePreset('${ruleEsc(preset.kind)}')">${ruleEsc(preset.label)}</button>`;
-  }).join('');
-}
-function addRule() {
-  collectRules();
-  cfg.rules = cfg.rules || [];
-  if (cfg.rules.length >= 16) return;
-  const sensor = firstAvailable(ruleSensors());
-  const actuator = firstUnclaimedRuleOutput();
-  if (sensor === null) {
-    alert('No configured sensor is available for a control rule.');
-    return;
-  }
-  if (actuator === null) {
-    alert('No configured output is available for a control rule.');
-    return;
-  }
-  cfg.rules.push({enabled:true,name:'',kind:0,sensor,op:0,threshold:0,
-                  actuator,on_value:1,off_value:0,hysteresis:0,
-                  input_min:0,input_max:1,output_min:0,output_max:1,mode_mask:4});
-  renderRules(cfg.rules.length - 1); markRulesEdited(cfg.rules.length - 1);
-}
-function addRulePreset(kind) {
-  collectRules();
-  cfg.rules = cfg.rules || [];
-  if (cfg.rules.length >= 16) return;
-  const preset = rulePresetStatus(kind);
-  if (!preset.available) return;
-  const add = rule => {
-    cfg.rules.push(Object.assign({enabled:true,kind:0,hysteresis:0,mode_mask:4,on_value:1,off_value:0,input_min:0,input_max:1,output_min:0,output_max:1}, rule));
-    renderRules(cfg.rules.length - 1); markRulesEdited(cfg.rules.length - 1);
-  };
-  if (kind === 'adc_pwm_dimmer') {
-    const sensor = firstGenericAnalogRuleSensor();
-    const actuator = firstGenericPwmRuleOutput();
-    const source = ruleSensors().find(item => item.v === sensor)?.id || '';
-    const target = ruleOutputs().find(item => item.v === actuator)?.id || '';
-    const rule = {name:'Warning light dimmer',kind:1,sensor,source,actuator,target,on_value:1,off_value:0,
-      input_min:0,input_max:1,output_min:0,output_max:1,mode_mask:14};
-    return add(rule);
-  }
-  if (kind === 'oil_temp_fan') {
-    return add({name:'Oil temp fan',sensor:0,op:0,threshold:100,actuator:0,on_value:1,off_value:0,hysteresis:5,mode_mask:6});
-  }
-}
-async function removeRule(index) {
-  collectRules();
-  const name = cfg.rules?.[index]?.name || `rule ${index + 1}`;
-  if (!await OTDialog.confirm(`Remove ${name}?\n\nThe rule will be deleted when you save.`, {
-    title: 'Remove control rule?', confirmText: 'Remove rule', danger: true
-  })) return;
-  cfg.rules.splice(index, 1);
-  renderRules(); markRulesEdited();
-}
-function collectRules() {
-  const rows = document.querySelectorAll('#rules-list .automation-card');
-  if (!rows.length) { cfg.rules = []; return; }
-  cfg.rules = Array.from(rows).map((_, i) => {
-    const sensorSel = document.getElementById('rule-sensor-' + i);
-    const actSel = document.getElementById('rule-act-' + i);
-    const sensor = +sensorSel.value;
-    const actuator = +actSel.value;
-    const source = sensorSel.selectedOptions?.[0]?.dataset?.id || '';
-    const target = actSel.selectedOptions?.[0]?.dataset?.id || '';
-    const kind = +(document.getElementById('rule-kind-' + i)?.value || 0);
-    const standbyMode = document.getElementById('rule-mode-standby-' + i)?.checked ? 1 : 0;
-    const startMode = document.getElementById('rule-mode-startup-' + i)?.checked ? 2 : 0;
-    const runMode = document.getElementById('rule-mode-running-' + i)?.checked ? 4 : 0;
-    const shutdownMode = document.getElementById('rule-mode-shutdown-' + i)?.checked ? 8 : 0;
-    const out = {
-      enabled: document.getElementById('rule-en-' + i).checked,
-      name: document.getElementById('rule-name-' + i).value.substring(0, 23),
-      kind: ruleUnit(sensor) === '0/1' ? 0 : kind,
-      sensor,
-      op: ruleUnit(sensor) === '0/1' ? 0 : +(document.getElementById('rule-op-' + i)?.value || 0),
-      threshold: ruleUnit(sensor) === '0/1' ? 0.5 : ruleThresholdToStored(sensor, document.getElementById('rule-thresh-' + i)?.value || 0),
-      hysteresis: ruleUnit(sensor) === '0/1' ? 0 : ruleHysteresisToStored(sensor, document.getElementById('rule-hyst-' + i)?.value || 0),
-      actuator,
-      on_value: ruleOutputToStored(actuator, document.getElementById('rule-on-' + i)?.value ?? 1),
-      off_value: ruleOutputToStored(actuator, document.getElementById('rule-off-' + i).value),
-      input_min: ruleSensorValueToStored(sensor, document.getElementById('rule-in-min-' + i)?.value ?? 0),
-      input_max: ruleSensorValueToStored(sensor, document.getElementById('rule-in-max-' + i)?.value ?? (ruleSensorScale(sensor) === 100 ? 100 : 1)),
-      output_min: ruleOutputToStored(actuator, document.getElementById('rule-out-min-' + i)?.value ?? 0),
-      output_max: ruleOutputToStored(actuator, document.getElementById('rule-out-max-' + i)?.value ?? (ruleOutputIsAnalog(actuator) ? 100 : 1)),
-      mode_mask: standbyMode | startMode | runMode | shutdownMode
-    };
-    if (source) out.source = source;
-    if (target) out.target = target;
-    return out;
-  });
-}
-function ruleWarnings(rules) {
-  const warnings = [];
-  const byAct = new Map();
-  const ownership = new Map();
-  const addOwner = (target, owner) => {
-    if (!target) return;
-    const list = ownership.get(target) || [];
-    if (!list.includes(owner)) list.push(owner);
-    ownership.set(target, list);
-  };
-  rules.forEach((rule, index) => {
-    if (!rule.enabled) return;
-    if (Number(rule.actuator) === 13 || Number(rule.actuator) === 14) return;
-    const list = byAct.get(rule.actuator) || [];
-    list.push(index + 1);
-    byAct.set(rule.actuator, list);
-    if ((Number(rule.mode_mask ?? 14) & 4) !== 0) {
-      const output = ruleOutputs().find(o => o.v === Number(rule.actuator));
-      addOwner(rule.target || output?.id, `rule ${rule.name || '#' + (index + 1)}`);
-    }
-    if (!Number(rule.mode_mask ?? 14)) warnings.push(`Rule ${rule.name || '#' + (index + 1)} has no active mode selected.`);
-  });
-  byAct.forEach((list, act) => {
-    if (list.length > 1) {
-      const out = ruleOutputs().find(o => o.v === Number(act))?.l || ('output ' + act);
-      warnings.push(`${list.length} enabled rules target ${out}. Give each output only one rule.`);
-    }
-  });
-  const controllers = hwCfg.controllers || {};
-  const prop = registryOutputPurpose('prop_pitch');
-  if (controllers.dynamic_idle) addOwner('main_fuel', 'Automatic Idle');
-  if (controllers.governor) addOwner(prop?.id || 'main_fuel', prop ? 'N2 governor (pitch)' : 'N2 governor (fuel)');
-  if (controllers.oil_loop) (hwCfg.oil_loops || []).filter(l => l?.enabled !== false).forEach(l => addOwner(l.pump_output, 'oil-pressure controller'));
-  ownership.forEach((owners, target) => {
-    if (owners.length < 2) return;
-    const channel = (hwCfg.channel_registry?.outputs || []).find(c => c.id === target);
-    const label = channel?.name || ruleOutputs().find(o => o.id === target)?.l || target;
-    warnings.push(`${label} has overlapping RUNNING owners: ${owners.join(', ')}. The later rule command is final; keep this only if intentional.`);
-  });
-  return warnings;
-}
-function renderRuleWarnings() {
-  const box = document.getElementById('rules-warnings');
-  if (!box) return;
-  const warnings = ruleWarnings(Array.isArray(cfg.rules) ? cfg.rules : []);
-  box.style.display = warnings.length ? '' : 'none';
-  box.innerHTML = warnings.map(w => 'Warning: ' + ruleEsc(w)).join('<br>');
-}
-function markRulesEdited(index = -1) {
-  collectRules();
-  if (index >= 0 && cfg.rules?.[index]) {
-    const title = document.getElementById('rule-title-' + index);
-    const summary = document.getElementById('rule-summary-' + index);
-    if (title) title.textContent = cfg.rules[index].name || `Control rule ${index + 1}`;
-    if (summary) summary.textContent = ruleSentence(cfg.rules[index]);
-  }
-  renderRuleWarnings();
-  markSequenceDirty('Control rules edited — save to apply');
-}
-
-function validateRulesForSave() {
-  const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
-  const errors = [];
-  const targets = new Map();
-  if (rules.length > 16) errors.push(`Control rules: ${rules.length}/16. Remove ${rules.length - 16} rule(s).`);
-  rules.forEach((rule, index) => {
-    const sensor = rule.source
-      ? ruleSensors().find(s => s.id === rule.source)
-      : ruleSensors().find(s => s.v === Number(rule.sensor));
-    const output = rule.target
-      ? ruleOutputs().find(o => o.id === rule.target)
-      : ruleOutputs().find(o => o.v === Number(rule.actuator));
-    const name = rule.name ? `"${rule.name}"` : `#${index + 1}`;
-    if (!sensor || !sensor.ok()) errors.push(`Rule ${name}: selected sensor is not configured.`);
-    if (!output || !output.ok()) errors.push(`Rule ${name}: selected output is not configured.`);
-    if (!Number(rule.mode_mask || 0)) errors.push(`Rule ${name}: select at least one engine state.`);
-    if (Number(rule.kind || 0) === 1) {
-      if (!ruleOutputIsAnalog(rule.actuator)) errors.push(`Rule ${name}: mapping requires a variable PWM or servo output.`);
-      if (!(Number(rule.input_max) > Number(rule.input_min))) errors.push(`Rule ${name}: input maximum must be greater than input minimum.`);
-    }
-    if (Number(rule.actuator) !== 13 && Number(rule.actuator) !== 14) {
-      const targetKey = rule.target || `#${rule.actuator}`;
-      if (targets.has(targetKey)) errors.push(`Rules ${targets.get(targetKey)} and ${name} target the same output. Keep one rule per output.`);
-      else targets.set(targetKey, name);
-    }
-  });
-  return errors;
-}
-
-function validateCustomBlockLimits() {
-  const defs = hwCfg.custom_blocks || {};
-  const entries = Object.entries(defs);
-  const errors = [];
-  const sensors = getEnabledSensors();
-  const acts = getEnabledActuators();
-  if (entries.length > MAX_CUSTOM_BLOCKS) {
-    errors.push(`Custom blocks: ${entries.length}/${MAX_CUSTOM_BLOCKS}. Remove ${entries.length - MAX_CUSTOM_BLOCKS} block(s).`);
-  }
-  entries.forEach(([key, def]) => {
-    const label = def?.label || key;
-    if (key.length > MAX_CUSTOM_KEY_LEN) {
-      errors.push(`${key}: key is ${key.length}/${MAX_CUSTOM_KEY_LEN} characters. Recreate it from the UI so firmware can match it safely.`);
-    }
-    if ((def?.label || '').length > MAX_CUSTOM_LABEL_LEN) {
-      errors.push(`${label}: label is longer than ${MAX_CUSTOM_LABEL_LEN} characters.`);
-    }
-    if ((def?.desc || '').length > MAX_CUSTOM_DESC_LEN) {
-      errors.push(`${label}: description is longer than ${MAX_CUSTOM_DESC_LEN} characters.`);
-    }
-    const steps = Array.isArray(def?.steps) ? def.steps : [];
-    if (steps.length > MAX_CUSTOM_STEPS) {
-      errors.push(`${label}: ${steps.length}/${MAX_CUSTOM_STEPS} steps. Remove ${steps.length - MAX_CUSTOM_STEPS} step(s).`);
-    }
-    if (def?.type === 'action' && steps.length === 0) {
-      errors.push(`${label}: action block has no steps.`);
-    }
-    if (def?.type === 'while') {
-      const sensor = def?.condition?.sensor;
-      if (!sensor || !sensors.some(s => s.key === sensor)) {
-        errors.push(`${label}: condition sensor is not configured.`);
-      }
-    }
-    steps.forEach((step, index) => {
-      if (step?.type === 'set_act' && !acts.some(a => a.key === step.act)) {
-        errors.push(`${label}: step ${index + 1} actuator is not configured.`);
-      }
-    });
-    if (def?.type !== 'action' && def?.type !== 'wait' && def?.type !== 'while') {
-      errors.push(`${label}: unknown custom block type.`);
-    }
-  });
-  return errors;
-}
-
-async function saveAll() {
-  if (!_seqDirty) return;
-  await refreshEngineStatus();
-  if (engineMode !== 'STANDBY' && engineMode !== 'FAULT') {
-    setSaveStatus('Warning: Engine must be in STANDBY or FAULT to save');
-    return;
-  }
-  collectRules();
-  ['startup','shutdown','afterburner','ab-shut'].forEach(ensureActionSlots);
-  // This page intentionally saves sequence hardware and settings atomically.
-  // Merge its edits onto the latest documents first so a long-open browser tab
-  // cannot silently restore unrelated older settings.
-  try {
-    const [latestHw, latestCfg] = await Promise.all([
-      fetchJsonWithRetry('/api/hardware'),
-      fetchJsonWithRetry('/api/config')
-    ]);
-    hwCfg = mergeSequenceEdits(loadedHwCfg, hwCfg, latestHw);
-    cfg = mergeSequenceEdits(loadedCfg, cfg, latestCfg);
-    // Live bus discovery is response metadata, not engine configuration.
-    delete hwCfg._i2c_discovery;
-  } catch (e) {
-    setSaveStatus('Warning: Could not refresh engine file: ' + e.message);
-    return;
-  }
-  const ruleErrors = validateRulesForSave();
-  if (ruleErrors.length) {
-    setSaveStatus('Warning: Control rule hardware mismatch');
-    alert('Control rule hardware mismatch:\n\n' + ruleErrors.map(e => '- ' + e).join('\n') +
-      '\n\nEdit or remove those rules before saving.');
-    return;
-  }
-  const customLimitErrors = validateCustomBlockLimits();
-  if (customLimitErrors.length) {
-    setSaveStatus('Warning: Custom block setup needs attention');
-    alert('Custom block setup needs attention:\n\n' + customLimitErrors.map(e => '- ' + e).join('\n') +
-      '\n\nFix these before saving so firmware and hardware stay matched.');
-    return;
-  }
-  const sequenceHardwareErrors = validateSequenceHardwareForSave();
-  if (sequenceHardwareErrors.length) {
-    setSaveStatus('Warning: Sequence contains blocks with missing hardware');
-    await OTDialog.alert('Sequence hardware mismatch:\n\n' + sequenceHardwareErrors.map(e => '- ' + e).join('\n') +
-      '\n\nRestore the required devices in Hardware or remove these blocks before saving.',
-      { title: 'Sequence needs hardware' });
-    return;
-  }
-  // Validate that the startup sequence is not empty
-  const startupBlocks = hwCfg['startup_seq'] || [];
-  if (startupBlocks.length === 0) {
-    setSaveStatus('Warning: Startup sequence is empty - add blocks before saving');
-    alert('Startup sequence is empty.\n\nAdd at minimum: Oil Pump On -> Timed Delay -> Ignition Output On -> Set Main Fuel for Idle -> Timed Delay -> Ignition Output Off -> Timed Delay\nbefore saving. An empty startup sequence will allow the engine to start with no safety or control blocks.');
-    return;
-  }
-  // Validate sequence safety: warn if critical blocks are missing
-  const seqWarnings = _validateSequence(startupBlocks);
-  if (seqWarnings.length > 0) {
-    const proceed = await OTDialog.confirm(
-      'Warning: Sequence warnings:\n\n' + seqWarnings.map(w => '- ' + w).join('\n') +
-      '\n\nSaving anyway may create an unsafe or non-starting sequence.',
-      { title: 'Sequence safety warnings', confirmText: 'Save anyway', danger: true }
-    );
-    if (!proceed) return;
-  }
-  setSaveStatus('Saving engine file...');
-  // Sequence order and block parameters belong to one engine file; save both atomically.
-  try {
-    if (typeof stopSequenceTelemetry === 'function') stopSequenceTelemetry();
-    await new Promise(resolve => setTimeout(resolve, 250));
-    const cfgRes = await fetch('/api/ecu_config', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ hardware: hwCfg, settings: cfg })
-    });
-    const resp = await cfgRes.json();
-    if (!cfgRes.ok || !resp.ok) {
-      setSaveStatus('Warning: Save failed: ' + (resp.error || cfgRes.status));
-      return;
-    }
-    if (window.OTSetup) OTSetup.mark('sequence');
-    clearSequenceDirty('Saved — rebooting…');
-    if (resp.reboot) startRebootCountdown();
-  } catch(e) { setSaveStatus('Warning: ' + e.message); }
-}
-
-function startRebootCountdown() {
-  const overlay = document.getElementById('reboot-overlay');
-  const cnt     = document.getElementById('reboot-count');
-  overlay.classList.add('show');
-  let n = 10;
-  cnt.textContent = n;
-  const t = setInterval(() => {
-    n--;
-    cnt.textContent = n;
-    if (n <= 0) {
-      clearInterval(t);
-      reconnect();
-    }
-  }, 1000);
-}
-
-function reconnect(attempts=0) {
-  fetch('/api/data').then(r => {
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    document.getElementById('reboot-overlay').classList.remove('show');
-    return loadAll();
-  }).then(() => {
-    startSequenceTelemetryForPlatform();
-  }).catch(() => {
-    if (attempts < 20) setTimeout(() => reconnect(attempts+1), 1000);
-    else document.getElementById('reboot-count').textContent = 'Reload page';
-  });
-}
-
-function setSaveStatus(msg) {
-  document.getElementById('save-status').textContent = msg;
-}
-
-function updateSequenceSaveControls() {
-  const canSave = _seqDirty && (engineMode === 'STANDBY' || engineMode === 'FAULT');
-  const save = document.getElementById('save-btn');
-  const discard = document.getElementById('seq-discard-btn');
-  if (save) save.disabled = !canSave;
-  if (discard) discard.disabled = !_seqDirty;
-}
-
-function markSequenceDirty(message) {
-  _seqDirty = true;
-  document.getElementById('sequence-save-bar')?.classList.add('is-dirty');
-  setSaveStatus(message || 'Unsaved changes — save to apply');
-  updateSequenceSaveControls();
-}
-
-function clearSequenceDirty(message) {
-  _seqDirty = false;
-  document.getElementById('sequence-save-bar')?.classList.remove('is-dirty');
-  setSaveStatus(message || 'No unsaved changes');
-  updateSequenceSaveControls();
-}
-
-async function discardSequenceChanges() {
-  if (!_seqDirty) return;
-  if (!await OTDialog.confirm('Discard every unsaved sequence and control-rule change?', {
-    title: 'Discard changes?', confirmText: 'Discard', danger: true
-  })) return;
-  await loadAll();
-}
-
 // Source: data_src/pages/sequence-runtime.js
 // ------ WebSocket for engine mode ------------------------------------------------------------------------------------------------------------------------------------------
 function updateEngineMode(mode) {
@@ -3908,6 +3125,16 @@ async function refreshEngineStatus() {
 
 let statusPollTimer = null;
 let seqWsPullTimer = null;
+let seqWsRequestInFlight = false;
+window.OTWaitForPageTelemetryIdle = (timeoutMs = 1500) => new Promise(resolve => {
+  const started = Date.now();
+  const poll = () => {
+    if (!seqWsRequestInFlight) resolve(true);
+    else if (Date.now() - started >= timeoutMs) resolve(false);
+    else setTimeout(poll, 25);
+  };
+  poll();
+});
 let seqClosingForNavigation = false;
 function setSeqConnectionState(ok, text) {
   const dot = document.getElementById('conn');
@@ -3930,7 +3157,12 @@ function startWS() {
   if (seqClosingForNavigation) return;
   if (ws && ws.readyState <= WebSocket.OPEN) return;
   ws = new WebSocket('ws://' + location.host + '/ws');
-  const pull = () => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('p'); };
+  const pull = () => {
+    if (ws && ws.readyState === WebSocket.OPEN && !seqWsRequestInFlight) {
+      seqWsRequestInFlight = true;
+      ws.send('p');
+    }
+  };
   ws.onopen = () => {
     setSeqConnectionState(true, 'Connected');
     stopStatusPoll();
@@ -3941,11 +3173,13 @@ function startWS() {
   ws.onmessage = e => {
     try {
       const d = JSON.parse(e.data);
+      if (d._frame_more !== true) seqWsRequestInFlight = false;
       if (d.mode !== undefined) updateEngineMode(d.mode);
       if (d.seq_issues !== undefined) _applySeqValidation(d);
     } catch(_){}
   };
   ws.onclose = () => {
+    seqWsRequestInFlight = false;
     if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
     setSeqConnectionState(false, 'Reconnecting');
     if (!seqClosingForNavigation) {
@@ -3957,12 +3191,12 @@ function startWS() {
 }
 function startSequenceTelemetryForPlatform() {
   seqClosingForNavigation = false;
-  if (hwCfg?.platform === 'esp32') startStatusPoll();
-  else startWS();
+  startWS();
 }
 function stopSequenceTelemetry() {
   seqClosingForNavigation = true;
   if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
+  seqWsRequestInFlight = false;
   stopStatusPoll();
   if (ws) {
     try {
@@ -3974,8 +3208,14 @@ function stopSequenceTelemetry() {
     ws = null;
   }
 }
+function prepareSequenceTelemetryNavigation() {
+  seqClosingForNavigation = true;
+  if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
+  stopStatusPoll();
+}
 window.addEventListener('pagehide', stopSequenceTelemetry);
 window.addEventListener('beforeunload', stopSequenceTelemetry);
+window.addEventListener('ot:navigation-prepare', prepareSequenceTelemetryNavigation);
 window.addEventListener('ot:navigation-start', stopSequenceTelemetry);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
@@ -4023,6 +3263,159 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadAll();
   startSequenceTelemetryForPlatform();
 }, { once:true });
+
+// Source: data_src/pages/sequence-save.js
+// Sequence persistence only. Custom running controllers belong to Controllers.
+function validateSequenceHardwareForSave() {
+  const errors = [];
+  const tabs = [['Startup','startup'],['Shutdown','shutdown'],['Afterburner','afterburner'],['Afterburner shutdown','ab-shut']];
+  tabs.forEach(([label, tab]) => (hwCfg[seqKey(tab)] || []).forEach((name, index) => {
+    const def = BLOCKS[name] || customBlocks[name];
+    if (!def) errors.push(`${label} block ${index + 1} (${name}) is unknown to this firmware.`);
+    else if (def.visibleIf && !def.visibleIf(hwCfg))
+      errors.push(`${label} block ${index + 1} (${def.label || name}) cannot run with the fitted hardware.`);
+  }));
+  return errors;
+}
+
+function validateCustomBlockLimits() {
+  const entries = Object.entries(hwCfg.custom_blocks || {});
+  const errors = [];
+  const sensors = getEnabledSensors();
+  const acts = getEnabledActuators();
+  if (entries.length > MAX_CUSTOM_BLOCKS)
+    errors.push(`Custom blocks: ${entries.length}/${MAX_CUSTOM_BLOCKS}. Remove ${entries.length - MAX_CUSTOM_BLOCKS} block(s).`);
+  entries.forEach(([key, def]) => {
+    const label = def?.label || key;
+    const steps = Array.isArray(def?.steps) ? def.steps : [];
+    if (key.length > MAX_CUSTOM_KEY_LEN) errors.push(`${key}: key is longer than ${MAX_CUSTOM_KEY_LEN} characters.`);
+    if ((def?.label || '').length > MAX_CUSTOM_LABEL_LEN) errors.push(`${label}: label is longer than ${MAX_CUSTOM_LABEL_LEN} characters.`);
+    if ((def?.desc || '').length > MAX_CUSTOM_DESC_LEN) errors.push(`${label}: description is longer than ${MAX_CUSTOM_DESC_LEN} characters.`);
+    if (steps.length > MAX_CUSTOM_STEPS) errors.push(`${label}: ${steps.length}/${MAX_CUSTOM_STEPS} steps.`);
+    if (def?.type === 'action' && !steps.length) errors.push(`${label}: action block has no steps.`);
+    if (def?.type === 'while' && !sensors.some(sensor => sensor.key === def?.condition?.sensor))
+      errors.push(`${label}: condition sensor is not configured.`);
+    steps.forEach((step, index) => {
+      if (step?.type === 'set_act' && !acts.some(act => act.key === step.act))
+        errors.push(`${label}: step ${index + 1} actuator is not configured.`);
+    });
+    if (!['action','wait','while'].includes(def?.type)) errors.push(`${label}: unknown custom block type.`);
+  });
+  return errors;
+}
+
+async function saveAll() {
+  if (!_seqDirty) return;
+  await refreshEngineStatus();
+  if (engineMode !== 'STANDBY' && engineMode !== 'FAULT') {
+    setSaveStatus('Warning: Engine must be in STANDBY or FAULT to save');
+    return;
+  }
+  ['startup','shutdown','afterburner','ab-shut'].forEach(ensureActionSlots);
+  try {
+    // Merge only this page's changes onto the latest complete engine file.
+    const latestHw = await fetchJsonWithRetry('/api/hardware');
+    const latestCfg = await fetchJsonWithRetry('/api/config');
+    hwCfg = mergeSequenceEdits(loadedHwCfg, hwCfg, latestHw);
+    cfg = mergeSequenceEdits(loadedCfg, cfg, latestCfg);
+    delete hwCfg._i2c_discovery;
+  } catch (error) {
+    setSaveStatus('Warning: Could not refresh engine file: ' + error.message);
+    return;
+  }
+  const customErrors = validateCustomBlockLimits();
+  if (customErrors.length) {
+    setSaveStatus('Warning: Custom block setup needs attention');
+    await OTDialog.alert('Custom block setup needs attention:\n\n' + customErrors.map(e => '- ' + e).join('\n'), {title:'Custom blocks need attention'});
+    return;
+  }
+  const hardwareErrors = validateSequenceHardwareForSave();
+  if (hardwareErrors.length) {
+    setSaveStatus('Warning: Sequence contains blocks with missing hardware');
+    await OTDialog.alert('Sequence hardware mismatch:\n\n' + hardwareErrors.map(e => '- ' + e).join('\n') + '\n\nRestore the required devices in Hardware or remove these blocks before saving.', {title:'Sequence needs hardware'});
+    return;
+  }
+  const startup = hwCfg.startup_seq || [];
+  if (!startup.length) {
+    setSaveStatus('Warning: Startup sequence is empty');
+    await OTDialog.alert('Add the startup actions and waits your turbine needs before saving.', {title:'Startup sequence is empty'});
+    return;
+  }
+  const warnings = _validateSequence(startup);
+  if (warnings.length && !await OTDialog.confirm('Sequence warnings:\n\n' + warnings.map(w => '- ' + w).join('\n') + '\n\nSave anyway?', {title:'Sequence safety warnings', confirmText:'Save anyway', danger:true})) return;
+  setSaveStatus('Saving engine file...');
+  try {
+    if (typeof stopSequenceTelemetry === 'function') stopSequenceTelemetry();
+    await new Promise(resolve => setTimeout(resolve, 250));
+    const response = await fetch('/api/ecu_config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hardware:hwCfg, settings:cfg})});
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      setSaveStatus('Warning: Save failed: ' + (result.error || response.status));
+      return;
+    }
+    if (window.OTSetup) OTSetup.mark('sequence');
+    clearSequenceDirty('Saved — rebooting…');
+    if (result.reboot) startRebootCountdown();
+  } catch (error) {
+    setSaveStatus('Warning: ' + error.message);
+  }
+}
+
+function startRebootCountdown() {
+  const overlay = document.getElementById('reboot-overlay');
+  const count = document.getElementById('reboot-count');
+  overlay?.classList.add('show');
+  let remaining = 10;
+  if (count) count.textContent = remaining;
+  const timer = setInterval(() => {
+    remaining--;
+    if (count) count.textContent = remaining;
+    if (remaining <= 0) { clearInterval(timer); reconnect(); }
+  }, 1000);
+}
+
+function reconnect(attempts = 0) {
+  fetch('/api/data').then(response => {
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    document.getElementById('reboot-overlay')?.classList.remove('show');
+    return loadAll();
+  }).then(() => startSequenceTelemetryForPlatform()).catch(() => {
+    if (attempts < 20) setTimeout(() => reconnect(attempts + 1), 1000);
+    else if (document.getElementById('reboot-count')) document.getElementById('reboot-count').textContent = 'Reload page';
+  });
+}
+
+function setSaveStatus(message) {
+  const status = document.getElementById('save-status');
+  if (status) status.textContent = message;
+}
+
+function updateSequenceSaveControls() {
+  const save = document.getElementById('save-btn');
+  const discard = document.getElementById('seq-discard-btn');
+  if (save) save.disabled = !_seqDirty || (engineMode !== 'STANDBY' && engineMode !== 'FAULT');
+  if (discard) discard.disabled = !_seqDirty;
+}
+
+function markSequenceDirty(message) {
+  _seqDirty = true;
+  document.getElementById('sequence-save-bar')?.classList.add('is-dirty');
+  setSaveStatus(message || 'Unsaved changes — save to apply');
+  updateSequenceSaveControls();
+}
+
+function clearSequenceDirty(message) {
+  _seqDirty = false;
+  document.getElementById('sequence-save-bar')?.classList.remove('is-dirty');
+  setSaveStatus(message || 'No unsaved changes');
+  updateSequenceSaveControls();
+}
+
+async function discardSequenceChanges() {
+  if (!_seqDirty) return;
+  if (!await OTDialog.confirm('Discard every unsaved sequence change?', {title:'Discard changes?', confirmText:'Discard', danger:true})) return;
+  await loadAll();
+}
 </script>
 </body>
 </html>

@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <title>OpenTurbine — Tools</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260814g',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260814g');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 <style>
 .test-settings-card{width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .test-settings-head,.test-settings-foot{flex:0 0 auto;padding:1rem}
@@ -19,7 +20,8 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
+  <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
@@ -125,6 +127,17 @@ let cfgData     = {};
 const TOOL_CONFIRMATION_SKIP_KEY = 'ot_tool_confirmations_skip_all';
 let toolsTelemetryTimer = null;
 let toolsTelemetryInFlight = false;
+let toolsTelemetryWs = null;
+let toolsTelemetryClosing = false;
+window.OTWaitForPageTelemetryIdle = (timeoutMs = 1500) => new Promise(resolve => {
+  const started = Date.now();
+  const poll = () => {
+    if (!toolsTelemetryInFlight) resolve(true);
+    else if (Date.now() - started >= timeoutMs) resolve(false);
+    else setTimeout(poll, 25);
+  };
+  poll();
+});
 function escHtml(value){
   return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
@@ -405,7 +418,7 @@ function renderTools() {
     <div class="tool-footer" style="margin-top:.5rem">
       <div class="tool-desc" style="flex:1">
         Updates the dashboard pages without erasing config or logs.
-        First run <code>tools/gzip_data.py</code>, then select all eleven generated
+        First run <code>tools/gzip_data.py</code>, then select all twelve generated
         <code>data/*.gz</code> files. Requires idle STANDBY with no active outputs.
       </div>
       <label style="cursor:pointer">
@@ -805,7 +818,7 @@ window.applyData = function(d) {
       cvmBanner.innerHTML =
         '<b>⚠ Config schema mismatch</b><br>' +
         'This engine file uses a different firmware settings schema. Missing or unsupported parameters may use ' +
-        'factory defaults — review <a href="/config.html" style="color:inherit">Config</a> ' +
+        'factory defaults — review <a href="/controllers.html" style="color:inherit">Controllers</a> ' +
         'and <a href="/hardware.html" style="color:inherit">Hardware</a> before starting the engine.';
       const main = document.querySelector('main');
       if (main) main.insertBefore(cvmBanner, main.firstChild);
@@ -1024,6 +1037,11 @@ async function loadToolConfig() {
 
 async function pollToolsTelemetry() {
   if (toolsTelemetryInFlight) return;
+  if (toolsTelemetryWs && toolsTelemetryWs.readyState === WebSocket.OPEN) {
+    toolsTelemetryInFlight = true;
+    toolsTelemetryWs.send('p');
+    return;
+  }
   toolsTelemetryInFlight = true;
   try {
     // Hardware and configuration were loaded above. Tools only needs changing
@@ -1042,15 +1060,57 @@ async function pollToolsTelemetry() {
 }
 
 function startToolsTelemetry() {
-  if (toolsTelemetryTimer) return;
-  pollToolsTelemetry();
-  toolsTelemetryTimer = setInterval(pollToolsTelemetry, 2000);
+  toolsTelemetryClosing = false;
+  if (toolsTelemetryWs && toolsTelemetryWs.readyState <= WebSocket.OPEN) return;
+  toolsTelemetryWs = new WebSocket('ws://' + location.host + '/ws');
+  toolsTelemetryWs.onopen = () => {
+    setConnectionState(true, 'Connected');
+    pollToolsTelemetry();
+    if (toolsTelemetryTimer) clearInterval(toolsTelemetryTimer);
+    toolsTelemetryTimer = setInterval(pollToolsTelemetry, 2000);
+  };
+  toolsTelemetryWs.onmessage = event => {
+    try {
+      const d = JSON.parse(event.data);
+      window.applyData(d);
+      if (d._frame_more !== true) toolsTelemetryInFlight = false;
+      setConnectionState(true, 'Connected');
+    } catch (_) {}
+  };
+  toolsTelemetryWs.onerror = () => { try { toolsTelemetryWs.close(); } catch (_) {} };
+  toolsTelemetryWs.onclose = () => {
+    toolsTelemetryInFlight = false;
+    if (toolsTelemetryTimer) clearInterval(toolsTelemetryTimer);
+    toolsTelemetryTimer = null;
+    toolsTelemetryWs = null;
+    if (!toolsTelemetryClosing) {
+      setConnectionState(false, 'Reconnecting');
+      setTimeout(startToolsTelemetry, 2000);
+    }
+  };
 }
 function stopToolsTelemetry() {
+  toolsTelemetryClosing = true;
+  if (toolsTelemetryTimer) clearInterval(toolsTelemetryTimer);
+  toolsTelemetryTimer = null;
+  toolsTelemetryInFlight = false;
+  if (toolsTelemetryWs) {
+    try {
+      toolsTelemetryWs.onclose = null;
+      toolsTelemetryWs.onerror = null;
+      toolsTelemetryWs.onmessage = null;
+      toolsTelemetryWs.close(1000, 'page navigation');
+    } catch (_) {}
+    toolsTelemetryWs = null;
+  }
+}
+function prepareToolsTelemetryNavigation() {
+  toolsTelemetryClosing = true;
   if (toolsTelemetryTimer) clearInterval(toolsTelemetryTimer);
   toolsTelemetryTimer = null;
 }
 window.addEventListener('pagehide', stopToolsTelemetry);
+window.addEventListener('ot:navigation-prepare', prepareToolsTelemetryNavigation);
 window.addEventListener('ot:navigation-start', stopToolsTelemetry);
 
 
@@ -1203,25 +1263,36 @@ async function restoreConfig(input) {
   const reader = new FileReader();
   reader.onload = ev => {
     const postRestore = async () => {
-      let response;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          response = await fetch('/api/ecu_config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: compactEngineFileForRestore(ev.target.result)
-          });
-        } catch (error) {
-          if (attempt === 2) throw error;
-          document.getElementById('cfg-backup-state').textContent = 'Retrying ECU connection...';
-          await new Promise(resolve => setTimeout(resolve, 2200));
-          continue;
+      const payload = compactEngineFileForRestore(ev.target.result);
+      try {
+        return await fetch('/api/ecu_config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload
+        });
+      } catch (error) {
+        // A successful restore immediately reboots the AP, so the browser can
+        // lose the response after the file was committed. Retrying this
+        // mutation could apply the same restore and reboot several times.
+        document.getElementById('cfg-backup-state').textContent = 'Checking after ECU restart…';
+        let sawDisconnect = false;
+        for (let attempt = 0; attempt < 45; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          try {
+            const status = await fetch('/api/status', {cache:'no-store'});
+            if (status.ok && sawDisconnect) {
+              return new Response(JSON.stringify({ok:true,reboot:true,recovered:true}), {
+                status:200, headers:{'Content-Type':'application/json'}
+              });
+            }
+          } catch (_) {
+            sawDisconnect = true;
+          }
         }
-        if (![500, 503].includes(response.status) || attempt === 2) return response;
-        document.getElementById('cfg-backup-state').textContent = 'Waiting for ECU storage…';
-        await new Promise(resolve => setTimeout(resolve, 2200));
+        throw new Error(sawDisconnect
+          ? 'The ECU restarted but did not reconnect. Rejoin its Wi-Fi and verify the engine file before trying again.'
+          : 'The restore response was lost. The file was not sent again because repeating a restore may reboot the ECU twice. Reconnect and verify the current engine file.');
       }
-      return response;
     };
     postRestore()
     .then(async r => {
@@ -1317,9 +1388,9 @@ function startWebAssetsUpdate(input) {
     return;
   }
   const required = [
-    'calibration.html.gz', 'config.html.gz', 'hardware.html.gz', 'index.html.gz',
+    'calibration.html.gz', 'controllers.html.gz', 'hardware.html.gz', 'index.html.gz',
     'log.html.gz', 'sequence.html.gz', 'app.js.gz', 'style.css.gz',
-    'theme.js.gz', 'ui_dialog.js.gz', 'tools.html.gz'
+    'system.html.gz', 'theme.js.gz', 'ui_dialog.js.gz', 'tools.html.gz'
   ];
   const names = new Set(files.map(f => f.name));
   const missing = required.filter(name => !names.has(name));

@@ -159,6 +159,7 @@ function makeSettings() {
   return {
     profile_id: 'sim-dev',
     config_version: 9,
+    controller_schema: 1,
     engine: { rpm_limit: 95000, n2_rpm_limit: 30000, min_rpm: 12000, tot_limit: 720, tot_cooldown_target: 110, tot_safe_margin: 40 },
     oil: { startup_pressure: 1.5, startup_pct: 35, startup_min_bar: 0.5, running_min: 1.2, map_min: 1.5, map_max: 3.6, use_throttle_map: true, adjust_scale: 0.1, min_pct: 12, failsafe_delay_ms: 500, failsafe_pct: 70 },
     sequence: {
@@ -184,7 +185,9 @@ function makeSettings() {
     rc_input: { min_us: 1000, max_us: 2000, failsafe_ms: 500 },
     afterburner: { min_n1: 45000, max_n1: 92000, max_tot_for_light: 650, throttle_threshold: 0.8, use_torch: true, use_igniter: true, torch_spike_pct: 20, torch_duration_ms: 250, torch_tot_limit: 780, lightup_pump_pct: 80, flame_mode: 0, tot_rise_deg_c: 30, tot_rise_window_ms: 1000, assume_ignited_ms: 1500, flame_timeout_ms: 4000, flame_loss_delay_ms: 1000, pump_min_pct: 20, pump_max_pct: 80, pump_control_mode: 1, pump_follow_throttle: true, main_fuel_offset_pct: 0, stabilize_ms: 1000, stabilize_max_tot: 750 },
     session_log: { n1: true, n2: true, tot: true, oil: true, p1: true, p2: true, torque:true, thrust:true, throttle: true, mode: true, tit: true, batt: true, fuel_press: true, fuel_flow: true, glow: true, fp2: true, ab: true, prop: true, loop: false, interval_ms: 500 },
-    rules: [{ enabled: true, name: 'Oil fan', kind: 0, sensor: 0, source: 'oil_temp', op: 0, threshold: 90, hysteresis: 5,
+    rules: [{ enabled: true, name: 'Main Fuel', kind: 1, sensor: 17, source: 'operator_throttle', actuator: 4, target: 'main_fuel',
+      input_min: 0, input_max: 1, output_min: 0.1, output_max: 1, on_value: 1, off_value: 0, hysteresis: 0, mode_mask: 4 },
+      { enabled: true, name: 'Oil fan', kind: 0, sensor: 0, source: 'oil_temp', op: 0, threshold: 90, hysteresis: 5,
       actuator: 0, target: 'cooling_fan_main', on_value: 1, off_value: 0, input_min: 0, input_max: 1,
       output_min: 0, output_max: 1, mode_mask: 4 }]
   };
@@ -470,7 +473,10 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
   try {
     if (req.method === 'GET' && (url.pathname === '/api/data' || url.pathname === '/api/telemetry')) return sendJson(res, 200, state.data);
-    if (req.method === 'GET' && url.pathname === '/api/status') return sendJson(res, 200, { ok: true, mode: state.data.mode, locked: !!state.data.config_locked });
+    if (req.method === 'GET' && url.pathname === '/api/status') return sendJson(res, 200, {
+      ok: true, mode: state.data.mode, locked: !!state.data.config_locked,
+      dev_mode: !!state.data.dev_mode
+    });
     if (req.method === 'GET' && url.pathname === '/api/device_info') return sendJson(res, 200, {
       project: 'OpenTurbine', firmware_version: 'test', build_id: 'ui-mock',
       target: 'esp32s3dev', chip: 'ESP32-S3', state: state.data.mode,
@@ -549,6 +555,15 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/api/start') {
       state.data = scenarios.startup();
+      broadcast();
+      return sendJson(res, 200, { ok: true });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/start-limited') {
+      state.commands.push({ cmd: 'START_LIMITED' });
+      state.data = merge(scenarios.startup(), {
+        limp_mode: true, limp_automatic: true,
+        limp_override_sensor: state.data.limited_start_sensor || 'failed sensor'
+      });
       broadcast();
       return sendJson(res, 200, { ok: true });
     }

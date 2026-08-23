@@ -55,6 +55,7 @@ int8_t ruleTargetHandle(const char* id) {
     if (!id || !id[0]) return -1;
     if (!strcmp(id, "main_fuel") || !strcmp(id, "main_fuel_output") || !strcmp(id, "throttle")) return RulesEngine::THROTTLE;
     if (!strcmp(id, "starter_main") || !strcmp(id, "main_starter") || !strcmp(id, "starter")) return RulesEngine::STARTER;
+    if (!strcmp(id, "starter_enable") || !strcmp(id, "starter_enable_main")) return RulesEngine::STARTER_ENABLE;
     if (!strcmp(id, "oil_pump_main") || !strcmp(id, "oil_pump")) return RulesEngine::OIL_PUMP;
     if (!strcmp(id, "cooling_fan_main") || !strcmp(id, "cooling_fan") || !strcmp(id, "cool_fan")) return RulesEngine::COOL_FAN;
     if (!strcmp(id, "bleed_valve_main") || !strcmp(id, "bleed_valve")) return RulesEngine::BLEED_VALVE;
@@ -80,6 +81,7 @@ int8_t ruleTargetHandle(const char* id) {
     }
     return -1;
 }
+
 }
 
 // hardware_profile.h controller option → Config default (file wins once saved)
@@ -178,8 +180,8 @@ float Config::idlePressureLimit     = 2.0f;
 float Config::idleIGain             = 0.0f;   // 0 = off by default (pure ramp mode), enable in config
 float Config::idleIMax              = 0.10f;  // ±10% integral authority
 int   Config::idleMode                  = 0;
-float Config::idleDecelEnterRpm         = 1000.0f;
-float Config::idleDecelDropPct          = 2.0f;
+float Config::idleDecelEnterRpm         = 0.0f;
+float Config::idleDecelDropPct          = 0.0f;
 float Config::idleLookaheadMs           = 2500.0f;
 float Config::idleSettleBandRpm         = 1500.0f;
 float Config::idleFullResponseRpm       = 12000.0f;
@@ -187,7 +189,7 @@ float Config::idleTrimUpPctPerSec       = 4.0f;
 float Config::idleTrimDownPctPerSec     = 2.0f;
 float Config::idleLearnRate             = 0.02f;
 float Config::idleLearnAccelMax         = 1200.0f;
-float Config::idlePressureDecelEnter    = 0.12f;
+float Config::idlePressureDecelEnter    = 0.0f;
 float Config::idlePressureSettleBand    = 0.03f;
 float Config::idlePressureFullResponse  = 0.25f;
 float Config::idlePressureLearnRateMax  = 1.0f;
@@ -425,6 +427,7 @@ static void inhibitStartForProfileMismatch() {
 
 Config::Rule Config::rules[Config::MAX_RULES] = {};
 int          Config::ruleCount                = 0;
+uint8_t      Config::controllerSchema         = 0;
 
 namespace {
 bool registryInputPurposeAvailable(const char* purpose) {
@@ -492,6 +495,7 @@ bool ruleActuatorAvailable(uint8_t a) {
         case 3:  return HardwareConfig::hasOilScavengePump;
         case 4:  return HardwareConfig::hasThrottle;
         case 5:  return HardwareConfig::hasStarter;
+        case 6:  return HardwareConfig::hasStarterEn;
         case 7:  return HardwareConfig::hasOilPump;
         case 8:  return HardwareConfig::hasFuelSol;
         case 9:  return HardwareConfig::hasIgniter;
@@ -505,6 +509,40 @@ bool ruleActuatorAvailable(uint8_t a) {
         case 17: return HardwareConfig::hasPropPitch;
         default: return false;
     }
+}
+
+bool ruleActuatorSupportsVariable(uint8_t a) {
+    if (ChannelRegistry::isOutputActuator(a)) {
+        const uint8_t idx = ChannelRegistry::outputIndexFromActuator(a);
+        if (idx >= HardwareConfig::channelRegistry.outputCount) return false;
+        const uint8_t driver = HardwareConfig::channelRegistry.outputs[idx].driver;
+        return driver == 5 || driver == 6; // PWM or servo
+    }
+    switch (a) {
+        case RulesEngine::FUEL_PUMP2:
+        case RulesEngine::THROTTLE:
+        case RulesEngine::STARTER:
+        case RulesEngine::OIL_PUMP:
+        case RulesEngine::GLOW_PLUG:
+        case RulesEngine::PROP_PITCH:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool ruleTargetConflictsWithDedicatedController(int8_t handle) {
+    if (handle == RulesEngine::AB_PUMP) return true;
+    if (handle == RulesEngine::THROTTLE || handle == RulesEngine::PROP_PITCH)
+        return HardwareConfig::hasGovernor;
+    if (handle == RulesEngine::OIL_PUMP) return HardwareConfig::hasOilLoop;
+    if (ChannelRegistry::isOutputActuator(handle)) {
+        const uint8_t outputIndex = ChannelRegistry::outputIndexFromActuator(handle);
+        for (uint8_t i = 0; i < HardwareConfig::oilLoopCount; ++i)
+            if (HardwareConfig::oilLoops[i].enabled &&
+                HardwareConfig::oilLoops[i].pumpOutputIndex == outputIndex) return true;
+    }
+    return false;
 }
 } // namespace
 
@@ -959,9 +997,12 @@ bool validateSettingsDoc(const JsonDocument& doc) {
     JsonVariantConst rules = doc["rules"];
     if (present(rules)) {
         if (!rules.is<JsonArrayConst>() || rules.size() > Config::MAX_RULES) return false;
+        const char* claimedTargets[Config::MAX_RULES] = {};
+        size_t claimedTargetCount = 0;
         for (JsonObjectConst rule : rules.as<JsonArrayConst>()) {
+            const int kind = rule["kind"] | -1;
             if (!validBool(rule["enabled"]) ||
-                !validInt(rule["kind"], 0, 1) ||
+                !validInt(rule["kind"], 0, 2) ||
                 !validInt(rule["op"], 0, 1) ||
                 !validNumber(rule["threshold"], -1000000.0f, 1000000.0f) ||
                 !validNumber(rule["on_value"], 0.0f, 1.0f) ||
@@ -974,6 +1015,39 @@ bool validateSettingsDoc(const JsonDocument& doc) {
                 !validInt(rule["mode_mask"], 1, 15) ||
                 !validRuleId(rule["source"], sizeof(Config::Rule::sourceId), ConfigInternal::ruleSourceHandle, ruleSensorAvailable) ||
                 !validRuleId(rule["target"], sizeof(Config::Rule::targetId), ConfigInternal::ruleTargetHandle, ruleActuatorAvailable)) return false;
+            if (kind == 2) {
+                const int targetSourceType = rule["target_source_type"] | -1;
+                if (!validInt(rule["target_source_type"], 0, 2) ||
+                    !validNumber(rule["target_fixed"], -1000000.0f, 1000000.0f) ||
+                    !validNumber(rule["target_low"], -1000000.0f, 1000000.0f) ||
+                    !validNumber(rule["target_high"], -1000000.0f, 1000000.0f) ||
+                    !validNumber(rule["target_input_min"], -1000000.0f, 1000000.0f) ||
+                    !validNumber(rule["target_input_max"], -1000000.0f, 1000000.0f) ||
+                    !validNumber(rule["response_gain"], 0.0f, 1000.0f) ||
+                    !validNumber(rule["integral_gain"], 0.0f, 1000.0f) ||
+                    !validNumber(rule["deadband"], 0.0f, 1000000.0f)) return false;
+                if (targetSourceType != 0 &&
+                    !validRuleId(rule["target_source"], sizeof(Config::Rule::targetSourceId),
+                                 ConfigInternal::ruleSourceHandle, ruleSensorAvailable)) return false;
+                if (targetSourceType == 2 &&
+                    rule["target_input_max"].as<float>() == rule["target_input_min"].as<float>()) return false;
+            }
+            // Shutdown/fault requests are actions, not owned physical outputs.
+            // Every other enabled control must be the sole normal owner.
+            const char* target = rule["target"] | "";
+            const int8_t handle = ConfigInternal::ruleTargetHandle(target);
+            if (kind != 0 && !ruleActuatorSupportsVariable(handle)) return false;
+            if (rule["enabled"].as<bool>()) {
+                // A custom definition may replace the ordinary direct owner.
+                // The UI withholds outputs whose dedicated turbine controller
+                // is active; duplicate definitions are still rejected here.
+                if (ruleTargetConflictsWithDedicatedController(handle)) return false;
+                if (handle != 13 && handle != 14) {
+                    for (size_t i = 0; i < claimedTargetCount; ++i)
+                        if (!strcmp(claimedTargets[i], target)) return false;
+                    claimedTargets[claimedTargetCount++] = target;
+                }
+            }
         }
     }
 
@@ -1139,6 +1213,8 @@ volatile bool Config::_savePending = false;
 volatile bool Config::_runtimeStatsSavePending = false;
 volatile uint8_t Config::_runtimeStatsError = 0;
 bool Config::_missingRequiredSections = false;
+static uint8_t s_configSaveFailures = 0;
+static unsigned long s_configSaveRetryAfterMs = 0;
 
 bool Config::acquireStorageWrite() {
     if (!s_configWriteMutex) s_configWriteMutex = xSemaphoreCreateMutex();
@@ -1258,22 +1334,41 @@ void Config::sanitizeForHardware() {
     for (int i = 0; i < ruleCount; i++) {
         Rule r = rules[i];
         if (!ruleSensorAvailable(r.sensor) || !ruleActuatorAvailable(r.actuator)) continue;
+        if (r.kind == 2 && r.targetSourceType != 0 && !ruleSensorAvailable(r.targetSensor)) continue;
+        if (r.kind != 0 && !ruleActuatorSupportsVariable(r.actuator)) continue;
+        // Afterburner fuel remains owned by its ignition/running state
+        // machine. Other fitted outputs may use a custom normal owner when
+        // their dedicated controller is not selected in the UI.
+        if (ruleTargetConflictsWithDedicatedController(r.actuator)) continue;
         bool duplicateTarget = false;
         if (r.actuator != 13 && r.actuator != 14) {
             for (int j = 0; j < claimedTargetCount; ++j)
                 if (claimedTargets[j] == r.actuator) { duplicateTarget = true; break; }
         }
         if (duplicateTarget) continue;
-        r.kind = constrain(r.kind, 0, 1);
+        r.kind = constrain(r.kind, 0, 2);
         r.op = constrain(r.op, 0, 1);
         r.onValue = constrain(r.onValue, 0.0f, 1.0f);
         r.offValue = constrain(r.offValue, 0.0f, 1.0f);
         r.outputMin = constrain(r.outputMin, 0.0f, 1.0f);
         r.outputMax = constrain(r.outputMax, 0.0f, 1.0f);
-        if (r.kind == 1 && (!isfinite(r.inputMin) || !isfinite(r.inputMax) || r.inputMax <= r.inputMin)) continue;
+        r.targetSourceType = constrain(r.targetSourceType, 0, 2);
+        if (!isfinite(r.targetFixed) || !isfinite(r.targetLow) || !isfinite(r.targetHigh)) continue;
+        if (r.targetSourceType == 2 && (!isfinite(r.targetInputMin) ||
+            !isfinite(r.targetInputMax) || r.targetInputMax == r.targetInputMin)) continue;
+        if (!isfinite(r.responseGain) || r.responseGain < 0.0f ||
+            !isfinite(r.integralGain) || r.integralGain < 0.0f ||
+            !isfinite(r.deadband) || r.deadband < 0.0f) continue;
+        if (r.kind == 1 && (!isfinite(r.inputMin) || !isfinite(r.inputMax) || r.inputMax == r.inputMin)) continue;
         if (r.hysteresis < 0.0f) r.hysteresis = 0.0f;
         r.modeMask &= 0x0F;
         if (r.modeMask == 0) continue;
+        if (r.actuator == RulesEngine::THROTTLE) {
+            const float calibratedMinimum = constrain(fuelPumpMinPct / 100.0f, 0.0f, 1.0f);
+            if (r.onValue > 0.0f) r.onValue = max(r.onValue, calibratedMinimum);
+            r.outputMin = max(r.outputMin, calibratedMinimum);
+            r.outputMax = max(r.outputMax, r.outputMin);
+        }
         if (r.actuator != 13 && r.actuator != 14)
             claimedTargets[claimedTargetCount++] = r.actuator;
         rules[out++] = r;
@@ -1291,16 +1386,31 @@ void Config::requestSave() {
     // Called from Core 1 — sets a flag only, zero file I/O.
     // Core 0 picks this up in flushPendingSave() via WebServer::tick() once
     // the ECU reaches STANDBY/FAULT. Flash access can suspend both cores.
+    s_configSaveFailures = 0;
+    s_configSaveRetryAfterMs = 0;
     _savePending = true;
 }
 
 bool Config::flushPendingSave() {
     if (!_savePending) return false;
+    if (s_configSaveRetryAfterMs != 0 &&
+        static_cast<long>(millis() - s_configSaveRetryAfterMs) < 0) return false;
     _savePending = false;
     bool ok = save();
     if (!ok) {
-        _savePending = true;
-        Serial.println("[Config] WARNING: deferred config save failed; will retry in a safe window");
+        ++s_configSaveFailures;
+        if (s_configSaveFailures < 3) {
+            s_configSaveRetryAfterMs = millis() + 1000UL * s_configSaveFailures;
+            _savePending = true;
+            Serial.println("[Config] WARNING: deferred config save failed; retry scheduled");
+        } else {
+            s_configSaveRetryAfterMs = 0;
+            EngineData::instance().configStorageFault = true;
+            Serial.println("[Config] ERROR: deferred config save failed three times; retry stopped");
+        }
+    } else {
+        s_configSaveFailures = 0;
+        s_configSaveRetryAfterMs = 0;
     }
     return ok;
 }
@@ -1470,8 +1580,8 @@ void Config::incRunCount() {
     portEXIT_CRITICAL(&ConfigInternal::statsMux);
 }
 
-bool Config::save() {
-    return _saveSettingsJson(nullptr, 0);
+bool Config::save(bool writeRuntimeHardware) {
+    return _saveSettingsJson(nullptr, 0, writeRuntimeHardware);
 }
 
 // Copy one top-level object from the existing unified engine file without
@@ -1567,7 +1677,8 @@ static bool copyUnifiedObject(File& source, File& destination, const char* secti
     return true;
 }
 
-bool Config::_saveSettingsJson(const char* settingsJson, size_t settingsLen) {
+bool Config::_saveSettingsJson(const char* settingsJson, size_t settingsLen,
+                               bool writeRuntimeHardware) {
     static constexpr const char* TMP_PATH = "/ecu_config.tmp";
     static constexpr const char* BAK_PATH = "/ecu_config.bak";
 #if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
@@ -1613,15 +1724,32 @@ bool Config::_saveSettingsJson(const char* settingsJson, size_t settingsLen) {
     bool ok = fw.print("{\"hardware\":") == strlen("{\"hardware\":");
     JsonDocument section;
     bool copiedHardware = false;
-    if (hasStagedSettings && ok) {
+    const bool hadSourceConfig = LittleFS.exists(PATH);
+    if (!writeRuntimeHardware && hadSourceConfig && ok) {
         File current = LittleFS.open(PATH, "r");
         copiedHardware = current && copyUnifiedObject(current, fw, "hardware");
         if (current) current.close();
     }
     if (!copiedHardware) {
-        HardwareConfig::toJson(section, false);
-        const size_t hardwareExpected = measureJson(section);
-        ok &= serializeJson(section, fw) == hardwareExpected;
+        // A settings-only update must never synthesize a replacement for an
+        // existing hardware section. LittleFS.open()/seek() can temporarily
+        // fail on a memory-starved Classic ESP32; rebuilding Hardware while
+        // the web request is resident can then overflow ArduinoJson and used
+        // to commit a valid-looking but truncated section. Preserve the old
+        // unified file and let the UI retry instead.
+        if (hadSourceConfig && !writeRuntimeHardware) {
+            ok = false;
+            Serial.println("[Config] Refusing settings save: existing hardware section could not be copied");
+        } else {
+            HardwareConfig::toJson(section, false);
+            if (section.overflowed()) {
+                ok = false;
+                Serial.println("[Config] Refusing settings save: generated hardware JSON overflowed");
+            } else {
+                const size_t hardwareExpected = measureJson(section);
+                ok &= serializeJson(section, fw) == hardwareExpected;
+            }
+        }
     }
     section.clear();
     section.shrinkToFit();
@@ -1650,7 +1778,28 @@ bool Config::_saveSettingsJson(const char* settingsJson, size_t settingsLen) {
         ok &= serializeJson(section, fw) == settingsExpected;
     }
     ok &= fw.print('}') == 1;
+    const size_t writtenSize = fw.position();
     fw.close();
+    if (ok) {
+        // Every source tree was validated before this writer was entered and
+        // every serialization/copy above checked its exact byte count. Do not
+        // allocate and parse a second ArduinoJson tree merely to rediscover
+        // three fields already held in the authoritative runtime: a complete
+        // Classic restore can legitimately have no contiguous block left for
+        // that redundant parse. Reopen only to prove LittleFS retained the
+        // complete byte stream, then confirm the runtime identities that were
+        // serialized still match. Atomic rename/backup below remains the final
+        // commit boundary.
+        File candidate = LittleFS.open(TMP_PATH, "r");
+        const bool completeSize = candidate && writtenSize >= 32 &&
+                                  candidate.size() == writtenSize;
+        if (candidate) candidate.close();
+        if (!completeSize || !HardwareConfig::profileId[0] || !profileId[0] ||
+            strcmp(HardwareConfig::profileId, profileId) != 0) {
+            ok = false;
+            Serial.println("[Config] Refusing settings save: unified candidate failed structural verification");
+        }
+    }
     if (!ok) {
         LittleFS.remove(TMP_PATH);
 #if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
@@ -1744,6 +1893,10 @@ bool Config::validateJsonValues(const JsonDocument& doc) {
 DeserializationError Config::loadStagedJsonCandidate(JsonDocument& doc) {
 #if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
     static constexpr const char* APPLY_PATH = "/config_apply.tmp";
+    // LittleFS.open() allocates VFS/shared-file state. Avoid an uncaught
+    // bad_alloc/abort while a fragmented Classic heap is recovering; the
+    // caller already treats NoMemory as a bounded retry condition.
+    if (ESP.getMaxAllocHeap() < 4096) return DeserializationError::NoMemory;
     if (!acquireStorageWrite()) return DeserializationError::NoMemory;
     ConfigStorageWriteRelease release;
     File staged = LittleFS.open(APPLY_PATH, "r");

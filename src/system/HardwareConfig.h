@@ -367,7 +367,10 @@ public:
     static bool hasOilLoop;
     static bool hasDynamicIdle;
 
-    static constexpr int MAX_OIL_LOOPS = 2;
+    // Independent oil systems are ordinary fitted pump/pressure pairs. Keep
+    // the bound deterministic for the embedded target without imposing the
+    // old two-system UI limitation.
+    static constexpr int MAX_OIL_LOOPS = 6;
     struct OilLoopDef {
         bool  enabled = false;
         char  id[16] = {};
@@ -379,6 +382,9 @@ public:
         uint16_t speedMinHundredRpm = 0;
         uint16_t speedMaxHundredRpm = 200;
         uint16_t deadbandCentiBar = 20;
+        uint16_t adjustScaleCenti = 180;
+        uint16_t failsafeDelayMs = 1500;
+        uint8_t failsafeDemandPct = 60;
         uint8_t minDemandPct = 18;
         uint8_t maxDemandPct = 100;
     };

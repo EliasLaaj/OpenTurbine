@@ -38,7 +38,7 @@ class BuildSetupPackageTests(unittest.TestCase):
                 mock.patch.object(build_setup_package, "read_version", return_value="9.9.9"):
                 manifest = build_setup_package.stage_package(stage, esptool, esptool_license)
             self.assertEqual(manifest["package_schema"], 4)
-            self.assertEqual(manifest["setup_tool_version"], "0.7.0")
+            self.assertEqual(manifest["setup_tool_version"], "0.7.1")
             self.assertEqual(manifest["minimum_setup_tool_version"], "0.7.0")
             self.assertTrue((stage / "LICENSE").exists())
             self.assertTrue((stage / "THIRD_PARTY_NOTICES.md").exists())

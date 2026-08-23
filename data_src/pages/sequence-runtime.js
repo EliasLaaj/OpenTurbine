@@ -25,6 +25,16 @@ async function refreshEngineStatus() {
 
 let statusPollTimer = null;
 let seqWsPullTimer = null;
+let seqWsRequestInFlight = false;
+window.OTWaitForPageTelemetryIdle = (timeoutMs = 1500) => new Promise(resolve => {
+  const started = Date.now();
+  const poll = () => {
+    if (!seqWsRequestInFlight) resolve(true);
+    else if (Date.now() - started >= timeoutMs) resolve(false);
+    else setTimeout(poll, 25);
+  };
+  poll();
+});
 let seqClosingForNavigation = false;
 function setSeqConnectionState(ok, text) {
   const dot = document.getElementById('conn');
@@ -47,7 +57,12 @@ function startWS() {
   if (seqClosingForNavigation) return;
   if (ws && ws.readyState <= WebSocket.OPEN) return;
   ws = new WebSocket('ws://' + location.host + '/ws');
-  const pull = () => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('p'); };
+  const pull = () => {
+    if (ws && ws.readyState === WebSocket.OPEN && !seqWsRequestInFlight) {
+      seqWsRequestInFlight = true;
+      ws.send('p');
+    }
+  };
   ws.onopen = () => {
     setSeqConnectionState(true, 'Connected');
     stopStatusPoll();
@@ -58,11 +73,13 @@ function startWS() {
   ws.onmessage = e => {
     try {
       const d = JSON.parse(e.data);
+      if (d._frame_more !== true) seqWsRequestInFlight = false;
       if (d.mode !== undefined) updateEngineMode(d.mode);
       if (d.seq_issues !== undefined) _applySeqValidation(d);
     } catch(_){}
   };
   ws.onclose = () => {
+    seqWsRequestInFlight = false;
     if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
     setSeqConnectionState(false, 'Reconnecting');
     if (!seqClosingForNavigation) {
@@ -74,12 +91,12 @@ function startWS() {
 }
 function startSequenceTelemetryForPlatform() {
   seqClosingForNavigation = false;
-  if (hwCfg?.platform === 'esp32') startStatusPoll();
-  else startWS();
+  startWS();
 }
 function stopSequenceTelemetry() {
   seqClosingForNavigation = true;
   if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
+  seqWsRequestInFlight = false;
   stopStatusPoll();
   if (ws) {
     try {
@@ -91,8 +108,14 @@ function stopSequenceTelemetry() {
     ws = null;
   }
 }
+function prepareSequenceTelemetryNavigation() {
+  seqClosingForNavigation = true;
+  if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
+  stopStatusPoll();
+}
 window.addEventListener('pagehide', stopSequenceTelemetry);
 window.addEventListener('beforeunload', stopSequenceTelemetry);
+window.addEventListener('ot:navigation-prepare', prepareSequenceTelemetryNavigation);
 window.addEventListener('ot:navigation-start', stopSequenceTelemetry);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;

@@ -12,15 +12,20 @@ DST = os.path.join(os.path.dirname(__file__), "..", "data")
 
 EXTS = {".html", ".js", ".css"}
 WEB_ASSETS = [
-    "app.js.gz", "calibration.html.gz", "config.html.gz", "hardware.html.gz",
+    "app.js.gz", "calibration.html.gz", "controllers.html.gz", "hardware.html.gz",
     "index.html.gz", "log.html.gz", "sequence.html.gz", "style.css.gz",
-    "tools.html.gz", "theme.js.gz", "ui_dialog.js.gz",
+    "system.html.gz", "tools.html.gz", "theme.js.gz", "ui_dialog.js.gz",
 ]
 
 build_web_sources()
 
 for fname in os.listdir(SRC):
     if os.path.splitext(fname)[1] not in EXTS:
+        continue
+    # /config.html is a compatibility redirect served by firmware. Keep the
+    # generated source for browser/static audits, but do not spend LittleFS on
+    # a byte-identical second copy of the Controllers page.
+    if fname == "config.html":
         continue
     src_path = os.path.join(SRC, fname)
     dst_path = os.path.join(DST, fname + ".gz")

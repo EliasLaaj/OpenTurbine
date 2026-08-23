@@ -63,6 +63,7 @@ static volatile bool _hwRebootPending        = false;
 static unsigned long _hwRebootScheduledMs    = 0;
 static char _pendingRestartBlocker[80] = {};
 static const char*   _pendingRestartReason   = nullptr;
+static void _endMaintenanceWriteWindow();
 
 // ── WebSocket telemetry state ─────────────────────────────────
 // _wsPendingResponse: set when a "p" arrived but canSend() was false.
@@ -91,10 +92,12 @@ static void _maintainHttpTimeWait(void*) {
     for (tcp_pcb* pcb = tcp_tw_pcbs; pcb; pcb = pcb->next)
         if (pcb->local_port == 80) ++count;
 
-    // Seven retained entries still protect against delayed duplicate segments
-    // while leaving over half of lwIP's 16-PCB pool available for new work.
-    // The remote OS also keeps its matching tuple in TIME_WAIT, so it cannot
-    // legitimately reuse one of these connections while we relieve pressure.
+    // Seven retained entries leave over half of lwIP's 16-PCB pool available
+    // for new work.  Never recycle a just-closed tuple, though: the peer may be
+    // the passive closer and can immediately reuse its source port.  Four lwIP
+    // slow-timer ticks provide a two-second quarantine for delayed packets
+    // before exceptional HTTP pressure is relieved.
+    static constexpr uint32_t MIN_REAP_AGE_TICKS = 4;
     while (count >= 8) {
         tcp_pcb* oldest = nullptr;
         uint32_t oldestAge = 0;
@@ -106,7 +109,7 @@ static void _maintainHttpTimeWait(void*) {
                 oldestAge = age;
             }
         }
-        if (!oldest) break;
+        if (!oldest || oldestAge < MIN_REAP_AGE_TICKS) break;
         tcp_abort(oldest);  // TIME_WAIT has no live application callback.
         --count;
         s_httpTimeWaitReaped = s_httpTimeWaitReaped + 1;
@@ -287,7 +290,8 @@ static void _mergeJsonObject(JsonObject dst, JsonObjectConst patch) {
     }
 }
 
-static bool _claimWebRx(AsyncWebServerRequest* req, size_t index) {
+static bool _claimWebRx(AsyncWebServerRequest* req, size_t index,
+                        bool reportConflict = true) {
     bool claimed = false;
     portENTER_CRITICAL(&s_webRxMux);
     if (index == 0) {
@@ -302,8 +306,10 @@ static bool _claimWebRx(AsyncWebServerRequest* req, size_t index) {
         const unsigned long staleMs = g_webRxResponseLease ? 3500UL : 10000UL;
         if (g_webRxOwner && (millis() - g_webRxClaimMs) < staleMs) {
             portEXIT_CRITICAL(&s_webRxMux);
-            req->send(409, "application/json",
-                      "{\"error\":\"Another configuration transfer is in progress\"}");
+            if (reportConflict) {
+                req->send(409, "application/json",
+                          "{\"error\":\"Another configuration transfer is in progress\"}");
+            }
             return false;
         }
         g_webRxOwner = req;
@@ -346,9 +352,9 @@ static bool _outputsActiveForOta() {
 }
 
 static const char* const WEB_ASSETS[] = {
-    "app.js.gz", "calibration.html.gz", "config.html.gz", "hardware.html.gz",
+    "app.js.gz", "calibration.html.gz", "controllers.html.gz", "hardware.html.gz",
     "index.html.gz", "log.html.gz", "sequence.html.gz", "style.css.gz",
-    "tools.html.gz", "theme.js.gz", "ui_dialog.js.gz"
+    "system.html.gz", "tools.html.gz", "theme.js.gz", "ui_dialog.js.gz"
 };
 static constexpr uint16_t WEB_ASSET_COUNT = sizeof(WEB_ASSETS) / sizeof(WEB_ASSETS[0]);
 static constexpr uint16_t WEB_ASSET_ALL = (1u << WEB_ASSET_COUNT) - 1u;
@@ -749,25 +755,6 @@ static const char* _limitedStartRejectReason() {
     return nullptr;
 }
 
-#if !defined(OT_PLATFORM_ESP32S3)
-// Classic's 704 KiB LittleFS cannot hold both complete UI generations once
-// configuration and logs are present. Install one completed upload at a time,
-// retaining only that file's old copy until its replacement is in place.
-static bool _installAssetRolling(uint16_t i) {
-    String target = _assetPath(i, false);
-    String temp = _assetPath(i, true);
-    String backup = _assetBackupPath(i);
-    if (LittleFS.exists(backup)) LittleFS.remove(backup);
-    if (LittleFS.exists(target) && !LittleFS.rename(target, backup)) return false;
-    if (!LittleFS.rename(temp, target)) {
-        if (LittleFS.exists(backup)) LittleFS.rename(backup, target);
-        return false;
-    }
-    if (LittleFS.exists(backup)) LittleFS.remove(backup);
-    return true;
-}
-#endif
-
 static void _recoverInterruptedAssetUpdate() {
     bool hasBackup = false;
     bool hasTemp = false;
@@ -805,6 +792,10 @@ static void _finishConfigRestore(bool discardTemp = true) {
     LittleFS.remove("/ecu_config.hardware.tmp");
     _configRestoreOwner = nullptr;
     _configRestoreError = false;
+    // A successful restore keeps all flash-backed traffic excluded until its
+    // scheduled reboot. Error/timeout paths release the lease so the current
+    // UI can continue normally.
+    if (!_hwRebootPending) _endMaintenanceWriteWindow();
 }
 
 // Load one top-level object without ever holding the complete unified engine
@@ -967,9 +958,35 @@ public:
 static AsyncWebServer  _server(80);
 static AsyncWebSocket  _ws("/ws");
 static DNSServer       _dns;                 // captive portal DNS
+
+// ESPAsyncWebServer builds every response header in throwing STL containers.
+// On Classic an allocation failure therefore aborts the process instead of
+// becoming a retryable HTTP error. Stop disposable browser traffic before a
+// handler constructs any response during a genuinely low-heap instant. This
+// middleware is static and allocation-free per request; clients naturally
+// retry after configuration/telemetry memory is released.
+class LowHeapRequestGuard final : public AsyncMiddleware {
+public:
+    void run(AsyncWebServerRequest* request, ArMiddlewareNext next) override {
+#if defined(OT_PLATFORM_ESP32)
+        if (ESP.getFreeHeap() < 24576 || ESP.getMaxAllocHeap() < 8192) {
+            // abort() marks the request sent before closing its client. Calling
+            // client()->close() directly leaves _sent false; the framework then
+            // enters _send() after the middleware returns and dereferences the
+            // now-null client while creating its automatic 501 response.
+            if (request && request->client()) request->abort();
+            return;
+        }
+#endif
+        next();
+    }
+};
+static LowHeapRequestGuard s_lowHeapRequestGuard;
+
 static portMUX_TYPE s_assetResponseMux = portMUX_INITIALIZER_UNLOCKED;
 static uint16_t s_activeAssetResponses = 0;
 static bool s_storageWriteActive = false;
+static volatile bool s_maintenanceWriteActive = false;
 static uint32_t s_lastAssetRequestMs = 0;
 
 static bool _acquireAssetResponseLease() {
@@ -982,7 +999,7 @@ static bool _acquireAssetResponseLease() {
         bool acquired = false;
         portENTER_CRITICAL(&s_assetResponseMux);
         s_lastAssetRequestMs = millis();
-        if (!s_storageWriteActive) {
+        if (!s_storageWriteActive && !s_maintenanceWriteActive) {
             ++s_activeAssetResponses;
             acquired = true;
         }
@@ -1006,13 +1023,42 @@ static bool _beginStorageWriteWindow() {
     // Let a newly loading page claim all of its flash-backed files before
     // deferred persistence resumes. This also prevents writer starvation from
     // the small gaps between a page's concurrent asset requests.
-    if (!s_storageWriteActive && s_activeAssetResponses == 0 &&
+    if (!s_storageWriteActive && !s_maintenanceWriteActive &&
+        s_activeAssetResponses == 0 &&
         (uint32_t)(now - s_lastAssetRequestMs) >= 500UL) {
         s_storageWriteActive = true;
         acquired = true;
     }
     portEXIT_CRITICAL(&s_assetResponseMux);
     return acquired;
+}
+
+// A full engine-file restore spans several asynchronous request callbacks and
+// performs multiple staged LittleFS reads, writes, and renames. Claim the same
+// cross-task domain used by deferred log/config writers for the entire
+// transaction. Without this lease a pending theme/statistics save could start
+// between restore chunks and rewrite ecu_config.json from the old runtime.
+static bool _beginMaintenanceWriteWindow() {
+    const uint32_t deadline = millis() + 2000UL;
+    for (;;) {
+        bool acquired = false;
+        portENTER_CRITICAL(&s_assetResponseMux);
+        if (!s_storageWriteActive && !s_maintenanceWriteActive &&
+            s_activeAssetResponses == 0) {
+            s_maintenanceWriteActive = true;
+            acquired = true;
+        }
+        portEXIT_CRITICAL(&s_assetResponseMux);
+        if (acquired) return true;
+        if ((int32_t)(millis() - deadline) >= 0) return false;
+        vTaskDelay(1);
+    }
+}
+
+static void _endMaintenanceWriteWindow() {
+    portENTER_CRITICAL(&s_assetResponseMux);
+    s_maintenanceWriteActive = false;
+    portEXIT_CRITICAL(&s_assetResponseMux);
 }
 
 static void _endStorageWriteWindow() {
@@ -1075,6 +1121,15 @@ static void _sendGzipAsset(AsyncWebServerRequest* req, const char* path,
     resp->addHeader("Cache-Control", versionedPage
         ? "public, max-age=31536000, immutable"
         : cacheControl);
+    // Desktop/mobile browsers retain several idle HTTP/1.1 connections per
+    // origin. Each costs AsyncTCP/lwIP memory; a feature-rich S3 hardware
+    // profile can have less free internal heap than a minimal Classic profile,
+    // so chip type is not a safe proxy for transport headroom. Visiting a few
+    // different large pages could otherwise leave too little heap to transmit
+    // the next one even though every response completed. Shared assets and
+    // versioned pages remain browser-cached, so closing the completed transport
+    // does not make them download again on either supported chip.
+    resp->addHeader("Connection", "close");
     req->send(resp);
 }
 
@@ -1098,8 +1153,8 @@ static void _finalizeJsonResponse(AsyncWebServerResponse* resp) {
     // streaming assets.  Retiring their TCP transport after the declared body
     // is acknowledged prevents abandoned browser/editor requests from filling
     // AsyncTCP's client pool across repeated page navigation.  WebSocket
-    // telemetry remains persistent, and HTML/JS/CSS file responses deliberately
-    // retain keep-alive because they have different chunk-lifetime semantics.
+    // telemetry remains persistent. Classic flash-backed assets also close
+    // their transports after completion to avoid accumulating idle sockets.
     resp->addHeader("Connection", "close");
 }
 
@@ -1193,7 +1248,8 @@ private:
 // Request-body handlers must not use this helper because they already own that
 // buffer through WebRxRelease.
 static void _sendBorrowedWebRxJson(AsyncWebServerRequest* req, const char* json,
-                                   size_t len, int status = 200) {
+                                   size_t len, int status = 200,
+                                   bool allowDeferredSnapshot = false) {
     if (!req || !json || len >= sizeof(g_webRxBuf)) {
         if (req) {
             AsyncWebServerResponse* error = req->beginResponse(
@@ -1203,7 +1259,16 @@ static void _sendBorrowedWebRxJson(AsyncWebServerRequest* req, const char* json,
         }
         return;
     }
-    if (!_claimWebRx(req, 0)) return;
+    if (!_claimWebRx(req, 0, !allowDeferredSnapshot)) {
+        if (allowDeferredSnapshot) {
+            AsyncWebServerResponse* deferred = req->beginResponse(
+                200, "application/json", "{\"_snapshot_deferred\":true}");
+            deferred->addHeader("Cache-Control", "no-store");
+            _finalizeJsonResponse(deferred);
+            req->send(deferred);
+        }
+        return;
+    }
     portENTER_CRITICAL(&s_webRxMux);
     g_webRxResponseLease = true;
     portEXIT_CRITICAL(&s_webRxMux);
@@ -1244,6 +1309,17 @@ static void _sendOwnedJson(AsyncWebServerRequest* req, const char* json, size_t 
     req->send(resp);
 }
 
+// Use the preallocated receive workspace for large read-only responses on both
+// chips. An S3 normally has enough total heap for an owned copy, but long page
+// sessions can fragment its largest free block below the full telemetry size
+// while plenty of aggregate memory remains. The browser serializes these large
+// reads, so borrowing the otherwise-idle request workspace is deterministic
+// and gives Classic and S3 the same bounded behavior.
+static void _sendLargeReadJson(AsyncWebServerRequest* req, const char* json,
+                               size_t len, int status = 200) {
+    _sendBorrowedWebRxJson(req, json, len, status);
+}
+
 static bool _sendTelemetryFrame(AsyncWebSocketClient* client, const char* buf, size_t len) {
     // ESPAsyncWebServer copies each text frame into a heap-backed vector.
     // Avoid entering that allocator when RAM is already under pressure.
@@ -1259,7 +1335,72 @@ static bool _sendTelemetryFrame(AsyncWebSocketClient* client, const char* buf, s
         }
         return false;
     }
-    return client->text(buf, len);
+    // ESPAsyncWebServer fragments a message larger than the current AsyncTCP
+    // window. Under Classic heap/TCP pressure that path can enqueue a second
+    // header after an incomplete fragment, which browsers correctly reject as
+    // overlapping or invalid UTF-8 WebSocket frames. Split the flat telemetry
+    // object at top-level member boundaries so every queued WS message is a
+    // complete JSON object smaller than one conservative TCP payload. The UI
+    // merges each object and requests the next sample only after the last part.
+    static constexpr size_t WS_JSON_PART_MAX = 1100;
+    if (len <= WS_JSON_PART_MAX) return client->text(buf, len);
+    if (len < 2 || buf[0] != '{' || buf[len - 1] != '}') return false;
+
+    char part[WS_JSON_PART_MAX + 1];
+    size_t partLen = 1;
+    part[0] = '{';
+    size_t fieldStart = 1;
+    int depth = 1;
+    bool inString = false;
+    bool escaped = false;
+
+    auto sendPart = [&](bool more) -> bool {
+        static constexpr const char MORE_TRUE[] = "\"_frame_more\":true}";
+        static constexpr const char MORE_FALSE[] = "\"_frame_more\":false}";
+        const char* suffix = more ? MORE_TRUE : MORE_FALSE;
+        const size_t suffixLen = strlen(suffix);
+        if (partLen > 1) part[partLen++] = ',';
+        if (partLen + suffixLen > sizeof(part) - 1) return false;
+        memcpy(part + partLen, suffix, suffixLen);
+        partLen += suffixLen;
+        part[partLen] = '\0';
+        const bool queued = client->canSend() && client->text(part, partLen);
+        partLen = 1;
+        part[0] = '{';
+        return queued;
+    };
+
+    auto appendField = [&](size_t start, size_t end, bool moreFields) -> bool {
+        const size_t fieldLen = end > start ? end - start : 0;
+        static constexpr size_t MARKER_RESERVE = 24;
+        if (!fieldLen || fieldLen + MARKER_RESERVE + 2 > sizeof(part)) return false;
+        if (partLen > 1 && partLen + 1 + fieldLen + MARKER_RESERVE > sizeof(part)) {
+            if (!sendPart(true)) return false;
+        }
+        if (partLen > 1) part[partLen++] = ',';
+        memcpy(part + partLen, buf + start, fieldLen);
+        partLen += fieldLen;
+        if (!moreFields) return sendPart(false);
+        return true;
+    };
+
+    for (size_t i = 1; i < len - 1; ++i) {
+        const char c = buf[i];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') inString = false;
+            continue;
+        }
+        if (c == '"') { inString = true; continue; }
+        if (c == '{' || c == '[') ++depth;
+        else if (c == '}' || c == ']') --depth;
+        else if (c == ',' && depth == 1) {
+            if (!appendField(fieldStart, i, true)) return false;
+            fieldStart = i + 1;
+        }
+    }
+    return appendField(fieldStart, len - 1, false);
 }
 
 
@@ -1503,6 +1644,7 @@ static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool ful
     doc["loop_logging_ms"]       = ed.loopLoggingMs;
     doc["loop_led_ms"]           = ed.loopLedMs;
     doc["session_dropped_rows"]  = SessionLogger::droppedRows();
+    doc["session_queued_rows"]   = SessionLogger::queuedRows();
     doc["session_logger_healthy"] = SessionLogger::healthy();
     doc["session_logger_error"]   = SessionLogger::errorCode();
     doc["session_log_path"]       = SessionLogger::currentPath();
@@ -1680,6 +1822,9 @@ static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool ful
     // Hardware config flags, safety limits, labels, calibration raw values,
     // boot/session stats.  These never change during normal engine operation.
     if (full) {
+        // Lets Dashboard report an empty startup sequence without opening a
+        // second large /api/hardware transfer alongside this full snapshot.
+        doc["startup_seq_count"]      = HardwareConfig::startupSeqLen;
         doc["has_fuel_flow"]         = HardwareConfig::hasFuelFlow;
         int flameThreshold = 0;
         bool hasFlameThreshold = false;
@@ -2031,7 +2176,15 @@ void WebServer::_setupRoutes() {
     });
     _server.on("/config.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
-        _sendGzipAsset(req, "/config.html.gz", "text/html", PAGE_ASSET_CACHE);
+        req->redirect("/controllers.html");
+    });
+    _server.on("/controllers.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
+        if (redirectCaptiveToIp(req)) return;
+        _sendGzipAsset(req, "/controllers.html.gz", "text/html", PAGE_ASSET_CACHE);
+    });
+    _server.on("/system.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
+        if (redirectCaptiveToIp(req)) return;
+        _sendGzipAsset(req, "/system.html.gz", "text/html", PAGE_ASSET_CACHE);
     });
     _server.on("/sequence.html", HTTP_GET, [redirectCaptiveToIp](AsyncWebServerRequest* req) {
         if (redirectCaptiveToIp(req)) return;
@@ -2069,19 +2222,32 @@ void WebServer::_setupRoutes() {
         // POST even though the serialized frame is already safe in g_webTxBuf.
         doc.clear();
         doc.shrinkToFit();
-        _sendBorrowedWebRxJson(req, g_webTxBuf, n);
+        _sendBorrowedWebRxJson(req, g_webTxBuf, n, 200, true);
     });
 
     // GET /api/status
     _server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest* req) {
+        // A maximum Classic configuration can briefly consume the last useful
+        // contiguous block while Core 1 is applying the just-persisted tree.
+        // ESPAsyncWebServer's basic response constructor uses throwing STL
+        // allocation for its header list; attempting even this small status
+        // reply in that window terminates the process instead of returning an
+        // allocation error.  Drop this disposable poll before constructing a
+        // response.  The browser already retries status requests, while the
+        // configuration gate remains authoritative and START stays blocked.
+        if (ConfigApplyGate::busy() && ESP.getMaxAllocHeap() < 8192) {
+            if (req->client()) req->abort();
+            return;
+        }
         auto& ed = EngineData::instance();
-        char buf[320];
+        char buf[352];
         snprintf(buf, sizeof(buf),
-            "{\"mode\":\"%s\",\"locked\":%s,\"profile_match\":%s,\"config_apply_busy\":%s,"
+            "{\"mode\":\"%s\",\"locked\":%s,\"dev_mode\":%s,\"profile_match\":%s,\"config_apply_busy\":%s,"
             "\"free_heap\":%u,\"max_alloc_heap\":%u,\"ws_clients\":%u,"
             "\"http_time_wait\":%u,\"http_time_wait_reaped\":%u}",
             sysModeStr(ed.mode),
             Config::isLocked() ? "true" : "false",
+            ed.devMode ? "true" : "false",
             Config::profileMatch ? "true" : "false",
             ConfigApplyGate::busy() ? "true" : "false",
             static_cast<unsigned>(ESP.getFreeHeap()),
@@ -2127,7 +2293,7 @@ void WebServer::_setupRoutes() {
         JsonObject pcb = doc["pcb_profile"].to<JsonObject>();
         PcbProfileManager::toJson(pcb, false);
         size_t n = serializeJson(doc, g_webTxBuf, sizeof(g_webTxBuf));
-        _sendOwnedJson(req, g_webTxBuf, n);
+        _sendLargeReadJson(req, g_webTxBuf, n);
     });
 
     // GET /api/config — expose the settings section for page editors.
@@ -2149,7 +2315,18 @@ void WebServer::_setupRoutes() {
         size_t n = serializeJson(doc, g_webTxBuf, sizeof(g_webTxBuf));
         doc.clear();
         doc.shrinkToFit();
-        _sendBorrowedWebRxJson(req, g_webTxBuf, n);
+        // Config reads commonly precede a save. Classic keeps an independent
+        // response snapshot so a late TCP callback cannot collide with the
+        // following PATCH body. On S3, long browser sessions can fragment the
+        // largest free heap block below the config size even while aggregate
+        // free heap remains healthy. Borrow the reserved transfer workspace on
+        // S3 instead; it is released as soon as the final response bytes enter
+        // TCP, before fetch() resolves and the editor can issue its save.
+#if defined(OT_PLATFORM_ESP32S3)
+        _sendLargeReadJson(req, g_webTxBuf, n);
+#else
+        _sendOwnedJson(req, g_webTxBuf, n);
+#endif
     });
 
     // POST /api/config — replace only the settings section in ecu_config.json.
@@ -2208,7 +2385,8 @@ void WebServer::_setupRoutes() {
             }
             char* candidateJson = nullptr;
             size_t candidateLen = 0;
-            bool ok = Config::persistJsonCandidateReleasing(incoming, candidateJson, candidateLen);
+            bool ok = Config::persistJsonCandidateReleasing(
+                incoming, candidateJson, candidateLen, g_webTxBuf, sizeof(g_webTxBuf));
             if (!ok) {
                 ConfigApplyGate::release();
                 req->send(500, "application/json", "{\"ok\":false,\"error\":\"settings were valid but could not be written to storage\"}");
@@ -2218,7 +2396,12 @@ void WebServer::_setupRoutes() {
             // Release HTTP request/response memory before Core 1 constructs
             // the complete runtime tree. The gate keeps START and another save
             // blocked until this exact persisted generation has been applied.
-            ConfigApplyGate::publishCandidate(candidateJson, candidateLen, 250);
+            // Give the small HTTP acknowledgement time to leave AsyncTCP
+            // before the ECU core parses and applies the staged settings. On
+            // Classic after a long UI session, 250 ms could overlap the apply
+            // allocation with the response and reset an otherwise successful
+            // browser save.
+            ConfigApplyGate::publishCandidate(candidateJson, candidateLen, 1000);
             req->send(200, "application/json", active
                 ? "{\"ok\":true,\"saved\":true,\"applying\":true,\"live_now\":false}"
                 : "{\"ok\":true,\"saved\":true,\"applying\":true}");
@@ -2304,7 +2487,8 @@ void WebServer::_setupRoutes() {
             patch.shrinkToFit();
             char* candidateJson = nullptr;
             size_t candidateLen = 0;
-            bool ok = Config::persistJsonCandidateReleasing(current, candidateJson, candidateLen);
+            bool ok = Config::persistJsonCandidateReleasing(
+                current, candidateJson, candidateLen, g_webTxBuf, sizeof(g_webTxBuf));
             if (!ok) {
                 ConfigApplyGate::release();
                 req->send(500, "application/json",
@@ -2313,7 +2497,7 @@ void WebServer::_setupRoutes() {
             }
             FlightRecorder::logConfigChange("config.patch", 0, 0);
             bool active = !_isStandbyLike(EngineData::instance().mode);
-            ConfigApplyGate::publishCandidate(candidateJson, candidateLen, 250);
+            ConfigApplyGate::publishCandidate(candidateJson, candidateLen, 1000);
             req->send(200, "application/json", active
                 ? "{\"ok\":true,\"saved\":true,\"applying\":true,\"live_now\":false}"
                 : "{\"ok\":true,\"saved\":true,\"applying\":true}");
@@ -2384,7 +2568,6 @@ void WebServer::_setupRoutes() {
             return;
         }
         if (!_gateLogRead(req)) return;
-        req->onDisconnect([req]() { _releaseLogRead(req); });
         // Keep the heap-backed CSV response below the ESP async-stream ceiling.
         // Full history remains available from the zero-copy /api/log/raw route.
         const int DISPLAY_LIMIT = 120;
@@ -2438,6 +2621,11 @@ void WebServer::_setupRoutes() {
         resp->addHeader("Cache-Control", "no-store");
         resp->addHeader("Connection", "close");
         req->send(resp);
+        // The file has been closed and the complete bounded CSV now belongs to
+        // the response. Release the flash-read gate immediately; keep-alive
+        // disconnect callbacks may run many seconds later and made a normal
+        // return to the Log page look like a competing reader.
+        _releaseLogRead(req);
     });
 
     // Frequent dynamic data only. Static labels, limits, capabilities and
@@ -2461,7 +2649,6 @@ void WebServer::_setupRoutes() {
             return;
         }
         if (!_gateLogRead(req)) return;
-        req->onDisconnect([req]() { _releaseLogRead(req); });
         // Typical 120-record payloads stay comfortably below the async response
         // stream's practical ~16 KB ceiling even with several connected clients.
         const int DISPLAY_LIMIT = 120;
@@ -2497,7 +2684,12 @@ void WebServer::_setupRoutes() {
         resp->print(']');
         FlightRecorder::unlockLog();
         _finalizeJsonResponse(resp);
+        resp->addHeader("Connection", "close");
         req->send(resp);
+        // The LittleFS read and response construction are complete. The gate
+        // protects those operations, not the lifetime of the browser's TCP
+        // keep-alive connection.
+        _releaseLogRead(req);
     });
 
     // POST /api/start
@@ -3005,9 +3197,20 @@ void WebServer::_setupRoutes() {
                 return;
             }
             if (!index) {
-                String temp = _assetPath((uint16_t)asset, true);
-                if (LittleFS.exists(temp)) LittleFS.remove(temp);
-                _assetTempFile = LittleFS.open(temp, "w");
+#if defined(OT_PLATFORM_ESP32S3)
+                // S3 has enough LittleFS space to stage the complete set and
+                // atomically restore the previous generation if any swap fails.
+                String writePath = _assetPath((uint16_t)asset, true);
+#else
+                // Classic's small filesystem can hold the finished UI but not
+                // an old and new copy of a large page at the same time.  The
+                // marker has already been removed, so stream replacements in
+                // place.  A power loss leaves the firmware recovery page active
+                // and START inhibited until the complete set is uploaded again.
+                String writePath = _assetPath((uint16_t)asset, false);
+#endif
+                if (LittleFS.exists(writePath)) LittleFS.remove(writePath);
+                _assetTempFile = LittleFS.open(writePath, "w");
                 if (!_assetTempFile) {
                     _assetUploadError = true;
                     _discardAssetTemps();
@@ -3021,14 +3224,6 @@ void WebServer::_setupRoutes() {
             }
             if (final) {
                 _assetTempFile.close();
-#if !defined(OT_PLATFORM_ESP32S3)
-                if (!_installAssetRolling((uint16_t)asset)) {
-                    Serial.printf("[WebAssets] Could not install %s\n", filename.c_str());
-                    _assetUploadError = true;
-                    _discardAssetTemps();
-                    return;
-                }
-#endif
                 _assetUploadMask |= (1u << asset);
             }
         });
@@ -3046,7 +3241,7 @@ void WebServer::_setupRoutes() {
         // chunked fallback below.
         size_t n = HardwareConfig::toJson(g_webTxBuf, sizeof(g_webTxBuf), true);
         if (n < sizeof(g_webTxBuf)) {
-            _sendBorrowedWebRxJson(req, g_webTxBuf, n);
+            _sendLargeReadJson(req, g_webTxBuf, n);
             return;
         }
         AsyncJsonResponse* resp = new (std::nothrow) AsyncJsonResponse(false);
@@ -3621,6 +3816,16 @@ void WebServer::_setupRoutes() {
                         "{\"error\":\"Engine must be idle in STANDBY or FAULT to upload config\"}");
                     return;
                 }
+                if (ConfigApplyGate::busy()) {
+                    req->send(409, "application/json",
+                        "{\"error\":\"Wait for the current settings save to finish before restoring an engine file\"}");
+                    return;
+                }
+                if (!_beginMaintenanceWriteWindow()) {
+                    req->send(503, "application/json",
+                        "{\"error\":\"ECU storage is busy; retry the restore shortly\"}");
+                    return;
+                }
                 // Release the heap-backed live telemetry frame before the
                 // complete engine file arrives. Waiting until the last body
                 // chunk left too little contiguous heap to parse Hardware on
@@ -3736,8 +3941,9 @@ void WebServer::_setupRoutes() {
             if (strcmp(hwDoc["wifi_password"] | "", "__KEEP_PASSWORD__") == 0) {
                 hwDoc["wifi_password"] = HardwareConfig::wifiPassword;
             }
-            const bool hardwareEditorSave = req->hasParam("source") &&
-                req->getParam("source")->value() == "hardware";
+            const bool configurationEditorSave = req->hasParam("source") &&
+                (req->getParam("source")->value() == "hardware" ||
+                 req->getParam("source")->value() == "controllers");
             const bool prevSafOilT = HardwareConfig::safetyOilTempHigh;
             const bool prevSafFP = HardwareConfig::safetyFuelPressLow;
             const bool prevSafBatt = HardwareConfig::safetyBattLow;
@@ -3777,15 +3983,16 @@ void WebServer::_setupRoutes() {
             hwDoc.clear();
             hwDoc.shrinkToFit();
             Config::sanitizeForHardware();
-            if (hardwareEditorSave) {
+            if (configurationEditorSave) {
                 Config::autoFillNewlyEnabledSafety(prevSafOilT, prevSafFP,
                                                    prevSafBatt, prevSafSurge,
                                                    prevSafHot);
             }
-            // Config::save() is the canonical Classic-safe writer: it streams
-            // hardware and settings sequentially and commits them atomically,
-            // without requiring either uploaded tree to remain allocated.
-            if (!Config::save()) {
+            // Config::save(true) is the canonical Classic-safe full-restore
+            // writer: it serializes the newly applied runtime hardware rather
+            // than copying the still-authoritative old hardware section, then
+            // streams settings separately and commits both atomically.
+            if (!Config::save(true)) {
                 restoreRuntime();
                 req->send(500, "application/json", "{\"error\":\"failed to atomically save ecu_config.json\"}");
                 _finishConfigRestore();
@@ -3943,6 +4150,7 @@ bool WebServer::begin() {
     if (!_webAssetsComplete)
         Serial.println("[WebAssets] Complete-generation marker missing or hash mismatch; START inhibited");
     _startWiFi();
+    _server.addMiddleware(&s_lowHeapRequestGuard);
     _setupRoutes();
     _server.begin();
     Serial.println("[WebServer] Started on port 80");
@@ -3987,10 +4195,11 @@ void WebServer::tick() {
     unsigned long _t4 = millis();
     if (storageWriteWindow) Config::flushPendingRuntimeStats();
     unsigned long _t5 = millis();
-    if (_t5 - _t0 > 200) {
-        Serial.printf("[tick] SLOW %lums: dns=%lu evict=%lu drain=%lu save=%lu stats=%lu\n",
-            _t5-_t0, _t1-_t0, _t2-_t1, _t3-_t2, _t4-_t3, _t5-_t4);
-    }
+    // LittleFS erase/program operations can legitimately take hundreds of
+    // milliseconds. Do not print a routine timing line immediately after the
+    // flash-cache stall: on Classic ESP32 that UART activity can race the
+    // network task and amplify a harmless deferred save into severe heap and
+    // TCP pressure. Persistence failures still report their exact error.
 
     // ── LittleFS stats cache ──────────────────────────────────
     // Refresh every 10 s from webTask so _buildTelemetry never has to call
@@ -4017,7 +4226,9 @@ void WebServer::tick() {
     // set.  Send a tiny WS PING every 200 ms; the client auto-replies with
     // PONG, which fires WS_EVT_PONG inside async_tcp — the correct context to
     // deliver the pending telemetry frame without a cross-task handoff.
-    if (_wsPendingResponse && _ws.count() > 0) {
+    if (_wsPendingResponse && _ws.count() > 0 &&
+        !s_maintenanceWriteActive &&
+        ESP.getFreeHeap() >= 24576 && ESP.getMaxAllocHeap() >= 8192) {
         unsigned long now = millis();
         if (now - _wsPingMs >= 200) {
             _wsPingMs = now;

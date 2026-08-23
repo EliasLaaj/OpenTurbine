@@ -300,7 +300,7 @@ function focusRegistryInvalid(details) {
 function registryReferenceSummary(direction, id) {
   const users = registryCurrentUsers(direction, id);
   if (users.length) return `Used by: ${users.join(', ')}`;
-  return direction === 'input' ? 'Monitoring only' : 'Available to rules and sequences';
+  return direction === 'input' ? 'Monitoring only' : 'Available to controllers and sequences';
 }
 function registryImpactDisplay(text) {
   const s = String(text || '');
@@ -308,7 +308,7 @@ function registryImpactDisplay(text) {
   if (/oil loop/i.test(s)) return 'Controller: oil pressure loop';
   if (/sequence side action/i.test(s)) return 'Sequencer: side action';
   if (/custom block/i.test(s)) return 'Sequencer: custom block';
-  if (/control rule/i.test(s)) return `Control rules: ${s}`;
+  if (/control rule/i.test(s)) return `Simple controls: ${s}`;
   return s;
 }
 function registryCurrentUsers(direction, id) {
@@ -380,7 +380,7 @@ function registryRoleUsage(direction, c) {
   const purpose = registryDerivedPurpose(direction, c);
   const role = String(c.role || '');
   const hasSettingRule = Array.isArray(settingsCfg?.rules) && settingsCfg.rules.some(rule => registryRuleReferencesChannel(rule, direction, c));
-  if (hasSettingRule) uses.add('Control rules: rule target/source');
+  if (hasSettingRule) uses.add('Simple control: input or output');
   if (direction === 'input') {
     const seq = registrySequenceUsers(registryInputSequenceBlocksForPurpose(purpose));
     if (seq.length) uses.add(`Sequencer: ${seq.join(', ')}`);
@@ -461,7 +461,7 @@ function registryRuleReferencesChannel(rule, direction, c) {
   if (direction === 'input') {
     const sensorKey = registryCoreSensorKey(c);
     const numericSensor = sensorKey ? SENSOR_RULE_ENUM[sensorKey] : undefined;
-    return refMatches(rule.source) || refMatches(rule.sensor_id) || Number(rule.sensor) === handle ||
+    return refMatches(rule.source) || refMatches(rule.target_source) || refMatches(rule.sensor_id) || Number(rule.sensor) === handle ||
       (numericSensor !== undefined && Number(rule.sensor) === Number(numericSensor));
   }
   const actuatorKey = registryCoreActuatorKey(c);
@@ -542,13 +542,11 @@ function renderHardwareRequirementsSummary() {
     items.push({state:'error', text:'Shared SPI bus is disabled',
       detail:`${spiAssignments} thermocouple assignment${spiAssignments===1?' depends':'s depend'} on it. Enable the bus above or remove those devices.`});
   items.push({
-    state: hasMainFuel ? 'ok' : 'error',
-    text: hasMainFuel ? 'Main fuel metering output is ready' : 'Add a Main Fuel Pump / Metering output',
+    state: hasMainFuel ? 'ok' : 'warn',
+    text: hasMainFuel ? 'Main fuel metering output is ready' : 'No ECU-controlled main fuel output',
     detail: hasMainFuel
       ? 'The ECU has an output that can command the engine fuel flow.'
-      : (pcbProfileActive()
-        ? 'Required before the ECU can run an engine. Add it under Outputs, then choose the labelled PCB output where the fuel controller is connected.'
-        : 'Required before the ECU can run an engine. Add it under Outputs, then assign its GPIO and signal type.')
+      : 'This is valid for a logging-only installation or an engine with manual fuel control. Fuel controllers and fuel-command sequence steps remain unavailable until a metering output is fitted.'
   });
   if (cfg.controllers?.oil_loop) {
     items.push({state: hasOilPressure && hasOilPump ? 'ok' : 'error',
@@ -660,7 +658,7 @@ function abTriggerWorkflowCard() {
     ? Math.round(rawThreshold * 100 / 4095)
     : (rawThreshold * 3.3 / 4095).toFixed(2);
   const editor = editing ? `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
-    <div class="hw-field"><span class="hw-label">Trigger source</span><span class="hw-desc">Choose what physically requests afterburner. For throttle mode, set Throttle Trigger % in Config - Afterburner.</span><select class="${fieldClass('source')}" data-ab-trigger-field="source" onchange="setAbTrigSrc(+this.value);renderHardwareWorkflowSummaries()"><option value="0"${source===0?' selected':''}>Manual / browser command</option><option value="1"${source===1?' selected':''}>Throttle threshold</option><option value="2"${source===2?' selected':''}>Physical switch</option><option value="3"${source===3?' selected':''}>Analog or RC command input</option></select></div>
+    <div class="hw-field"><span class="hw-label">Trigger source</span><span class="hw-desc">Choose what physically requests afterburner. For throttle mode, set Throttle Trigger % in Controllers → Afterburner.</span><select class="${fieldClass('source')}" data-ab-trigger-field="source" onchange="setAbTrigSrc(+this.value);renderHardwareWorkflowSummaries()"><option value="0"${source===0?' selected':''}>Manual / browser command</option><option value="1"${source===1?' selected':''}>Throttle threshold</option><option value="2"${source===2?' selected':''}>Physical switch</option><option value="3"${source===3?' selected':''}>Analog or RC command input</option></select></div>
     ${source===2 ? ((pcbProfileActive() || profileFireInput) ? `<div class="hw-field"><span class="hw-label">Physical command input</span><span class="hw-desc">${profileFireInput?'Uses the fitted Afterburner command switch from Inputs.':'Add an Afterburner command switch under Inputs and choose its named PCB connection.'}</span></div>` : `<div class="hw-field"><span class="hw-label">Trigger-switch GPIO</span><select class="${fieldClass('switch_pin')}" data-ab-trigger-field="switch_pin" onchange="setAbTrig('switch_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.switch_pin,'in')}</select></div><div class="hw-field"><span class="hw-label">Switch polarity</span><label class="hw-toggle"><input class="${fieldClass('switch_active_h')}" data-ab-trigger-field="switch_active_h" type="checkbox" ${abt.switch_active_h?'checked':''} onchange="setAbTrigBool('switch_active_h',this.checked);renderHardwareWorkflowSummaries()"><span></span> Active high</label></div>`) : ''}
     ${source===3 ? ((pcbProfileActive() || profileCommandInput) ? `<div class="hw-field"><span class="hw-label">Command input</span><span class="hw-desc">${profileCommandInput?'Uses the fitted Afterburner analog / RC command from Inputs. Its signal type and calibration live on that input card.':'Add an Afterburner analog / RC command under Inputs and choose its named PCB connection.'}</span></div><div class="hw-field"><span class="hw-label">Trigger threshold (%)</span><span class="hw-desc">Afterburner is requested when the normalized command rises above this percentage.</span><input class="${fieldClass('input_threshold')}" type="number" min="0" max="100" step="1" value="${Math.round(rawThreshold*100/4095)}" onchange="setAbProfileThreshold(this.value)"></div>` : `<div class="hw-field"><span class="hw-label">Command signal</span><select class="${fieldClass('input_rc_pwm')}" data-ab-trigger-field="input_rc_pwm" onchange="setAbInputType(this.value==='rc');renderHardwareWorkflowSummaries()"><option value="analog"${!abt.input_rc_pwm?' selected':''}>Analog 0-3.3 V</option><option value="rc"${abt.input_rc_pwm?' selected':''}>RC servo pulse</option></select></div><div class="hw-field"><span class="hw-label">Command-input GPIO</span><select class="${fieldClass('input_pin')}" data-ab-trigger-field="input_pin" onchange="setAbTrig('input_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.input_pin,pinMode)}</select></div><div class="hw-field"><span class="hw-label">Trigger threshold (${abt.input_rc_pwm?'%':'V'})</span><span class="hw-desc">Afterburner is requested when this command input rises above the threshold.</span><input class="${fieldClass('input_threshold')}" data-ab-trigger-field="input_threshold" type="number" min="0" max="${abt.input_rc_pwm?'100':'3.3'}" step="${abt.input_rc_pwm?'1':'0.01'}" value="${thresholdValue}" onchange="setAbWorkflowThreshold(this.value)"></div>${abt.input_rc_pwm?`<div class="hw-field"><span class="hw-label">RC pulse range (us)</span><span class="hw-desc">Pulse widths representing 0% and 100% command.</span><div style="display:flex;gap:.35rem"><input class="${fieldClass('input_min_us')}" data-ab-trigger-field="input_min_us" aria-label="RC pulse minimum" type="number" min="500" max="2500" value="${Number(abt.input_min_us ?? 1000)}" onchange="setAbTrigBool('input_min_us',+this.value)"><input class="${fieldClass('input_max_us')}" data-ab-trigger-field="input_max_us" aria-label="RC pulse maximum" type="number" min="500" max="2500" value="${Number(abt.input_max_us ?? 2000)}" onchange="setAbTrigBool('input_max_us',+this.value)"></div></div>`:''}`) : ''}
     ${source!==0 ? `<div class="hw-field"><span class="hw-label">Arming interlock</span><label class="hw-toggle"><input class="${fieldClass('requires_arm')}" data-ab-trigger-field="requires_arm" type="checkbox" ${abt.requires_arm?'checked':''} onchange="setAbTrigBool('requires_arm',this.checked);renderHardwareWorkflowSummaries()"><span></span> Require a separate arm switch</label></div>${abt.requires_arm&&!usesDiArm?(pcbProfileActive()?`<div class="hw-field"><span class="hw-label">Arm switch</span><span class="hw-desc">Add an Afterburner arm switch under Inputs and choose its named PCB connection.</span></div>`:`<div class="hw-field"><span class="hw-label">Arm-switch GPIO</span><select class="${fieldClass('arm_pin')}" data-ab-trigger-field="arm_pin" onchange="setAbTrig('arm_pin',+this.value).then(()=>renderHardwareWorkflowSummaries())">${buildPinOptions(abt.arm_pin,'in')}</select></div><div class="hw-field"><span class="hw-label">Arm polarity</span><label class="hw-toggle"><input class="${fieldClass('arm_active_h')}" data-ab-trigger-field="arm_active_h" type="checkbox" ${abt.arm_active_h?'checked':''} onchange="setAbTrigBool('arm_active_h',this.checked);renderHardwareWorkflowSummaries()"><span></span> Active high</label></div>`):''}` : ''}
@@ -791,7 +789,7 @@ function ensureOilLoops() {
   if (!cfg.oil_loops.length) {
     const pressure = oilLoopChannels('input', 'oil_pressure')[0];
     const pump = oilLoopChannels('output', 'oil_pump')[0];
-    if (pressure && pump) cfg.oil_loops.push({enabled:true,id:'main',pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,min_pct:18,max_pct:100});
+    if (pressure && pump) cfg.oil_loops.push({enabled:true,id:'main',pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1});
   }
   return cfg.oil_loops;
 }
@@ -804,12 +802,13 @@ function updateOilLoop(index, key, value) {
 }
 function addOilLoop() {
   const loops = ensureOilLoops();
-  if (loops.length >= 2) return;
+  const maxLoops = Math.max(1, Number(cfg?._capabilities?.max_oil_loops || 6));
+  if (loops.length >= maxLoops) return;
   const used = new Set(loops.map(l => l.pump_output));
   const pressure = oilLoopChannels('input', 'oil_pressure')[0];
   const pump = oilLoopChannels('output', 'oil_pump').find(c => !used.has(c.id));
   if (!pressure || !pump) return;
-  loops.push({enabled:true,id:`oil${loops.length+1}`,pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,min_pct:18,max_pct:100});
+  loops.push({enabled:true,id:`oil${loops.length+1}`,pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1});
   dirty();
   renderHardwareWorkflowSummaries();
 }
@@ -846,12 +845,16 @@ function oilLoopInlineEditor() {
       ${source>=2?num(i,'speed_min_rpm','Low shaft speed (RPM)',loop.speed_min_rpm??0,100):''}
       ${source>=2?num(i,'speed_max_rpm','High shaft speed (RPM)',loop.speed_max_rpm??20000,100):''}
       ${num(i,'deadband_bar','Pressure deadband (bar)',loop.deadband_bar??.2,.01)}
+      ${binary?'':num(i,'response_gain','Response gain',loop.response_gain??1.8,.05)}
       ${binary?'':`<label class="hw-field"><span class="hw-label">Minimum pump output (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.min_demand??.18)*100)}" onchange="updateOilLoop(${i},'min_demand',+this.value/100)"></label>`}
       ${binary?'':`<label class="hw-field"><span class="hw-label">Maximum pump output (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.max_demand??1)*100)}" onchange="updateOilLoop(${i},'max_demand',+this.value/100)"></label>`}
+      ${num(i,'failsafe_delay_ms','Feedback-loss delay (ms)',loop.failsafe_delay_ms??1500,100)}
+      <label class="hw-field"><span class="hw-label">Feedback-loss pump output (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.failsafe_demand??.6)*100)}" onchange="updateOilLoop(${i},'failsafe_demand',+this.value/100)"></label>
       ${loopWarnings.length?`<div class="workflow-prerequisite" style="grid-column:1/-1">Warning: ${escapeHtmlText(loopWarnings.join(' '))}</div>`:''}
     </div></div>`;
   }).join('');
-  const canAdd = loops.length < 2 && pumps.some(p => !loops.some(l => l.pump_output === p.id));
+  const maxLoops = Math.max(1, Number(cfg?._capabilities?.max_oil_loops || 6));
+  const canAdd = loops.length < maxLoops && pumps.some(p => !loops.some(l => l.pump_output === p.id));
   return `<div class="registry-card-editor" style="display:grid">${cards}${canAdd?'<button class="btn-sm" onclick="addOilLoop()">Add another oil system</button>':''}</div>`;
 }
 function controllerAvailability(key) {
@@ -888,13 +891,13 @@ function controllerInlineEditor() {
       <div><strong>${escapeHtmlText(label)}</strong><div class="hw-desc">${escapeHtmlText(desc)}</div>${enabled ? '' : `<div class="workflow-prerequisite">Not available yet: ${escapeHtmlText(availability.reason)}</div>`}</div>
       <label class="hw-toggle"><input class="${changed ? 'field-changed' : ''}" type="checkbox" ${checked && enabled ? 'checked' : ''} ${enabled ? '' : 'disabled'} onchange="${handler}"><span></span> Enable</label>
     </div>
-    ${target ? `<div class="context-links"><a href="/config.html#${target}">Open its Config settings &rarr;</a></div>` : ''}
+    ${target ? `<div class="context-links"><a href="/controllers.html#${target}">Open its Controller settings &rarr;</a></div>` : ''}
   </div>`;
   };
   return `<div class="registry-card-editor" style="display:block">
     ${cb('oil_loop', 'Oil pressure loop', 'Closed-loop oil pressure control. Requires oil pressure input and oil pump output.', !!c.oil_loop, "setController('oil_loop',this.checked)")}
     ${c.oil_loop ? oilLoopInlineEditor() : ''}
-    ${hasThrottle ? `<div class="hw-item-card" style="grid-column:1/-1"><div class="registry-card-summary"><div><strong>Fuel response &amp; limit protection</strong><div class="hw-desc">Automatic with Main Fuel. Configure normal opening/closing response and N1, N2, temperature, P1, P2 or torque protection in <a href="/config.html#engine-limits">Config → Engine Limits &amp; Protection</a>.</div></div><span class="registry-status registry-status-ok">Ready</span></div></div>` : ''}
+    ${hasThrottle ? `<div class="hw-item-card" style="grid-column:1/-1"><div class="registry-card-summary"><div><strong>Fuel response &amp; limit protection</strong><div class="hw-desc">Automatic with Main Fuel. Configure normal opening/closing response and N1, N2, temperature, P1, P2 or torque protection in <a href="/controllers.html#engine-limits">Controllers → Engine Limits &amp; Protection</a>.</div></div><span class="registry-status registry-status-ok">Ready</span></div></div>` : ''}
     ${cb('dynamic_idle', 'Automatic idle control', 'Commands the main fuel output to hold N1 or N2 speed (normal proven methods), or experimental P1/P2 pressure. Choose the feedback source and tune it in Config > Start, Run & Recovery.', !!c.dynamic_idle, "setController('dynamic_idle',this.checked)")}
     ${cb('governor', 'Automatic N2 speed control', 'Generator/turboshaft: proportional main fuel controls N2. Prop Pitch uses proportional control or deliberate relay fine/coarse control. Set N2 target and response in Config > Power System.', !!c.governor, "setController('governor',this.checked)")}
   </div>`;
@@ -905,7 +908,7 @@ function renderControllerSummary() {
   const c = cfg.controllers || {};
   const rows = [
     ['oil_loop', 'Oil pressure loop', 'Closed-loop oil pressure control', !!c.oil_loop],
-    [null, 'Fuel response & limit protection', 'Automatic with Main Fuel; limits and response are configured in Config', registryHasPurpose('output','main_fuel')],
+    [null, 'Fuel response & limit protection', 'Automatic with Main Fuel; limits and response are configured in Controllers', registryHasPurpose('output','main_fuel')],
     ['dynamic_idle', 'Automatic idle speed control', 'Automatically holds the configured idle speed', !!c.dynamic_idle],
     ['governor', 'Automatic N2 speed control', 'Holds power-turbine speed using fuel or propeller pitch', !!c.governor],
   ];
@@ -963,7 +966,7 @@ function safetyInlineEditor() {
       <div><strong>${escapeHtmlText(label)}</strong><div class="hw-desc">${escapeHtmlText(desc)}</div>${enabled ? '' : `<div class="workflow-prerequisite">Not available yet: ${escapeHtmlText(availability.reason)}</div>`}</div>
       <label class="hw-toggle"><input class="${changed ? 'field-changed' : ''}" type="checkbox" ${checked && enabled ? 'checked' : ''} ${enabled ? '' : 'disabled'} onchange="setSafety('${key}',this.checked,null)"><span></span> Enable</label>
     </div>
-    <div class="context-links"><a href="/config.html#${target}">Open its limit and timing &rarr;</a></div>
+    <div class="context-links"><a href="/controllers.html#${target}">Open its limit and timing &rarr;</a></div>
   </div>`;
   };
   return `<div class="registry-card-editor" style="display:block">
@@ -986,7 +989,7 @@ function renderSafetySummary() {
   const s = cfg.safety || {};
   const rows = [
     ['overspeed', 'N1 overspeed', 'Requires primary N1 speed input', s.overspeed !== false],
-    ['n2_overspeed', 'N2 overspeed', 'Hard power-turbine shaft shutdown; limit is set in Config', !!s.n2_overspeed],
+    ['n2_overspeed', 'N2 overspeed', 'Hard power-turbine shaft shutdown; limit is set in Controllers', !!s.n2_overspeed],
     ['overtemp', 'Turbine gas overtemperature', 'Watches configured TOT/TIT limits', s.overtemp !== false],
     ['low_oil', 'Low oil pressure', 'Requires oil-pressure input or low-oil switch', s.low_oil !== false],
     ['oil_zero', 'Zero oil pressure', 'Requires oil-pressure input or zero-oil switch', s.oil_zero !== false],
@@ -1043,21 +1046,17 @@ function renderCommsIndicatorSummary() {
       clusterStatus,
       !!cluster.enabled,
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
-         <div class="hw-field"><span class="hw-label">Cluster serial</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('cluster_serial','enabled')}" type="checkbox" ${cluster.enabled?'checked':''} onchange="setProfileSerialEnabled('cluster_serial',this.checked)"><span></span> Enable</label></div>
-         ${pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical connection</span><span class="hw-desc">TX/RX wiring is fixed by the flashed PCB profile.${sharedProfileSerial?' This connector can run OT Cluster or MAVLink, so enabling one disables the other.':''}</span></div>` : `<div class="hw-field"><span class="hw-label">Cluster TX GPIO</span><select class="${workflowDeviceFieldClass('cluster_serial','tx_pin')}" onchange="setNested('cluster_serial','tx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(cluster.tx_pin, 'out')}</select></div>
+         ${pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical connection</span><span class="hw-desc">TX/RX wiring is fixed by the flashed PCB profile.${sharedProfileSerial?' The connector is shared with MAVLink.':''}</span></div>` : `<div class="hw-field"><span class="hw-label">Cluster TX GPIO</span><select class="${workflowDeviceFieldClass('cluster_serial','tx_pin')}" onchange="setNested('cluster_serial','tx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(cluster.tx_pin, 'out')}</select></div>
          <div class="hw-field"><span class="hw-label">Cluster RX GPIO</span><span class="hw-desc">Optional. Leave unassigned for TX-only streaming.</span><select class="${workflowDeviceFieldClass('cluster_serial','rx_pin')}" onchange="setNested('cluster_serial','rx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(cluster.rx_pin, 'in')}</select></div>`}
-         <div class="hw-field"><span class="hw-label">Baud rate</span><select class="${workflowDeviceFieldClass('cluster_serial','baud')}" onchange="setNested('cluster_serial','baud',+this.value);renderHardwareWorkflowSummaries()">${optionList([9600,19200,38400,57600,115200,230400,460800,921600], cluster.baud || 115200)}</select></div>
-         <div class="hw-field"><span class="hw-label">Interval (ms)</span><input class="${workflowDeviceFieldClass('cluster_serial','interval_ms')}" type="number" min="10" max="5000" value="${Number(cluster.interval_ms ?? 200)}" oninput="setNested('cluster_serial','interval_ms',+this.value)"></div>
+         <div class="hw-field"><a href="/system.html#system-device-setup">Enable the link and set its rate on System &rarr;</a></div>
       </div></div>`) : '',
     profileAllows('mavlink') ? card('mavlink', 'MAVLink telemetry',
       mav.enabled ? `${pcbProfileActive() ? 'Fixed PCB serial connection' : `TX GPIO ${mav.tx_pin ?? 'not set'}`} / ${mav.baud || 57600} baud / ${mav.interval_ms || 200} ms` : 'MAVLink telemetry output',
       mavStatus,
       !!mav.enabled,
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
-         <div class="hw-field"><span class="hw-label">MAVLink</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('mavlink','enabled')}" type="checkbox" ${mav.enabled?'checked':''} onchange="setProfileSerialEnabled('mavlink',this.checked)"><span></span> Enable</label></div>
-         ${pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical connection</span><span class="hw-desc">TX wiring is fixed by the flashed PCB profile.${sharedProfileSerial?' This connector can run MAVLink or OT Cluster, so enabling one disables the other.':''}</span></div>` : `<div class="hw-field"><span class="hw-label">MAVLink TX GPIO</span><select class="${workflowDeviceFieldClass('mavlink','tx_pin')}" onchange="setNested('mavlink','tx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(mav.tx_pin, 'out')}</select></div>`}
-         <div class="hw-field"><span class="hw-label">Baud rate</span><select class="${workflowDeviceFieldClass('mavlink','baud')}" onchange="setNested('mavlink','baud',+this.value);renderHardwareWorkflowSummaries()">${optionList([57600,115200,230400], mav.baud || 57600)}</select></div>
-         <div class="hw-field"><span class="hw-label">Interval (ms)</span><input class="${workflowDeviceFieldClass('mavlink','interval_ms')}" type="number" min="50" max="5000" step="50" value="${Number(mav.interval_ms ?? 200)}" oninput="setNested('mavlink','interval_ms',+this.value)"></div>
+         ${pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical connection</span><span class="hw-desc">TX wiring is fixed by the flashed PCB profile.${sharedProfileSerial?' The connector is shared with OT Cluster.':''}</span></div>` : `<div class="hw-field"><span class="hw-label">MAVLink TX GPIO</span><select class="${workflowDeviceFieldClass('mavlink','tx_pin')}" onchange="setNested('mavlink','tx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(mav.tx_pin, 'out')}</select></div>`}
+         <div class="hw-field"><a href="/system.html#system-device-setup">Enable the link and set its rate on System &rarr;</a></div>
       </div></div>`) : '',
     profileAllows('status_led') ? card('status_led', 'Status LED',
       ledEnabled && (led.pin ?? -1) >= 0 ? `${ledType === 1 ? 'NeoPixel RGB' : 'GPIO LED'}${pcbProfileActive() ? ' / fixed PCB indicator' : ` / GPIO ${led.pin}`}` : 'Local status indicator LED',
@@ -1106,23 +1105,23 @@ function registryContextLinks(direction, c) {
   };
   if (direction === 'input') {
     const configTargets = {
-      n1_speed:['/config.html#cf-rpm_limit','Set N1 protection'],
-      n2_speed:['/config.html#cf-n2_rpm_limit','Set N2 protection'],
-      tot:['/config.html#cf-tot_limit','Set TOT protection'],
-      tit:['/config.html#cf-sf_tit','Set TIT protection'],
-      oil_pressure:['/config.html#cf-oil_rm','Set oil protection'],
-      low_oil_switch:['/config.html#cf-oil_rm','Set low-oil protection'],
-      oil_zero_switch:['/config.html#cf-oil_zb','Set no-pressure protection'],
-      p1_pressure:['/config.html#cf-sf_p1t','Set P1 protection'],
-      p2_pressure:['/config.html#cf-sf_p2t','Set P2 protection'],
-      oil_temperature:['/config.html#cf-sf_ot','Set oil-temperature protection'],
-      fuel_pressure:['/config.html#cf-sf_fp','Set fuel-pressure protection'],
-      battery_voltage:['/config.html#cf-sf_bv','Set undervoltage protection'],
-      flame:['/config.html#cf-sf_fs','Set combustion-loss detection'],
-      ab_flame:['/config.html#cf-ab_fm','Set AB flame confirmation'],
-      torque:['/config.html#cf-sf_tqt','Set torque protection'],
-      ab_command:['/config.html#cf-ab_pcm','Set AB command behavior'],
-      limp_mode:['/config.html#cf-lm_mt','Set reduced-power limit']
+      n1_speed:['/controllers.html#cf-rpm_limit','Set N1 protection'],
+      n2_speed:['/controllers.html#cf-n2_rpm_limit','Set N2 protection'],
+      tot:['/controllers.html#cf-tot_limit','Set TOT protection'],
+      tit:['/controllers.html#cf-sf_tit','Set TIT protection'],
+      oil_pressure:['/controllers.html#cf-oil_rm','Set oil protection'],
+      low_oil_switch:['/controllers.html#cf-oil_rm','Set low-oil protection'],
+      oil_zero_switch:['/controllers.html#cf-oil_zb','Set no-pressure protection'],
+      p1_pressure:['/controllers.html#cf-sf_p1t','Set P1 protection'],
+      p2_pressure:['/controllers.html#cf-sf_p2t','Set P2 protection'],
+      oil_temperature:['/controllers.html#cf-sf_ot','Set oil-temperature protection'],
+      fuel_pressure:['/controllers.html#cf-sf_fp','Set fuel-pressure protection'],
+      battery_voltage:['/controllers.html#cf-sf_bv','Set undervoltage protection'],
+      flame:['/controllers.html#cf-sf_fs','Set combustion-loss detection'],
+      ab_flame:['/controllers.html#cf-ab_fm','Set AB flame confirmation'],
+      torque:['/controllers.html#cf-sf_tqt','Set torque protection'],
+      ab_command:['/controllers.html#cf-ab_pcm','Set AB command behavior'],
+      limp_mode:['/controllers.html#cf-lm_mt','Set reduced-power limit']
     };
     const calibrationTargets = {
       oil_pressure:'oil-press-cal-row', p1_pressure:'p1-cal-row',
@@ -1136,41 +1135,41 @@ function registryContextLinks(direction, c) {
     if (calibrationTargets[purpose]) add(`/calibration.html#${calibrationTargets[purpose]}`, 'Open its calibration');
     if (purpose === 'fuel_flow' && Number(c.driver) === 1) add('/calibration.html#fuelflow-cal-row', 'Calibrate fuel flow');
     if ((purpose === 'throttle' || purpose === 'idle') && Number(c.driver) === 3) {
-      add('/config.html#cf-rc_fs', 'Set RC signal-loss timeout');
+      add('/controllers.html#cf-rc_fs', 'Set RC signal-loss timeout');
     }
     if (purpose === 'sequence_gate') add('/sequence.html#tab-startup', 'Open startup sequence');
     if (purpose === 'ab_arm' || purpose === 'ab_fire') {
-      add('/config.html#cf-ab_mn', 'Set AB ignition conditions');
+      add('/controllers.html#cf-ab_mn', 'Set AB ignition conditions');
       add('/sequence.html#tab-afterburner', 'Open AB sequence');
     }
   } else {
     if (purpose === 'main_fuel') {
-      add('/config.html#cf-th_ru', 'Set fuel response');
+      add('/controllers.html#cf-th_ru', 'Set fuel response');
       add('/calibration.html#fuelpump-min-cal-row', 'Calibrate minimum fuel command');
     } else if (purpose === 'starter' || purpose === 'starter_enable' || purpose === 'air_starter') {
-      add('/config.html#cf-sa_en', 'Set starter assist');
+      add('/controllers.html#cf-sa_en', 'Set starter assist');
       add('/sequence.html#tab-startup', 'Open startup sequence');
     } else if (purpose === 'oil_pump') {
-      add('/config.html#cf-oil_mm', 'Set oil-pressure control');
-      add('/config.html#cf-so_rl', 'Set windmilling oil protection');
+      add('/controllers.html#cf-oil_mm', 'Set oil-pressure control');
+      add('/controllers.html#cf-so_rl', 'Set windmilling oil protection');
       add('/sequence.html#tab-startup', 'Open startup oil steps');
     } else if (purpose === 'scavenge_pump') {
-      add('/config.html#cf-oil_ufd', 'Set flow-fault behavior');
+      add('/controllers.html#cf-oil_ufd', 'Set flow-fault behavior');
       add('/sequence.html#tab-shutdown', 'Open shutdown sequence');
     } else if (purpose === 'igniter') {
-      add('/config.html#cf-rl_it', 'Set relight behavior');
+      add('/controllers.html#cf-rl_it', 'Set relight behavior');
       add('/sequence.html#tab-startup', 'Open ignition sequence');
     } else if (purpose === 'glow_plug') {
-      add('/config.html#cf-gl_ms', 'Set glow preheat');
+      add('/controllers.html#cf-gl_ms', 'Set glow preheat');
       add('/sequence.html#tab-startup', 'Place the preheat block');
     } else if (purpose === 'ab_igniter') {
-      add('/config.html#cf-ab_ui', 'Set AB ignition method');
+      add('/controllers.html#cf-ab_ui', 'Set AB ignition method');
       add('/sequence.html#tab-afterburner', 'Open AB sequence');
     } else if (purpose === 'ab_pump' || purpose === 'ab_valve') {
-      add('/config.html#cf-ab_lpp', 'Set AB fuel behavior');
+      add('/controllers.html#cf-ab_lpp', 'Set AB fuel behavior');
       add('/sequence.html#tab-afterburner', 'Open AB sequence');
     } else if (purpose === 'prop_pitch' || purpose === 'nozzle_actuator') {
-      add('/config.html#cf-gv_tr', 'Set N2 governor target');
+      add('/controllers.html#cf-gv_tr', 'Set N2 governor target');
     } else if (['fuel_shutoff','pilot_fuel','purge_valve'].includes(purpose)) {
       add('/sequence.html#tab-startup', 'Open startup sequence');
     } else if (purpose === 'drain_valve') {
@@ -1234,7 +1233,7 @@ function renderRegistryInventory() {
            ${pcbProfileActive() ? '' : registryI2cEditor(direction, c, i)}
            ${pcbProfileActive() ? '' : (direction==='input' ? registryTemperatureInterfaceEditor(c, i) : '')}
            ${pcbProfileActive() ? '' : registryTorqueInterfaceEditor(direction, c, i)}
-           ${!pcbProfileActive() && Number(c.driver)<8 && !(direction==='input' && registryTemperatureIsSpi(c)) ? `<div class="hw-field"><span class="hw-label">${direction==='input' ? registryInputPinLabel(c) : 'GPIO pin'}</span><select class="${pinClass}" onchange="updateRegistryChannel('${direction}',${i},'pin',+this.value)">${buildPinOptions(c.pin, registryTorqueIsHx711(c) || Number(c.temp_interface||0)===5 ? 'in' : registryPinMode(direction, c.driver))}</select></div>` : ''}
+           ${(!pcbProfileActive() || !c.physical_port) && Number(c.driver)<8 && !(direction==='input' && registryTemperatureIsSpi(c)) ? `<div class="hw-field"><span class="hw-label">${direction==='input' ? registryInputPinLabel(c) : 'GPIO pin'}</span><select class="${pinClass}" onchange="updateRegistryChannel('${direction}',${i},'pin',+this.value)">${buildPinOptions(c.pin, registryTorqueIsHx711(c) || Number(c.temp_interface||0)===5 ? 'in' : registryPinMode(direction, c.driver))}</select>${pcbProfileActive()?'<span class="hw-desc">Only unreserved ESP32 pins are offered. PCB-labelled connections are preferred when suitable.</span>':''}</div>` : ''}
            ${pcbProfileActive() ? '' : registryInputOptionsEditor(direction, c, i)}
            ${registryProfileInputTuningEditor(direction, c, i)}
            ${pcbProfileActive() ? '' : registryInvertEditor(direction, c, i)}

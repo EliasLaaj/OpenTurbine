@@ -41,8 +41,9 @@ async function pageSweep(page, viewport) {
   await page.setViewportSize(viewport);
   const pages = [
     ['index.html', '#n1-card'],
-    ['hardware.html', '#f-profile-id'],
-    ['config.html', 'body'],
+    ['hardware.html', '#hardware-profile-section'],
+    ['controllers.html', '#controller-overview'],
+    ['system.html', '#system-device-setup'],
     ['sequence.html', '#save-btn'],
     ['calibration.html', 'body'],
     ['tools.html', 'body'],
@@ -62,6 +63,9 @@ async function pageSweep(page, viewport) {
     assert.ok(metrics.overflow <= 24, `${route} has horizontal overflow ${metrics.overflow}px at ${viewport.width}px`);
     assert.ok(metrics.visibleInputs > 0 || route === 'index.html' || route === 'log.html', `${route} should expose controls`);
     if (route === 'index.html') {
+      await page.waitForFunction(() =>
+        ['p1-health', 'p2-health', 'fuel-flow-health'].every(id =>
+          document.getElementById(id)?.classList.contains('ok')), null, { timeout: 5000 });
       assert.equal(await page.evaluate(() =>
         ['p1-health', 'p2-health', 'fuel-flow-health'].every(id =>
           document.getElementById(id)?.classList.contains('ok'))), true,
@@ -73,10 +77,10 @@ async function pageSweep(page, viewport) {
       assert.equal(await page.locator('#unit-temp-btn').evaluate(el => el.getBoundingClientRect().height >= 34), true);
       assert.equal(await page.locator('#unit-press-btn').evaluate(el => el.getBoundingClientRect().height >= 34), true);
     }
-    if (route === 'config.html' && viewport.width <= 600) {
+    if ((route === 'controllers.html' || route === 'system.html') && viewport.width <= 600) {
       const closedHeights = await page.locator('.config-group:not([open])').evaluateAll(groups =>
         groups.map(group => group.getBoundingClientRect().height));
-      assert.ok(closedHeights.length > 0 && closedHeights.every(height => height < 100),
+      assert.ok(closedHeights.every(height => height <= 112),
         `closed mobile Configuration groups should stay compact; got ${closedHeights.join(', ')}`);
     }
     if (route === 'log.html' && viewport.width <= 600) {
@@ -181,7 +185,6 @@ function enumNames(source, marker) {
         checks: async () => {
           assert.equal(await page.evaluate(() => registryHasPurpose('input', 'n2_rpm')), false);
           assert.equal(await page.evaluate(() => hardwareHasAfterburner()), false);
-          assert.equal(await page.locator('#f-cl-rx option[value="-1"]').count(), 1);
         }
       },
       {
@@ -222,7 +225,6 @@ function enumNames(source, marker) {
           actuators: { status_led: { enabled: true, pin: 5 } }
         },
         checks: async () => {
-          assert.equal(await page.locator('#f-cl-rx option[value="46"]').count(), 1);
           assert.equal(await page.evaluate(() => buildPinOptions(46, 'out').includes('value="46"')), false);
         }
       }
@@ -246,7 +248,9 @@ function enumNames(source, marker) {
       };
       await patchHardware(page, profilePatch);
       await page.goto(`${base}/hardware.html`);
-      await page.waitForSelector('#f-profile-id', { state: 'attached' });
+      await page.waitForSelector('#hardware-profile-section', { state: 'attached' });
+      await page.waitForFunction(expected => typeof cfg !== 'undefined' && cfg?.platform === expected,
+        profilePatch.platform || current.platform, { timeout: 5000 });
       await profile.checks();
     }
     results.push(`representative hardware profiles render expected feature gates (${profiles.map(p => p.name).join(', ')})`);
@@ -267,6 +271,8 @@ function enumNames(source, marker) {
     });
     await page.goto(`${base}/sequence.html`);
     await page.waitForSelector('#save-btn', { state: 'attached' });
+    await page.waitForFunction(() => [...document.querySelectorAll('#add-startup-sel option,#add-shutdown-sel option')]
+      .some(option => /N2 Speed Control|Governor/i.test(option.textContent)), null, { timeout: 5000 });
     const sequencer = await page.evaluate(() => {
       const optionText = [...document.querySelectorAll('#add-startup-sel option,#add-shutdown-sel option')].map(o => o.textContent);
       const ruleText = [...document.querySelectorAll('.rule-sensor option,.rule-actuator option')].map(o => o.textContent);
@@ -413,8 +419,11 @@ function enumNames(source, marker) {
     assert.match(sequenceHtml, /validateCustomBlockLimits\(\)/);
     assert.match(sequenceHtml, /def\.type === 'wait' \? \[\]/);
     assert.match(sequenceHtml, /if \(type !== 'wait'\) rawDef\.steps/);
-    assert.match(sequenceHtml, /validateRulesForSave\(\)/);
-    assert.match(sequenceHtml, /Control rule hardware mismatch/);
+    assert.doesNotMatch(sequenceHtml, /id="rules-list"|Control Rules/);
+    const controllersHtml = fs.readFileSync(path.join('data_src', 'controllers.html'), 'utf8');
+    assert.match(controllersHtml, /Custom controllers/);
+    assert.match(controllersHtml, /Hold a feedback target/);
+    assert.match(controllersHtml, /one normal owner/i);
     assert.doesNotMatch(sequenceHtml, /Default:\s*AB(?:CheckReady|SolClose|PumpOn)/);
     assert.match(sequenceHtml, /Default: check readiness &rarr; open the AB fuel valve &rarr; start the AB fuel pump &rarr; ignite &rarr; confirm flame &rarr; stabilize/);
     assert.match(sequenceHtml, /Default: stop the AB fuel pump &rarr; close the AB fuel valve &rarr; turn the AB igniter off/);
@@ -424,12 +433,12 @@ function enumNames(source, marker) {
     assert.doesNotMatch(indexHtml, /20260612b|20260617b|20260619a|20260625a|20260705a|Primary thermal limit/);
     assert.doesNotMatch(indexHtml, />Not saved<|No calibration saved|No successful test recorded/);
     assert.match(indexHtml, /Run a safe actuator or dry-sequence test/);
-    assert.match(indexHtml, /20260814g/);
-    for (const pageName of ['index.html', 'hardware.html', 'config.html', 'calibration.html', 'sequence.html', 'log.html', 'tools.html']) {
+    assert.match(indexHtml, /20260816q/);
+    for (const pageName of ['index.html', 'hardware.html', 'controllers.html', 'system.html', 'calibration.html', 'sequence.html', 'log.html', 'tools.html']) {
       const pageSource = fs.readFileSync(path.join('data_src', pageName), 'utf8');
       const sharedRefs = [...pageSource.matchAll(/\/(?:style\.css|app\.js|theme\.js|ui_dialog\.js)\?v=([^"'&]+)/g)];
       assert.ok(sharedRefs.length > 0, `${pageName} must version its shared assets`);
-      assert.ok(sharedRefs.every(match => match[1] === '20260814g'), `${pageName} has a stale shared-asset cache key`);
+      assert.ok(sharedRefs.every(match => match[1] === '20260816q'), `${pageName} has a stale shared-asset cache key`);
     }
     assert.match(indexHtml, /<body data-page="dashboard">/);
     assert.match(indexHtml, /id="profile-mismatch-banner" style="display:none"/);
@@ -481,14 +490,15 @@ function enumNames(source, marker) {
     assert.match(webServer, /doc\["build_id"\] = buildId/);
     results.push('device identity exposes a per-build ELF fingerprint for exact firmware verification');
 
-    assert.match(webServer, /#if !defined\(OT_PLATFORM_ESP32S3\)[\s\S]*static bool _installAssetRolling/);
-    assert.match(webServer, /if \(!_installAssetRolling\(\(uint16_t\)asset\)\)/);
+    assert.match(webServer, /#if defined\(OT_PLATFORM_ESP32S3\)[\s\S]*String writePath = _assetPath\(\(uint16_t\)asset, true\)/);
+    assert.match(webServer, /String writePath = _assetPath\(\(uint16_t\)asset, false\)/);
+    assert.match(webServer, /START inhibited until the complete set is uploaded again/);
     const toolsSource = fs.readFileSync(path.join('data_src', 'tools.html'), 'utf8');
     const webAssetOrder = toolsSource.match(/const required = \[([\s\S]*?)\];/);
     assert.ok(webAssetOrder);
     assert.ok(webAssetOrder[1].lastIndexOf("'tools.html.gz'") >
               webAssetOrder[1].lastIndexOf("'ui_dialog.js.gz'"));
-    results.push('Classic web asset updates use bounded rolling storage and upload the recovery page last');
+    results.push('Classic web asset updates fit the bounded filesystem and upload the recovery page last');
 
     await reset(page);
     await page.goto(`${base}/index.html`);

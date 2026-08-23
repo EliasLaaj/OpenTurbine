@@ -18,17 +18,71 @@ either target to a build-only-by-a-few-bytes state.
 
 Systematic hardware-in-the-loop validation of the OpenTurbine firmware on the
 bench rig, aimed at finding defects **before** they reach a real turbine engine.
-The current release candidate is OpenTurbine 2.0.3. DUT and tester roles may be
+The current release candidate is OpenTurbine 2.0.4. DUT and tester roles may be
 swapped between the ESP32-S3 and Classic ESP32 as a campaign requires. Tests
 drive physical ADC/PCNT/SPI/digital paths where wired and use explicit simulator
 coverage for unavailable I²C devices.
 
 The first findings below are retained historical v1.x campaign evidence. Use
 the **v2.0.0 release-candidate HIL** section as the baseline and the newer
-2.0.3 verification audit and dated result files for current sign-off;
+2.0.4 verification audit and dated result files for current sign-off;
 superseded EGT-rate and old configuration behavior are not v2 requirements.
 
 Legend: ✅ pass · ⚠️ anomaly/concern · ❌ bug · ⏭️ not physically testable
+
+## v2.0.4 final dual-target qualification — 2026-08-23
+
+- ✅ **Classic ESP32 as DUT, ESP32-S3 as tester:** 11/11 reachable pin/function
+  cases passed (`classic_pinfunc_hil_20260822_190410.json`), followed by 2/2
+  physical fuel-isolation safety cases (`classic_safety_hil_20260822_190422.json`)
+  and 2/2 bounded session-logging cases
+  (`session_logger_hil_20260822_205910.json`). The final realistic browser
+  session ran 319 seconds with 18 navigations, live save/readback, complete
+  engine-file download/restore, cleanup save, no panic, and the original
+  profile restored (`classic_heapguard_soak_20260822`).
+- ✅ **ESP32-S3 as DUT, Classic ESP32 as tester:** 10/10 hard-safety cases
+  (`phase2_safety_hil_20260822_211431.json`), 13/13 controller/protection
+  interactions (`interaction_hil_20260822_213350.json`), 3/3 afterburner and
+  Reduced-Power interactions (`afterburner_limp_hil_20260822_213505.json`),
+  4/4 shutdown-output ownership cases
+  (`shutdown_output_ownership_hil_20260822_213703.json`), and 2/2 bounded
+  session-logging cases (`session_logger_hil_20260822_211652.json`) passed.
+- ✅ The final S3 user-session soak completed 18 page navigations, two
+  acknowledged persisted controller saves, complete engine-file
+  download/upload/restore, the one expected software reboot, original-value
+  restoration, and zero HTTP, browser-console, conflict, panic, or unexpected
+  reset failures (`s3_final_user_soak_20260823`). A final all-page audit of the
+  rebuilt Controllers/System UI passed with zero transient API retries
+  (`s3_final_ui_nav_status_20260823`).
+- ✅ The campaigns exposed and closed four web/storage defects before sign-off:
+  an unsafe low-heap raw client close, an S3 full-config snapshot allocation,
+  a Log read lease tied to TCP keep-alive, and configuration pages retaining
+  unnecessary WebSockets during navigation. Controllers/System now obtain
+  live mode and Developer Mode lock state from the compact status heartbeat.
+- ✅ Final firmware budgets remain within target: ESP32-S3 uses 35.5% static
+  RAM and 50.9% application flash; Classic uses 29.7% static RAM and 94.9%
+  application flash. Session-log filesystem reserve scales to the target's
+  actual LittleFS size, so the bounded 64-row logger works on both chips.
+
+## v2.0.4 web-persistence and Setup Tool qualification — 2026-08-16
+
+- ✅ Repeated real-browser navigation, page interaction, configuration edits,
+  persistence, readback, and restoration were exercised against both physical
+  targets while the other ECU was electrically isolated. The test fails if the
+  ECU boot counter changes or any output becomes active.
+- ✅ The Classic ESP32 completed the corrected low-memory persistence session
+  without rebooting: 12 page navigations and two acknowledged, read-back saves
+  over 150 seconds, followed by restoration of the original setting.
+- ✅ The ESP32-S3 completed the equivalent cross-page edit workflow without a
+  reboot. A diagnostic rerun also verified that an absent session log is the
+  only expected 404 and records the exact endpoint for every other HTTP error.
+- ✅ The Windows Setup Tool was visually exercised at a 588 × 487 client area.
+  Its home, safety, wait, and board-selection screens remained readable and
+  usable, and live USB detection clearly reported the responsive S3 and asked
+  for its matching hardware package before any erase step.
+
+The exact versioned release-gate and final flashed-image checks are recorded
+before publication; the v2.0.3 evidence below remains historical.
 
 ## v2.0.3 final cross-platform web and release qualification — 2026-08-14
 

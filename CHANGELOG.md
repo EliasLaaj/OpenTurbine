@@ -10,6 +10,41 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ## [Unreleased]
 
+## [2.0.4] — 2026-08-23
+
+### Added
+- Added a deliberate reduced-power start choice inside the normal START confirmation when configured sensor feedback is unhealthy. Critical STOP-path failures and other conditions that cannot be made safe remain hard startup locks.
+- Added guided oil-pressure calibration: capture zero pressure, slowly find the pump's reliable starting demand, then record gauge pressure against live sensor voltage at several useful pump speeds.
+- Added accessible drag-and-drop sequence ordering with touch/pointer dragging and keyboard movement, while keeping the editor compact on phones.
+- Added exact-endpoint browser soak diagnostics and boot-counter assertions for realistic cross-page editing sessions.
+
+### Changed
+- Simplified the dashboard's command presentation: throttle, idle and switches remain compact, sensor telemetry keeps the detailed cards, and inactive/failed analog sensors no longer make the display oscillate.
+- Moved reduced-power startup into one clear START workflow instead of presenting a second start button, and removed explanatory dashboard clutter that belongs in the guide.
+- Clarified flame calibration choices so the operator can explicitly sample with or without energizing the configured igniter.
+- Made developer-mode editing availability follow the firmware's actual runtime-safe field policy; fields requiring STANDBY remain visibly locked with a concise reason.
+- Reworked the Windows Setup Tool for small and low-resolution displays with responsive button rows, wrapped text, scrollable content and smaller supported window bounds. Successful USB probing now says that the board is found and responsive and asks for its matching hardware package.
+
+### Fixed
+- Prevented low-memory Classic ESP32 configuration persistence from throwing an allocation exception inside AsyncTCP or LittleFS. Nothrow allocations now return failure as intended, and the complete candidate is serialized into reserved scratch memory before filesystem staging begins.
+- Preserved the existing hardware registry exactly during settings-only saves, structurally verified the unified candidate before atomic replacement, and bounded failed deferred-save retries instead of retrying continuously.
+- Prevented flash-backed page responses and persistence from overlapping, while retaining bounded page-load waiting and closing completed HTTP transports consistently on both supported chips.
+- Split oversized WebSocket telemetry only at complete top-level JSON member boundaries, eliminating malformed fragments under constrained TCP/heap conditions.
+- Fixed mobile Config save controls overflowing the viewport, fault guidance clipping, brief incorrect dashboard layouts during initial configuration loading, and inconsistent sequence move controls.
+- Fixed stale configuration-transfer state appearing on the Log page after ordinary page changes.
+- Prevented transient `/api/config` 503 responses during long ESP32-S3 sessions by using the reserved bounded transfer workspace instead of requiring a second contiguous full-config allocation.
+- Released completed bounded Log views when their flash read finishes rather than waiting for a keep-alive disconnect, so returning to Log cannot be mistaken for a competing reader.
+- Replaced unsafe low-heap raw TCP closes with framework-safe request aborts and limited the proactive low-heap request guard to the memory-constrained Classic target.
+- Kept Controllers and System live mode/Developer Mode locks current through the compact status heartbeat without retaining WebSocket clients across page navigation.
+- Made session-log filesystem headroom proportional to the available LittleFS volume, preserving the bounded logger on Classic while retaining a larger reserve on ESP32-S3.
+- Prevented absent N1, TOT, and throttle channels from appearing in event snapshots and applied the disabled standby-snapshot setting equally in STANDBY and FAULT.
+
+### Validation
+- Passed physical realistic-session checks on Classic ESP32 and ESP32-S3 with repeated page navigation, edits, acknowledged persisted saves, readback, restoration, unchanged boot counters, STANDBY retained and all outputs inactive.
+- Visually verified the Windows Setup Tool's critical install path at a 588 × 487 client area and confirmed live S3 USB responsiveness without proceeding to erase.
+- No fuel-burning turbine was run; installation-specific wiring inspection, output-polarity checks, dry commissioning and a controlled first-engine test remain required.
+- Requalified both role orientations: Classic passed 11/11 pin/function, 2/2 physical safety, 2/2 session logger, and a 319-second real browser session; ESP32-S3 passed 10/10 hard safety, 13/13 controller interactions, 3/3 afterburner/Reduced-Power, 4/4 shutdown ownership, 2/2 session logger, and the final 18-navigation save/export/import/restore session with clean UART evidence.
+
 ## [2.0.3] — 2026-08-14
 
 ### Changed

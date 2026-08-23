@@ -85,14 +85,18 @@ void FlightRecorder::tick() {
     auto& ed = EngineData::instance();
     auto& hw = HardwareConfig::instance();
 
-    if (ed.mode == SysMode::STANDBY && !Config::logStandby) return;
+    const bool idleMode = ed.mode == SysMode::STANDBY || ed.mode == SysMode::FAULT;
+    if (idleMode && !Config::logStandby) return;
 
-    // Track run peaks (only meaningful during RUNNING, but harmless otherwise)
-    if (ed.n1Rpm  > _runMaxN1)                              _runMaxN1 = ed.n1Rpm;
-    if (hw.hasTwoShaft && hw.hasN2Rpm && ed.n2Rpm > s_runMaxN2) s_runMaxN2 = ed.n2Rpm;
-    if (ed.tot    > _runMaxTot)                             _runMaxTot = ed.tot;
-    if (hw.hasTit && ed.tit > _runMaxTit)                    _runMaxTit = ed.tit;
-    if (hw.hasOilPress && ed.oilPressure < _runMinOil)      _runMinOil = ed.oilPressure;
+    // Run summaries describe the run, not values observed while configuring,
+    // faulted, or cooling in another mode.
+    if (ed.mode == SysMode::RUNNING) {
+        if (hw.hasN1Rpm && ed.n1Rpm > _runMaxN1) _runMaxN1 = ed.n1Rpm;
+        if (hw.hasTwoShaft && hw.hasN2Rpm && ed.n2Rpm > s_runMaxN2) s_runMaxN2 = ed.n2Rpm;
+        if (hw.hasTot && ed.tot > _runMaxTot) _runMaxTot = ed.tot;
+        if (hw.hasTit && ed.tit > _runMaxTit) _runMaxTit = ed.tit;
+        if (hw.hasOilPress && ed.oilPressure < _runMinOil) _runMinOil = ed.oilPressure;
+    }
 
     // Compact 10-second SNAP: essential sensors only
     uint32_t intervalMs = Config::snapshotIntervalMs > 0 ? Config::snapshotIntervalMs : 10000;
@@ -100,13 +104,9 @@ void FlightRecorder::tick() {
     if (now - _lastSnapshotMs < intervalMs) return;
     _lastSnapshotMs = now;
 
-    // thr as 0-100 integer to save bytes
-    int thrPct = (int)(ed.throttleDemand * 100.0f + 0.5f);
-
     char buf[260];
     int n = snprintf(buf, sizeof(buf),
-        "{\"t\":%lu,\"ev\":\"SNAP\",\"n1\":%.0f,\"tot\":%.0f,\"thr\":%d",
-        _uptimeSec(), ed.n1Rpm, ed.tot, thrPct);
+        "{\"t\":%lu,\"ev\":\"SNAP\"", _uptimeSec());
 
     #define APPEND_EVENT_FIELD(...) do { \
         if (n >= 0 && n < (int)sizeof(buf)) { \
@@ -120,6 +120,12 @@ void FlightRecorder::tick() {
         } \
     } while (0)
 
+    if (hw.hasN1Rpm)
+        APPEND_EVENT_FIELD(",\"n1\":%.0f", ed.n1Rpm);
+    if (hw.hasTot)
+        APPEND_EVENT_FIELD(",\"tot\":%.0f", ed.tot);
+    if (hw.hasThrottle)
+        APPEND_EVENT_FIELD(",\"thr\":%d", (int)(ed.throttleDemand * 100.0f + 0.5f));
     if (hw.hasOilPress)
         APPEND_EVENT_FIELD(",\"oil\":%.2f,\"oilP\":%d", ed.oilPressure, (int)ed.oilPumpPct);
     if (hw.hasTwoShaft && hw.hasN2Rpm)

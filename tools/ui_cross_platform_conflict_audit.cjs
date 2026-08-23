@@ -28,7 +28,7 @@ async function patchHardware(page, patch) {
 
 async function gotoHardware(page) {
   await page.goto(`${base}/hardware.html`);
-  await page.waitForSelector('#f-profile-id', { state: 'attached' });
+  await page.waitForSelector('#hardware-profile-section', { state: 'attached' });
 }
 
 async function hasOption(page, selector, value) {
@@ -67,7 +67,6 @@ async function hasOption(page, selector, value) {
       adc11: buildPinOptions(-1, 'adc').includes('value="11"')
     }));
     assert.deepEqual(s3Pins, {out46:false, out22:false, adc10:true, adc11:false});
-    assert.equal(await hasOption(page, '#f-cl-rx', 46), 1, 'ESP32-S3 input selector may allow input-only GPIO46');
     results.push('ESP32-S3 pin selectors match firmware GPIO, output and ADC limits');
 
     const conflictMatrix = await page.evaluate(() => {

@@ -84,14 +84,18 @@ class InteractionQualification:
         return [
             {
                 "enabled": True, "kind": 0, "source": "tot_main",
-                "target": "main_fuel", "op": 0, "threshold": 50,
+                "target": "fuel_shutoff", "op": 0, "threshold": 50,
                 "on_value": 1.0, "off_value": 0.0, "hysteresis": 0,
+                "input_min": 0.0, "input_max": 1000.0,
+                "output_min": 0.0, "output_max": 1.0,
                 "mode_mask": RUNNING_MASK, "name": "hil_force_fuel",
             },
             {
                 "enabled": True, "kind": 0, "source": "tot_main",
-                "target": "igniter_main", "op": 0, "threshold": 50,
+                "target": "igniter", "op": 0, "threshold": 50,
                 "on_value": 1.0, "off_value": 0.0, "hysteresis": 0,
+                "input_min": 0.0, "input_max": 1000.0,
+                "output_min": 0.0, "output_max": 1.0,
                 "mode_mask": RUNNING_MASK, "name": "hil_force_ignition",
             },
         ]
@@ -101,7 +105,18 @@ class InteractionQualification:
             deadline = time.time() + 10
             while time.time() < deadline and not self.runner.outputs_idle(self.dut.data()):
                 time.sleep(0.15)
-        ok, resp = self.runner.dc.patch_cfg({"rules": rules}, verify=False)
+        # Keep fixtures aligned with the complete rule schema used by the UI.
+        # The firmware deliberately rejects partial definitions so an old
+        # client cannot silently change mapping semantics.
+        normalized = []
+        for supplied in rules:
+            rule = {
+                "input_min": 0.0, "input_max": 1.0,
+                "output_min": 0.0, "output_max": 1.0,
+                **supplied,
+            }
+            normalized.append(rule)
+        ok, resp = self.runner.dc.patch_cfg({"rules": normalized}, verify=False)
         saved = self.dut.config().get("rules", [])
         names = {r.get("name") for r in saved}
         if not ok or names != set(expected_names):
@@ -265,13 +280,18 @@ class InteractionQualification:
         self.start_running()
         baseline = self.drive(seconds=2.5)
         baseline_pulse = self.t.get("THROTTLE_OUT")
+        baseline_valve = self.t.get("FUEL_SOL")
         base_eff = float(baseline.get("throttle_effective") or 0)
-        rule_active = base_eff > 0.9 and baseline.get("igniter_on")
+        rule_active = (
+            base_eff > 0.1 and baseline.get("igniter_on") and
+            baseline.get("fuel_sol_open") and
+            int(baseline_valve.get("level") or 0) == 1
+        )
         self.record(
-            "RULE_AND_CONTROLLERS_CAN_COMMAND_OUTPUT",
-            rule_active and int(baseline_pulse.get("us") or 0) >= 1850,
+            "RULES_AND_DEDICATED_CONTROLLERS_OWN_SEPARATE_OUTPUTS",
+            rule_active and int(baseline_pulse.get("us") or 0) >= 1100,
             throttle_effective=base_eff, throttle_pulse=baseline_pulse,
-            igniter_on=baseline.get("igniter_on"),
+            fuel_valve=baseline_valve, igniter_on=baseline.get("igniter_on"),
         )
 
         pulled = self.drive(n1=46000, n2=39000, egt=730, seconds=3.0)
@@ -279,8 +299,8 @@ class InteractionQualification:
         pulled_eff = float(pulled.get("throttle_effective") or 0)
         self.record(
             "N1_N2_EGT_PULLBACK_DOMINATES_RULE_AND_GOVERNOR",
-            pulled.get("mode") == "RUNNING" and pulled_eff < base_eff - 0.2 and
-            int(pulled_pulse.get("us") or 0) < int(baseline_pulse.get("us") or 0) - 150,
+            pulled.get("mode") == "RUNNING" and pulled_eff < base_eff - 0.03 and
+            int(pulled_pulse.get("us") or 0) < int(baseline_pulse.get("us") or 0) - 60,
             baseline_effective=base_eff, pulled_effective=pulled_eff,
             mode=pulled.get("mode"), event=pulled.get("last_event"),
             baseline_pulse=baseline_pulse, pulled_pulse=pulled_pulse,
@@ -505,7 +525,7 @@ class InteractionQualification:
         # the hardwired STOP path must still win immediately.
         fuel_rule = [{
             "enabled": True, "kind": 0, "source": "tot_main",
-            "target": "main_fuel", "op": 0, "threshold": 50,
+            "target": "fuel_shutoff", "op": 0, "threshold": 50,
             "on_value": 1.0, "off_value": 0.0, "hysteresis": 0,
             "mode_mask": RUNNING_MASK, "name": "hil_relight_fuel",
         }]

@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	appVersion                  = "0.7.0"
+	appVersion                  = "0.7.1"
 	packageCompatibilityVersion = "0.7.0"
 	requiredPackageSchema       = 4
 	appTitle                    = "OpenTurbine Setup Tool"
@@ -69,12 +69,13 @@ var (
 var webAssets = []string{
 	"app.js.gz",
 	"calibration.html.gz",
-	"config.html.gz",
+	"controllers.html.gz",
 	"hardware.html.gz",
 	"index.html.gz",
 	"log.html.gz",
 	"sequence.html.gz",
 	"style.css.gz",
+	"system.html.gz",
 	"tools.html.gz",
 	"theme.js.gz",
 	"ui_dialog.js.gz",
@@ -303,36 +304,37 @@ var (
 	comdlg32 = syscall.NewLazyDLL("comdlg32.dll")
 	dwmapi   = syscall.NewLazyDLL("dwmapi.dll")
 
-	procGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
-	procGetCurrentThreadId = kernel32.NewProc("GetCurrentThreadId")
-	procRegisterClassExW   = user32.NewProc("RegisterClassExW")
-	procCreateWindowExW    = user32.NewProc("CreateWindowExW")
-	procDefWindowProcW     = user32.NewProc("DefWindowProcW")
-	procShowWindow         = user32.NewProc("ShowWindow")
-	procUpdateWindow       = user32.NewProc("UpdateWindow")
-	procGetMessageW        = user32.NewProc("GetMessageW")
-	procTranslateMessage   = user32.NewProc("TranslateMessage")
-	procDispatchMessageW   = user32.NewProc("DispatchMessageW")
-	procPostQuitMessage    = user32.NewProc("PostQuitMessage")
-	procPostMessageW       = user32.NewProc("PostMessageW")
-	procGetClientRect      = user32.NewProc("GetClientRect")
-	procInvalidateRect     = user32.NewProc("InvalidateRect")
-	procLoadIconW          = user32.NewProc("LoadIconW")
-	procLoadImageW         = user32.NewProc("LoadImageW")
-	procBeginPaint         = user32.NewProc("BeginPaint")
-	procEndPaint           = user32.NewProc("EndPaint")
-	procSetWindowTextW     = user32.NewProc("SetWindowTextW")
-	procSetProcessDPIAware = user32.NewProc("SetProcessDPIAware")
-	procSetDPIContext      = user32.NewProc("SetProcessDpiAwarenessContext")
-	procLoadCursorW        = user32.NewProc("LoadCursorW")
-	procOpenClipboard      = user32.NewProc("OpenClipboard")
-	procEmptyClipboard     = user32.NewProc("EmptyClipboard")
-	procCloseClipboard     = user32.NewProc("CloseClipboard")
-	procSetClipboardData   = user32.NewProc("SetClipboardData")
-	procGlobalAlloc        = kernel32.NewProc("GlobalAlloc")
-	procGlobalLock         = kernel32.NewProc("GlobalLock")
-	procGlobalUnlock       = kernel32.NewProc("GlobalUnlock")
-	procGlobalFree         = kernel32.NewProc("GlobalFree")
+	procGetModuleHandleW      = kernel32.NewProc("GetModuleHandleW")
+	procGetCurrentThreadId    = kernel32.NewProc("GetCurrentThreadId")
+	procRegisterClassExW      = user32.NewProc("RegisterClassExW")
+	procCreateWindowExW       = user32.NewProc("CreateWindowExW")
+	procDefWindowProcW        = user32.NewProc("DefWindowProcW")
+	procShowWindow            = user32.NewProc("ShowWindow")
+	procUpdateWindow          = user32.NewProc("UpdateWindow")
+	procGetMessageW           = user32.NewProc("GetMessageW")
+	procTranslateMessage      = user32.NewProc("TranslateMessage")
+	procDispatchMessageW      = user32.NewProc("DispatchMessageW")
+	procPostQuitMessage       = user32.NewProc("PostQuitMessage")
+	procPostMessageW          = user32.NewProc("PostMessageW")
+	procGetClientRect         = user32.NewProc("GetClientRect")
+	procSystemParametersInfoW = user32.NewProc("SystemParametersInfoW")
+	procInvalidateRect        = user32.NewProc("InvalidateRect")
+	procLoadIconW             = user32.NewProc("LoadIconW")
+	procLoadImageW            = user32.NewProc("LoadImageW")
+	procBeginPaint            = user32.NewProc("BeginPaint")
+	procEndPaint              = user32.NewProc("EndPaint")
+	procSetWindowTextW        = user32.NewProc("SetWindowTextW")
+	procSetProcessDPIAware    = user32.NewProc("SetProcessDPIAware")
+	procSetDPIContext         = user32.NewProc("SetProcessDpiAwarenessContext")
+	procLoadCursorW           = user32.NewProc("LoadCursorW")
+	procOpenClipboard         = user32.NewProc("OpenClipboard")
+	procEmptyClipboard        = user32.NewProc("EmptyClipboard")
+	procCloseClipboard        = user32.NewProc("CloseClipboard")
+	procSetClipboardData      = user32.NewProc("SetClipboardData")
+	procGlobalAlloc           = kernel32.NewProc("GlobalAlloc")
+	procGlobalLock            = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock          = kernel32.NewProc("GlobalUnlock")
+	procGlobalFree            = kernel32.NewProc("GlobalFree")
 
 	procCreateFontW            = gdi32.NewProc("CreateFontW")
 	procCreateSolidBrush       = gdi32.NewProc("CreateSolidBrush")
@@ -393,6 +395,7 @@ const (
 	dtWordBreak  = 0x00000010
 	dtSingleLine = 0x00000020
 	dtNoPrefix   = 0x00000800
+	dtCalcRect   = 0x00000400
 
 	transparent = 1
 	psSolid     = 0
@@ -506,6 +509,7 @@ type NativeUI struct {
 	logs          []string
 	showDetails   bool
 	scrollOffset  int
+	scrollMax     int
 	activeJob     *Job
 	zones         []clickZone
 	boards        []detectedBoard
@@ -557,12 +561,32 @@ func runGUI(app *App) {
 		lpszClassName: className,
 	}
 	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
+	// Fit the initial window inside the usable desktop. This matters on common
+	// 1024x600 service laptops and when Windows display scaling leaves a small
+	// logical work area beneath the taskbar.
+	work := rect{0, 0, 1024, 768}
+	procSystemParametersInfoW.Call(0x0030, 0, uintptr(unsafe.Pointer(&work)), 0) // SPI_GETWORKAREA
+	workW, workH := int(work.right-work.left), int(work.bottom-work.top)
+	windowW, windowH := 900, 740
+	if windowW > workW-24 {
+		windowW = workW - 24
+	}
+	if windowH > workH-24 {
+		windowH = workH - 24
+	}
+	if windowW < 600 {
+		windowW = 600
+	}
+	if windowH < 520 {
+		windowH = 520
+	}
+	x, y := int(work.left)+(workW-windowW)/2, int(work.top)+(workH-windowH)/2
 	hwnd, _, _ := procCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(utf16Ptr(appTitle))),
 		wsOverlappedWindow|wsVisible,
-		0x80000000, 0x80000000, 900, 740,
+		uintptr(x), uintptr(y), uintptr(windowW), uintptr(windowH),
 		0, 0, hInst, 0,
 	)
 	ui.hwnd = hwnd
@@ -600,9 +624,9 @@ func wndProc(hwnd uintptr, msgID uint32, wParam, lParam uintptr) uintptr {
 		return 0
 	case wmGetMinMaxInfo:
 		mmi := (*minMaxInfo)(unsafe.Pointer(lParam))
-		// Safety and destructive-action screens carry essential text above the
-		// buttons. Do not allow resizing until that text is clipped away.
-		mmi.minTrackSize = point{x: 680, y: 680}
+		// Content areas scroll independently while action buttons stay visible,
+		// so the tool remains usable on low-resolution Windows service laptops.
+		mmi.minTrackSize = point{x: 600, y: 520}
 		return 0
 	case wmMouseWheel:
 		if ui != nil {
@@ -666,13 +690,13 @@ func setProcessDPIAware() {
 
 func (ui *NativeUI) scroll(wheelDelta int) {
 	ui.mu.Lock()
-	if ui.screen == screenDriverHelp {
+	if ui.scrollMax > 0 {
 		ui.scrollOffset -= wheelDelta / 120 * 48
 		if ui.scrollOffset < 0 {
 			ui.scrollOffset = 0
 		}
-		if ui.scrollOffset > 260 {
-			ui.scrollOffset = 260
+		if ui.scrollOffset > ui.scrollMax {
+			ui.scrollOffset = ui.scrollMax
 		}
 	}
 	ui.mu.Unlock()
@@ -992,6 +1016,7 @@ func (ui *NativeUI) applyPending() {
 	p := ui.pending
 	ui.pending = nil
 	if p != nil {
+		previousScreen := ui.screen
 		ui.screen = p.screen
 		ui.title = p.title
 		ui.subtitle = p.subtitle
@@ -1042,8 +1067,9 @@ func (ui *NativeUI) applyPending() {
 			ui.driverChoices = nil
 			ui.pcbChoices = nil
 		}
-		if p.screen != screenDriverHelp {
+		if p.screen != previousScreen {
 			ui.scrollOffset = 0
+			ui.scrollMax = 0
 		}
 	}
 	ui.mu.Unlock()
@@ -1064,11 +1090,11 @@ func (ui *NativeUI) paint() {
 	procGetClientRect.Call(ui.hwnd, uintptr(unsafe.Pointer(&cr)))
 	w := int(cr.right - cr.left)
 	h := int(cr.bottom - cr.top)
-	if w < 640 {
-		w = 640
+	if w < 320 {
+		w = 320
 	}
-	if h < 480 {
-		h = 480
+	if h < 320 {
+		h = 320
 	}
 
 	// Paint into memory and copy one finished frame to the window. Direct GDI
@@ -1110,17 +1136,17 @@ func (ui *NativeUI) paint() {
 	fill(hdc, rect{0, 0, int32(w), 86}, colHeader)
 	line(hdc, 0, 86, w, 86, colBorderSoft, 1)
 	text(hdc, title, rect{34, 14, int32(w - 34), 54}, ui.fontTitle, colText, dtLeft|dtSingleLine|dtNoPrefix)
-	text(hdc, subtitle, rect{36, 56, int32(w - 36), 80}, ui.fontSmall, colTextMuted, dtLeft|dtSingleLine|dtNoPrefix)
+	text(hdc, subtitle, rect{36, 54, int32(w - 36), 82}, ui.fontSmall, colTextMuted, dtLeft|dtWordBreak|dtNoPrefix)
 
 	switch s {
 	case screenHome:
 		ui.paintHome(hdc, w, h)
 	case screenSafety:
-		ui.paintCardScreen(hdc, w, h, body, detail, step, total, progress, primary, secondary, false, false, logs, showDetails)
+		ui.paintCardScreen(hdc, w, h, body, detail, step, total, progress, primary, secondary, false, false, logs, showDetails, scrollOffset)
 	case screenRunning:
-		ui.paintCardScreen(hdc, w, h, body, detail, step, total, progress, "", "", true, true, logs, showDetails)
+		ui.paintCardScreen(hdc, w, h, body, detail, step, total, progress, "", "", true, true, logs, showDetails, scrollOffset)
 	case screenWait:
-		ui.paintCardScreen(hdc, w, h, body, detail, step, total, progress, primary, "", false, true, logs, showDetails)
+		ui.paintCardScreen(hdc, w, h, body, detail, step, total, progress, primary, "", false, true, logs, showDetails, scrollOffset)
 	case screenDone:
 		if backupPath != "" && !strings.Contains(body, backupPath) {
 			body += "\n\nEngine file backup:\n" + backupPath
@@ -1129,19 +1155,19 @@ func (ui *NativeUI) paint() {
 		if backupPath != "" {
 			secondary = "Open backup folder"
 		}
-		ui.paintCardScreen(hdc, w, h, body, detail, step, total, 100, "Back to start", secondary, false, true, logs, showDetails)
+		ui.paintCardScreen(hdc, w, h, body, detail, step, total, 100, "Back to start", secondary, false, true, logs, showDetails, scrollOffset)
 	case screenDriverHelp:
 		ui.paintDriverHelp(hdc, w, h, body, detail, logs, showDetails, scrollOffset, driverChoices)
 	case screenBoardChoice:
-		ui.paintBoardChoice(hdc, w, h, boards)
+		ui.paintBoardChoice(hdc, w, h, boards, scrollOffset)
 	case screenPCBProfileChoice:
-		ui.paintPCBProfileChoice(hdc, w, h, pcbChoices)
+		ui.paintPCBProfileChoice(hdc, w, h, pcbChoices, scrollOffset)
 	case screenError:
 		errorSecondary := secondaryState
 		if errorSecondary == "" {
 			errorSecondary = "Open folder"
 		}
-		ui.paintCardScreen(hdc, w, h, body, detail, step, total, progress, "Back to start", errorSecondary, false, true, logs, showDetails)
+		ui.paintCardScreen(hdc, w, h, body, detail, step, total, progress, "Back to start", errorSecondary, false, true, logs, showDetails, scrollOffset)
 	}
 
 	// Footer is intentionally simple.
@@ -1186,8 +1212,15 @@ func (ui *NativeUI) paintHome(hdc uintptr, w, h int) {
 
 func (ui *NativeUI) drawActionCard(hdc uintptr, r rect, heading, body, button, action string) {
 	drawPanel(hdc, r, colPanel, colBorderSoft, 24)
-	text(hdc, heading, rect{r.left + 24, r.top + 26, r.right - 24, r.top + 64}, ui.fontHeading, colText, dtLeft|dtSingleLine|dtNoPrefix)
-	text(hdc, body, rect{r.left + 24, r.top + 82, r.right - 24, r.bottom - 84}, ui.fontBody, colTextMuted, dtLeft|dtWordBreak|dtNoPrefix)
+	text(hdc, heading, rect{r.left + 24, r.top + 22, r.right - 24, r.top + 76}, ui.fontHeading, colText, dtLeft|dtWordBreak|dtNoPrefix)
+	text(hdc, body, rect{r.left + 24, r.top + 86, r.right - 24, r.bottom - 84}, ui.fontBody, colTextMuted, dtLeft|dtWordBreak|dtNoPrefix)
+	if r.right-r.left < 300 {
+		if action == "new" {
+			button = "Install (erases board)"
+		} else {
+			button = "Update (keep setup)"
+		}
+	}
 	br := rect{r.left + 24, r.bottom - 64, r.right - 24, r.bottom - 22}
 	drawButton(hdc, br, button, ui.fontButton, true)
 	ui.addZone(br, action)
@@ -1199,9 +1232,11 @@ func (ui *NativeUI) paintDriverHelp(hdc uintptr, w, h int, body, detail string, 
 	drawPanel(hdc, card, colPanel, colBorderSoft, 24)
 	top := int(card.top) + 28
 	bodyArea := rect{card.left + 28, int32(top), card.right - 28, card.bottom - 226}
+	bodyHeight := measureTextHeight(hdc, body, ui.fontBody, int(bodyArea.right-bodyArea.left))
+	ui.setScrollMax(maxInt(0, bodyHeight-int(bodyArea.bottom-bodyArea.top)+12))
 	saved, _, _ := procSaveDC.Call(hdc)
 	procIntersectClipRect.Call(hdc, uintptr(bodyArea.left), uintptr(bodyArea.top), uintptr(bodyArea.right), uintptr(bodyArea.bottom))
-	text(hdc, body, rect{bodyArea.left, bodyArea.top - int32(scrollOffset), bodyArea.right, bodyArea.top + 520 - int32(scrollOffset)}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
+	text(hdc, body, rect{bodyArea.left, bodyArea.top - int32(scrollOffset), bodyArea.right, bodyArea.top + int32(bodyHeight) - int32(scrollOffset)}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
 	procRestoreDC.Call(hdc, saved)
 	if showDetails {
 		dr := rect{card.left + 28, card.bottom - 218, card.right - 28, card.bottom - 132}
@@ -1259,30 +1294,34 @@ func (ui *NativeUI) paintDriverHelp(hdc uintptr, w, h int, body, detail string, 
 	ui.addZone(try, "retryUSB")
 }
 
-func (ui *NativeUI) paintBoardChoice(hdc uintptr, w, h int, boards []detectedBoard) {
+func (ui *NativeUI) paintBoardChoice(hdc uintptr, w, h int, boards []detectedBoard, scrollOffset int) {
 	card := rect{34, 112, int32(w - 34), int32(h - 78)}
 	drawPanel(hdc, card, colPanel, colBorderSoft, 24)
 	text(hdc, "More than one supported board was found. Nothing will be erased until you choose.", rect{card.left + 28, card.top + 24, card.right - 28, card.top + 62}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
-	y := card.top + 78
+	listTop, listBottom := card.top+78, card.bottom-74
+	ui.setScrollMax(maxInt(0, len(boards)*64-int(listBottom-listTop)))
+	saved, _, _ := procSaveDC.Call(hdc)
+	procIntersectClipRect.Call(hdc, uintptr(card.left+20), uintptr(listTop), uintptr(card.right-20), uintptr(listBottom))
+	y := listTop - int32(scrollOffset)
 	for i, board := range boards {
-		if y+58 > card.bottom-74 {
-			break
-		}
 		r := rect{card.left + 28, y, card.right - 28, y + 52}
 		label := board.Port + "  —  " + board.Chip
 		if i == 0 {
 			label += "  (suggested)"
 		}
 		drawButton(hdc, r, label, ui.fontButton, i == 0)
-		ui.addZone(r, fmt.Sprintf("selectBoard:%d", i))
+		if r.bottom > listTop && r.top < listBottom {
+			ui.addZone(r, fmt.Sprintf("selectBoard:%d", i))
+		}
 		y += 64
 	}
+	procRestoreDC.Call(hdc, saved)
 	cancel := rect{card.left + 28, card.bottom - 58, card.left + 150, card.bottom - 16}
 	drawButton(hdc, cancel, "Cancel", ui.fontButton, false)
 	ui.addZone(cancel, "cancelUSB")
 }
 
-func (ui *NativeUI) paintCardScreen(hdc uintptr, w, h int, body, detail string, step, total, progress int, primary, secondary string, busy bool, canDetails bool, logs []string, showDetails bool) {
+func (ui *NativeUI) paintCardScreen(hdc uintptr, w, h int, body, detail string, step, total, progress int, primary, secondary string, busy bool, canDetails bool, logs []string, showDetails bool, scrollOffset int) {
 	card := rect{34, 112, int32(w - 34), int32(h - 78)}
 	drawPanel(hdc, card, colPanel, colBorderSoft, 24)
 	top := int(card.top) + 28
@@ -1295,21 +1334,42 @@ func (ui *NativeUI) paintCardScreen(hdc uintptr, w, h int, body, detail string, 
 		ui.drawProgress(hdc, rect{card.left + 28, int32(top + 34), card.right - 28, int32(top + 48)}, progress)
 		top += 76
 	}
-	bodyBottom := card.bottom - 150
-	if showDetails && canDetails {
-		bodyBottom = card.bottom - 286
+	buttonRows := 1
+	if canDetails && (primary != "" || secondary != "" || w < 760) {
+		buttonRows = 2
 	}
+	buttonTop := card.bottom - 64
+	auxButtonTop := buttonTop
+	if buttonRows == 2 {
+		auxButtonTop -= 54
+	}
+	bodyBottom := auxButtonTop - 74
+	if showDetails && canDetails {
+		bodyBottom = auxButtonTop - 194
+	}
+	bodyTop := int32(top)
 	if busy {
 		drawStatusBadge(hdc, rect{card.left + 28, int32(top), card.left + 136, int32(top + 32)}, "Working", ui.fontSmall)
-		text(hdc, body, rect{card.left + 28, int32(top + 48), card.right - 28, bodyBottom}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
+		bodyTop = int32(top + 48)
 	} else if requiresConfirmationBadge(primary) {
 		drawStatusBadge(hdc, rect{card.left + 28, int32(top), card.left + 230, int32(top + 32)}, "Confirmation required", ui.fontSmall)
-		text(hdc, body, rect{card.left + 28, int32(top + 48), card.right - 28, bodyBottom}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
-	} else {
-		text(hdc, body, rect{card.left + 28, int32(top), card.right - 28, bodyBottom}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
+		bodyTop = int32(top + 48)
+	}
+	if bodyBottom < bodyTop+28 {
+		bodyBottom = bodyTop + 28
+	}
+	bodyArea := rect{card.left + 28, bodyTop, card.right - 28, bodyBottom}
+	bodyHeight := measureTextHeight(hdc, body, ui.fontBody, int(bodyArea.right-bodyArea.left))
+	ui.setScrollMax(maxInt(0, bodyHeight-int(bodyArea.bottom-bodyArea.top)+10))
+	saved, _, _ := procSaveDC.Call(hdc)
+	procIntersectClipRect.Call(hdc, uintptr(bodyArea.left), uintptr(bodyArea.top), uintptr(bodyArea.right), uintptr(bodyArea.bottom))
+	text(hdc, body, rect{bodyArea.left, bodyArea.top - int32(scrollOffset), bodyArea.right, bodyArea.top + int32(bodyHeight) - int32(scrollOffset)}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
+	procRestoreDC.Call(hdc, saved)
+	if ui.currentScrollMax() > 0 {
+		text(hdc, "Mouse wheel: more text", rect{bodyArea.left, bodyArea.bottom - 20, bodyArea.right, bodyArea.bottom}, ui.fontSmall, colAccent2, dtRight|dtSingleLine|dtNoPrefix)
 	}
 	if showDetails && canDetails {
-		dr := rect{card.left + 28, card.bottom - 274, card.right - 28, card.bottom - 92}
+		dr := rect{card.left + 28, auxButtonTop - 182, card.right - 28, auxButtonTop - 10}
 		drawPanel(hdc, dr, colPanelSoft, colBorder, 14)
 		text(hdc, "Additional information", rect{dr.left + 16, dr.top + 10, dr.right - 16, dr.top + 34}, ui.fontSmall, colText, dtLeft|dtSingleLine|dtNoPrefix)
 		logText := latestLogs(logs, 3)
@@ -1318,25 +1378,28 @@ func (ui *NativeUI) paintCardScreen(hdc uintptr, w, h int, body, detail string, 
 		}
 		text(hdc, logText, rect{dr.left + 16, dr.top + 40, dr.right - 16, dr.bottom - 22}, ui.fontSmall, colTextMuted, dtLeft|dtWordBreak|dtNoPrefix)
 	} else if detail != "" {
-		dr := rect{card.left + 28, card.bottom - 138, card.right - 28, card.bottom - 86}
+		dr := rect{card.left + 28, auxButtonTop - 62, card.right - 28, auxButtonTop - 10}
 		drawPanel(hdc, dr, colPanelSoft, colBorder, 14)
 		text(hdc, detail, rect{dr.left + 16, dr.top + 12, dr.right - 16, dr.bottom - 10}, ui.fontSmall, colTextMuted, dtLeft|dtWordBreak|dtNoPrefix)
 	}
-	by := int(card.bottom) - 64
+	by := int(buttonTop)
 	leftX := card.left + 28
 	if canDetails {
 		label := "Show details"
 		if showDetails {
 			label = "Hide details"
 		}
-		drBtn := rect{leftX, int32(by), leftX + 170, int32(by + 44)}
+		drBtn := rect{leftX, auxButtonTop, leftX + 150, auxButtonTop + 44}
 		drawButton(hdc, drBtn, label, ui.fontButton, false)
 		ui.addZone(drBtn, "details")
-		leftX += 186
-		copyBtn := rect{leftX, int32(by), leftX + 150, int32(by + 44)}
+		leftX += 162
+		copyBtn := rect{leftX, auxButtonTop, leftX + 132, auxButtonTop + 44}
 		drawButton(hdc, copyBtn, "Copy log", ui.fontButton, false)
 		ui.addZone(copyBtn, "copyLog")
-		leftX += 166
+		leftX += 144
+		if buttonRows == 2 {
+			leftX = card.left + 28
+		}
 	}
 	if secondary != "" {
 		sr := rect{leftX, int32(by), leftX + 150, int32(by + 44)}
@@ -1403,6 +1466,47 @@ func (ui *NativeUI) addZone(r rect, action string) {
 	ui.mu.Lock()
 	ui.zones = append(ui.zones, clickZone{r: r, action: action})
 	ui.mu.Unlock()
+}
+
+func (ui *NativeUI) setScrollMax(value int) {
+	if value < 0 {
+		value = 0
+	}
+	ui.mu.Lock()
+	ui.scrollMax = value
+	if ui.scrollOffset > value {
+		ui.scrollOffset = value
+	}
+	ui.mu.Unlock()
+}
+
+func (ui *NativeUI) currentScrollMax() int {
+	ui.mu.Lock()
+	defer ui.mu.Unlock()
+	return ui.scrollMax
+}
+
+func measureTextHeight(hdc uintptr, value string, font uintptr, width int) int {
+	if width < 1 {
+		return 1
+	}
+	r := rect{0, 0, int32(width), 1}
+	old, _, _ := procSelectObject.Call(hdc, font)
+	p := utf16Ptr(value)
+	procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(p)), ^uintptr(0), uintptr(unsafe.Pointer(&r)), dtLeft|dtWordBreak|dtNoPrefix|dtCalcRect)
+	procSelectObject.Call(hdc, old)
+	height := int(r.bottom - r.top)
+	if height < 1 {
+		height = 1
+	}
+	return height
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func fill(hdc uintptr, r rect, color uint32) {
@@ -1722,7 +1826,13 @@ func (j *Job) runNewBoard() {
 		Detail: "Choose the .otpcb.json file supplied with a third-party or self-designed PCB. The file must match the detected ESP chip.",
 		Action: "pcbProfileCustom", Enabled: true,
 	})
-	j.ui().update(uiUpdate{screen: screenPCBProfileChoice, title: "Choose board hardware", subtitle: subtitleForMode(j.mode), mode: j.mode, pcbChoices: choices})
+	j.ui().update(uiUpdate{
+		screen:     screenPCBProfileChoice,
+		title:      "Board found and responsive",
+		subtitle:   friendlyTarget(target) + " on " + port + " answered correctly — select its hardware package.",
+		mode:       j.mode,
+		pcbChoices: choices,
+	})
 	var pcbProfilePath, pcbProfileLabel string
 	for pcbProfilePath == "" && pcbProfileLabel == "" {
 		action := <-j.actionCh
@@ -1876,7 +1986,7 @@ func (j *Job) runExistingUpdate() {
 		return
 	}
 
-	j.set(7, total, 94, "Reconnect for final verification", "The dashboard files were accepted and the board is restarting.\n\nWindows may have switched back to another network. Connect to this OpenTurbine board's Wi-Fi again, wait a few seconds, then click Continue.", "The tool will verify the firmware version and all eleven web assets; it will not report success merely because upload returned quickly.", true)
+	j.set(7, total, 94, "Reconnect for final verification", "The dashboard files were accepted and the board is restarting.\n\nWindows may have switched back to another network. Connect to this OpenTurbine board's Wi-Fi again, wait a few seconds, then click Continue.", "The tool will verify the firmware version and all twelve web assets; it will not report success merely because upload returned quickly.", true)
 	j.waitContinue()
 	if err := waitForECU(75 * time.Second); err != nil {
 		j.fail(errors.New("The files were uploaded, but the tool could not reconnect for final verification. Reconnect to the board Wi-Fi and run Update and keep my setup again; it is safe to repeat."))
@@ -2741,15 +2851,16 @@ func validStableID(value string, max int) bool {
 	return true
 }
 
-func (ui *NativeUI) paintPCBProfileChoice(hdc uintptr, w, h int, choices []pcbProfileChoice) {
+func (ui *NativeUI) paintPCBProfileChoice(hdc uintptr, w, h int, choices []pcbProfileChoice, scrollOffset int) {
 	card := rect{34, 112, int32(w - 34), int32(h - 78)}
 	drawPanel(hdc, card, colPanel, colBorderSoft, 24)
-	text(hdc, "Choose the physical board layout. This choice is written at flash time and cannot be changed from the ECU web page.", rect{card.left + 28, card.top + 22, card.right - 28, card.top + 66}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
-	y := card.top + 78
+	text(hdc, "The board answered over USB. Select the hardware package that matches the physical board. Nothing is erased until the later confirmation.", rect{card.left + 28, card.top + 18, card.right - 28, card.top + 68}, ui.fontBody, colText, dtLeft|dtWordBreak|dtNoPrefix)
+	listTop, listBottom := card.top+78, card.bottom-72
+	ui.setScrollMax(maxInt(0, len(choices)*72-int(listBottom-listTop)))
+	saved, _, _ := procSaveDC.Call(hdc)
+	procIntersectClipRect.Call(hdc, uintptr(card.left+20), uintptr(listTop), uintptr(card.right-20), uintptr(listBottom))
+	y := listTop - int32(scrollOffset)
 	for _, choice := range choices {
-		if y+72 > card.bottom-72 {
-			break
-		}
 		r := rect{card.left + 28, y, card.right - 28, y + 64}
 		drawPanel(hdc, r, colPanelSoft, colBorder, 14)
 		color := colText
@@ -2758,11 +2869,12 @@ func (ui *NativeUI) paintPCBProfileChoice(hdc uintptr, w, h int, choices []pcbPr
 		}
 		text(hdc, choice.Label, rect{r.left + 16, r.top + 9, r.right - 16, r.top + 31}, ui.fontButton, color, dtLeft|dtSingleLine|dtNoPrefix)
 		text(hdc, choice.Detail, rect{r.left + 16, r.top + 34, r.right - 16, r.bottom - 7}, ui.fontSmall, colTextMuted, dtLeft|dtWordBreak|dtNoPrefix)
-		if choice.Enabled && choice.Action != "" {
+		if choice.Enabled && choice.Action != "" && r.bottom > listTop && r.top < listBottom {
 			ui.addZone(r, choice.Action)
 		}
 		y += 72
 	}
+	procRestoreDC.Call(hdc, saved)
 	cancel := rect{card.left + 28, card.bottom - 56, card.left + 150, card.bottom - 14}
 	drawButton(hdc, cancel, "Cancel", ui.fontButton, false)
 	ui.addZone(cancel, "cancelUSB")

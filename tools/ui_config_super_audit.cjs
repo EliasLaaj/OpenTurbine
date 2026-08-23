@@ -72,7 +72,17 @@ async function gotoConfig(page) {
   assert.equal(stateResponse.ok(), true);
   await page.goto(`${base}/config.html`);
   await page.waitForSelector('#cf-eg_src', { state: 'attached' });
-  await page.evaluate(() => document.querySelectorAll('.config-group').forEach(group => { group.open = true; }));
+  await page.evaluate(() => document.querySelectorAll('.config-group,.protection-card').forEach(group => { group.open = true; }));
+}
+
+async function gotoSystem(page) {
+  const stateResponse = await page.request.post(`${base}/__sim/data`, {
+    data: { mode:'STANDBY', config_locked:false }
+  });
+  assert.equal(stateResponse.ok(), true);
+  await page.goto(`${base}/system.html`);
+  await page.waitForSelector('#cf-cl_n1', { state:'attached' });
+  await page.evaluate(() => document.querySelectorAll('.config-group,.protection-card').forEach(group => { group.open = true; }));
 }
 
 async function shown(page, selector) {
@@ -158,11 +168,11 @@ async function sectionVisible(page, title) {
       '#cf-eg_src', '#cf-tot_limit', '#cf-tot_safe_margin', '#cf-tot_cooldown_target',
       '#cf-sf_hs', '#cf-sf_st', '#cf-sf_fo', '#cf-sf_fs',
       '#cf-rh_jt', '#cf-rh_zs',
-      '#cf-th_ru', '#cf-th_rd', '#cf-th_mx', '#cf-th_ex',
-      '#cf-lm_mt', '#cf-ms_is'
     ]) {
       assert.equal(await disabled(page, selector), true, `${selector} should be locked without its hardware`);
     }
+    for (const selector of ['#cf-th_ru', '#cf-th_rd', '#cf-th_mx', '#cf-th_ex', '#cf-lm_mt', '#cf-ms_is'])
+      assert.equal(await page.locator(selector).count(), 0, `${selector} should stay out of a build without its owning output`);
     assert.equal(await sectionVisible(page, 'Cluster'), false);
     assert.equal(await shown(page, '#ab-cfg-section'), false);
     assert.equal(await shown(page, '[data-group="power"]'), false,
@@ -246,16 +256,13 @@ async function sectionVisible(page, title) {
     assert.equal(await shown(page, '#glow-cfg-section'), false, 'glow section should hide without glow plug hardware');
     assert.equal(await shown(page, '#rc-pwm-section'), false, 'RC PWM section should hide without servo PWM inputs');
     await page.locator('#btn-view-explore').click();
-    assert.equal(await shown(page, '#starter-support-section'), true, 'Explore all should reveal unavailable starter assist');
-    assert.equal(await disabled(page, '#cf-sa_en'), true, 'Explore all must not arm starter assist without its hardware prerequisites');
-    assert.equal(await page.locator('#cf-sa_en').evaluate(el => el.closest('.cfg-field').classList.contains('cfg-field-inactive')), true,
-      'future starter-assist values should be visibly marked inactive');
-    assert.match(await page.locator('#starter-support-section').textContent(), /requires.*starter.*N1/i);
+    assert.equal(await page.locator('#starter-support-section').count(), 0,
+      'an output-owned starter controller should not clutter builds without a starter output');
     await page.locator('#btn-view-expert').click();
     assert.equal(await shown(page, '#starter-support-section'), false, 'Configured system should hide unavailable starter assist');
     await page.locator('#btn-view-explore').click();
     await page.locator('#cfg-search').fill('Bendix starter');
-    assert.equal(await shown(page, '#cf-sa_en'), true, 'search should reveal unavailable starter assist fields');
+    assert.equal(await page.locator('#cf-sa_en').count(), 0, 'search must not recreate a controller whose output is not fitted');
     await page.locator('#cfg-search').fill('');
 
     await patchHardware(page, {
@@ -295,8 +302,7 @@ async function sectionVisible(page, title) {
         oil_press: { enabled: false }
       }
     });
-    await gotoConfig(page);
-    await page.locator('#btn-view-expert').click();
+    await gotoSystem(page);
     assert.equal(await page.locator('#cf-cl_en').count(), 0, 'cluster has no redundant Config enable');
     assert.equal(await shown(page, '#cf-cl_n1'), true);
     assert.equal(await disabled(page, '#cf-cl_n1'), false);
@@ -305,14 +311,7 @@ async function sectionVisible(page, title) {
     assert.equal(await disabled(page, '#cf-cl_tw'), true);
     assert.equal(await shown(page, '#cf-cl_ow'), false);
     assert.equal(await disabled(page, '#cf-cl_ow'), true);
-    await page.locator('#btn-view-explore').click();
-    assert.equal(await shown(page, '#cf-cl_n2'), true, 'Explore should expose a future N2 cluster threshold');
-    assert.equal(await disabled(page, '#cf-cl_n2'), false);
-    assert.equal(await shown(page, '#cf-cl_tw'), true);
-    assert.equal(await disabled(page, '#cf-cl_tw'), false);
-    assert.equal(await shown(page, '#cf-cl_ow'), true);
-    assert.equal(await disabled(page, '#cf-cl_ow'), false);
-    results.push('cluster thresholds stay hardware-focused normally and become editable, marked future values in Explore');
+    results.push('System keeps cluster thresholds focused on the sensors fitted to the configured display');
 
     await reset(page);
     console.log('super-audit: TIT-only');
@@ -336,8 +335,8 @@ async function sectionVisible(page, title) {
       actuators: { igniter: { enabled: false } }
     });
     await gotoConfig(page);
-    assert.equal(await disabled(page, '#cf-rl_en'), true);
-    assert.equal(await disabled(page, '#cf-rl_mr'), true);
+    assert.equal(await page.locator('#cf-rl_en').count(), 0);
+    assert.equal(await page.locator('#cf-rl_mr').count(), 0);
 
     await patchHardware(page, {
       actuators: { igniter: { enabled: true } }
@@ -390,17 +389,23 @@ async function sectionVisible(page, title) {
       sensors: { oil_press: { enabled: true }, n1_rpm: { enabled: true }, n2_rpm: { enabled: false } },
       actuators: { oil_pump: { enabled: true }, throttle: { enabled: false } },
       controllers: { dynamic_idle: true },
+      oil_loops: [{ enabled:true, id:'oil1', pressure_input:'oil_pressure_main', pump_output:'oil_pump',
+        target_source:1, target_bar:2.2, target_high_bar:3.1, speed_min_rpm:0, speed_max_rpm:20000,
+        deadband_bar:.2, response_gain:1.8, failsafe_delay_ms:1500, failsafe_demand:.6,
+        min_demand:.18, max_demand:1 }],
       has_two_shaft: false
     });
     await gotoConfig(page);
-    assert.equal(await disabled(page, '#cf-di_tr'), true);
+    assert.equal(await page.locator('#cf-di_tr').count(), 0,
+      'automatic-idle tuning should be absent when there is no Main Fuel output to control');
     await page.locator('#btn-view-expert').click();
-    assert.equal(await disabled(page, '#cf-oil_tm'), false);
-    await page.locator('#cf-oil_tm').uncheck();
-    assert.equal(await disabled(page, '#cf-oil_mx'), true);
-    await page.locator('#cf-oil_tm').check();
-    assert.equal(await disabled(page, '#cf-oil_mx'), false);
-    results.push('dynamic idle and oil throttle map respond to actuator and checkbox prerequisites');
+    const oilCard = page.locator('[data-purpose="oil_pump"]');
+    assert.equal(await oilCard.getByText('Oil Pressure Control', {exact:true}).count() > 0, true);
+    assert.equal(await oilCard.getByLabel('High pressure target (bar)').count(), 1);
+    await oilCard.getByLabel('Pressure target set by').selectOption('0');
+    assert.equal(await oilCard.getByLabel('High pressure target (bar)').count(), 0);
+    assert.equal(await oilCard.getByLabel('Pressure target (bar)').count(), 1);
+    results.push('per-pump oil-pressure controller settings live inside the owning Oil Pump card and follow the selected target source');
 
     await reset(page);
     console.log('super-audit: pressure-only dynamic idle');
@@ -457,11 +462,8 @@ async function sectionVisible(page, title) {
     await gotoConfig(page);
     assert.equal(await disabled(page, '#cf-lm_mt'), false);
     assert.equal(await disabled(page, '#cf-ms_is'), false);
-    assert.equal(await disabled(page, '#cf-gv_tr'), false);
-    assert.equal(await disabled(page, '#cf-gv_kp'), false);
     await page.locator('#btn-view-expert').click();
-    assert.equal(await disabled(page, '#cf-gv_pk'), true);
-    assert.equal(await disabled(page, '#cf-gv_pr'), true);
+    assert.equal(await page.locator('#cf-gv_tr').count(), 0);
 
     await patchHardware(page, {
       has_two_shaft: true,
@@ -471,10 +473,10 @@ async function sectionVisible(page, title) {
     });
     await gotoConfig(page);
     await page.locator('#btn-view-expert').click();
-    assert.equal(await disabled(page, '#cf-gv_tr'), false);
-    assert.equal(await disabled(page, '#cf-gv_pk'), false);
-    assert.equal(await disabled(page, '#cf-gv_pr'), false);
-    results.push('governor fields require N2 and a control output, with prop-pitch tuning locked without prop pitch');
+    assert.equal(await page.locator('#cf-gv_tr').count(), 0);
+    assert.equal(await page.locator('#new-controller-output option[value="prop_pitch"]').count(), 1,
+      'a fitted unowned pitch output should be offered by the unified controller creator');
+    results.push('N2 control uses the unified owning-output controller definition instead of a second legacy governor panel');
 
     await reset(page);
     console.log('super-audit: afterburner missing deps');
@@ -492,22 +494,8 @@ async function sectionVisible(page, title) {
     assert.equal(await shown(page, '#ab-cfg-section'), false, 'Setup hides an afterburner feature with no usable hardware path');
     await page.locator('#btn-view-expert').click();
     assert.equal(await shown(page, '#ab-cfg-section'), false, 'stale afterburner flags must not reveal settings without canonical AB hardware');
-    assert.equal(await disabled(page, '#cf-ab_mn'), true);
-    assert.equal(await disabled(page, '#cf-ab_mx'), true);
-    assert.equal(await disabled(page, '#cf-ab_tt'), true);
-    assert.equal(await disabled(page, '#cf-ab_tpct'), true);
-    assert.equal(await disabled(page, '#cf-ab_tms'), true);
-    assert.equal(await disabled(page, '#cf-ab_ui'), true);
-    assert.equal(await disabled(page, '#cf-ab_ut'), true);
-    assert.equal(await disabled(page, '#cf-ab_mt'), true);
-    assert.equal(await shown(page, '#cf-ab_tr'), false);
-    assert.equal(await disabled(page, '#cf-ab_tr'), true);
-    assert.equal(await shown(page, '#cf-ab_tw'), false);
-    assert.equal(await disabled(page, '#cf-ab_tw'), true);
-    assert.equal(await disabled(page, '#cf-ab_pcm'), true);
-    assert.equal(await optionDisabled(page, '#cf-ab_fm', '0'), true);
-    assert.equal(await optionDisabled(page, '#cf-ab_fm', '1'), true);
-    assert.equal(await optionDisabled(page, '#cf-ab_pcm', '2'), true);
+    for (const selector of ['#cf-ab_mn','#cf-ab_mx','#cf-ab_tt','#cf-ab_tpct','#cf-ab_tms','#cf-ab_ui','#cf-ab_ut','#cf-ab_mt','#cf-ab_tr','#cf-ab_tw','#cf-ab_pcm','#cf-ab_fm'])
+      assert.equal(await page.locator(selector).count(), 0, `${selector} should be absent without an owning AB output`);
     results.push('stale afterburner flags cannot reveal settings without canonical AB hardware');
 
     await reset(page);

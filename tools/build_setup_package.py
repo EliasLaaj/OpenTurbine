@@ -39,12 +39,13 @@ BUILD_ROOTS = [
 WEB_ASSETS = [
     "app.js.gz",
     "calibration.html.gz",
-    "config.html.gz",
+    "controllers.html.gz",
     "hardware.html.gz",
     "index.html.gz",
     "log.html.gz",
     "sequence.html.gz",
     "style.css.gz",
+    "system.html.gz",
     "tools.html.gz",
     "theme.js.gz",
     "ui_dialog.js.gz",
@@ -67,7 +68,7 @@ COMMON_FLASH = [
     ("0x10000", "firmware.bin"),
 ]
 PACKAGE_SCHEMA = 4
-SETUP_TOOL_VERSION = "0.7.0"
+SETUP_TOOL_VERSION = "0.7.1"
 MINIMUM_SETUP_TOOL_VERSION = "0.7.0"
 ESPTOOL_VERSION = "5.3.0"
 

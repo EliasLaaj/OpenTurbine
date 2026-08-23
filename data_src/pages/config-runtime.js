@@ -48,9 +48,19 @@ function updateLiveBadges(d) {
 }
 
 // ── WS integration — track locked state ──────────────────────
+let configTelemetryInstallAttempts = 0;
 function installConfigTelemetryExtension() {
 const _base = window.applyData;
-if (typeof _base !== 'function' || _base._configExtended) return;
+if (typeof _base !== 'function') {
+  // The shared bootstrap loads app.js from the ECU at DOMContentLoaded. On a
+  // cold/mobile connection that synchronous asset request can finish after
+  // this page listener. Retry briefly instead of permanently missing the live
+  // mode/lock extension for the lifetime of the page.
+  if (configTelemetryInstallAttempts++ < 100)
+    setTimeout(installConfigTelemetryExtension, 25);
+  return;
+}
+if (_base._configExtended) return;
 window.applyData = function(d) {
   const merged = _base(d);
   if (!merged) return;
@@ -62,7 +72,7 @@ window.applyData = function(d) {
   const activeMode = ['STARTUP','RUNNING','SHUTDOWN'].includes(runtimeMode);
   // The complete config remains locked in every active mode. On this page,
   // RUNNING Developer Mode exposes only the marked live-tuning fields.
-  const locked = activeMode ? !liveRun : !!d.config_locked;
+  const locked = activeMode ? !liveRun : !!(d.config_locked ?? d.locked);
   if (locked !== isLocked && cfg.profile_id) {
     isLocked = locked;
     renderForm();
@@ -123,6 +133,19 @@ window.applyData = function(d) {
   // Dev Mode button label
 };
 window.applyData._configExtended = true;
+// app.js is injected by the shared DOMContentLoaded bootstrap. Its WebSocket
+// can deliver the first complete frame before this page-specific listener runs.
+// Replay the already merged snapshot immediately so mode locks, fitted-feature
+// visibility, and live badges are correct on the first rendered frame rather
+// than waiting for the next telemetry interval.
+if (typeof _lastData !== 'undefined' && _lastData) window.applyData(_lastData);
+// Controllers and System do not hold a WebSocket merely to learn the ECU mode.
+// Prime the compact status state now; the shared 3 s status heartbeat keeps it
+// current while this page remains open.
+fetch('/api/status', { cache:'no-store' })
+  .then(response => response.ok ? response.json() : null)
+  .then(status => { if (status) window.applyData(status); })
+  .catch(() => {});
 }
 document.addEventListener('DOMContentLoaded', installConfigTelemetryExtension, { once:true });
 
@@ -476,7 +499,7 @@ function applyHwConditions() {
   // Oil Target remains unavailable without pressure feedback; Advanced may
   // display it ghosted as reference, but it must never become editable.
 
-  // Show/hide a no-sensor note inside the Oil System section
+  // Show/hide a no-sensor note inside the oil-pressure controller section.
   let oilNote = document.getElementById('hw-oil-no-sensor-note');
   if (!hasOilPress) {
     if (!oilNote) {
@@ -484,7 +507,7 @@ function applyHwConditions() {
       oilNote.id = 'hw-oil-no-sensor-note';
       oilNote.style.cssText = 'font-size:.72rem;color:var(--yellow);background:rgba(255,196,0,.07);border:1px solid rgba(255,196,0,.3);border-radius:5px;padding:.35rem .65rem;margin:.15rem 0 .45rem;line-height:1.5;grid-column:1/-1';
       oilNote.textContent = 'No oil pressure sensor — closed-loop running-pressure settings are inactive. Set startup oil-pump duty in Sequence > Build Oil Pressure.';
-      // Insert after the Oil System title
+      // Insert after the oil-pressure controller title.
       const oilGrid = oilMpEl?.closest('.cfg-grid');
       if (oilGrid) oilGrid.prepend(oilNote);
     }
@@ -618,7 +641,8 @@ function applyHwConditions() {
   ghostSelectOption('di_src', 1, hasN2, 'N2 speed input is not configured in Hardware.');
   ghostSelectOption('di_src', 2, hasP1, 'P1 pressure input is not configured in Hardware.');
   ghostSelectOption('di_src', 3, hasP2, 'P2 pressure input is not configured in Hardware.');
-  ghostSectionByTitle('Automatic Idle Control', hasDynamicIdle, 'Automatic idle control needs a throttle/fuel output and one installed N1, N2, P1 or P2 sensor.');
+  // Idle remains available for its normal fuel range even when automatic
+  // feedback is off. Individual Automatic Idle fields are gated above.
 
   const starterAssistAvailable = _hasStarterSupportCfg;
   ['sa_en','sa_pc','sa_er','sa_on','sa_off'].forEach(k => ghostField(k, starterAssistAvailable,
@@ -808,17 +832,27 @@ function revealConfigDeepLink() {
 
 document.addEventListener('DOMContentLoaded', () => {
 (async () => {
-  return Promise.all([
-    fetchJsonWithRetry('/api/config'),
-    fetchJsonWithRetry('/api/hardware')
-  ]);
+  // These are the ECU's two largest configuration documents and share one
+  // bounded transfer buffer. Read them in order so an ordinary page open never
+  // has to recover from an expected HTTP 409 collision.
+  const loadedConfig = await fetchJsonWithRetry('/api/config');
+  const loadedHardware = await fetchJsonWithRetry('/api/hardware');
+  return [loadedConfig, loadedHardware];
 })()
   .then(([c, hw]) => {
     cfg   = c;
     hwCfg = hw;
+    const controllerMigrated = CONFIG_SURFACE === 'controllers' && migrateLegacyControllerDefinitions();
     renderForm();
     _applyAllVisibility();
     _clearDirty();       // baseline after dependency selectors finish normalizing
+    if (controllerMigrated) {
+      _controllerRulesDirty = true;
+      _controllerHardwareDirty = true;
+      _markDirty();
+      const badge = document.getElementById('cfg-state-badge');
+      if (badge) badge.textContent = 'Review migrated controls';
+    }
     applyView();
     hookValidation();
     runValidation();

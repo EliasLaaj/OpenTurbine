@@ -19,7 +19,7 @@ function installedBrowser() {
   const screenshotDir = process.argv[4] || path.join(os.tmpdir(), 'openturbine-live-audit');
   fs.mkdirSync(screenshotDir, { recursive: true });
   const dwellMs = Number(process.argv[5] || 1000);
-  const pages = ['/', '/hardware.html', '/config.html', '/calibration.html', '/sequence.html', '/log.html', '/tools.html'];
+  const pages = ['/', '/hardware.html', '/controllers.html', '/system.html', '/calibration.html', '/sequence.html', '/log.html', '/tools.html'];
   const failures = [];
   const recoveredApiFailures = [];
   const browser = await chromium.launch({ headless: true, ...(installedBrowser() ? { executablePath: installedBrowser() } : {}) });
@@ -28,6 +28,17 @@ function installedBrowser() {
     localStorage.setItem('ot_beta_notice_ack_v1', '1');
     localStorage.setItem('ot_theme_onboarded_v1', '1');
     localStorage.setItem('ot_theme', 'carbon');
+    window.__otOversizedOperatorSeen = false;
+    document.addEventListener('DOMContentLoaded', () => {
+      const check = () => {
+        if (document.querySelector(
+          '.registry-input-card[data-registry-input-id="operator_throttle"], ' +
+          '.registry-input-card[data-registry-input-id="operator_idle"]'
+        )) window.__otOversizedOperatorSeen = true;
+      };
+      check();
+      new MutationObserver(check).observe(document.body, { childList: true, subtree: true });
+    }, { once: true });
   });
   const page = await context.newPage();
   let navigationEpoch = 0;
@@ -102,29 +113,70 @@ function installedBrowser() {
   }
 
   await navigate(`${base}/`, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#di-states-wrap:not([style*="display: none"])', { timeout: 10000 });
-  await page.waitForSelector('#operator-input-row:not([style*="display: none"])', { timeout: 10000 });
-  await page.waitForFunction(() =>
-    /^\d+(?:\.\d+)?$/.test(document.getElementById('registry-input-value-operator_throttle')?.textContent || '') &&
-    /^\d+(?:\.\d+)?$/.test(document.getElementById('registry-input-value-operator_idle')?.textContent || ''),
-  null, { timeout: 7000 });
+  // Wait for the dashboard's own serialized inventory request instead of
+  // opening a competing API connection on memory-constrained Classic boards.
+  await page.waitForFunction(() => {
+    const visible = element => element && getComputedStyle(element).display !== 'none';
+    return visible(document.getElementById('di-states-wrap')) ||
+      visible(document.getElementById('operator-input-row'));
+  }, null, { timeout: 15000 });
+  await page.waitForFunction(() => {
+    const visible = element => element && getComputedStyle(element).display !== 'none';
+    const numeric = id => /^\d+(?:\.\d+)?$/.test(document.getElementById(id)?.textContent || '');
+    const throttleReady = !visible(document.getElementById('operator-throttle-wrap')) ||
+      numeric('registry-input-value-operator_throttle');
+    const idleReady = !visible(document.getElementById('operator-idle-wrap')) ||
+      numeric('registry-input-value-operator_idle');
+    const switchesReady = !visible(document.getElementById('di-states-wrap')) ||
+      /(?:ON|OFF)/.test(document.getElementById('di-state-items')?.textContent || '');
+    return throttleReady && idleReady && switchesReady;
+  }, null, { timeout: 10000 });
   const compactDashboard = await page.evaluate(() => ({
+    switchesVisible: getComputedStyle(document.getElementById('di-states-wrap')).display !== 'none',
+    throttleVisible: getComputedStyle(document.getElementById('operator-throttle-wrap')).display !== 'none',
+    idleVisible: getComputedStyle(document.getElementById('operator-idle-wrap')).display !== 'none',
     switches: document.getElementById('di-state-items')?.textContent || '',
     throttle: document.getElementById('registry-input-value-operator_throttle')?.textContent || '',
     idle: document.getElementById('registry-input-value-operator_idle')?.textContent || '',
+    operatorCardFlashSeen: window.__otOversizedOperatorSeen === true,
     oversizedSwitchCards: document.querySelectorAll(
-      '[data-registry-input-id="start_switch"], [data-registry-input-id="stop_switch"], ' +
-      '[data-registry-input-id="operator_throttle"], [data-registry-input-id="operator_idle"]'
+      '.registry-input-card[data-registry-input-id="start_switch"], ' +
+      '.registry-input-card[data-registry-input-id="stop_switch"], ' +
+      '.registry-input-card[data-registry-input-id="operator_throttle"], ' +
+      '.registry-input-card[data-registry-input-id="operator_idle"]'
     ).length,
   }));
-  assert.match(compactDashboard.switches, /Start Switch\s*(?:ON|OFF).*Stop Switch\s*(?:ON|OFF)/s);
-  assert.match(compactDashboard.throttle, /^\d+(?:\.\d+)?$/);
-  assert.match(compactDashboard.idle, /^\d+(?:\.\d+)?$/);
+  if (compactDashboard.switchesVisible) assert.match(compactDashboard.switches, /(?:ON|OFF)/s);
+  if (compactDashboard.throttleVisible) assert.match(compactDashboard.throttle, /^\d+(?:\.\d+)?$/);
+  if (compactDashboard.idleVisible) assert.match(compactDashboard.idle, /^\d+(?:\.\d+)?$/);
   assert.equal(compactDashboard.oversizedSwitchCards, 0,
     'switch, throttle, or idle input regressed into an oversized sensor card');
+  assert.equal(compactDashboard.operatorCardFlashSeen, false,
+    'throttle or idle briefly flashed as an oversized sensor card during dashboard startup');
+  assert.equal(await page.locator('#btn-limited-start, #btn-confirm-limited-start').count(), 0,
+    'dashboard still contains a duplicate reduced-power START action');
+  const failedSensorSamples = [];
+  for (let sample = 0; sample < 12; sample++) {
+    failedSensorSamples.push(await page.evaluate(() => ({
+      totFault: document.getElementById('tot-health')?.classList.contains('fault') === true,
+      tot: document.getElementById('tot')?.textContent || '',
+      titFault: document.getElementById('tit-health')?.classList.contains('fault') === true,
+      tit: document.getElementById('tit')?.textContent || '',
+      oilFault: document.getElementById('oil-health')?.classList.contains('fault') === true,
+      oil: document.getElementById('oil')?.textContent || '',
+    })));
+    await page.waitForTimeout(250);
+  }
+  for (const sensor of ['tot', 'tit', 'oil']) {
+    const faultKey = `${sensor}Fault`;
+    if (failedSensorSamples.some(sample => sample[faultKey])) {
+      assert.deepEqual([...new Set(failedSensorSamples.filter(sample => sample[faultKey]).map(sample => sample[sensor]))], ['—'],
+        `${sensor.toUpperCase()} failed reading oscillated instead of remaining unavailable`);
+    }
+  }
   await page.screenshot({ path: path.join(screenshotDir, 'dashboard-compact-inputs.png'), fullPage: true });
 
-  await navigate(`${base}/config.html`, { waitUntil: 'domcontentloaded' });
+  await navigate(`${base}/controllers.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#cf-sf_p1t', { state: 'attached' });
   await page.evaluate(() => {
     document.querySelectorAll('.config-group').forEach(group => { group.open = true; });
@@ -137,7 +189,7 @@ function installedBrowser() {
   for (const key of ['pb_p1s', 'pb_p1h', 'pb_p2s', 'pb_p2h']) {
     assert.match(await page.locator(`#cf-${key}`).evaluate(el => el.closest('.cfg-field').querySelector('.cfg-label').textContent), /bar|PSI|kPa/);
   }
-  await page.screenshot({ path: path.join(screenshotDir, 'classic-config-mobile.png'), fullPage: true });
+  await page.screenshot({ path: path.join(screenshotDir, 'controllers-mobile.png'), fullPage: true });
 
   await navigate(`${base}/log.html`, { waitUntil: 'domcontentloaded' });
   await page.locator('#tab-session').click();

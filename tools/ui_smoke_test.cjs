@@ -31,7 +31,7 @@ async function scenario(page, name) {
 
 async function openConfigWorkspace(page) {
   await page.waitForSelector('.config-group', { state: 'attached' });
-  await page.evaluate(() => document.querySelectorAll('.config-group').forEach(group => { group.open = true; }));
+  await page.evaluate(() => document.querySelectorAll('.config-group,.protection-card').forEach(group => { group.open = true; }));
 }
 
 function installedBrowser() {
@@ -56,6 +56,7 @@ function installedBrowser() {
     await dialog.dismiss();
   });
   const results = [];
+  let saved;
 
   try {
     await page.goto(base);
@@ -96,6 +97,25 @@ function installedBrowser() {
     assert.equal(await page.locator('[data-registry-input-id="start_switch"]').count(), 0);
     assert.equal(await page.locator('[data-registry-input-id="stop_switch"]').count(), 0);
     assert.match(await text(page, '#di-state-items'), /Start Switch\s*OFF.*Stop Switch\s*OFF/s);
+    const compactRender = await page.evaluate(() => {
+      renderRegistryInputCards({ registry_inputs: [
+        { id: 'operator_throttle', value: .42, healthy: true },
+        { id: 'operator_idle', value: .17, healthy: true },
+        { id: 'start_switch', value: 0, healthy: true },
+        { id: 'stop_switch', value: 0, healthy: true }
+      ] });
+      return {
+        throttle: document.getElementById('registry-input-value-operator_throttle')?.textContent,
+        idle: document.getElementById('registry-input-value-operator_idle')?.textContent,
+        switches: document.getElementById('di-state-items')?.textContent
+      };
+    });
+    assert.equal(await page.locator('.registry-input-card').count(), 0);
+    assert.equal(compactRender.throttle, '42.0');
+    assert.equal(compactRender.idle, '17.0');
+    assert.match(compactRender.switches, /Start Switch\s*OFF.*Stop Switch\s*OFF/s);
+    await scenario(page, 'full');
+    await page.waitForFunction(() => document.getElementById('di-state-items')?.textContent?.includes('Maintenance Interlock'));
     assert.equal(await page.evaluate(() =>
       ['tot-card', 'tit-card', 'n1-card', 'n2-card'].every(id =>
         document.getElementById(id)?.classList.contains('big')) &&
@@ -186,6 +206,32 @@ function installedBrowser() {
     assert.match(await text(page, '.ot-dialog-message'), /START is no longer available.*telemetry is stale/is);
     await page.locator('#ot-dialog-confirm').click();
     results.push('start confirmation exposes compact live ECU start checks before command');
+
+    await page.request.post(`${base}/__sim/data`, { data: {
+      mode: 'STANDBY', tot: 731, tot_healthy: false, limited_start_allowed: true,
+      limited_start_sensor: 'TOT', limp_throttle_cap: 35
+    } });
+    await page.waitForFunction(() => _lastData?.limited_start_allowed === true);
+    const failedTotSparkLength = await page.evaluate(() => _sparkTot.length);
+    assert.equal(await text(page, '#tot'), '—');
+    await page.request.post(`${base}/__sim/data`, { data: { tot: 812, tot_healthy: false } });
+    await page.waitForFunction(() => Number(_lastData?.tot) === 812);
+    assert.equal(await text(page, '#tot'), '—');
+    assert.equal(await page.evaluate(() => _sparkTot.length), failedTotSparkLength);
+    await page.evaluate(() => showStartConfirm());
+    assert.equal(await page.locator('#btn-limited-start').count(), 0);
+    assert.equal(await page.locator('#btn-confirm-limited-start').count(), 0);
+    assert.equal(await text(page, '#btn-confirm-start'), 'Start Reduced Power');
+    assert.equal(await page.locator('#btn-confirm-start').isDisabled(), false);
+    assert.match(await text(page, '#start-confirm-checks'), /TOT feedback is unavailable.*fuel cap.*afterburner.*unrelated interlock/is);
+    await page.locator('#btn-confirm-start').click();
+    await page.waitForFunction(() => _lastData?.mode === 'STARTUP' && _lastData?.limp_mode === true);
+    saved = await state(page);
+    assert.ok(saved.commands.some(command => command.cmd === 'START_LIMITED'));
+    results.push('one eligible sensor failure changes the single confirmation action to reduced-power start and keeps failed readings stable');
+    await scenario(page, 'full');
+    await page.waitForFunction(() => _lastData?.mode === 'RUNNING' && Number(_lastData?.throttle_demand) === 0.61);
+
     assert.equal((await text(page, '#getting-started-banner')).match(/[⚙🔧📋🔨▶]/u), null);
     assert.equal(await page.locator('.gs-steps a').first().evaluate(el => getComputedStyle(el).color), 'rgb(245, 245, 247)');
     results.push('getting-started checklist uses the high-contrast text colour for plain-text actions');
@@ -285,7 +331,7 @@ function installedBrowser() {
     await page.waitForFunction(() => document.getElementById('tot')?.textContent?.includes('640'));
     await page.waitForTimeout(450);
     await page.goto(`${base}/config.html`);
-    await page.waitForSelector('#cf-tot_limit');
+    await page.waitForSelector('#cf-tot_limit', {state:'attached'});
     await openConfigWorkspace(page);
     await page.goto(base);
     await waitShown(page, '#n1-card', true);
@@ -368,14 +414,14 @@ function installedBrowser() {
     assert.equal(await text(page, '#fault-desc-text'), longFault);
     assert.equal(await page.locator('#fault-desc-text').evaluate(el =>
       ['anywhere', 'break-word'].includes(getComputedStyle(el).overflowWrap)), true);
-    for (const route of ['/log.html', '/calibration.html', '/config.html', '/tools.html'])
+    for (const route of ['/log.html', '/calibration.html', '/controllers.html', '/tools.html'])
       assert.equal(await page.locator(`#fault-card a[href="${route}"]`).count(), 1);
     results.push('fault scenario exposes the current diagnosis and direct investigation routes');
 
     await scenario(page, 'full');
     await page.request.post(`${base}/__sim/data`, { data: { mode:'STANDBY', config_locked:false } });
     await page.goto(`${base}/config.html`);
-    await page.waitForSelector('#cf-tot_limit');
+    await page.waitForSelector('#cf-tot_limit', {state:'attached'});
     await openConfigWorkspace(page);
     assert.equal(await page.locator('#cf-tot_limit').inputValue(), '1328');
     assert.equal(await page.locator('#cf-tot_safe_margin').inputValue(), '72');
@@ -388,6 +434,31 @@ function installedBrowser() {
     assert.equal(await page.locator('#unit-press-btn').textContent(),
       (await page.locator('#cf-oil_rm').evaluate(el => el.closest('.cfg-field').querySelector('.cfg-label').textContent.includes('PSI'))) ? 'PSI' : 'bar');
     results.push('config loads converted values without duplicating control-rule editing');
+
+    await page.setViewportSize({ width: 412, height: 915 });
+    await page.evaluate(() => document.querySelector('.save-bar').classList.add('is-dirty'));
+    const mobileSaveBar = await page.locator('.save-bar').evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return { left:r.left, right:r.right, bottom:innerHeight-r.bottom, width:r.width,
+        position:getComputedStyle(el).position, viewport:innerWidth,
+        docWidth:document.documentElement.scrollWidth };
+    });
+    assert.ok(mobileSaveBar.left >= 7 && mobileSaveBar.right <= mobileSaveBar.viewport - 7);
+    assert.equal(mobileSaveBar.position, 'fixed');
+    assert.ok(mobileSaveBar.bottom >= 7 && mobileSaveBar.bottom <= 16);
+    assert.ok(mobileSaveBar.docWidth <= mobileSaveBar.viewport);
+    await page.evaluate(() => document.querySelector('.save-bar').classList.remove('is-dirty'));
+    await page.setViewportSize({ width: 1280, height: 720 });
+    results.push('mobile Config save bar stays inside the viewport without creating horizontal overflow');
+
+    await page.request.post(`${base}/__sim/data`, { data: { mode:'RUNNING', dev_mode:true, config_locked:true } });
+    await page.waitForFunction(() => runtimeMode === 'RUNNING' && runtimeDevMode === true);
+    for (const id of ['#cf-th_ru','#cf-di_tr','#cf-di_db','#cf-di_ig'])
+      assert.equal(await page.locator(id).isEnabled(), true, `${id} should be live-editable in RUNNING Developer Mode`);
+    assert.equal(await page.locator('#cf-tot_limit').isDisabled(), true);
+    await page.request.post(`${base}/__sim/data`, { data: { mode:'STANDBY', dev_mode:true, config_locked:false } });
+    await page.waitForFunction(() => runtimeMode === 'STANDBY');
+    results.push('RUNNING Developer Mode exposes live-safe controller response values and ramps, while structural safety settings remain locked');
 
     await page.locator('#unit-temp-btn').click();
     assert.equal(await page.locator('#cf-tot_limit').inputValue(), '720');
@@ -408,7 +479,7 @@ function installedBrowser() {
     await page.locator('#ot-dialog-confirm').click();
     await page.locator('#save-recap-confirm-btn').click();
     await page.waitForFunction(() => document.querySelector('#save-msg').textContent.includes('Saved'));
-    let saved = await state(page);
+    saved = await state(page);
     assert.ok(Math.abs(saved.settings.engine.tot_limit - 660) < 0.001);
     assert.ok(Math.abs(saved.settings.engine.tot_safe_margin - 50) < 0.001);
     assert.ok(Math.abs(saved.settings.oil.running_min - 2) < 0.001);
@@ -442,10 +513,25 @@ function installedBrowser() {
     assert.equal(saved.settings.calibration.throttle_max_raw, 1872); // -1% of 760 span
     results.push('servo throttle calibration averages endpoints and persists the 2%/1% safety margins');
 
+    assert.deepEqual(await page.locator('#flame-noise-mode option').allTextContents(), [
+      'Fire igniter while sampling (recommended)',
+      'Keep igniter off / use external flame source'
+    ]);
+    await page.evaluate(() => {
+      oilPts = [{ raw: 500, b: 0 }];
+      oilCalActive = true;
+      document.getElementById('oil-mv-bar').value = '500';
+      oilUseDatasheet();
+    });
+    assert.equal(await page.locator('#oil-step-3').isVisible(), true);
+    assert.equal(await page.evaluate(() => oilPts.length), 2);
+    assert.match(await text(page, '#oil-fit-summary'), /Datasheet straight-line calibration/);
+    results.push('flame calibration makes igniter-off capture explicit and oil datasheet calibration creates a saveable curve');
+
     await page.goto(`${base}/hardware.html`);
     await page.waitForFunction(() => /Loaded|Converted/i.test(document.querySelector('#save-msg')?.textContent || ''));
     assert.equal(await page.evaluate(() => cfg.sensors.throttle_input.rc_pwm), true);
-    assert.equal(await page.locator('#f-wifi-tx-power').inputValue(), '8');
+    assert.equal(await page.evaluate(() => Number(cfg.wifi_tx_power_dbm)), 8);
     results.push('hardware page restores servo-input source from saved hardware state');
     await page.evaluate(() => addRegistryChannel('input'));
     const inputCatalog = await text(page, '#registry-add-catalog');
@@ -573,6 +659,7 @@ function installedBrowser() {
     results.push('hardware save merges only page-owned edits and dependency cleanup onto the latest engine file');
 
     await page.request.patch(`${base}/api/hardware`, { data: { platform: 'esp32s3' } });
+    await page.evaluate(() => { _hwDirty = false; });
     await page.reload();
     await page.waitForFunction(() => /Loaded|Converted/i.test(document.querySelector('#save-msg')?.textContent || ''));
     assert.deepEqual(await page.evaluate(() => ({
@@ -647,6 +734,42 @@ function installedBrowser() {
     } });
     await page.goto(`${base}/sequence.html`);
     await page.waitForFunction(() => document.body.textContent.includes('Oil Pump On'));
+    const reorderHandles = page.locator('#list-startup .drag-handle');
+    assert.equal(await reorderHandles.count(), await page.locator('#list-startup .block-card').count());
+    assert.match(await reorderHandles.first().getAttribute('aria-label'), /arrow keys/i);
+    const initialBlockOrder = await page.locator('#list-startup .block-card').evaluateAll(cards => cards.map(card => card.dataset.block));
+    const draggedHandle = page.locator(`#list-startup .block-card[data-block="${initialBlockOrder[0]}"] .drag-handle`).first();
+    await draggedHandle.scrollIntoViewIfNeeded();
+    const firstHandleBox = await draggedHandle.boundingBox();
+    const secondCardBox = await page.locator('#list-startup .block-card').nth(1).boundingBox();
+    assert.ok(firstHandleBox && secondCardBox);
+    const pointerId = 7;
+    await draggedHandle.dispatchEvent('pointerdown', {
+      pointerId, pointerType: 'touch', button: 0,
+      clientX: firstHandleBox.x + firstHandleBox.width / 2,
+      clientY: firstHandleBox.y + firstHandleBox.height / 2
+    });
+    await draggedHandle.dispatchEvent('pointermove', {
+      pointerId, pointerType: 'touch', button: 0,
+      clientX: secondCardBox.x + secondCardBox.width / 2,
+      clientY: secondCardBox.y + secondCardBox.height * .8
+    });
+    await draggedHandle.dispatchEvent('pointerup', {
+      pointerId, pointerType: 'touch', button: 0,
+      clientX: secondCardBox.x + secondCardBox.width / 2,
+      clientY: secondCardBox.y + secondCardBox.height * .8
+    });
+    await page.waitForFunction(first => document.querySelectorAll('#list-startup .block-card')[1]?.dataset.block === first, initialBlockOrder[0]);
+    await page.evaluate(() => moveBlockTo('startup', 1, 0));
+    assert.deepEqual(await page.locator('#list-startup .block-card').evaluateAll(cards => cards.map(card => card.dataset.block)), initialBlockOrder);
+    const finalStateColumns = await page.locator('#final-state-startup .fs-row').evaluateAll(rows => rows.map(row => {
+      const label = row.querySelector('.fs-label').getBoundingClientRect();
+      const value = row.querySelector('.fs-val').getBoundingClientRect();
+      return { labelX: Math.round(label.x), valueX: Math.round(value.x), width: Math.round(row.getBoundingClientRect().width) };
+    }));
+    assert.equal(new Set(finalStateColumns.map(row => row.labelX)).size, 1);
+    assert.equal(new Set(finalStateColumns.map(row => row.valueX)).size, 1);
+    assert.equal(new Set(finalStateColumns.map(row => row.width)).size, 1);
     const delayInputs = page.locator('#list-startup .block-card[data-block="TimedDelay"] input[type="number"]');
     assert.equal(await delayInputs.count(), 3);
     assert.deepEqual(await delayInputs.evaluateAll(els => els.map(el => el.value)), ['15000', '10000', '5000']);
@@ -671,7 +794,7 @@ function installedBrowser() {
     await page.locator('#ab-edit-min-n1').dispatchEvent('input');
     assert.equal(await page.evaluate(() => hwCfg.ab_trigger.input_threshold), Math.round(72 * 4095 / 100));
     assert.equal(await page.evaluate(() => cfg.afterburner.min_n1), 50000);
-    results.push('sequence editor keeps independent timed delays and edits AB input/gate thresholds in friendly units');
+    results.push('sequence editor drag-reorders blocks, keeps independent delays, and edits AB gates in friendly units');
     await page.goto(`${base}/hardware.html`);
     await page.waitForFunction(() => /Loaded|Converted/i.test(document.querySelector('#save-msg')?.textContent || ''));
     assert.equal(await page.evaluate(() => cfg.ab_trigger.input_rc_pwm), true);
@@ -705,7 +828,8 @@ function installedBrowser() {
     assert.equal(await page.evaluate(() => registryHasPurpose('input', 'n2_speed')), true);
     assert.equal(await page.evaluate(() => controllerAvailability('governor').ok && cfg.controllers.governor), true);
     results.push('fitted N2 and registry fuel output enable the governor without a legacy two-shaft master');
-    await page.goto(`${base}/config.html`);
+    await page.evaluate(() => { _hwDirty = false; });
+    await page.goto(`${base}/controllers.html`);
     await openConfigWorkspace(page);
     assert.equal(await page.locator('#cf-ab_pcm').inputValue(), '1');
     assert.equal(await page.locator('#cf-ab_fm option[value="0"]').isDisabled(), false);
@@ -726,16 +850,14 @@ function installedBrowser() {
       }
     } });
     await page.reload();
-    assert.equal(await page.locator('#cf-ab_fm option[value="0"]').isDisabled(), true);
-    assert.equal(await page.locator('#cf-ab_fm option[value="1"]').isDisabled(), false);
-    assert.equal(await page.locator('#cf-ab_pcm option[value="2"]').isDisabled(), true);
-    assert.equal(await page.locator('#cf-ab_ui').isDisabled(), true);
-    results.push('config editor ghosts afterburner choices whose hardware is unavailable');
+    assert.equal(await page.locator('#cf-ab_fm').count(), 0);
+    assert.equal(await page.locator('#cf-ab_pcm').count(), 0);
+    assert.equal(await page.locator('#cf-ab_ui').count(), 0);
+    results.push('Controllers removes afterburner-only settings when their output controller hardware is unavailable');
     await page.goto(`${base}/sequence.html`);
-    await page.locator('.seq-tab', { hasText: 'Control Rules' }).click();
-    assert.equal(await page.locator('#tab-rules iframe').count(), 0);
-    assert.equal(await page.locator('#rule-sensor-0 option[value="13"]').isDisabled(), true);
-    assert.equal(await page.locator('#rule-act-0 option[value="1"]').isDisabled(), true);
+    assert.equal(await page.locator('.seq-tab', { hasText: 'Control Rules' }).count(), 0);
+    assert.equal((await page.evaluate(() => getEnabledSensors().map(row => row.key))).includes('p1'), false);
+    assert.equal((await page.evaluate(() => getEnabledActuators().map(row => row.key))).includes('bleed_valve'), false);
     await page.request.patch(`${base}/api/hardware`, { data: {
       has_afterburner: false,
       has_two_shaft: false,
@@ -748,10 +870,9 @@ function installedBrowser() {
     await page.waitForFunction(() => document.querySelector('#save-status')?.textContent === 'No unsaved changes');
     assert.equal(await page.locator('#add-afterburner-sel option[value="ABPumpOn"]').count(), 1);
     assert.equal(await page.locator('#add-afterburner-sel option[value="ABSolOpen"]').count(), 1);
-    await page.locator('.seq-tab', { hasText: 'Control Rules' }).click();
-    assert.equal(await page.locator('#rule-sensor-0 option[value="6"]').isDisabled(), false);
-    assert.equal(await page.locator('#rule-sensor-0 option[value="24"]').isDisabled(), false);
-    assert.equal(await page.locator('#rule-act-0 option[value="11"]').isDisabled(), false);
+    assert.equal((await page.evaluate(() => getEnabledSensors().map(row => row.key))).includes('n2_rpm'), true);
+    assert.equal((await page.evaluate(() => getEnabledSensors().map(row => row.key))).includes('ab_input'), true);
+    assert.equal((await page.evaluate(() => getEnabledActuators().map(row => row.key))).includes('ab_sol'), true);
     results.push('sequence derives N2 and afterburner choices from fitted devices, ignoring legacy master flags');
 
     const automationState = await state(page);
@@ -764,37 +885,101 @@ function installedBrowser() {
         { id: 'warning_lamp_pwm', name: 'Warning Lamp', purpose: 'generic', role: 'generic', driver: 5, pin: 38, min: 0, max: 1, installed: true }
       ])
     } } });
-    await page.reload();
-    await page.locator('.seq-tab', { hasText: 'Control Rules' }).click();
-    const dimmerPreset = page.locator('[data-rule-preset="adc_pwm_dimmer"]');
-    assert.equal(await dimmerPreset.getAttribute('aria-disabled'), 'false');
-    await dimmerPreset.click();
-    assert.equal(await page.locator('#rules-list .automation-card').count(), 2);
-    assert.equal(await page.locator('#rule-kind-1').inputValue(), '1');
-    assert.match(await page.locator('#rule-sensor-1 option:checked').textContent(), /Lamp Dimmer/);
-    assert.match(await page.locator('#rule-act-1 option:checked').textContent(), /Warning Lamp/);
-    assert.equal(await page.locator('#rule-mode-standby-1').isChecked(), false);
-    assert.equal(await page.locator('#rule-mode-startup-1').isChecked(), true);
-    assert.equal(await page.locator('#rule-mode-running-1').isChecked(), true);
-    assert.equal(await page.locator('#rule-mode-shutdown-1').isChecked(), true);
-    await page.locator('#rule-in-min-1').fill('10');
-    await page.locator('#rule-in-max-1').fill('90');
-    await page.locator('#rule-out-min-1').fill('15');
-    await page.locator('#rule-out-max-1').fill('65');
-    await page.locator('#save-btn').click();
-    await page.locator('#ot-dialog-confirm').click();
-    await page.waitForFunction(() => document.querySelector('#reboot-overlay')?.classList.contains('show'));
+    await page.goto(`${base}/controllers.html`);
+    await page.waitForSelector('#simple-controls');
+    const starterOwnerCard = page.locator('#controller-overview details[data-purpose="starter"]');
+    const igniterOwnerCard = page.locator('#controller-overview details[data-purpose="igniter"]');
+    await starterOwnerCard.locator(':scope > summary').click();
+    await igniterOwnerCard.locator(':scope > summary').click();
+    assert.equal(await starterOwnerCard.locator('#starter-support-section').count(), 1);
+    assert.equal(await igniterOwnerCard.locator('#relight-section').count(), 1);
+    assert.equal(await igniterOwnerCard.locator('#manual-relight-section').count(), 1);
+    const creator = page.locator('#controller-overview .controller-create-card');
+    await creator.locator('#new-controller-output').selectOption('warning_lamp_pwm');
+    await creator.getByRole('button', {name:'Create controller'}).click();
+    const simpleCard = page.locator('#controller-overview [data-controller-output="warning_lamp_pwm"]');
+    if (!(await simpleCard.evaluate((el) => el.open))) {
+      await simpleCard.locator(':scope > summary').click();
+    }
+    await simpleCard.getByLabel('Control method').selectOption('1');
+    await simpleCard.getByLabel('Controlled by').selectOption('lamp_dimmer_knob');
+    await page.evaluate(() => {
+      const index = cfg.rules.length - 1;
+      updateSimpleControl(index, 'input_min', 0.1);
+      updateSimpleControl(index, 'input_max', 0.9);
+      updateSimpleControl(index, 'output_min', 0.15);
+      updateSimpleControl(index, 'output_max', 0.65);
+      toggleSimpleControlMode(index, 1, true);
+    });
+    const simpleRule = await page.evaluate(() => cfg.rules.at(-1));
+    response = await page.request.patch(`${base}/api/config`, {data:{rules:[simpleRule]}});
+    assert.equal(response.ok(), true);
     saved = await state(page);
-    assert.equal(saved.hardware.profile_id, saved.settings.profile_id);
-    assert.equal(saved.hardware.startup_delay_ms[6], 6000);
-    assert.equal(saved.settings.rules.length, 2);
-    assert.equal(saved.settings.rules[1].kind, 1);
-    assert.equal(saved.settings.rules[1].mode_mask, 14);
-    assert.equal(saved.settings.rules[1].input_min, 0.1);
-    assert.equal(saved.settings.rules[1].input_max, 0.9);
-    assert.equal(saved.settings.rules[1].output_min, 0.15);
-    assert.equal(saved.settings.rules[1].output_max, 0.65);
-    results.push('control rules expose each engine state directly and preserve canonical percentage saves');
+    assert.equal(saved.settings.rules.length, 1);
+    assert.equal(saved.settings.rules[0].kind, 1);
+    assert.equal(saved.settings.rules[0].mode_mask, 5);
+    assert.equal(saved.settings.rules[0].input_min, 0.1);
+    assert.equal(saved.settings.rules[0].input_max, 0.9);
+    assert.equal(saved.settings.rules[0].output_min, 0.15);
+    assert.equal(saved.settings.rules[0].output_max, 0.65);
+    await simpleCard.getByRole('button', {name:'Delete controller'}).click();
+    assert.equal(await page.locator('#controller-overview [data-controller-output="warning_lamp_pwm"]').count(), 0);
+    assert.ok(await page.locator('#new-controller-output option[value="warning_lamp_pwm"]').count());
+    results.push('Controllers uses expandable local output definitions, creates from an unowned output, maps fitted inputs, and deletes cleanly');
+
+    response = await page.request.post(`${base}/api/ecu_config`, {data:{
+      settings: automationState.settings,
+      hardware: automationState.hardware
+    }});
+    assert.equal(response.ok(), true);
+    await page.reload();
+    await page.waitForSelector('#controller-overview details[data-purpose="main_fuel"]');
+    assert.equal(await page.locator('#controller-overview details[open]').count(), 0);
+    const mainFuelCard = page.locator('#controller-overview details[data-purpose="main_fuel"]');
+    await mainFuelCard.locator(':scope > summary').click();
+    assert.equal(await mainFuelCard.locator('.controller-subcard[open]').count(), 0);
+    const throttleSubcard = mainFuelCard.locator('.controller-subcard').filter({hasText:'Throttle Response'}).first();
+    const idleSubcard = mainFuelCard.locator('.controller-subcard').filter({hasText:'Minimum normal-running fuel authority'}).first();
+    assert.equal(await throttleSubcard.locator('#cf-th_mx').count(), 0);
+    assert.equal(await idleSubcard.locator('#cf-th_mx').count(), 1);
+    await throttleSubcard.locator(':scope > summary').click();
+    await throttleSubcard.locator('#cf-th_ru').fill('1650');
+    assert.equal(await page.locator('#btn-save').isDisabled(), false,
+      'editing a field moved into an output controller card must enable Save');
+    await throttleSubcard.locator(':scope > summary').click();
+    await idleSubcard.locator(':scope > summary').click();
+    assert.equal(await mainFuelCard.locator('#cf-di_tr').isVisible(), true);
+    assert.equal(await mainFuelCard.locator('#cf-di_tp').isVisible(), false);
+    assert.equal(await mainFuelCard.locator('#cf-di_de').isVisible(), false);
+    assert.equal(await mainFuelCard.locator('#cf-di_dd').isVisible(), false);
+    await mainFuelCard.locator('#cf-di_src').selectOption('2');
+    assert.equal(await mainFuelCard.locator('#cf-di_tr').isVisible(), false);
+    assert.equal(await mainFuelCard.locator('#cf-di_tp').isVisible(), true);
+    await mainFuelCard.locator('#cf-di_mode').selectOption('1');
+    const predictiveTuning = mainFuelCard.locator('#cf-di_pde').locator('xpath=ancestor::details[1]');
+    await predictiveTuning.locator(':scope > summary').click();
+    assert.equal(await mainFuelCard.locator('#cf-di_de').isVisible(), false);
+    assert.equal(await mainFuelCard.locator('#cf-di_pde').isVisible(), true);
+    assert.equal(await mainFuelCard.locator('#cf-di_dd').isVisible(), true);
+    assert.equal(await mainFuelCard.locator('#cf-di_dd').getAttribute('min'), '0');
+    results.push('Controller subcards start collapsed and Idle keeps its enable, fuel range, and source-relevant settings together');
+
+    await page.goto(`${base}/system.html`);
+    await page.waitForSelector('#system-device-setup');
+    assert.equal(await page.locator('.cfg-search-wrap').isVisible(), false);
+    assert.equal(await page.locator('.cfg-toolbar').isVisible(), false);
+    assert.equal(await page.locator('#dev-mode-tools-link').isVisible(), false);
+    const cleanSystemBar = page.locator('.save-bar');
+    assert.equal(await cleanSystemBar.isVisible(), false);
+    await page.evaluate(() => document.querySelector('.save-bar').classList.add('is-dirty'));
+    const desktopSystemBar = await cleanSystemBar.evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return {left:r.left, right:r.right, viewport:innerWidth, width:r.width};
+    });
+    assert.ok(desktopSystemBar.left >= 0 && desktopSystemBar.right <= desktopSystemBar.viewport,
+      `System save bar bounds ${JSON.stringify(desktopSystemBar)}`);
+    await page.evaluate(() => document.querySelector('.save-bar').classList.remove('is-dirty'));
+    results.push('System groups device settings coherently and centers its save bar only when needed');
 
     const unified = await (await page.request.get(`${base}/api/ecu_config`)).json();
     unified.hardware.profile_id = 'second-bench-engine';

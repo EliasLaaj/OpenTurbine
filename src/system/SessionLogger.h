@@ -31,6 +31,7 @@ public:
     static void tick();          // Core 1: snapshot → queue push (no file I/O)
     static void drainQueue();    // Core 0: persist only in STANDBY/FAULT
     static uint32_t droppedRows();
+    static uint32_t queuedRows();
     static uint32_t evictionCount();
     static uint32_t lastEvictedSession();
     static size_t freeBytes();

@@ -161,9 +161,25 @@ bool PcbProfileResolver::resolve(ChannelRegistry& registry,
                 channel.direction == ChannelRegistry::Input &&
                 !strcmp(channel.id, "battery_voltage"))
                 continue;
-            if (!channel.physicalPortId[0] || !channel.physicalModeId[0])
+            const bool hasPort = channel.physicalPortId[0] != '\0';
+            const bool hasMode = channel.physicalModeId[0] != '\0';
+            if (hasPort != hasMode)
                 return fail(reason, reasonSize,
-                            "profile-mode channel is missing its named PCB port");
+                            "PCB channel has an incomplete named-port assignment");
+            if (!hasPort) {
+                // A PCB profile owns its labelled connectors and fixed
+                // functions, not every otherwise free ESP32 pad. Advanced
+                // builders may deliberately use a spare GPIO. It remains an
+                // ordinary registry channel and still passes the platform,
+                // role/driver, and global collision validation.
+                if (channel.pin < 0)
+                    return fail(reason, reasonSize,
+                                "bare-GPIO channel has no GPIO assignment");
+                if (PcbProfileManager::gpioReserved(channel.pin))
+                    return fail(reason, reasonSize,
+                                "bare-GPIO channel uses a pin reserved by the PCB");
+                continue;
+            }
             for (uint8_t j = 0; j < claimCount; ++j)
                 if (!strcmp(claimed[j], channel.physicalPortId))
                     return fail(reason, reasonSize,

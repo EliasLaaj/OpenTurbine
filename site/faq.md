@@ -1,7 +1,7 @@
 ---
 layout: document
 title: "OpenTurbine FAQ: boards, installation and updates"
-description: Answers about supported ESP32 boards, Windows installation, hardware channels, control rules, updates, backups, wiring, logs, and experimental-use limits for OpenTurbine.
+description: Answers about supported ESP32 boards, Windows installation, hardware channels, controllers, updates, backups, wiring, logs, and experimental-use limits for OpenTurbine.
 lede: Quick answers for the normal Windows installation path.
 ---
 
@@ -36,11 +36,11 @@ You can explore and configure the dashboard with loads physically disconnected. 
 
 ## Can I add a sensor or output that is not one of the built-in names?
 
-Yes. Add it to the **Hardware** Installed Channel Inventory with a unique stable ID, the correct input/output driver, pin, range, and safe states. Registry-backed analog, pulse, digital, relay, PWM, and servo/ESC channels can be referenced by supported rules, sequence actions, controller bindings, tools, and telemetry. The electrical interface still needs suitable conditioning or a rated driver.
+Yes. Add it to the **Hardware** Installed Channel Inventory with a unique stable ID, the correct input/output driver, pin, range, and safe states. Registry-backed analog, pulse, digital, relay, PWM, and servo/ESC channels can be referenced by supported controllers, sequence actions, Tools, and telemetry. The electrical interface still needs suitable conditioning or a rated driver.
 
-## What can Control Rules do?
+## What can simple controls do?
 
-Control Rules are small automations in the **Sequence** page. A rule can switch an output at a sensor threshold with hysteresis, or map an input range directly to a variable PWM/servo output range. Choose the engine states where it is active and an off value for every other state. Keep one enabled rule per output; use sequence blocks and controllers for more complex engine behavior.
+Simple controls live with the other output owners on **Controllers**. A control can switch an output at a sensor threshold with hysteresis or map an input range directly to a variable PWM/servo output range. Each output has one normal owner; Sequence owns ordered startup/shutdown actions and safety can always override normal demand.
 
 ## Why does Windows warn about the Setup Tool?
 

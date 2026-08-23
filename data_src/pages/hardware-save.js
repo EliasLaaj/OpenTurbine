@@ -743,7 +743,7 @@ function friendlyHardwareSaveError(response) {
   const map = [
     ['malformed json', 'The browser produced incomplete setup data. Reload Hardware, repeat the change, and try again.'],
     ['channel registry', 'One of the installed device cards has an invalid or incomplete purpose, signal type, GPIO, or range. Open the red device card below and complete its setup.'],
-    ['hardware dependencies', 'An enabled controller or safety needs hardware that is no longer fitted. Open Edit controllers and Edit safeties, then disable the unavailable item or restore its required device.'],
+    ['hardware dependencies', 'An enabled controller or safety needs hardware that is no longer fitted. Open Controllers, disable the unavailable item, or restore its required device.'],
     ['sequence references', 'A sequence or custom action still refers to a removed device. Open Sequence, fix the unavailable block or action, and save it before retrying Hardware.'],
     ['platform pins', 'A GPIO, electrical range, or sensor interface is not valid for this ESP32 board. Check the red device card and Requirements section.'],
     ['oil loops', 'An automatic oil loop refers to a missing pressure input or oil-pump output. Restore those devices or remove the unused oil loop.'],
@@ -956,6 +956,6 @@ window.addEventListener('load', async () => {
   // starts allocating WebSocket frames on the ECU.
   startStatusPoll();
   const loaded = await loadHardware();
-  if (loaded && cfg?.platform !== 'esp32') connectWs();
+  if (loaded) connectWs();
   applyContextTooltips();
 });

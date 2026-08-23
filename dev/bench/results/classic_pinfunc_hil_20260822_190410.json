@@ -1,0 +1,65 @@
+{
+  "campaign": "classic_pinfunc_hil",
+  "dut": "ESP32 Classic",
+  "tester": "ESP32-S3 OTBench 0.9",
+  "passed": 11,
+  "total": 11,
+  "restored": true,
+  "results": [
+    {
+      "name": "LEDC PWM output (oil_pump)",
+      "passed": true,
+      "detail": "duty=1.00"
+    },
+    {
+      "name": "digital output (fuel_sol)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "digital output (igniter)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "digital output (starter_en)",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "SERVO output (LEDC servo)",
+      "passed": true,
+      "detail": "pulse=1600us @60%"
+    },
+    {
+      "name": "FREQ input (N1 RPM / PCNT)",
+      "passed": true,
+      "detail": "drive 45000 -> 45000"
+    },
+    {
+      "name": "ADC input (GPIO32 range)",
+      "passed": true,
+      "detail": "high=3.3bar low=0bar"
+    },
+    {
+      "name": "DIGITAL input (DI channel)",
+      "passed": true,
+      "detail": "on=True off=False"
+    },
+    {
+      "name": "v2 assist Tools pulse auto-stops",
+      "passed": true,
+      "detail": "peak=1201us final=1001us"
+    },
+    {
+      "name": "v2 StarterSpin repeats pulses",
+      "passed": true,
+      "detail": "HTTP=200 transitions=4"
+    },
+    {
+      "name": "v2 StarterSpin STOP cut",
+      "passed": true,
+      "detail": "pulse=1000us mode=SHUTDOWN"
+    }
+  ]
+}

@@ -1536,6 +1536,9 @@ namespace Hardware {
         g_blkCooldownSpin.oilMinPct = constrain(Config::oilMinPct, 0.0f, 100.0f);
         g_blkCooldownSpin.oilMaxPct = 100.0f;
         g_blkCooldownSpin.oilDeadbandBar = Config::oilPressureDeadband;
+        g_blkCooldownSpin.oilAdjustScale = Config::oilAdjustScale;
+        g_blkCooldownSpin.oilFailsafeDelayMs = Config::oilFailsafeDelayMs;
+        g_blkCooldownSpin.oilFailsafePct = Config::oilFailsafePct;
         g_blkCooldownSpin.oilPumpBinary = hw.hasOilPump && hw.oilPumpType == 2;
         g_blkCooldownSpin.pressureInputIndex = 255;
         if (hw.hasOilLoop) {
@@ -1548,12 +1551,18 @@ namespace Hardware {
             for (uint8_t i = 0; i < HardwareConfig::oilLoopCount; ++i) {
                 const auto& loop = HardwareConfig::oilLoops[i];
                 if (!loop.enabled) continue;
+                g_ctrlOilLoop.adjustScale = loop.adjustScaleCenti / 100.0f;
                 g_ctrlOilLoop.minPct   = constrain((float)loop.minDemandPct, 0.0f, 100.0f);
                 g_ctrlOilLoop.maxPct   = constrain((float)loop.maxDemandPct, g_ctrlOilLoop.minPct, 100.0f);
+                g_ctrlOilLoop.failsafeDelayMs = loop.failsafeDelayMs;
+                g_ctrlOilLoop.failsafePct = loop.failsafeDemandPct;
                 g_ctrlOilLoop.deadband = loop.deadbandCentiBar / 100.0f;
                 g_blkCooldownSpin.oilMinPct = g_ctrlOilLoop.minPct;
                 g_blkCooldownSpin.oilMaxPct = g_ctrlOilLoop.maxPct;
                 g_blkCooldownSpin.oilDeadbandBar = g_ctrlOilLoop.deadband;
+                g_blkCooldownSpin.oilAdjustScale = g_ctrlOilLoop.adjustScale;
+                g_blkCooldownSpin.oilFailsafeDelayMs = g_ctrlOilLoop.failsafeDelayMs;
+                g_blkCooldownSpin.oilFailsafePct = g_ctrlOilLoop.failsafePct;
                 g_blkCooldownSpin.pressureInputIndex = loop.pressureInputIndex;
                 g_blkCooldownSpin.oilPumpBinary =
                     loop.pumpOutputIndex < HardwareConfig::channelRegistry.outputCount &&
@@ -1562,9 +1571,6 @@ namespace Hardware {
                 break;
             }
         }
-        g_blkCooldownSpin.oilAdjustScale = Config::oilAdjustScale;
-        g_blkCooldownSpin.oilFailsafeDelayMs = Config::oilFailsafeDelayMs;
-        g_blkCooldownSpin.oilFailsafePct = Config::oilFailsafePct;
         if (hw.hasThrottle) {
             g_ctrlThrottleSlew.rampUpMs     = Config::throttleRampUpMs;
             g_ctrlThrottleSlew.rampDownMs   = Config::throttleRampDownMs;
@@ -3122,8 +3128,8 @@ namespace Hardware {
                     g_registryOilLoopFailArmed[i] = true;
                     g_registryOilLoopFailSinceMs[i] = now;
                 } else if (now - g_registryOilLoopFailSinceMs[i] >=
-                           (unsigned long)Config::oilFailsafeDelayMs) {
-                    const float fallback = constrain(Config::oilFailsafePct, minPct, maxPct);
+                           (unsigned long)loop.failsafeDelayMs) {
+                    const float fallback = constrain((float)loop.failsafeDemandPct, minPct, maxPct);
                     g_registryOilLoopPct[i] = binary ? (fallback > 0.0f ? 100.0f : 0.0f) : fallback;
                 }
                 const float demand = g_registryOilLoopPct[i] / 100.0f;
@@ -3142,7 +3148,7 @@ namespace Hardware {
                 else if (pressureBar > targetBar + deadband) g_registryOilLoopPct[i] = 0.0f;
             } else if (fabsf(error) > deadband) {
                 g_registryOilLoopPct[i] = constrain(
-                    g_registryOilLoopPct[i] + error * Config::oilAdjustScale * (dt * 400.0f),
+                    g_registryOilLoopPct[i] + error * (loop.adjustScaleCenti / 100.0f) * (dt * 400.0f),
                     minPct, maxPct);
             }
             ed.registryOutputDemand[loop.pumpOutputIndex] = g_registryOilLoopPct[i] / 100.0f;
@@ -3181,7 +3187,13 @@ namespace Hardware {
                                           Config::governorTargetRpm > 0.0f &&
                                           !g_ctrlGovernor.usePropPitch;
         const int8_t registryThrottle = g_registryInputPlan.throttle;
-        if ((hw.hasThrottleInput || registryThrottle >= 0) && mode == SysMode::RUNNING && !governorOwnsThrottle) {
+        // Schema 1 uses an explicit output-first controller definition for
+        // Main Fuel. Keep the former implicit throttle mapping only while an
+        // unmigrated schema-0 configuration is active; otherwise deleting the
+        // Main Fuel card would misleadingly leave a hidden owner running.
+        if (Config::controllerSchema == 0 &&
+            (hw.hasThrottleInput || registryThrottle >= 0) &&
+            mode == SysMode::RUNNING && !governorOwnsThrottle) {
             float norm;
             if (registryThrottle >= 0) {
                 norm = ed.registryInputHealthy[registryThrottle] ? ed.registryInputValue[registryThrottle] : 0.0f;

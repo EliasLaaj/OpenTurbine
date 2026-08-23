@@ -1,11 +1,11 @@
 #pragma once
 #include "../hal/actuators/RelayDemand.h"
 // ============================================================
-//  RulesEngine — deterministic threshold and linear-map automations,
+//  RulesEngine — deterministic threshold and linear-map simple controls,
 //  evaluated every control tick.
 //
-//  Rules are edited in the Sequence page Control Rules tab and
-//  stored in the settings section of ecu_config.json under "rules".
+//  Simple controls are edited on Controllers and stored in the settings
+//  section of ecu_config.json under "rules".
 //
 //  Rules run after sequencer/controller writes in explicitly selected engine
 //  states. Outside those states they release ownership so the last non-rule
@@ -13,6 +13,7 @@
 //  configured OFF demand. Deletion also releases ownership.
 // ============================================================
 #include "Config.h"
+#include "FeedbackControlMath.h"
 #include "HardwareConfig.h"
 #include "../engine/EngineData.h"
 
@@ -60,7 +61,10 @@ public:
     // reloaded or compacted so a previous rule's latched state cannot apply
     // to a different rule that now occupies the same index.
     static void resetLatches() {
-        for (int i = 0; i < Config::MAX_RULES; i++) _ruleLatched[i] = false;
+        for (int i = 0; i < Config::MAX_RULES; i++) {
+            _ruleLatched[i] = false;
+            FeedbackControlMath::reset(_feedbackState[i]);
+        }
     }
 
     // Called before sequencers/controllers calculate this tick's ordinary
@@ -81,6 +85,8 @@ public:
         // FAULT is never an automation state. The caller has already released
         // the previous overlay; do not claim or alter any target here.
         if (ed.mode == SysMode::FAULT) {
+            for (int i = 0; i < Config::MAX_RULES; ++i)
+                FeedbackControlMath::reset(_feedbackState[i]);
             return;
         }
 
@@ -91,21 +97,42 @@ public:
                                      _actuatorUsable(r.actuator);
             if (!activeState) {
                 _ruleLatched[i] = false;
+                FeedbackControlMath::reset(_feedbackState[i]);
                 continue;
             }
+            const float baseDemand = _readActuatorDemand(r.actuator, ed);
             if (!_targetPresent(_ownedTargets, _ownedTargetCount, r.actuator) &&
                 _ownedTargetCount < Config::MAX_RULES) {
                 _ownedTargets[_ownedTargetCount] = r.actuator;
-                _ownedBaseDemands[_ownedTargetCount] = _readActuatorDemand(r.actuator, ed);
+                _ownedBaseDemands[_ownedTargetCount] = baseDemand;
                 ++_ownedTargetCount;
             }
             const bool inputHealthy = _sensorUsable(r.sensor, ed);
-            const bool applies = inputHealthy;
+            const bool targetHealthy = r.kind != 2 || r.targetSourceType == 0 ||
+                                       _sensorUsable(r.targetSensor, ed);
+            const bool applies = inputHealthy && targetHealthy;
             float demand = r.offValue;
 
             if (applies) {
                 const float value = _readSensor(r.sensor, ed);
-                if (r.kind == 1) {
+                if (r.kind == 2) {
+                    float target = r.targetFixed;
+                    if (r.targetSourceType == 1) {
+                        target = _readSensor(r.targetSensor, ed) >= 0.5f
+                            ? r.targetHigh : r.targetLow;
+                    } else if (r.targetSourceType == 2) {
+                        const float source = _readSensor(r.targetSensor, ed);
+                        const float span = r.targetInputMax - r.targetInputMin;
+                        const float mapped = span != 0.0f
+                            ? constrain((source - r.targetInputMin) / span, 0.0f, 1.0f)
+                            : 0.0f;
+                        target = r.targetLow + mapped * (r.targetHigh - r.targetLow);
+                    }
+                    demand = FeedbackControlMath::step(_feedbackState[i], millis(),
+                        baseDemand, value, target, r.responseGain, r.integralGain,
+                        r.deadband, r.outputMin, r.outputMax);
+                    _ruleLatched[i] = false;
+                } else if (r.kind == 1) {
                     const float span = r.inputMax - r.inputMin;
                     const float mapped = span != 0.0f
                         ? constrain((value - r.inputMin) / span, 0.0f, 1.0f)
@@ -119,7 +146,15 @@ public:
                 }
             } else {
                 _ruleLatched[i] = false;
+                FeedbackControlMath::reset(_feedbackState[i]);
             }
+
+            // Automatic idle is a floor, not a competing fuel owner. Its
+            // already-calculated command remains authoritative beneath a
+            // custom Main Fuel definition.
+            if (r.actuator == THROTTLE && HardwareConfig::hasDynamicIdle &&
+                ed.mode == SysMode::RUNNING)
+                demand = max(demand, baseDemand);
 
             if (_actuatorUsable(r.actuator))
                 _applyActuator(r.actuator, constrain(demand, 0.0f, 1.0f), ed, r.name);
@@ -439,6 +474,7 @@ private:
     static inline ShutdownCallback _shutdownCb = nullptr;
     static inline FaultCallback _faultCb = nullptr;
     static inline bool _ruleLatched[Config::MAX_RULES] = {};
+    static inline FeedbackControlMath::State _feedbackState[Config::MAX_RULES] = {};
     static inline uint8_t _ownedTargets[Config::MAX_RULES] = {};
     static inline float _ownedBaseDemands[Config::MAX_RULES] = {};
     static inline uint8_t _ownedTargetCount = 0;

@@ -1064,7 +1064,7 @@ function registryOilFlowMonitorEditor(c, index) {
       ${pinEditor}${deviceEditor}${calibration}
       <div class="hw-field"><span class="hw-label">Low-flow monitoring</span><span class="hw-desc">Check this sensor whenever the pump is commanded on.</span><label class="hw-toggle"><input type="checkbox" ${c.has_flow_monitor?'checked':''} onchange="updateRegistryChannel('output',${index},'has_flow_monitor',this.checked)"><span></span> Monitor low flow</label></div>
       <div class="hw-field"><span class="hw-label">Minimum flow (L/min)</span><span class="hw-desc">Flow below this value is considered a fault while this pump is on.</span><input type="number" min="0.001" max="10000" step="0.01" value="${registryFormatValue(c.minimum_flow_l_min ?? 0.1)}" onchange="updateRegistryChannel('output',${index},'minimum_flow_l_min',Math.max(0.001,+this.value||0.1))"></div>
-      <div class="hw-field"><span class="hw-label">Protection behavior</span><span class="hw-desc">Confirmation time and optional shutdown are in <a href="/config.html#oil-config-section">Config → Oil System</a>.</span></div>
+      <div class="hw-field"><span class="hw-label">Protection behavior</span><span class="hw-desc">Confirmation time and optional shutdown are in <a href="/controllers.html#oil-config-section">Controllers → Safety &amp; Limits → Oil Pressure Safety</a>.</span></div>
     </div></div>` : `<div class="hw-desc" style="margin-top:.45rem">Enable this subcard to add and calibrate the pump's matching flow meter.</div>`}
   </div>`;
 }

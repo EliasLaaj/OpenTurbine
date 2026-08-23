@@ -26,7 +26,7 @@ Keep fuel disconnected, ignition energy disabled, starter/load power isolated, a
 10. [Configure all ECU settings](#part-10-configure-all-ecu-settings)
 11. [Calibrate inputs and outputs](#part-11-calibrate-inputs-and-outputs)
 12. [Build startup and shutdown sequences](#part-12-build-startup-and-shutdown-sequences)
-13. [Use control rules](#part-13-use-control-rules)
+13. [Use custom controllers](#part-13-use-custom-controllers)
 14. [Dry-test the complete ECU](#part-14-dry-test-the-complete-ecu)
 15. [Prepare for a first fueled test](#part-15-prepare-for-a-first-fueled-test)
 16. [Operate, back up, update and diagnose](#part-16-operate-back-up-update-and-diagnose)
@@ -166,22 +166,22 @@ The **Purpose** field tells the firmware how an installed channel may be used. T
 <tbody>
 <tr><td>N1 speed</td><td>Primary core-shaft RPM. Used by startup checks, overspeed, flameout/surge logic, idle control, windmilling protection and logs. Wire only a clean conditioned pulse and set pulses/revolution.</td></tr>
 <tr><td>N2 speed</td><td>Free power-turbine/output-shaft RPM. Enables N2 overspeed, N2 idle feedback, shaft power and the N2 governor.</td></tr>
-<tr><td>Additional shaft speed</td><td>Extra speed channel for rules, custom sequencing and logs. It does not replace the primary N1 or N2 purpose.</td></tr>
+<tr><td>Additional shaft speed</td><td>Extra speed channel for simple controls, custom sequencing and logs. It does not replace the primary N1 or N2 purpose.</td></tr>
 <tr><td>TOT / EGT</td><td>Turbine-outlet temperature, normally through a supported thermocouple converter. Can be the primary engine-temperature safety source.</td></tr>
 <tr><td>TIT</td><td>Turbine-inlet temperature. Use when the engine documentation specifies a TIT limit; never substitute a TOT limit.</td></tr>
 <tr><td>Oil pressure</td><td>Feedback for oil protection and optional closed-loop oil-pump control. Wire and calibrate the exact transducer range.</td></tr>
 <tr><td>Fuel pressure</td><td>Fuel-manifold feedback for diagnostics and optional low-pressure shutdown.</td></tr>
-<tr><td>P1 / P2 / coolant pressure</td><td>Compressor inlet, compressor discharge and cooling-system measurements used for display, logging, rules and calculated behavior where supported.</td></tr>
+<tr><td>P1 / P2 / coolant pressure</td><td>Compressor inlet, compressor discharge and cooling-system measurements used for display, logging, controllers and calculated behavior where supported.</td></tr>
 <tr><td>Oil, coolant or intake temperature</td><td>Auxiliary temperature channels. Oil temperature can enable its dedicated shutdown; others are available to logging and automation.</td></tr>
-<tr><td>Fuel flow</td><td>Pulse or analog flow measurement for consumption logs and rules. Enter the manufacturer's pulses/litre or calibrated mapping.</td></tr>
+<tr><td>Fuel flow</td><td>Pulse or analog flow measurement for consumption logs and supported controls. Enter the manufacturer's pulses/litre or calibrated mapping.</td></tr>
 <tr><td>Main / scavenge oil flow</td><td>Separate flow feedback for the corresponding pump. Calibrate in L/min, enable monitoring on that pump's Hardware card, and test its minimum-flow threshold. Confirmed underflow warns by default; shutdown is a separate Config choice.</td></tr>
 <tr><td>Main flame / afterburner flame</td><td>Dedicated combustion detectors. Main flame can confirm startup/flameout; AB flame can confirm afterburner light-off.</td></tr>
-<tr><td>Torque</td><td>Analog, HX711, or NAU7802 measurement. NAU7802 calibration captures unloaded zero plus known force and lever arm. With N2 it supports shaft-power calculation; it is also available to rules.</td></tr>
-<tr><td>Thrust</td><td>Conditioned local/TLA2528 analog transmitter or NAU7802 load-cell measurement. Analog inputs use linear or multi-point calibration; NAU7802 uses unloaded zero plus a known force or mass. Canonical display, telemetry, rules and logs use newtons.</td></tr>
+<tr><td>Torque</td><td>Analog, HX711, or NAU7802 measurement. NAU7802 calibration captures unloaded zero plus known force and lever arm. With N2 it supports shaft-power calculation; it is also available to controllers.</td></tr>
+<tr><td>Thrust</td><td>Conditioned local/TLA2528 analog transmitter or NAU7802 load-cell measurement. Analog inputs use linear or multi-point calibration; NAU7802 uses unloaded zero plus a known force or mass. Canonical display, telemetry, controllers and logs use newtons.</td></tr>
 <tr><td>Battery / bus voltage</td><td>Scaled ADC measurement for display, logs and undervoltage protection. A battery must never connect directly to an ADC pin.</td></tr>
 <tr><td>Throttle input</td><td>Operator demand from analog, RC PWM, pulse-duty or another supported input. Calibrate low/high endpoints and signal-loss behavior.</td></tr>
 <tr><td>Idle input</td><td>Separate idle/startup demand, usable as digital, analog, RC PWM, pulse or duty depending on the installation.</td></tr>
-<tr><td>Digital interlock</td><td>General switch for rules and sequence conditions.</td></tr>
+<tr><td>Digital interlock</td><td>General switch for simple controls and sequence conditions.</td></tr>
 <tr><td>Inhibit-start</td><td>Prevents a start while the external inhibit is active.</td></tr>
 <tr><td>Emergency-stop request</td><td>Requests ECU shutdown. Useful in addition to, never instead of, the hardwired energy-removing stop.</td></tr>
 <tr><td>Fault switch</td><td>External equipment can request fault shutdown.</td></tr>
@@ -216,17 +216,17 @@ An ESP32 GPIO can provide only a logic command. Use an interface rated for the r
 <tr><td>Starter</td><td>Relay, PWM driver or ESC demand used to spool the engine.</td></tr>
 <tr><td>Starter enable</td><td>Separate contactor/enable for starter electronics that require enable plus proportional demand.</td></tr>
 <tr><td>Oil pump</td><td>Fixed or pressure-controlled oil delivery, startup priming and windmilling protection.</td></tr>
-<tr><td>Coolant pump / scavenge pump / cooling fan</td><td>Auxiliary pumping and cooling outputs usable from sequences and rules. Scavenge can continue into shutdown where configured.</td></tr>
-<tr><td>Secondary / auxiliary fuel pump</td><td>Independent second fuel output for sequence/rule use. It does not automatically mirror main throttle.</td></tr>
+<tr><td>Coolant pump / scavenge pump / cooling fan</td><td>Auxiliary pumping and cooling outputs usable from Sequence and Controllers. Scavenge can continue into shutdown where configured.</td></tr>
+<tr><td>Secondary / auxiliary fuel pump</td><td>Independent second fuel output for Sequence or Controller use. It does not automatically mirror main throttle.</td></tr>
 <tr><td>Igniter / afterburner igniter / glow plug</td><td>Commands the appropriate external ignition or glow driver. The ESP32 never drives a coil or glow element directly.</td></tr>
 <tr><td>Valve / solenoid</td><td>Bleed or other on/off valve through a rated driver.</td></tr>
 <tr><td>Afterburner valve / pump</td><td>Dedicated afterburner fuel shutoff and delivery outputs used by AB sequences.</td></tr>
 <tr><td>Air starter</td><td>Air-start valve through an on/off driver.</td></tr>
 <tr><td>Start-fuel solenoid</td><td>Dedicated light-off fuel valve for an applicable combustion system.</td></tr>
 <tr><td>Air / fuel purge valve</td><td>Valve that can be placed in a custom safe sequence.</td></tr>
-<tr><td>Electric drain valve</td><td>Open/close output available to startup/shutdown sequences, Control Rules and standby Tools tests. Configure its physical polarity or endpoints in Hardware.</td></tr>
+<tr><td>Electric drain valve</td><td>Open/close output available to startup/shutdown sequences, simple Controllers and standby Tools tests. Configure its physical polarity or endpoints in Hardware.</td></tr>
 <tr><td>Variable nozzle / propeller pitch</td><td>Proportional servo/ESC output, or deliberate fine/coarse relay pitch; propeller pitch can be the N2 governor's controlled output.</td></tr>
-<tr><td>Generic automation output</td><td>Relay, PWM or servo output controlled by custom rules or sequence steps, with no built-in engine role.</td></tr>
+<tr><td>Generic automation output</td><td>Relay, PWM or servo output controlled by a simple Controller or sequence step, with no built-in engine role.</td></tr>
 </tbody></table></div>
 
 For every output, set a **Power-on state / Boot safe demand** and a **Fault safe demand** that are electrically safe. Verify actual polarity at the driver input and load terminals; a label in software cannot correct a wrongly wired active-low module.
@@ -272,8 +272,8 @@ Open **Hardware**, select the exact Classic ESP32 or supported ESP32-S3 target, 
 <thead><tr><th>Field</th><th>What to enter</th></tr></thead>
 <tbody>
 <tr><td>Display name / label</td><td>A short human-readable name shown in the dashboard and logs, such as “Main oil pressure”. Renaming it does not break stable references.</td></tr>
-<tr><td>Stable ID</td><td>A short unique machine name such as <code>oil_pressure_main</code>. Set it once; rules, sequences and telemetry may refer to it.</td></tr>
-<tr><td>Purpose</td><td>The built-in ECU meaning listed in Parts 5 and 6. This determines which safety, controller, sequence and rule options can use the channel.</td></tr>
+<tr><td>Stable ID</td><td>A short unique machine name such as <code>oil_pressure_main</code>. Set it once; controllers, sequences and telemetry may refer to it.</td></tr>
+<tr><td>Purpose</td><td>The built-in ECU meaning listed in Parts 5 and 6. This determines which safety, controller and sequence options can use the channel.</td></tr>
 <tr><td>Controller use / binding</td><td>Assigns the installed device to a core job such as primary N1 or main fuel output. Do not bind two devices to one exclusive role.</td></tr>
 <tr><td>Electrical driver</td><td>The real signal type: digital, ADC, pulse, RC, PWM duty, thermocouple interface, relay, PWM or servo/ESC. It must match the wiring.</td></tr>
 <tr><td>GPIO / CS / CLK / MISO / MOSI / data</td><td>The physical board pins used by that interface. Choose only offered pins and use each exclusive pin once. Shared SPI clock/data lines are allowed only where the UI explicitly accepts the shared bus.</td></tr>
@@ -328,13 +328,13 @@ Enabling a checkbox does not prove the protection. You must force a safe simulat
 <tr><td>Surge / compressor instability</td><td>Uses rolling N1 variance to detect oscillation. It requires a clean N1 signal and engine-specific validation to avoid false trips.</td></tr>
 </tbody></table></div>
 
-The Hardware page disables protections whose required input is not fitted. After enabling a protection, go to Config and enter its threshold. A value of zero disables several thresholds; read each field explanation carefully.
+Controllers disables protections whose required input is not fitted. Each expandable safety card keeps its enable, source, thresholds and confirmation timing together. A value of zero disables several thresholds; read each field explanation carefully.
 
-## Part 10: Configure all ECU settings
+## Part 10: Configure Controllers and System
 
 ### 10.1 Safe order
 
-1. Open **Config** only after Hardware saves without errors.
+1. Open **Controllers** only after Hardware saves without errors; use **System** for ECU-wide behavior and communications.
 2. Select **Essentials** first. Enter limits from the exact engine, sensor and actuator documentation.
 3. Use **Changed** to review every edit. Yellow fields are not saved yet.
 4. Use **Explore all features** to inspect or preconfigure features whose required hardware/controller is absent. Amber-bordered tuning values save normally but remain inactive until Hardware satisfies the displayed prerequisite. Enable switches and choices for missing hardware remain locked, so Explore cannot arm a feature unexpectedly. Search also reveals unavailable settings; neither Explore nor Developer Mode bypasses a missing physical prerequisite.
@@ -345,7 +345,7 @@ Never copy “typical”, example or preset values into a fueled turbine without
 
 ### 10.2 Complete source-matched field reference
 
-The expandable sections below document every field currently rendered by `data_src/config.html`. This list is generated from the dashboard schema rather than maintained as a second handwritten list. If a field is unavailable, Hardware has not provided its prerequisite.
+The expandable sections below document every field rendered by Controllers and System. This list is generated from their shared source schema rather than maintained as a second handwritten list. If a field is unavailable, Hardware has not provided its prerequisite.
 
 {% include generated-config-fields.html %}
 
@@ -416,27 +416,31 @@ Run the full startup and shutdown sequence repeatedly with no fuel and ignition 
 
 <p class="guide-return"><a href="#guide-contents">Back to contents</a></p>
 
-## Part 13: Use control rules
+## Part 13: Use custom controllers
 
-Control rules are small automations outside the main sequence. Each output may have one enabled rule.
+Open **Controllers → Custom controllers** for behavior that is not covered by a common turbine controller. Any fitted sensor, switch, or operator input can control an unowned compatible output. Each output may have one enabled normal owner.
 
-### Threshold rule
+### Threshold control
 
 Choose an input, **above** or **below**, a threshold, hysteresis, on value and off value. Example: a fan turns on above 100 °C with 5 °C hysteresis; it stays on until temperature falls to 95 °C. Hysteresis prevents rapid chatter near the threshold.
 
-### Mapping rule
+### Mapping control
 
 Choose an input minimum/maximum and an output minimum/maximum. The ECU maps linearly between them and clamps outside the range. Use it for a verified proportional relationship, not a safety shutdown.
 
+### Feedback control
+
+Choose the measured feedback signal, then choose whether its target is fixed, selected by a switch, or mapped from another variable input. The controller inherits the existing output at RUNNING handover, applies the configured output limits, and uses the feedback-loss output if either required input becomes unhealthy. Start with gentle response values and tune on a safe bench setup.
+
 ### Fields common to both
 
-- **Enabled** makes the rule active.
-- **Input** is a fitted registry channel.
-- **Output** is the one actuator the rule owns.
-- **States** limits the rule to Starting, Running and/or Shutdown; All States removes that limit.
-- **Off value** is commanded when the rule is outside its states or its input becomes unavailable.
+- **Enabled** makes the control active.
+- **Input / feedback** is a fitted registry channel.
+- **Output** is the fitted actuator this controller owns. Outputs already owned by an enabled dedicated turbine controller are not offered.
+- The control owns that output only while the ECU is RUNNING. Sequence and safe-state logic own it in other modes.
+- **Off value** is commanded when RUNNING ends or its input becomes unavailable.
 
-Fault handling returns authority to the output's hardware-safe state. Rules do not override fault safety.
+Common turbine controllers remain the simplest route, but a custom controller may replace an ordinary direct owner when no dedicated controller is enabled for that output. RUNNING is the default; advanced builds may select any combination of STANDBY, STARTUP, RUNNING, and SHUTDOWN. Afterburner fuel remains state-machine-owned. Fault handling returns every output to its hardware-safe state; custom controllers never run in FAULT or override fault safety.
 
 ## Part 14: Dry-test the complete ECU
 
@@ -480,7 +484,7 @@ Observe the engine itself, independent instruments and dashboard. Do not rely on
 
 ### Backups
 
-In **Tools**, download the complete engine file before major changes and before every update. It contains hardware, calibration, sequences, rules and Wi-Fi credentials. Store it securely and remove credentials before sharing. Logs are separate downloads.
+In **Tools**, download the complete engine file before major changes and before every update. It contains hardware, calibration, sequences, controllers and Wi-Fi credentials. Store it securely and remove credentials before sharing. Logs are separate downloads.
 
 ### Updates
 

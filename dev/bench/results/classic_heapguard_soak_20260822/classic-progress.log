@@ -1,0 +1,25 @@
+Classic ESP32 build=866b5f6ee19a9b9d; original ramp=600 ms; duration=300s
+Classic navigation 1: /controllers.html connected heap=67488/38900 ws=0 tw=0
+Classic edit: throttle ramp 650 ms save acknowledged
+Classic navigation 2: /tools.html connected heap=60844/38900 ws=1 tw=0
+Classic complete engine-file download + same-file restore passed
+Classic navigation 3: / connected heap=57204/38900 ws=1 tw=0
+Classic navigation 4: /hardware.html connected heap=53368/38900 ws=1 tw=0
+Classic navigation 5: /system.html connected heap=62572/38900 ws=0 tw=1
+Classic navigation 6: /calibration.html connected heap=53120/38900 ws=1 tw=1
+Classic navigation 7: /sequence.html connected heap=52852/38900 ws=1 tw=2
+Classic navigation 8: /log.html connected heap=62312/38900 ws=0 tw=2
+Classic navigation 9: /tools.html connected heap=52824/38900 ws=1 tw=2
+Classic navigation 10: / connected heap=51172/38900 ws=1 tw=3
+Classic navigation 11: /hardware.html connected heap=51776/38900 ws=1 tw=4
+Classic navigation 12: /system.html connected heap=60972/38900 ws=0 tw=5
+Classic navigation 13: /calibration.html connected heap=51776/38900 ws=1 tw=4
+Classic navigation 14: /sequence.html connected heap=51520/38900 ws=1 tw=5
+Classic navigation 15: /log.html connected heap=60992/38900 ws=0 tw=5
+Classic navigation 16: /tools.html connected heap=50692/38900 ws=1 tw=5
+Classic navigation 17: /controllers.html connected heap=61256/38900 ws=0 tw=4
+Classic config PATCH response HTTP 200
+Classic restore: throttle ramp 600 ms save acknowledged
+Classic navigation 18: / connected heap=57192/38900 ws=1 tw=0
+Classic recovered 1 transient API GET reset(s) during page handoff.
+Classic realistic session PASSED: 319s, 18 navigations, 2 persisted config saves, original config restored.

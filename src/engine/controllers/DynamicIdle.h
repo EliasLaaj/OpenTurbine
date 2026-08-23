@@ -21,8 +21,8 @@ public:
     float pressureLimit = 2.0f;
 
     int idleMode = 0;
-    float idleDecelEnterRpm = 1000.0f;
-    float idleDecelDropPct = 2.0f;
+    float idleDecelEnterRpm = 0.0f;
+    float idleDecelDropPct = 0.0f;
     float idleLookaheadMs = 2500.0f;
     float idleSettleBandRpm = 1500.0f;
     float idleFullResponseRpm = 12000.0f;
@@ -30,7 +30,7 @@ public:
     float idleTrimDownPctPerSec = 2.0f;
     float idleLearnRate = 0.02f;
     float idleLearnAccelMax = 1200.0f;
-    float pressureDecelEnter = 0.12f;
+    float pressureDecelEnter = 0.0f;
     float pressureSettleBand = 0.03f;
     float pressureFullResponse = 0.25f;
     float pressureLearnRateMax = 1.0f;
@@ -118,9 +118,11 @@ public:
             const float settleBand = pressureMode ? pressureSettleBand : idleSettleBandRpm;
             const float fullResponse = pressureMode ? pressureFullResponse : idleFullResponseRpm;
             const float learnRateMax = pressureMode ? pressureLearnRateMax : idleLearnAccelMax;
+            const bool decelCatchEnabled = enterBand > 0.0f && idleDecelDropPct > 0.0f;
             if (!_wasEngaged) {
                 _wasEngaged = true;
-                _state = (feedback > target + enterBand && _learnedHoldValid) ? DiState::DecelCatch : DiState::Trim;
+                _state = (decelCatchEnabled && feedback > target + enterBand && _learnedHoldValid)
+                    ? DiState::DecelCatch : DiState::Trim;
             }
             const float predicted = feedback + rate * (idleLookaheadMs * 0.001f);
             if (_state == DiState::DecelCatch) {

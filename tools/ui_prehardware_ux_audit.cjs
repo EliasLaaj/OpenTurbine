@@ -117,7 +117,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(gs, /not physical verification/i);
     assert.doesNotMatch(gs, /completed on this browser/i);
     assert.equal(await page.locator('#getting-started-banner a[href="/hardware.html"]').count(), 1);
-    assert.equal(await page.locator('#getting-started-banner a[href="/config.html"]').count(), 1);
+    assert.equal(await page.locator('#getting-started-banner a[href="/controllers.html"]').count(), 1);
     assert.equal(await page.locator('#getting-started-banner a[href="/calibration.html"]').count(), 1);
     await page.evaluate(() => localStorage.setItem('openturbine_setup_progress_v1',
       JSON.stringify({ hardware: Date.now(), tools: Date.now() })));
@@ -137,7 +137,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
 
     const blankResponse = await page.request.post(`${base}/__sim/blank`);
     assert.equal(blankResponse.ok(), true);
-    await goto(page, 'hardware.html', '#f-profile-id');
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     await page.locator('button[onclick="addRegistryChannel(\'input\')"]').click();
     await page.locator('#registry-add-catalog .registry-add-option', { hasText: 'TOT / EGT' }).click();
     assert.match(await text(page, '#registry-add-error'), /MAX thermocouple amplifier.*shared SPI wiring.*SCK and MISO.*CS pin/is);
@@ -149,7 +149,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     results.push('bus-dependent devices explain the electrical prerequisite and lead directly to its wiring controls');
 
     await reset(page);
-    await goto(page, 'hardware.html', '#f-profile-id');
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     assert.match(await text(page, '#save-msg'), /Loaded|Converted/i);
     assert.equal(await page.locator('#btn-save').isDisabled(), true);
     assert.equal(await page.locator('#btn-discard').isDisabled(), true);
@@ -174,7 +174,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.equal(await page.locator('#oil-press-cal-row').evaluate(row => row.classList.contains('deep-link-target')), true);
     results.push('calibration page provides a compact index of fitted sensors and actuators');
 
-    await goto(page, 'hardware.html', '#f-profile-id');
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     await page.locator('button[onclick="addRegistryChannel(\'input\')"]').click();
     const inputAddChoices = await page.locator('#registry-add-catalog').evaluate(catalog =>
       Object.fromEntries(Array.from(catalog.querySelectorAll('button')).map(button => [
@@ -218,10 +218,10 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.equal(await page.locator('#registry-inputs .registry-card[data-registry-id="oil_flow"]').count(), 0);
     const oilPumpCard = page.locator('#registry-outputs .registry-card[data-registry-id="oil_pump"]');
     await oilPumpCard.locator('button', {hasText:'Edit'}).click();
-    assert.match((await oilPumpCard.textContent()).trim(), /Flow sensing & monitoring.*Main oil-pump flow sensor.*Pulses \/ litre.*Minimum flow.*Oil System/is);
+    assert.match((await oilPumpCard.textContent()).trim(), /Flow sensing & monitoring.*Main oil-pump flow sensor.*Pulses \/ litre.*Minimum flow.*Safety & Limits.*Oil Pressure Safety/is);
     assert.match((await oilPumpCard.textContent()).trim(), /Current sensing.*Calibration page/is);
-    assert.equal(await oilPumpCard.locator('a[href="/config.html#cf-oil_mm"]').count(), 1);
-    assert.equal(await oilPumpCard.locator('a[href="/config.html#cf-so_rl"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/controllers.html#cf-oil_mm"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/controllers.html#cf-so_rl"]').count(), 1);
     assert.equal(await oilPumpCard.locator('a[href="/sequence.html#tab-startup"]').count(), 1);
     results.push('add-device catalog reserves singleton checks for sensors while multi-instance outputs and pump-owned monitoring remain clear');
 
@@ -375,13 +375,9 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       ]
     });
     await scenario(page, 'minimal');
-    await goto(page, 'hardware.html', '#f-profile-desc');
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     await page.waitForFunction(() => /Loaded|Converted/i.test(document.querySelector('#save-msg')?.textContent || ''));
     assert.match(await text(page, '#save-msg'), /Loaded|Converted/i);
-    assert.match(await text(page, '#hardware-controllers-summary'), /Fuel response.*Automatic with Main Fuel.*1 more available to enable/is);
-    assert.match(await text(page, '#hardware-safety-summary'), /5 available to enable/i);
-    const profileDescription = page.locator('#f-profile-desc');
-    const originalDescription = await profileDescription.inputValue();
     assert.equal(await page.locator('#btn-save').isDisabled(), true);
     assert.equal(await page.locator('#btn-discard').isDisabled(), true);
     assert.deepEqual(
@@ -392,18 +388,11 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       await page.evaluate(() => registryRoleUsage('input', { purpose:'stop_switch', role:'switch' })),
       ['Core firmware: hard stop and shutdown command']
     );
-    await profileDescription.fill(originalDescription + ' changed');
-    assert.equal(await page.locator('#btn-save').isDisabled(), false);
-    assert.equal(await page.locator('#btn-discard').isDisabled(), false);
-    assert.equal(await profileDescription.evaluate(el => el.classList.contains('field-changed')), true);
-    assert.equal(await profileDescription.evaluate(el => el.closest('.hw-item-card')?.classList.contains('field-changed')), true);
-    await profileDescription.fill(originalDescription);
     results.push('hardware page reaches a clear loaded state before edits');
 
     await page.locator('button', { hasText: '+ Add input' }).click();
     await page.getByRole('button', { name: /N2 speed/i }).click();
     const draftedN2 = page.locator('#registry-inputs .registry-card').last();
-    assert.match(await page.locator('#hardware-controllers-summary').textContent(), /Fuel response.*1 more available to enable/is);
     const gpio32Option = draftedN2.locator('select').nth(2).locator('option[value="32"]');
     assert.equal(await gpio32Option.isDisabled(), false);
     assert.doesNotMatch(await gpio32Option.textContent(), /AB flame/i);
@@ -413,7 +402,6 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       return /GPIO 35/.test(card?.textContent || '') && /Ready/.test(card?.textContent || '');
     });
     assert.match(await draftedN2.textContent(), /N2 Speed.*GPIO 35.*Ready/is);
-    assert.match(await page.locator('#hardware-controllers-summary').textContent(), /Fuel response.*2 more available to enable/is);
     assert.equal(await page.locator('#btn-save').isDisabled(), false);
     await page.locator('button', { hasText: '+ Add output' }).click();
     await page.getByRole('button', { name: /AB igniter/i }).click();
@@ -803,6 +791,10 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
 
     await goto(page, 'config.html', '#cf-rpm_limit');
     await page.locator('#btn-view-expert').click();
+    await page.locator('#cf-rpm_limit').evaluate(el => {
+      let parent = el.parentElement;
+      while (parent) { if (parent.tagName === 'DETAILS') parent.open = true; parent = parent.parentElement; }
+    });
     await page.locator('#cf-rpm_limit').fill('96000');
     await page.locator('#btn-save').click();
     // The full-system fixture intentionally includes a relight threshold below
@@ -837,14 +829,12 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       safety: { overspeed: true, overtemp: true, low_oil: true },
       controllers: { oil_loop: true, dynamic_idle: true }
     });
-    await goto(page, 'hardware.html', '#hardware-safety-summary');
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     const unavailableState = await page.evaluate(() => ({
       overspeed: cfg.safety.overspeed, overtemp: cfg.safety.overtemp, lowOil: cfg.safety.low_oil,
       oilLoop: cfg.controllers.oil_loop, dynamicIdle: cfg.controllers.dynamic_idle
     }));
     assert.deepEqual(unavailableState, { overspeed:false, overtemp:false, lowOil:false, oilLoop:false, dynamicIdle:false });
-    await page.locator('#btn-edit-safety').click();
-    await page.locator('#btn-edit-controllers').click();
     await page.evaluate(() => {
       cfg.i2c = {...(cfg.i2c || {}), enabled:false};
       cfg.spi = {...(cfg.spi || {}), enabled:false};
@@ -897,29 +887,17 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(supportedBusText, /TCA9554.*TLA2528.*NAU7802/is);
     assert.match(supportedBusText, /MAX6675.*MAX31855.*MAX31856/is);
     assert.match(supportedBusText, /DS18B20.*OneWire/is);
-    assert.ok(await page.locator('#hardware-safety-summary input:disabled').count() >= 3);
-    assert.ok(await page.locator('#hardware-controllers-summary input:disabled').count() >= 2);
-    assert.match(await text(page, '#btn-edit-safety'), /Done editing/i);
-    assert.match(await text(page, '#btn-edit-controllers'), /Done editing/i);
-    assert.match(await text(page, '#hardware-safety-summary'), /Not available yet:/i);
-    assert.match(await text(page, '#hardware-controllers-summary'), /proportional main fuel controls N2|relay fine\/coarse control/i);
-    const setupGuide = await text(page, '#shaft-control-setup-guide');
-    assert.match(setupGuide, /N2-controlled idle.*Main Fuel.*N2 Speed.*Automatic idle control/is);
-    assert.match(setupGuide, /Turboprop.*Prop Pitch.*pitch primary.*fuel remains operator-controlled.*N2 pullback/is);
-    assert.match(setupGuide, /Generator or turboshaft.*commands main fuel/is);
-    assert.equal(await page.locator('#shaft-control-setup-guide a[href="/config.html#idle-control-cfg-section"]').count(), 1);
-    assert.equal(await page.locator('#shaft-control-setup-guide a[href="/config.html#governor-cfg-section"]').count(), 2);
-    assert.match(await text(page, '#protection-setup-guide'), /Combustion and startup.*Auxiliary protection/is);
-    assert.equal(await page.locator('#hardware-safety-summary a[href="/config.html#cf-sf_bv"]').count(), 1);
-    assert.match(await text(page, '#hardware-requirements-summary'), /Add a Main Fuel Pump.*Required before the ECU can run an engine/is);
-    results.push('compact bus, controller and safety editors expose setup details and prerequisites on demand');
+    await goto(page, 'controllers.html', '#controller-overview');
+    assert.ok(await page.locator('.safety-local-toggle input:disabled').count() >= 5);
+    assert.match(await page.locator('#cfg-form').textContent(), /Requires Main Fuel and N1 or N2|Fit an N1 speed input/i);
+    results.push('compact bus setup and Controllers prerequisites remain discoverable without duplicating control settings on Hardware');
 
     await patchData(page, { mode:'STANDBY', config_locked:false });
-    await goto(page, 'config.html#cf-sf_bv', '#cf-sf_bv');
+    await goto(page, 'controllers.html#cf-sf_bv', '#cf-sf_bv');
     assert.equal(await page.locator('.cfg-field.deep-link-target[data-key="sf_bv"]').count(), 1);
     assert.equal(await page.locator('#cf-sf_bv').isVisible(), true);
     assert.equal(await page.locator('#cf-sf_bv').evaluate(el => el.closest('.config-group')?.open), true);
-    results.push('cross-page links reveal, open, and highlight their exact Config field');
+    results.push('cross-page links reveal, open, and highlight their exact Controllers field');
 
     await reset(page);
     await goto(page, 'calibration.html#p2-cal-row', '#p2-cal-row');
@@ -933,14 +911,14 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
 
     await reset(page);
     await patchHardware(page, { cluster_serial: { enabled: false, tx_pin: -1, rx_pin: -1 } });
-    await goto(page, 'config.html', '#cf-cl_n1');
-    assert.equal(await page.locator('#cf-cl_en').count(), 0, 'cluster transmission must have only the Hardware enable');
+    await goto(page, 'system.html', '#cf-cl_n1');
+    assert.equal(await page.locator('#cf-cl_en').count(), 0, 'cluster transmission must have one System enable');
     assert.equal(await page.locator('#cf-cl_n1').isVisible(), false, 'cluster thresholds stay hidden when cluster hardware is disabled');
     await goto(page, 'hardware.html', '#hardware-comms-summary');
     await page.locator('#btn-edit-comms').click();
     assert.match(await text(page, '#hardware-comms-summary'), /Cluster TX GPIO|Cluster RX GPIO|TX-only/i);
     assert.ok(await page.locator('#hardware-comms-summary option[value="-1"]').count() >= 1);
-    results.push('cluster Hardware enable is authoritative and TX-only/two-way setup exposes the telemetry RX option');
+    results.push('cluster System enable and Hardware serial wiring remain clearly separated');
 
     await reset(page);
     const timerOnlyHardware = (await (await page.request.get(`${base}/api/hardware`)).json());
@@ -976,7 +954,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     const missingOilBlock = page.locator('.block-card', { hasText: 'Oil Pump On' }).first();
     assert.match(await missingOilBlock.getAttribute('class'), /block-hardware-missing/);
     assert.match(await missingOilBlock.textContent(), /Missing hardware/i);
-    await missingOilBlock.getByRole('button', { name: 'Move block down' }).click();
+    await missingOilBlock.getByRole('button', { name: /Drag to reorder block/ }).press('ArrowDown');
     assert.equal(await page.locator('#save-btn').isDisabled(), false);
     assert.equal(await page.locator('#seq-discard-btn').isDisabled(), false);
     await page.locator('#save-btn').click();
@@ -995,10 +973,9 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await goto(page, 'sequence.html', '#save-btn');
     assert.equal(await visible(page, '#tab-btn-afterburner'), true);
     assert.equal(await page.locator('#add-startup-sel option[value*="AB"]').count(), 0);
-    await page.locator('.seq-tab', { hasText: 'Control Rules' }).click();
-    assert.equal(await page.locator('#rule-sensor-0 option[value="6"]').isDisabled(), false);
-    assert.equal(await page.locator('#rule-act-0 option[value="11"]').isDisabled(), false);
-    results.push('sequencer and rules expose fitted N2/afterburner devices without obsolete master flags');
+    assert.equal((await page.evaluate(() => getEnabledSensors().map(row => row.key))).includes('n2_rpm'), true);
+    assert.equal((await page.evaluate(() => getEnabledActuators().map(row => row.key))).includes('ab_sol'), true);
+    results.push('sequencer exposes fitted N2/afterburner devices without obsolete master flags');
 
     await reset(page);
     const registryAbHardware = await (await page.request.get(`${base}/api/hardware`)).json();
@@ -1008,14 +985,12 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     });
     await patchHardware(page, { channel_registry: registryAbHardware.channel_registry });
     await goto(page, 'sequence.html', '#save-btn');
-    await page.locator('.seq-tab', { hasText: 'Control Rules' }).click();
-    assert.equal(await page.locator('#rule-sensor-0 option[value="24"]').isDisabled(), false);
-    assert.equal(await page.locator('#rule-sensor-0 option', { hasText: /^AB (Input|Command)/ }).count(), 1);
+    assert.equal((await page.evaluate(() => getEnabledSensors().filter(row => row.key === 'ab_input').length)), 1);
     await goto(page, 'config.html', '#rc-pwm-section');
     await page.locator('#btn-view-expert').click();
     assert.equal(await visible(page, '#rc-pwm-section'), true);
     assert.equal(await page.locator('#cf-ab_pcm option[value="2"]').isDisabled(), false);
-    results.push('registry RC afterburner command is one named rule source and exposes its signal-loss settings');
+    results.push('registry RC afterburner command is one named sequence source and exposes its signal-loss settings');
 
     await reset(page);
     await patchHardware(page, {
@@ -1103,7 +1078,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
 
     await reset(page);
     await scenario(page, 'fault');
-    await goto(page, 'hardware.html', '#f-profile-desc');
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     await page.evaluate(() => {
       engineMode = 'FAULT';
       _hwDirty = true;
@@ -1123,12 +1098,14 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     results.push('Hardware and Sequence keep their firmware-supported FAULT repair save path available');
 
     await reset(page);
-    await goto(page, 'config.html', '#cfg-form');
-    assert.equal(await page.locator('#cfg-form input:not([aria-label]), #cfg-form select:not([aria-label])').count(), 0);
+    await goto(page, 'controllers.html', '#cfg-form');
+    assert.equal(await page.locator('#cfg-form input, #cfg-form select').evaluateAll(elements =>
+      elements.filter(el => !el.getAttribute('aria-label') && !(el.labels && el.labels.length)).length), 0);
     assert.ok((await page.locator('#preset-sel').getAttribute('aria-label'))?.length > 0);
-    await goto(page, 'hardware.html', '#f-profile-desc');
-    assert.ok((await page.locator('#f-profile-desc').getAttribute('aria-label'))?.length > 0);
-    assert.ok((await page.locator('#f-wifi-tx-power').getAttribute('aria-label'))?.length > 0);
+    await goto(page, 'system.html', '#system-engine-description');
+    assert.ok((await page.locator('#system-engine-description').evaluate(el => el.labels?.[0]?.textContent.trim() || ''))?.length > 0);
+    assert.ok((await page.locator('#system-wifi-tx-power').evaluate(el => el.labels?.[0]?.textContent.trim() || ''))?.length > 0);
+    await goto(page, 'hardware.html', '#hardware-profile-section');
     assert.equal(await page.locator('#registry-bindings select:not([aria-label])').count(), 0);
     await goto(page, 'sequence.html', '#add-startup-sel');
     assert.ok((await page.locator('#add-startup-sel').getAttribute('aria-label'))?.length > 0);
@@ -1136,7 +1113,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.ok((await page.locator('#cooldown-slider').getAttribute('aria-label'))?.length > 0);
     results.push('visible generated settings and static commissioning selectors expose programmatic labels');
 
-    for (const route of ['index.html', 'hardware.html', 'config.html', 'sequence.html', 'calibration.html', 'tools.html', 'log.html']) {
+    for (const route of ['index.html', 'hardware.html', 'controllers.html', 'system.html', 'sequence.html', 'calibration.html', 'tools.html', 'log.html']) {
       await assertNoSevereLayoutIssues(page, route, { width: 390, height: 844 });
       assert.equal(await page.locator('#ot-nav-more').count(), 0, `${route} should not inject a floating More button`);
       await assertNoSevereLayoutIssues(page, route, { width: 1366, height: 768 });

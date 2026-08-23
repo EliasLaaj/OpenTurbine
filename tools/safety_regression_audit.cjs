@@ -12,12 +12,14 @@ function expect(label, condition) {
   checks.push(label);
 }
 
-const configCpp = read('src/system/Config.cpp') + read('src/system/ConfigSerialize.cpp');
+const configSerialize = read('src/system/ConfigSerialize.cpp');
+const configCpp = read('src/system/Config.cpp') + configSerialize;
 const configHtml = read('data_src/config.html');
 const hardware = read('src/Hardware.h');
 const hwConfig = read('src/system/HardwareConfig.cpp') +
   read('src/system/HardwareConfigSerialize.cpp');
 const main = read('src/main.cpp');
+const nothrowNew = read('src/platform/esp32/NothrowNew.cpp');
 const web = read('src/system/web/WebServer.cpp');
 const webApp = read('data_src/app.js');
 const outputActivity = read('src/system/OutputActivity.h');
@@ -43,7 +45,7 @@ const pcbProfileManager = read('src/system/pcb/PcbProfileManager.cpp');
 const lossRecheck = read('src/hal/i2c/LossRecheck.h');
 const ntc = read('src/hal/sensors/NTCSensor.h');
 const sequenceHtml = read('data_src/sequence.html');
-const sequenceRules = read('data_src/pages/sequence-rules-save.js');
+const sequenceRules = read('data_src/pages/sequence-editor.js');
 const hardwareHtml = read('data_src/hardware.html');
 const hardwareCatalog = read('data_src/pages/hardware-registry-catalog.js');
 const hardwareSave = read('data_src/pages/hardware-save.js');
@@ -87,6 +89,20 @@ expect('repository PlatformIO launcher avoids the broken global shim',
   fs.existsSync(path.join(root, 'tools/pio.cmd')));
 expect('priority-ten AsyncTCP work is pinned away from the engine-control core',
   platformio.includes('-DCONFIG_ASYNC_TCP_RUNNING_CORE=0'));
+expect('nothrow allocation returns null instead of aborting a heap-starved network task',
+  nothrowNew.includes('operator new(std::size_t size, const std::nothrow_t&) noexcept') &&
+  nothrowNew.includes('operator new[](std::size_t size, const std::nothrow_t&) noexcept') &&
+  (nothrowNew.match(/std::malloc\(size \? size : 1\)/g) || []).length === 2);
+expect('settings candidates release the merged JSON tree before opening LittleFS',
+  configSerialize.includes('serializeJson(doc, scratch, scratchLen)') &&
+  configSerialize.indexOf('serializeJson(doc, scratch, scratchLen)') <
+    configSerialize.indexOf('doc.clear();') &&
+  configSerialize.indexOf('doc.clear();') <
+    configSerialize.indexOf('_saveSettingsJson(persistedCandidate, required)'));
+expect('full engine restore atomically writes the uploaded runtime hardware instead of recopying the old file',
+  web.includes('Config::save(true)') &&
+  configCpp.includes('if (!writeRuntimeHardware && hadSourceConfig && ok)') &&
+  configCpp.includes('if (hadSourceConfig && !writeRuntimeHardware)'));
 expect('PCNT failures are recoverable',
   !pcnt.includes('ESP_ERROR_CHECK') && pcnt.includes('feedback disabled without reboot'));
 expect('analog filters use four samples', analog.includes('RollingAvg<4> _avg'));
@@ -516,13 +532,14 @@ const pioHook = fs.readFileSync(path.join(root, 'tools', 'pio_s3_dynconfig.py'),
 expect('Tools polls compact live telemetry after loading its configuration and hardware documents',
   toolsHtml.includes("fetchJsonWithTimeout('/api/telemetry', 3000)") &&
   !toolsHtml.includes("fetchJsonWithTimeout('/api/data', 3000)"));
-expect('Classic and S3 browser telemetry use one compact transport without page-owned WebSocket churn',
-  webApp.includes('_useWebSocketTelemetry = false;') &&
+expect('Classic and S3 browser telemetry use one compact persistent transport with REST fallback',
+  webApp.includes('_useWebSocketTelemetry = true;') &&
   webApp.includes("fetch('/api/telemetry'") &&
   !webApp.includes("info?.target !== 'esp32dev'"));
-expect('HTTP TIME_WAIT pressure relief is scoped to port 80 and preserves a protected tail',
+expect('HTTP TIME_WAIT pressure relief is scoped to port 80 and quarantines fresh tuples',
   web.includes('if (pcb->local_port == 80) ++count;') &&
   web.includes('while (count >= 8)') &&
+  web.includes('oldestAge < MIN_REAP_AGE_TICKS') &&
   web.includes('tcp_abort(oldest)') &&
   web.includes('s_httpTimeWaitPcbs = count'));
 expect('HTTP completion leaves advertised close to the peer without ECU TIME_WAIT or browser resets',
@@ -590,11 +607,22 @@ expect('configuration warnings describe actual startup and cooldown ordering',
   configHtml.includes('later spool stage may already be satisfied') &&
   configHtml.includes('Startup may pass and then immediately fault') &&
   configHtml.includes('Cooldown may complete immediately while the turbine is still hot'));
-expect('rule help and collisions disclose final command ownership',
-  sequenceHtml.includes('Outside the selected engine states, the rule releases the output') &&
-  sequenceHtml.includes('false or unavailable input applies the configured off value') &&
-  sequenceHtml.includes('overlapping RUNNING owners') &&
-  sequenceHtml.includes('later rule command is final'));
+expect('custom controllers disclose single ownership and safety authority',
+  configHtml.includes('One normal owner per output') &&
+  configHtml.includes('STOP, FAULT, and hardware safety remain authoritative'));
+expect('custom feedback control has target-source choices, bumpless handover, and bounded PI state',
+  configHtml.includes('Hold a feedback target') &&
+  configHtml.includes('Two-state switch') && configHtml.includes('Variable input mapping') &&
+  rulesEngine.includes('FeedbackControlMath::step') &&
+  rulesEngine.includes('Automatic idle is a floor'));
+expect('custom controllers expose normal operating states but never FAULT ownership',
+  configHtml.includes('When this controller is active') &&
+  configHtml.includes('Standby') && configHtml.includes('Startup') &&
+  configHtml.includes('Running') && configHtml.includes('Shutdown') &&
+  rulesEngine.includes('FAULT is never an automation state'));
+expect('starter-enable output resolves as a supported custom on-off target',
+  configCpp.includes('starter_enable_main') &&
+  configCpp.includes('case 6:  return HardwareConfig::hasStarterEn'));
 expect('oil-loop editor separates binary and proportional hardware semantics',
   hardwareHtml.includes('On/off oil-pressure control') &&
   hardwareHtml.includes('Minimum pump output (%)') &&
@@ -703,7 +731,7 @@ expect('hardware full-engine save refreshes and three-way merges concurrent brow
   hardwareSave.includes("fetch('/api/ecu_config?source=hardware'") &&
   hardwareSave.includes('mergedSettings.profile_id = mergedHardware.profile_id') &&
   hardwareSave.includes('JSON.stringify({hardware:mergedHardware, settings:mergedSettings})') &&
-  web.includes('if (hardwareEditorSave)') &&
+  web.includes('if (configurationEditorSave)') &&
   web.includes('Config::autoFillNewlyEnabledSafety(prevSafOilT, prevSafFP'));
 expect('hardware reboot recap includes every editable registry calibration and routing field',
   hardwareSave.includes("['i2c_address','device_channel'].includes(key)) return driver >= 8") &&
@@ -806,17 +834,18 @@ expect('atomic sequence saves preserve unrelated settings changed after the page
   sequenceHtml.includes("fetchJsonWithRetry('/api/config')") &&
   sequenceHtml.includes('mergeSequenceEdits(loadedHwCfg, hwCfg, latestHw)') &&
   sequenceHtml.includes('mergeSequenceEdits(loadedCfg, cfg, latestCfg)'));
-expect('generic shared-I2C channels are first-class custom-block and control-rule channels',
+expect('generic shared-I2C channels are first-class custom-block and simple-control channels',
   sequenceHtml.includes('if (!registryChannelInstalled(c)) return;') &&
-  sequenceHtml.includes('registryChannelInstalled(c) && !registryInputCoreBound(c)') &&
-  sequenceHtml.includes('registryChannelInstalled(c) && !registryOutputCoreBound(c)') &&
-  sequenceHtml.includes('[1,9].includes(Number(c.driver))'));
+  sequenceHtml.includes('if (registryInputCoreBound(c)) return;') &&
+  sequenceHtml.includes('if (!registryChannelInstalled(c) || registryOutputCoreBound(c)) return;') &&
+  configHtml.includes('function simpleControlInputs()') &&
+  configHtml.includes('function simpleControlOutputs()'));
 expect('configured I2C drain and purge valves participate in device-loss guards',
   hardware.includes('!strcmp(p, "purge_valve") || !strcmp(p, "drain_valve")'));
 expect('Sequence custom-channel ownership follows semantic canonical owners after channel renames',
-  sequenceHtml.includes('RULE_CORE_INPUT_PURPOSES') &&
-  sequenceHtml.includes('RULE_CORE_OUTPUT_PURPOSES') &&
-  sequenceHtml.includes('return (preferred || peers[0]) === c;'));
+  sequenceHtml.includes('SEQUENCE_CORE_INPUT_PURPOSES') &&
+  sequenceHtml.includes('SEQUENCE_CORE_OUTPUT_PURPOSES') &&
+  sequenceHtml.includes('return (preferred || peers[0]) === channel;'));
 expect('every main-engine shutdown entry handles an empty shutdown sequence',
   (main.match(/if \(_shutdownCount == 0\)/g) || []).length >= 3 &&
   main.includes('Startup abort: shutdown sequence empty - immediate all-off to STANDBY'));
@@ -981,5 +1010,33 @@ expect('output re-purpose and removal preserve explicit ownership and stable num
   hardwareRegistryActions.includes("shiftRegistryNumericHandlesAfterRemoval(direction, index, r[direction + 's'].length);"));
 expect('STOP cleanup explicitly clears both bleed-valve state representations',
   main.includes('ed.bleedValveDemand = 0.0f;\n    ed.bleedValveOpen = false;'));
+expect('full telemetry defers without a conflict when the bounded response workspace is busy',
+  web.includes('bool allowDeferredSnapshot = false') &&
+  web.includes('{\\"_snapshot_deferred\\":true}') &&
+  web.includes('_sendBorrowedWebRxJson(req, g_webTxBuf, n, 200, true);') &&
+  webApp.includes('async function loadDashboardSnapshot(attempt = 0)') &&
+  webApp.includes('data?._snapshot_deferred') &&
+  webApp.includes('loadDashboardSnapshot(attempt + 1)'));
+expect('low-heap request rejection uses the framework-safe abort path only on Classic',
+  web.includes('#if defined(OT_PLATFORM_ESP32)\n        if (ESP.getFreeHeap() < 24576') &&
+  (web.match(/request->abort\(\)/g) || []).length >= 1 &&
+  web.includes('if (req->client()) req->abort();') &&
+  !web.includes('req->client()->close()'));
+expect('S3 config reads use the bounded transfer workspace instead of a fragile second full copy',
+  web.includes('#if defined(OT_PLATFORM_ESP32S3)\n        _sendLargeReadJson(req, g_webTxBuf, n);\n#else\n        _sendOwnedJson(req, g_webTxBuf, n);'));
+expect('completed bounded log views release their read gate before TCP keep-alive teardown',
+  web.includes('The LittleFS read and response construction are complete.') &&
+  (web.match(/_releaseLogRead\(req\);/g) || []).length >= 3);
+expect('session logging keeps proportional filesystem headroom on both flash sizes',
+  sessionLogger.includes('LittleFS.totalBytes() / 8U') &&
+  sessionLogger.includes('SESSION_MIN_RESERVE_BYTES = 32 * 1024') &&
+  sessionLogger.includes('SESSION_MAX_RESERVE_BYTES = 150 * 1024') &&
+  sessionLogger.includes('return min(SESSION_MAX_RESERVE_BYTES'));
+expect('idle event snapshots honor the disabled toggle in both STANDBY and FAULT and omit absent channels',
+  flightRecorder.includes('ed.mode == SysMode::STANDBY || ed.mode == SysMode::FAULT') &&
+  flightRecorder.includes('if (idleMode && !Config::logStandby) return;') &&
+  flightRecorder.includes('if (hw.hasN1Rpm)') &&
+  flightRecorder.includes('if (hw.hasTot)') &&
+  flightRecorder.includes('if (hw.hasThrottle)'));
 
 console.log(`Safety regression audit passed (${checks.length} checks).`);

@@ -58,9 +58,9 @@ Join the Wi-Fi network created by the board, remain connected even if Windows sa
 
 OpenTurbine does not require one fixed engine layout. Describe only the sensors and actuators your system actually has, then configure and test them in this order:
 
-**Hardware → Config → Calibration → Sequence and Control Rules → Tools → Dashboard**
+**Hardware → Controllers → System → Calibration → Sequence → Tools → Dashboard**
 
-The [complete User Guide]({{ '/user-guide/' | relative_url }}) explains every stage, including sensor wiring, actuator drivers, available inputs and outputs, controller behavior, safety functions and Config fields.
+The [complete User Guide]({{ '/user-guide/' | relative_url }}) explains every stage, including sensor wiring, actuator drivers, output ownership, safety functions, ECU-wide settings, calibration and sequences.
 
 Do not connect fuel or ignition energy until the independent stop and every configured shutdown path have been dry-tested.
 

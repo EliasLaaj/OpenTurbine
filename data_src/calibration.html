@@ -5,14 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Calibration</title>
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260814g',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260814g');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body>
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
-  <a href="/config.html" title="Tune engine limits, controllers, recovery behavior, and hardware-dependent settings.">Config</a>
+  <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" class="active" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
@@ -89,14 +91,12 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
         <span id="oil-step-ind-3" class="step-dot">3</span>
       </div>
 
-      <!-- Step 1: Choose starting pump %, click Start → auto-zero captured -->
+      <!-- Step 1: capture the sensor's pump-off reference -->
       <div id="oil-step-1">
         <div class="wizard-steps">
-          Depressurise the oil line and choose what the sensor should read at ambient pressure: <b>0 bar</b> for a gauge-pressure sensor, or about <b>1 bar</b> for an absolute-pressure sensor. Start Calibration averages the zero reading with the pump off. Starting pump % may remain at 0 when you want to use the automatic sweep next.
+          <b>1. Capture pump-off pressure.</b> Depressurise the oil line and choose what the sensor should read at ambient pressure: <b>0 bar</b> for a gauge-pressure sensor, or about <b>1 bar</b> for an absolute-pressure sensor. The ECU keeps the pump off and averages the reference before continuing.
         </div>
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
-          <span style="font-size:.78rem;color:var(--dim)">Starting pump %</span>
-          <input type="number" id="oil-pump-pct" value="0" min="0" max="100" step="0.25" style="width:80px">
           <label style="font-size:.75rem;color:var(--dim)">Zero reading
             <select id="oil-zero-reference">
               <option value="0">0 bar (gauge pressure)</option>
@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
       <!-- Step 2: Add points at different pump speeds -->
       <div id="oil-step-2" style="display:none">
         <div class="wizard-steps">
-          Find the minimum pump output with the slow sweep, then capture stable gauge readings at several pump outputs. Four total points are required. <b>Automatic</b> normally chooses a straight-line model and uses a curved model only when it fits substantially better. Alternatively, enter datasheet sensitivity at the ECU ADC pin in mV/bar.
+          <b>2. Find the pump minimum.</b> Start the slow sweep, then tap <b>Pump started — capture minimum</b> at the first reliable movement, sound, flow, or pressure rise. The pump stops immediately and that output becomes its minimum command.
         </div>
         <!-- Pump speed control -->
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.5rem 0">
@@ -119,8 +119,12 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
           <input type="number" id="oil-pump-pct2" value="0" min="0" max="100" step="0.25" style="width:80px">
           <button onclick="oilSetPump()">Set pump</button>
           <button id="btn-oil-sweep" onclick="oilMinSweepStart()">Sweep from 0 at 1%/s</button>
-          <button id="btn-oil-sweep-stop" onclick="oilMinSweepStop()" disabled>Pressure started — stop</button>
+          <button id="btn-oil-sweep-stop" onclick="oilMinimumFound()" disabled>Pump started — capture minimum</button>
           <button onclick="oilCalStop()" style="color:var(--dim)">Stop pump</button>
+        </div>
+        <div id="oil-min-pct-status" style="font-size:.75rem;color:var(--yellow);margin-bottom:.65rem">Minimum pump output not captured yet.</div>
+        <div class="wizard-steps">
+          <b>3. Calibrate pressure.</b> Set a few pump outputs across the useful range. After each reading stabilises, enter the pressure shown by your trusted gauge and capture the point. The pump output and raw sensor reading are stored together; four total pressure points including zero are required.
         </div>
         <!-- Pressure capture -->
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
@@ -128,9 +132,13 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
           <button onclick="captureOilPoint()">Capture point</button>
           <button onclick="clearOilPoints()" style="color:var(--dim)">Clear all</button>
           <label>Fit <select id="oil-fit-mode"><option value="auto">Automatic</option><option value="linear">Straight-line sensor</option><option value="cubic">Curved sensor</option></select></label>
-          <label>Datasheet sensitivity <input id="oil-mv-bar" type="number" min="0.1" step="0.1" style="width:6rem"> mV/bar</label>
-          <button onclick="oilUseDatasheet()">Use datasheet value</button>
         </div>
+        <details style="margin:.55rem 0;font-size:.75rem;color:var(--dim)"><summary style="cursor:pointer">Use the sensor datasheet instead of gauge points</summary>
+          <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
+            <label>Sensor sensitivity at the ECU ADC pin <input id="oil-mv-bar" type="number" min="0.1" step="0.1" style="width:6rem"> mV/bar</label>
+            <button onclick="oilUseDatasheet()">Use datasheet value</button>
+          </div>
+        </details>
         <pre id="oil-pts" style="font-size:.7rem;color:var(--dim);background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:.5rem;min-height:2.5rem">Waiting for first point…</pre>
         <div style="display:flex;gap:.5rem;margin-top:.5rem">
           <button id="btn-oil-to-3" onclick="oilGoStep3()" disabled>Compute Fit →</button>
@@ -166,11 +174,19 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     <div class="wizard" id="flame-threshold-tools">
       <div class="wizard-title">Flame Threshold Calibration</div>
       <div class="wizard-steps">
-        1. Make sure no flame is present, then click <b>Capture noise floor</b> (~1 s sampling). Keep the threshold near the igniter-on noise floor so weak light-off flame is still detected.<br>
+        1. Make sure no flame is present, choose whether the igniter should fire, then click <b>Capture noise floor</b> (~1 s sampling). Keep the threshold near the igniter-on noise floor so weak light-off flame is still detected.<br>
         Threshold = noise floor × multiplier (default 3×). Adjust multiplier if needed, then save.<br>
         <span style="color:var(--yellow)">⚠ <b>Recommended: keep "fire igniter while sampling" ON.</b> Spark noise from the igniter raises the ADC floor.
         Capturing with the igniter firing sets the threshold high enough so that spark bursts during startup are not mistaken for a real flame — preventing false ignition confirmation.
         Only disable this if your igniter is not yet installed. “Last run average” is a low-rate reference from the previous engine run; it is not used automatically as the ignition threshold.</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:.55rem;margin:.55rem 0;flex-wrap:wrap">
+        <label style="font-size:.75rem;color:var(--dim)">Noise capture method
+          <select id="flame-noise-mode">
+            <option value="igniter">Fire igniter while sampling (recommended)</option>
+            <option value="quiet">Keep igniter off / use external flame source</option>
+          </select>
+        </label>
       </div>
       <div class="wiz-buttons" style="margin-bottom:.4rem">
         <button id="btn-flame-noise" onclick="captureFlameNoise()">Capture noise floor</button>
@@ -178,10 +194,6 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
         <button id="btn-flame-clear" onclick="clearFlame()" style="color:var(--dim)">Clear</button>
       </div>
       <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.4rem;flex-wrap:wrap">
-        <label style="font-size:.75rem;color:var(--dim);display:flex;align-items:center;gap:.4rem">
-          <input type="checkbox" id="flame-noise-ign" checked>
-          fire igniter while sampling (recommended)
-        </label>
         <span style="font-size:.75rem;color:var(--dim)">multiplier:</span>
         <input type="number" id="flame-multiplier" value="3" min="1" max="10" step="0.5" style="width:70px"
                oninput="recomputeFlameThreshold()">
@@ -1410,6 +1422,7 @@ function calStandbyGuard(action) {
 // ── Oil calibration wizard ────────────────────────────────────
 let oilCalActive = false;
 let oilFit = { a:0, b:0, c:0, d:0, x0:0, x1:4095 };
+let oilMinPctCaptured = null;
 
 function oilGoStep(n) {
   [1,2,3].forEach(i => {
@@ -1435,7 +1448,6 @@ async function postCalCommand(payload) {
 
 function oilCalStart() {
   if (!calStandbyGuard('the oil pump calibration')) return;
-  const pct = parseFloat(document.getElementById('oil-pump-pct').value) || 0;
   const statusEl = document.getElementById('oil-zero-status');
   const startBtn = document.getElementById('btn-oil-start');
 
@@ -1456,13 +1468,15 @@ function oilCalStart() {
       // Auto-insert zero-pressure point
       const zeroBar = parseFloat(document.getElementById('oil-zero-reference')?.value) || 0;
       oilPts = [{ raw: raw0, b: zeroBar }];
+      oilMinPctCaptured = null;
       renderOilPts();
-      statusEl.textContent = `Zero captured: raw=${raw0} → 0.00 bar`;
+      statusEl.textContent = `Pump-off reference captured: raw=${raw0} → ${zeroBar.toFixed(2)} bar`;
 
-      // Now spin up to chosen %
-      document.getElementById('oil-pump-pct2').value = pct;
+      // Continue with the pump stopped. The next step deliberately finds the
+      // first reliable pump output rather than asking the operator to guess it.
+      document.getElementById('oil-pump-pct2').value = '0';
       try {
-        await postCalCommand({ cmd:'SET_OIL_PCT', fParam: pct });
+        await postCalCommand({ cmd:'SET_OIL_PCT', fParam: 0 });
         oilCalActive = true;
         oilGoStep(2);
       } catch(e) {
@@ -1504,6 +1518,14 @@ function oilMinSweepStop(keep=true) {
   document.getElementById('btn-oil-sweep-stop').disabled=true;
   postCalCommand({cmd:'SET_OIL_PCT',fParam:0,iParam:0}).catch(()=>{});
   if(!keep) document.getElementById('oil-pump-pct2').value='0';
+}
+function oilMinimumFound() {
+  if (!_oilMinSweep) return;
+  const pct = Math.max(0, Math.min(100, parseFloat(document.getElementById('oil-pump-pct2').value) || 0));
+  oilMinPctCaptured = pct;
+  const status = document.getElementById('oil-min-pct-status');
+  if (status) status.textContent = `Captured minimum pump output: ${pct.toFixed(2)}%. Verify it starts reliably before using the engine.`;
+  oilMinSweepStop(true);
 }
 
 function oilCalStop() {
@@ -1689,6 +1711,10 @@ function oilUseDatasheet(){
   const mv=parseFloat(document.getElementById('oil-mv-bar').value), zero=oilPts[0];
   if(!zero||!Number.isFinite(mv)||mv<=0){alert('Capture zero and enter the sensor sensitivity in mV/bar.');return;}
   const c=(3300/4095)/mv, d=zero.b-c*zero.raw;
+  const raw1 = zero.raw < 4095 ? 4095 : 0;
+  const value1 = c * raw1 + d;
+  if (raw1 === zero.raw || value1 <= zero.b) { alert('The datasheet value does not produce a usable increasing pressure range from the captured zero. Check the wiring and sensitivity.'); return; }
+  oilPts = [{raw:zero.raw,b:zero.b},{raw:raw1,b:value1}];
   oilFit={a:0,b:0,c,d,x0:0,x1:4095}; oilCalStop(); oilGoStep(3);
   document.getElementById('oil-fit-summary').innerHTML=`<b>Datasheet straight-line calibration</b><br>Zero: ADC ${zero.raw} = ${zero.b.toFixed(2)} bar<br>Sensitivity: ${mv} mV/bar`;
 }
@@ -1756,15 +1782,17 @@ function saveOilCal() {
   const registryPatch = registryCalibrationPatch('oil_pressure', {
     calibration_points: curve.map(p=>({raw:Math.round(p.raw),value:p.b}))
   });
-  patchHardwareThenConfig(registryPatch, () => {
-    const registry = registryInputById('oil_pressure');
-    if (registry) registry.calibration_points = curve.map(p=>({raw:Math.round(p.raw),value:p.b}));
-  }, {
+  const settingsPatch = {
     calibration: {
       oil_poly: { a:oilFit.a, b:oilFit.b, c:oilFit.c, d:oilFit.d,
                   x_min:oilFit.x0, x_max:oilFit.x1 }
     }
-  }, 'Oil pressure calibration saved', () => {
+  };
+  if (oilMinPctCaptured !== null) settingsPatch.oil = { min_pct: oilMinPctCaptured };
+  patchHardwareThenConfig(registryPatch, () => {
+    const registry = registryInputById('oil_pressure');
+    if (registry) registry.calibration_points = curve.map(p=>({raw:Math.round(p.raw),value:p.b}));
+  }, settingsPatch, 'Oil pressure calibration saved', () => {
     // Reset the wizard only once the ECU accepted the save — a rejection
     // used to wipe the captured points anyway.
     oilGoStep(1);
@@ -1782,7 +1810,7 @@ const _flameBtns = () => ['btn-flame-noise','btn-flame-save','btn-flame-clear']
 
 async function captureFlameNoise() {
   const statusEl = document.getElementById('flame-status');
-  const fireIgn  = document.getElementById('flame-noise-ign')?.checked;
+  const fireIgn  = document.getElementById('flame-noise-mode')?.value !== 'quiet';
   if (fireIgn) {
     // Firing a spark source needs both the STANDBY gate and an explicit ack.
     if (!calStandbyGuard('the igniter noise capture')) return;

@@ -7,6 +7,7 @@
   const nativeFetch = window.fetch.bind(window);
   let pageFetchController = new AbortController();
   let pendingPageFetches = 0;
+  let largeReadChain = Promise.resolve();
   const pageFetchWaiters = new Set();
   const waitForPageFetches = (timeoutMs) => {
     if (!pendingPageFetches) return Promise.resolve(true);
@@ -53,7 +54,7 @@
       else signal.addEventListener('abort', abort, { once: true });
     }
     pendingPageFetches++;
-    return nativeFetch(input, { ...init, signal: requestController.signal })
+    const performFetch = () => nativeFetch(input, { ...init, signal: requestController.signal })
       .then(async response => {
         // Do not report a JSON fetch as settled merely because its headers
         // arrived. Navigation must wait until the small ECU response body has
@@ -74,6 +75,16 @@
           for (const done of [...pageFetchWaiters]) done(true);
         }
       });
+    // Config, hardware, and the full telemetry snapshot are deliberately large
+    // and share one bounded response buffer on Classic ESP32. Page scripts may
+    // ask for them from independent startup tasks, so serialize them here
+    // without making every caller know about the transport constraint.
+    const largeRead = method === 'GET' &&
+      (pathname === '/api/config' || pathname === '/api/hardware' || pathname === '/api/data');
+    if (!largeRead) return performFetch();
+    const queued = largeReadChain.catch(() => {}).then(performFetch);
+    largeReadChain = queued.then(() => undefined, () => undefined);
+    return queued;
   };
   const abortPageFetches = () => pageFetchController.abort();
   const waitForWindowLoad = (timeoutMs) => {
@@ -88,6 +99,27 @@
       const timer = setTimeout(() => done(false), timeoutMs);
       window.addEventListener('load', loaded, { once: true });
     });
+  };
+  const waitForServerTelemetryClose = async (timeoutMs = 2500) => {
+    const started = Date.now();
+    do {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), Math.min(800, timeoutMs));
+      try {
+        const response = await nativeFetch('/api/status?navigation_close=1', {
+          cache: 'no-store', signal: controller.signal
+        });
+        if (response.ok) {
+          const status = await response.json();
+          if (Number(status.ws_clients || 0) === 0) return true;
+        }
+      } catch (_) {
+      } finally {
+        clearTimeout(timer);
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } while (Date.now() - started < timeoutMs);
+    return false;
   };
   window.addEventListener('pagehide', abortPageFetches);
   window.addEventListener('beforeunload', abortPageFetches);
@@ -109,12 +141,28 @@
     event.preventDefault();
     if (navigationStarting) return;
     navigationStarting = true;
-    window.dispatchEvent(new Event('ot:navigation-start'));
     document.documentElement.style.cursor = 'progress';
+    window.dispatchEvent(new Event('ot:navigation-prepare'));
     // The navigation bar can be clicked while the Classic is still streaming
     // this page's CSS/JS. Finish load-blocking files before leaving so Chrome
     // does not abandon a LittleFS response and occupy a scarce TCP connection.
-    await Promise.all([waitForWindowLoad(6000), waitForPageFetches(4000)]);
+    await Promise.all([
+      waitForWindowLoad(6000),
+      waitForPageFetches(4000),
+      typeof window.OTWaitForTelemetryIdle === 'function'
+        ? window.OTWaitForTelemetryIdle(1600) : Promise.resolve(true),
+      typeof window.OTWaitForPageTelemetryIdle === 'function'
+        ? window.OTWaitForPageTelemetryIdle(1600) : Promise.resolve(true)
+    ]);
+    // Only close the page's sockets after their current multipart telemetry
+    // reply has drained. Closing a Hardware/Sequence/Tools socket mid-frame
+    // can strand AsyncTCP send buffers on Classic until heap is exhausted.
+    window.dispatchEvent(new Event('ot:navigation-start'));
+    // close() is asynchronous. A page-local Hardware/Sequence/Tools socket can
+    // still own multipart telemetry buffers after JavaScript has discarded its
+    // WebSocket object. Starting the next large HTML/API load in that window
+    // exhausted Classic ESP32 heap during ordinary one-tab navigation.
+    await waitForServerTelemetryClose(2500);
     abortPageFetches();
     // Give the async TCP task one scheduling window to process the old page's
     // request aborts and WebSocket close before opening the replacement page.

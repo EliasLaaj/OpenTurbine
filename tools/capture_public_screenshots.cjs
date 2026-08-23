@@ -78,8 +78,13 @@ async function installPublicExample(page) {
   Object.assign(settings.sequence.shutdown, { rpm_drop_threshold: 8000, rpm_drop_timeout_ms: 20000, cooldown_timeout_ms: 60000, cooldown_use_starter: true, cooldown_use_oil: true, cooldown_starter_pct: 10, cooldown_oil_pct: 30 });
   Object.assign(settings.safety, { check_interval_ms: 20, flameout_shutdown_ms: 1200, flameout_egt_below_c: 300, flameout_egt_fall_rate_c_s: 50, oil_temp_limit_c: 110, batt_volt_min_v: 10.8 });
   settings.relight.enabled = false;
-  settings.rules = [{ enabled: true, name: 'Oil cooling fan', kind: 0, sensor: 0, source: 'oil_temp', op: 0, threshold: 85, hysteresis: 5,
-    actuator: 0, target: '', on_value: 1, off_value: 0, input_min: 0, input_max: 1, output_min: 0, output_max: 1, mode_mask: 4 }];
+  settings.controller_schema = 1;
+  settings.rules = [
+    { enabled: true, name: 'Main Fuel', kind: 1, sensor: 17, source: 'operator_throttle', actuator: 64, target: 'main_fuel',
+      input_min: 0, input_max: 1, output_min: 0.12, output_max: 1, on_value: 1, off_value: 0, hysteresis: 0, mode_mask: 4 },
+    { enabled: true, name: 'Oil cooling fan', kind: 0, sensor: 0, source: 'oil_temp', op: 0, threshold: 85, hysteresis: 5,
+      actuator: 69, target: 'cooling_fan', on_value: 1, off_value: 0, input_min: 0, input_max: 1, output_min: 0, output_max: 1, mode_mask: 4 }
+  ];
 
   await page.request.post(`${base}/api/ecu_config`, { data: { hardware, settings } });
 }
@@ -157,14 +162,10 @@ async function capture(page, route, file, selector, scrollToSelector = false) {
     await capture(page, 'index.html', 'hero-dashboard.png', '#n1-card');
     await setRunState(page, { mode: 'STANDBY', last_event: 'STANDBY', uptime_s: 0, n1: 0, tot: 24, oil: 0, oil_raw: 500, oil_temp: 24, throttle_demand: 0, throttle_input_us: 1000, throttle_input_norm: 0, rc_throttle_norm: 0, idle_input_type: 'none', idle_input_us: 0, oil_pct: 0, flame: false });
     await capture(page, 'hardware.html', 'hardware-page.png', '#hardware-inputs-panel', true);
-    await capture(page, 'config.html', 'config-page.png', '#cfg-form');
+    await capture(page, 'controllers.html', 'controllers-page.png', '.cfg-workspace-card');
+    await capture(page, 'system.html', 'system-page.png', '.cfg-workspace-card');
     await capture(page, 'calibration.html', 'calibration-page.png', '#throttle-cal-row');
     await capture(page, 'sequence.html', 'sequence-page.png', '#list-startup');
-    await setRunState(page, { oil_temp: 88, cool_fan_on: true });
-    await page.goto(`${base}/sequence.html`);
-    await page.getByRole('button', { name: 'Control Rules' }).click();
-    await page.waitForSelector('#rules-list');
-    await page.screenshot({ path: path.join(output, 'control-rules-page.png'), type: 'png' });
     await setRunState(page, { mode: 'STANDBY', last_event: 'STANDBY', uptime_s: 0, n1: 0, tot: 24, oil: 0, oil_raw: 500, oil_temp: 24, throttle_demand: 0, throttle_input_us: 1000, throttle_input_norm: 0, rc_throttle_norm: 0, idle_input_type: 'none', idle_input_us: 0, oil_pct: 0, flame: false });
     await capture(page, 'tools.html', 'tools-page.png', '#tool-area');
     const heroData = fs.readFileSync(path.join(output, 'hero-dashboard.png')).toString('base64');
