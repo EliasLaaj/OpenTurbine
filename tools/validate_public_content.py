@@ -15,11 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / "site"
 PUBLIC_ORIGIN = "https://elia179.github.io/OpenTurbine-ESP32-Gas-Turbine-ECU/"
 PUBLIC_PAGES = [
-    "index.md", "get-started.md", "hardware.md", "user-guide.md", "troubleshooting.md",
+    "index.md", "get-started.md", "example-system.md", "hardware.md", "user-guide.md", "troubleshooting.md",
     "safety.md", "faq.md", "developers.md", "about.md", "404.html",
 ]
 PUBLIC_ROUTES = [
-    "index.html", "get-started/index.html", "hardware/index.html", "user-guide/index.html",
+    "index.html", "get-started/index.html", "example-system/index.html", "hardware/index.html", "user-guide/index.html",
     "troubleshooting/index.html", "safety/index.html", "faq/index.html", "developers/index.html",
     "about/index.html", "404.html",
 ]
@@ -185,7 +185,7 @@ def check_built_site(built: Path, errors: list[str]) -> None:
         except ET.ParseError as exc:
             fail(errors, f"generated sitemap.xml is invalid XML: {exc}")
             sitemap_urls = []
-        expected = {PUBLIC_ORIGIN, *(PUBLIC_ORIGIN + route + "/" for route in ("get-started", "hardware", "user-guide", "troubleshooting", "safety", "faq", "developers", "about"))}
+        expected = {PUBLIC_ORIGIN, *(PUBLIC_ORIGIN + route + "/" for route in ("get-started", "example-system", "hardware", "user-guide", "troubleshooting", "safety", "faq", "developers", "about"))}
         if not expected.issubset(set(sitemap_urls)):
             fail(errors, "generated sitemap.xml is missing one or more public routes")
         for url in sitemap_urls:

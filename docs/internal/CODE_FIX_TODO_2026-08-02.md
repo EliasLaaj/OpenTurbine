@@ -1,5 +1,7 @@
 # OpenTurbine post-audit implementation TODO
 
+> **Archived implementation record:** OpenTurbine 2.1.0 was published on 2026-08-25 after the complete software gate and dual-board dry-bench campaign passed. The short active backlog now lives in `POST_2_1_BACKLOG.md`. Unchecked historical notes below do not override the current release record.
+
 ## Sensor coverage and final pre-audit corrections — 2026-08-08
 
 - [x] Ordinary local and TLA2528 analog channels share one optional 2–6 point monotonic piecewise-linear calibration. Existing linear offset/scale remains the uncluttered default; NTC, thermocouple, pulse/frequency, and load-cell conversions remain dedicated.
@@ -57,7 +59,7 @@ The final follow-up set is code-complete. These checks mark implementation and h
 
 Final hardware-free verification passed on 2026-08-08: 102 safety regressions, native command/controller/I2C behavior, 19 sensor protocol vectors, 24 mixed hardware profiles across seven pages, the full Chromium/Firefox/WebKit desktop and narrow matrix, both firmware and LittleFS targets, and all image/linker budgets.
 
-- [ ] Run the complete HIL campaign on the exact rebuilt candidate before tester release.
+- [x] Run the complete HIL campaign on the exact rebuilt candidate before tester release. Completed for the published 2.1.0 candidate on Classic ESP32 and ESP32-S3; see `dev/bench/VALIDATION.md`.
 
 ## Product rules for every change
 

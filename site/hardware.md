@@ -9,7 +9,7 @@ lede: Build a safe interface around the ESP32; a GPIO pin is a logic signal, nev
 
 This guide covers the physical interface for an OpenTurbine ESP32 turbine ECU. It is not a universal turbine wiring diagram. Keep fuel, ignition, starter, and other load power disconnected while checking the installation.
 
-New to electronics or microcontrollers? Use the [complete beginner user guide]({{ '/user-guide/' | relative_url }}) first. It contains the enlarged wiring diagram, wire-by-wire connection patterns, every supported input/output purpose, controller and safety behavior, calibration, sequencing, dry testing, and a source-generated Controllers/System field reference.
+New to electronics or microcontrollers? Start with the [basic single-shaft example]({{ '/example-system/' | relative_url }}) to see how an ordinary system fits together, then use the [complete beginner user guide]({{ '/user-guide/' | relative_url }}). It contains the enlarged wiring diagram, wire-by-wire connection patterns, every supported input/output purpose, controller and safety behavior, calibration, sequencing, dry testing, and a source-generated Controllers/System field reference.
 
 ## Supported ESP32 targets
 

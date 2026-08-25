@@ -60,8 +60,8 @@ OpenTurbine does not require one fixed engine layout. Describe only the sensors 
 
 **Hardware → Controllers → System → Calibration → Sequence → Tools → Dashboard**
 
-The [complete User Guide]({{ '/user-guide/' | relative_url }}) explains every stage, including sensor wiring, actuator drivers, output ownership, safety functions, ECU-wide settings, calibration and sequences.
+The [basic single-shaft example]({{ '/example-system/' | relative_url }}) is a compact way to explore how those pages fit together. The [complete User Guide]({{ '/user-guide/' | relative_url }}) explains every stage, including sensor wiring, actuator drivers, output ownership, safety functions, ECU-wide settings, calibration and sequences.
 
 Do not connect fuel or ignition energy until the independent stop and every configured shutdown path have been dry-tested.
 
-<p class="document-nav"><a href="{{ '/user-guide/' | relative_url }}">Open the User Guide</a><a href="{{ '/hardware/' | relative_url }}">Hardware requirements</a><a href="{{ '/troubleshooting/' | relative_url }}">Troubleshooting</a></p>
+<p class="document-nav"><a href="{{ '/example-system/' | relative_url }}">Explore the example system</a><a href="{{ '/user-guide/' | relative_url }}">Open the User Guide</a><a href="{{ '/hardware/' | relative_url }}">Hardware requirements</a><a href="{{ '/troubleshooting/' | relative_url }}">Troubleshooting</a></p>

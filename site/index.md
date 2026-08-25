@@ -39,8 +39,9 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
 </div>
 </div></section>
 
-<section class="section"><div class="shell"><h2>Start where you are</h2><div class="card-grid three">
+<section class="section"><div class="shell"><h2>Start where you are</h2><div class="card-grid four">
 <a class="card" href="{{ '/get-started/' | relative_url }}"><h3>Install on a board</h3><p>Use the Windows Setup Tool, connect to the ECU Wi-Fi and open the dashboard.</p></a>
+<a class="card" href="{{ '/example-system/' | relative_url }}"><h3>Explore a basic system</h3><p>Follow one ordinary single-shaft example to see how hardware, controllers, calibration and sequences fit together.</p></a>
 <a class="card" href="{{ '/user-guide/' | relative_url }}"><h3>Build and configure an ECU</h3><p>Read the complete guide for wiring, Hardware, Controllers, System, calibration, sequences and dry testing.</p></a>
 <a class="card" href="{{ '/troubleshooting/' | relative_url }}"><h3>Fix a problem</h3><p>Go directly to help for USB, flashing, Wi-Fi, dashboard and update problems.</p></a>
 </div></div></section>
