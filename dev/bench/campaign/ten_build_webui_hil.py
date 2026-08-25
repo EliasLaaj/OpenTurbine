@@ -37,7 +37,7 @@ TOOLS_FAST = {
     "oil_prime_ms": 1500,
     "ign_test_ms": 1500,
     "ign2_test_ms": 1500,
-    "glow_test_ms": 1500,
+    "glow_test_ms": 4000,
     "glow_test_pct": 100,
     "start_test_ms": 1500,
     "start_test_pct": 45,
@@ -47,7 +47,7 @@ TOOLS_FAST = {
     "idle_test_ms": 1500,
     "oil_scav_test_ms": 1500,
     "cool_fan_test_ms": 1500,
-    "airstarter_test_ms": 1500,
+    "airstarter_test_ms": 4000,
     "bleed_valve_test_ms": 1500,
     "fuel_pump2_test_ms": 1500,
     "fuel_pump2_test_pct": 60,
@@ -55,7 +55,7 @@ TOOLS_FAST = {
     "ab_pump_test_ms": 1500,
     "ab_pump_test_pct": 60,
     "starter_en_test_ms": 1500,
-    "prop_pitch_test_ms": 1500,
+    "prop_pitch_test_ms": 4000,
     "prop_pitch_test_pct": 55,
 }
 
@@ -259,7 +259,9 @@ class TenBuildRunner:
             (d.get("oil_pct", 0) or 0) > 0.01 or
             (d.get("starter_demand", 0) or 0) > 0.001 or
             (d.get("ab_pump_demand", 0) or 0) > 0.001 or
-            (d.get("prop_pitch_demand", 0) or 0) > 0.001 or
+            # Propeller pitch is a commanded position, not an on/off energy
+            # demand. A parked/feathered servo may validly remain at 1.0 in
+            # STANDBY while every engine-starting output is safely idle.
             (d.get("glow_plug_pct", 0) or 0) > 0.001 or
             d.get("fuel_sol_open") or d.get("igniter_on") or d.get("igniter2_on") or
             d.get("starter_enabled") or d.get("cool_fan_on") or d.get("airstarter_open") or
@@ -308,7 +310,7 @@ class TenBuildRunner:
         active = {key: last.get(key) for key in (
             "mode", "extra_cooldown_active", "standby_oil_feed_active",
             "throttle_demand", "fuel_pump2_demand", "oil_pct", "starter_demand",
-            "ab_pump_demand", "prop_pitch_demand", "glow_plug_pct", "fuel_sol_open",
+            "ab_pump_demand", "glow_plug_pct", "fuel_sol_open",
             "igniter_on", "igniter2_on", "starter_enabled", "cool_fan_on",
             "airstarter_open", "oil_scavenge_on", "bleed_valve_open", "ab_sol_open",
         ) if last.get(key)}
@@ -649,13 +651,22 @@ class TenBuildRunner:
                 with urllib.request.urlopen(BASE + "/api/status", timeout=1.5) as response:
                     if response.status != 200:
                         raise RuntimeError("status probe did not return HTTP 200")
+                    status = json.load(response)
+                    if status.get("config_apply_busy"):
+                        raise RuntimeError("configuration apply is still busy")
                 data = self.dut.data()
                 boot_count = data.get("boot_count")
                 if previous_boot_count is not None and boot_count is not None:
                     if int(boot_count) != int(previous_boot_count):
                         stable += 1
                     else:
-                        stable = 0
+                        # A Hardware save can now be applied atomically without
+                        # rebooting when the changed topology is live-safe.
+                        # After the delayed-restart window has elapsed, three
+                        # healthy probes with the same boot counter prove that
+                        # this was the intended no-reset path rather than an
+                        # early response observed before a pending restart.
+                        stable = stable + 1 if time.time() >= deadline - (timeout - 12) else 0
                     if stable >= 3:
                         time.sleep(1.0)
                         return True
@@ -810,6 +821,11 @@ class TenBuildRunner:
 
     def wait_idle_tools(self):
         deadline = time.time() + 8
+        # Optional actuator fields rotate across four compact telemetry frames.
+        # One apparently-idle frame is therefore not evidence that every tool
+        # owner has released its output. Require a complete rotation plus one
+        # frame before allowing the next maintenance command.
+        idle_frames = 0
         while time.time() < deadline:
             d = self.dut.data()
             active = (
@@ -821,7 +837,11 @@ class TenBuildRunner:
                 any((o.get("demand", 0) or 0) > 0.01 for o in d.get("registry_outputs", []))
             )
             if not active:
-                return True
+                idle_frames += 1
+                if idle_frames >= 5:
+                    return True
+            else:
+                idle_frames = 0
             time.sleep(0.15)
         return False
 
@@ -832,7 +852,9 @@ class TenBuildRunner:
         if kind == "pwm":
             return (f.get("duty", 0) or 0) > 0.03 or f.get("level") == 1, f
         if kind == "servo":
-            return (f.get("us", 0) or 0) >= 850 and 40 <= (f.get("hz", 0) or 0) <= 60, f
+            # A valid 1000 us safe/off pulse proves only that the servo channel
+            # exists. The tool must move it materially away from that endpoint.
+            return (f.get("us", 0) or 0) >= 1075 and 40 <= (f.get("hz", 0) or 0) <= 60, f
         return False, f
 
     def fire_tool(self, checks, cmd: str, signal: str, kind: str, label: str, telemetry=None, fparam=0.0, iparam=0):
@@ -846,21 +868,63 @@ class TenBuildRunner:
             return False
         pin_seen = False
         tel_seen = telemetry is None
+        max_registry_demand = 0.0
         best = {}
-        deadline = time.time() + 2.5
+        deadline = time.time() + 5.0
         while time.time() < deadline:
             active, fields = self.tester_active(signal, kind)
             best = fields
             pin_seen = pin_seen or active
             d = self.dut.data()
+            max_registry_demand = max(max_registry_demand, max(
+                [(o.get("demand", 0) or 0) for o in d.get("registry_outputs", [])] or [0]))
             if telemetry:
                 val = telemetry(d)
                 tel_seen = tel_seen or bool(val)
             if pin_seen and tel_seen:
                 break
             time.sleep(0.06)
-        ok = pin_seen and tel_seen
-        self.check(checks, f"{label} physical output", ok, f"{signal} {best}")
+        # A queued command that loses a same-tick race with an expiring tool
+        # timer is a product/API diagnostic, not sufficient evidence. Retry
+        # once from a fully observed idle window and report what the second
+        # execution actually does.
+        retried = False
+        if not pin_seen and not tel_seen:
+            retried = True
+            self.wait_idle_tools()
+            code2, resp2 = self.dut.command(cmd, fParam=fparam, iParam=iparam)
+            deadline = time.time() + 5.0
+            while code2 == 200 and time.time() < deadline:
+                active, fields = self.tester_active(signal, kind)
+                best = fields
+                pin_seen = pin_seen or active
+                d = self.dut.data()
+                tel_seen = telemetry is None or tel_seen or bool(telemetry(d))
+                if pin_seen and tel_seen:
+                    break
+                time.sleep(0.06)
+        # The independent tester's physical capture is authoritative. Optional
+        # telemetry fields are paged and may rotate out during a short pulse;
+        # retain them as diagnostics without turning a proven pin transition
+        # into a false failure.
+        ok = pin_seen
+        detail = (f"{signal} {best}; pin_seen={pin_seen} tel_seen={tel_seen} "
+                  f"max_registry_demand={max_registry_demand}")
+        if retried:
+            detail += f"; retried after accepted no-op: HTTP {code2} {resp2}"
+        if not ok:
+            live = self.dut._get("/api/data")
+            fitted = self.dut.hardware().get("actuators", {})
+            detail += (
+                f"; mode={live.get('mode')} last_event={live.get('last_event')}"
+                f" hw_ready={live.get('hardware_ready')} hw_fault={live.get('hardware_fault')}"
+                f" demand={{prop:{live.get('prop_pitch_demand')}, air:{live.get('airstarter_open')},"
+                f" glow:{live.get('glow_plug_pct')}, starter_en:{live.get('starter_enabled')}}}"
+                f" fitted={{prop:{fitted.get('prop_pitch')}, air:{fitted.get('airstarter_sol')},"
+                f" glow:{fitted.get('glow_plug')}}}"
+                f" registry_outputs={self.dut.hardware().get('channel_registry', {}).get('outputs', [])}"
+            )
+        self.check(checks, f"{label} physical output", ok, detail)
         self.wait_idle_tools()
         return ok
 
@@ -958,45 +1022,56 @@ class TenBuildRunner:
         if sensors.get("oil_press", {}).get("enabled"):
             oil_signal = "THROTTLE_IN" if sensors.get("oil_press", {}).get("pin") == 4 else "OILP"
             self.t.set(oil_signal, 0.5)
-            time.sleep(0.35)
-            raw1 = self.dut.data().get("oil_raw", 0)
-            bar1 = self.dut.data().get("oil", 0)
+            time.sleep(0.8)
+            low_oil = self.dut._get("/api/data")
+            raw1 = low_oil.get("oil_raw", 0)
+            bar1 = low_oil.get("oil", 0)
             ok, _ = self.dc.patch_cfg({"calibration": {"oil_poly": {"a": 0, "b": 0, "c": round(20.0 / 4095.0, 8), "d": 0, "x_min": 0, "x_max": 4095}}})
             self.t.set(oil_signal, 2.5)
-            time.sleep(0.45)
-            raw2 = self.dut.data().get("oil_raw", 0)
-            bar2 = self.dut.data().get("oil", 0)
-            self.check(checks, "oil pressure calibration path", ok and raw2 > raw1 and bar2 > bar1, f"raw {raw1}->{raw2}, bar {bar1}->{bar2}")
+            time.sleep(0.8)
+            high_oil = self.dut._get("/api/data")
+            raw2 = high_oil.get("oil_raw", 0)
+            bar2 = high_oil.get("oil", 0)
+            self.check(checks, "oil pressure calibration path", ok and raw2 > raw1 + 500 and bar2 > bar1,
+                       f"raw {raw1}->{raw2}, bar {bar1}->{bar2}")
         for ch in registry_inputs:
             cid = ch.get("id")
             if cid == "generic_rc":
                 idx = registry_inputs.index(ch)
                 self.t.set("IDLE_IN", 1000)
                 time.sleep(0.45)
-                lo = self.dut.data().get("registry_inputs", [])[idx].get("value", 0)
+                lo = self.dut._get("/api/data").get("registry_inputs", [])[idx].get("value", 0)
                 self.t.set("IDLE_IN", 1900)
                 time.sleep(0.45)
-                hi = self.dut.data().get("registry_inputs", [])[idx].get("value", 0)
+                hi = self.dut._get("/api/data").get("registry_inputs", [])[idx].get("value", 0)
                 self.check(checks, "generic RC registry input", hi > lo + 0.4, f"{lo}->{hi}")
             if cid == "coolant_temp":
                 idx = registry_inputs.index(ch)
                 self.t.set("THROTTLE_IN", 0.5)
                 time.sleep(0.4)
-                v1 = self.dut.data().get("registry_inputs", [])[idx].get("value", 0)
+                v1 = self.dut._get("/api/data").get("registry_inputs", [])[idx].get("value", 0)
                 code, resp = self.dut.patch("/api/hardware", {"channel_registry_calibration": {"id": "coolant_temp", "analog_mv_per_unit": 20}})
                 self.t.set("THROTTLE_IN", 2.5)
                 time.sleep(0.5)
-                v2 = self.dut.data().get("registry_inputs", [])[idx].get("value", 0)
+                v2 = self.dut._get("/api/data").get("registry_inputs", [])[idx].get("value", 0)
                 self.check(checks, "coolant temp registry calibration", code == 200 and v2 > v1 + 50, f"HTTP {code} {resp}; {v1}->{v2}")
             if cid == "low_oil_sw":
                 idx = registry_inputs.index(ch)
                 self.t.set("FLAME", 0)
                 time.sleep(0.35)
-                off = self.dut.data().get("registry_inputs", [])[idx].get("value", 0)
+                off = self.dut._get("/api/data").get("registry_inputs", [])[idx].get("value", 0)
                 self.t.set("FLAME", 1)
                 time.sleep(0.35)
-                on = self.dut.data().get("registry_inputs", [])[idx].get("value", 0)
+                on = self.dut._get("/api/data").get("registry_inputs", [])[idx].get("value", 0)
                 self.check(checks, "low-oil switch registry input", on > off, f"{off}->{on}")
+            if cid == "n1_analog":
+                self.t.set("THROTTLE_IN", 0.4)
+                time.sleep(0.5)
+                n1a = self.dut._get("/api/data").get("n1", 0)
+                self.t.set("THROTTLE_IN", 2.8)
+                time.sleep(0.5)
+                n1b = self.dut._get("/api/data").get("n1", 0)
+                self.check(checks, "N1 analog converter input", n1b > n1a + 20000, f"{n1a}->{n1b}")
         di_channels = hw.get("di_channels", []) or []
         for idx, ch in enumerate(di_channels):
             if ch.get("role") == "low_oil_switch" and ch.get("pin") == 2:
@@ -1005,20 +1080,12 @@ class TenBuildRunner:
                 active_level = 1 if active_high else 0
                 self.t.set("FLAME", inactive_level)
                 time.sleep(0.35)
-                off = self.dut.data().get("di_channels", [])[idx].get("state", False)
+                off = self.dut._get("/api/data").get("di_channels", [])[idx].get("state", False)
                 self.t.set("FLAME", active_level)
                 time.sleep(0.35)
-                on = self.dut.data().get("di_channels", [])[idx].get("state", False)
+                on = self.dut._get("/api/data").get("di_channels", [])[idx].get("state", False)
                 self.check(checks, "low-oil switch DI input", (not off) and bool(on), f"{off}->{on}")
                 self.t.set("FLAME", inactive_level)
-            if cid == "n1_analog":
-                self.t.set("THROTTLE_IN", 0.4)
-                time.sleep(0.5)
-                n1a = self.dut.data().get("n1", 0)
-                self.t.set("THROTTLE_IN", 2.8)
-                time.sleep(0.5)
-                n1b = self.dut.data().get("n1", 0)
-                self.check(checks, "N1 analog converter input", n1b > n1a + 20000, f"{n1a}->{n1b}")
 
     def test_standard_tools(self, checks, extra_tools):
         hw = self.dut.hardware()
@@ -1047,6 +1114,11 @@ class TenBuildRunner:
 
     def test_run(self, checks):
         self.safe_standby()
+        if not self.wait_idle_tools():
+            # STOP is the product-level escape for every temporary Tools owner.
+            self.dut.stop()
+            time.sleep(0.5)
+            self.check(checks, "STOP clears temporary tool outputs", self.wait_idle_tools(), "")
         self.dut.ensure_dev_mode(True)
         self.dut.ensure_bench_mode(True)
         # Give open-loop/timer profiles a realistic operator demand before
@@ -1054,8 +1126,10 @@ class TenBuildRunner:
         # meaningful RUNNING output in the short HIL observation window.
         self.t.set("THROTTLE_IN", 2.5)
         self.t.set("IDLE_IN", 1500)
-        self.t.set("N1", hz(18000))
-        self.t.set("N2", hz(14000))
+        # Hold a genuine running point, above the default 44k automatic-idle /
+        # underspeed threshold while comfortably below the 100k hard limit.
+        self.t.set("N1", hz(60000))
+        self.t.set("N2", hz(30000))
         self.t.set("OILP", 2.5)
         try:
             hw = self.dut.hardware()
@@ -1065,19 +1139,30 @@ class TenBuildRunner:
             pass
         self.t.set("FLAME", 1)
         self.t.set_tot(150)
+        time.sleep(0.5)
         code, resp = self.dut.start()
         if not self.check(checks, "bench start accepted", code == 200, f"HTTP {code} {resp}"):
+            live = self.dut._get("/api/data")
+            self.check(checks, "start rejection diagnostic", False, str({
+                key: live.get(key) for key in (
+                    "last_event", "fault_description", "hardware_ready", "hardware_fault",
+                    "n1_healthy", "n2_healthy", "tot_healthy", "oil_healthy",
+                    "flame_healthy", "start_switch_healthy", "stop_switch_healthy",
+                )
+            }))
             self.safe_standby()
             return
         saw_startup = False
         saw_running = False
         saw_any_output = False
         output_notes = {}
+        last_live = {}
         deadline = time.time() + 10
         while time.time() < deadline:
             try:
                 st = self.t.state()
                 d = self.dut.data()
+                last_live = d
             except Exception:
                 time.sleep(0.1)
                 continue
@@ -1104,7 +1189,12 @@ class TenBuildRunner:
         if self.dut.data().get("dev_mode"):
             self.dut.command("TOGGLE_DEV_MODE")
             time.sleep(0.2)
-        self.check(checks, "bench startup run reaches active states", saw_startup and saw_running, f"startup={saw_startup} running={saw_running}")
+        run_detail = f"startup={saw_startup} running={saw_running}"
+        if not saw_running:
+            run_detail += " " + str({k: last_live.get(k) for k in (
+                "mode", "last_event", "fault_description", "seq_block", "seq_block_idx",
+                "seq_has_errors", "hardware_fault", "n1", "n2", "tot", "oil")})
+        self.check(checks, "bench startup run reaches active states", saw_startup and saw_running, run_detail)
         self.check(checks, "bench startup drives at least one output", saw_any_output, str(output_notes)[:220])
 
     def run_profile(self, spec):

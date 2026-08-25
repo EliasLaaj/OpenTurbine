@@ -38,4 +38,6 @@ public:
     static size_t reserveBytes();
     static bool healthy();
     static uint8_t errorCode();  // 0=ok, 1=queue, 2=open, 3=header, 4=backlog, 5=space, 6=write, 7=identity
+    static bool captureActive();
+    static uint32_t configuredMask();
 };

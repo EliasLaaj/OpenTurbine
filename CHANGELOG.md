@@ -10,6 +10,38 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-08-25
+
+### Added
+- Added user-created output controllers with threshold, mapped-input, feedback-target, and fixed-state methods, while keeping built-in turbine subsystems separate and understandable.
+- Added explicit mirrored outputs for twin igniters, pumps, valves, and other redundant physical channels. Each mirror follows the final protected source command but keeps its own pin, signal type, polarity, endpoints, and electrical protection.
+- Added repeatable START, STOP, interlock, and auxiliary switch inputs. Any active switch asserts the command, while every fitted channel must remain healthy.
+- Added per-output current-sensor calibration, trip current, and confirmation time for all output types; every confirmed overcurrent initiates shutdown.
+
+### Changed
+- Reorganized configuration into Hardware, Controllers, and System workspaces with Configured System as the default view, conditional subcards, collapsed first-load navigation, and contextual help beside every setting.
+- Renamed the neutral primary fuel actuator to Main Fuel Metering so pumps, valves, metering units, and ESC-driven devices use the same control model without misleading terminology.
+- Made duplicate core-purpose outputs explicitly independent unless created as mirrors, and made their ownership visible so no second fuel or ignition output appears driven when it is not.
+- Replaced page-owned WebSocket telemetry with one bounded 3 Hz compact REST path. Optional values rotate between complete responses, reducing Classic heap, TCP, and navigation pressure.
+- Moved output overcurrent configuration to the owning Hardware card and removed obsolete controller-specific current settings and other superseded UI paths.
+
+### Fixed
+- Prevented fragmented-heap configuration apply failures from rebooting the ECU; the attempted candidate is abandoned safely while the current runtime configuration is retained and re-persisted.
+- Kept the Classic session recorder usable with the complete dashboard, configuration and event history installed by capping its protected filesystem reserve at 48 KiB; S3 retains the larger 150 KiB reserve.
+- Fixed Controllers rendering stopping on a removed visibility helper, which could present as a configuration fetch failure and hide later protection cards.
+- Fixed repeated START/STOP registry channels bypassing pin-collision validation under the former single-canonical-input assumption.
+- Fixed Configured System exposing controls unsupported by fitted hardware, misleading duplicate-output ownership text, and several stale legacy names and tests.
+- Filled the remaining contextual-help gaps for shared-SPI thermocouple wiring, NTC and load-cell calibration, sequence delays, idle metering, and afterburner entry/stabilization fields; regression tests now reject unexplained installed or rendered fields.
+- Kept propeller-pitch and afterburner demand in every compact telemetry frame so one browser cannot starve another browser of those live values.
+- Fixed Hardware saves that changed propeller-pitch parking demand becoming stuck behind the old live demand instead of completing the controlled restart.
+- Preserved an explicit 0% propeller-pitch parking position across save and reboot instead of restoring it as 100%.
+
+### Validation
+- Passed the complete publication gate: all 10 UI audit programs, 240 safety checks, 16 representative turbine setups, protocol/calibration vectors, native controller behavior, release-tool tests, and firmware plus LittleFS builds and memory budgets for both targets.
+- The exact packaged Classic build passed physical overspeed and STOP fuel-isolation tests, bounded session logging with zero dropped rows, and a realistic save/export/import/navigation workflow with the original configuration restored.
+- ESP32-S3 passed the same 2.1.0 browser save/export/import workflow on hardware; its final packaged source passed the same dual-target software and build gates.
+- No fuel-burning turbine was run. Installation-specific wiring inspection, driver/output polarity checks, dry commissioning, and a controlled first-engine test remain required.
+
 ## [2.0.4] — 2026-08-23
 
 ### Added

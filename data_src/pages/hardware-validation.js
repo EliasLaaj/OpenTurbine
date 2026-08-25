@@ -37,7 +37,7 @@ const PIN_SELECT_LABELS = {
   'f-igncur-pin':       'Igniter 1 Current',
   'f-ign2cur-pin':      'Secondary Igniter Current',
   'f-oilpumpcur-pin':   'Oil Pump Current',
-  'f-thr-pin':        'Main Fuel Pump / Metering Output',
+  'f-thr-pin':        'Main Fuel Metering Output',
   'f-str-pin':        'Starter ESC',
   'f-op-pin':         'Oil Pump',
   'f-oscav-pin':      'Oil Scavenge Pump',

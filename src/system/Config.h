@@ -97,15 +97,19 @@ public:
     static float p1TripLimit;
     static float p2TripLimit;
     static float torqueTripLimit;
-    static int   pressureTorqueTripConfirmMs;
+    static int   p1TripConfirmMs, p2TripConfirmMs, torqueTripConfirmMs;
     static float pullbackMinThrottlePct;
-    static float pullbackStrength;
-    // Gradual limiter method (Simple/0 = current values, Advanced/1 = rate prediction)
-    static int   rpmLimiterMode;
-    static float pullbackLookaheadMs;
     static float pullbackNearLimitRampUpMs;
     static float pullbackApproachZoneRpm;   // 0 = auto (4× soft/hard band)
     static float rpmAccelFilter;            // EMA weight for the dRPM/dt estimate
+    // Per-feedback gradual-limiter response. Reactive (0) is the simple
+    // default; predictive (1) projects only that source by its own horizon.
+    static int   pullbackN1Mode, pullbackN2Mode, pullbackEgtMode;
+    static int   pullbackP1Mode, pullbackP2Mode, pullbackTorqueMode;
+    static float pullbackN1LookaheadMs, pullbackN2LookaheadMs, pullbackEgtLookaheadMs;
+    static float pullbackP1LookaheadMs, pullbackP2LookaheadMs, pullbackTorqueLookaheadMs;
+    static float pullbackN1Strength, pullbackN2Strength, pullbackEgtStrength;
+    static float pullbackP1Strength, pullbackP2Strength, pullbackTorqueStrength;
 
     // ── Dynamic idle ──────────────────────────────────────────
     static float idleTargetRpm;
@@ -213,7 +217,6 @@ public:
 
     // ── Oil controller deadband ───────────────────────────────
     static float oilPressureDeadband;    // bar: suppress output change when |error| < this
-    static uint32_t oilPumpOvercurrentDelayMs; // continuous overcurrent before shutdown
     static uint32_t oilPumpUnderflowDelayMs;   // continuous low/no flow before confirmed fault
     static bool shutdownOnOilUnderflow;        // false = warn only; true = fault shutdown
 
@@ -295,7 +298,7 @@ public:
     // Ignition
     static bool  abUseTorch;           // spike main fuel through turbine (torch method)
     static bool  abUseIgniter;         // fire AB igniter (igniter2) on ignition
-    static float abTorchSpikePct;      // main fuel pump spike % during torch
+    static float abTorchSpikePct;      // main fuel metering spike % during torch
     static int   abTorchDurationMs;    // torch spike duration
     static float abTorchTotLimit;      // custom torch-only EGT cut (°C)
     static int   abTorchGuardMode;     // 0=auto, 1=custom limit, 2=off
@@ -427,7 +430,7 @@ public:
     // sequence/direct owner.
     struct Rule {
         bool    enabled;
-        uint8_t kind;       // 0=threshold on/off, 1=linear map, 2=feedback
+        uint8_t kind;       // 0=threshold on/off, 1=linear map, 2=feedback, 3=fixed output
         uint8_t sensor;     // 0=oil_temp 1=tot 2=n1_rpm 3=oil_press 4=tit 5=batt_v 6=n2_rpm
         uint8_t op;         // threshold rules: 0=above, 1=below
         float   threshold;  // SI units: °C, bar, RPM, V

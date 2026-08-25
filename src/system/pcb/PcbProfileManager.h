@@ -42,7 +42,7 @@ public:
         // This is intended for controls physically fitted to the board (for
         // example its labelled START/STOP inputs), not turbine-specific loads.
         char defaultId[20] = {};
-        char defaultName[16] = {};
+        char defaultName[24] = {};
         char defaultRole[18] = {};
         char defaultPurpose[20] = {};
         uint8_t channel = 0;

@@ -1077,26 +1077,23 @@ body[data-page="tools"] main { max-width: 1180px; }
 }
 .hw-item-card:last-child { margin-bottom: 0; }
 .hw-hide-unselected { display: none !important; }
-main.hw-installed-view #hardware-requirements-panel {
-  display: none !important;
-}
 main.hw-installed-view .registry-bindings-panel {
   display: none !important;
 }
-main .hw-section:not(#hardware-profile-section):not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-requirements-panel) {
+main .hw-section:not(#hardware-profile-section):not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel) {
   display: none !important;
 }
-main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card {
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card {
   padding: .58rem .75rem;
 }
-main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-grid,
-main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > [id^="grp-"] {
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-grid,
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > [id^="grp-"] {
   display: none !important;
 }
-main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-toggle {
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-toggle {
   margin-bottom: 0 !important;
 }
-main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-requirements-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-desc {
+main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inputs-panel):not(#hardware-outputs-panel):not(#hardware-comms-panel):not(#hardware-controllers-panel):not(#hardware-safety-panel):not(#hardware-profile-section) .hw-item-card > .hw-desc {
   margin-top: .25rem;
 }
 .registry-card-summary {
@@ -1135,6 +1132,18 @@ main.hw-installed-view .hw-section:not(#hardware-buses-panel):not(#hardware-inpu
 }
 .registry-status-ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--border)); }
 .registry-status-error { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
+.registry-mirror-label {
+  display: inline-block;
+  margin-left: .45rem;
+  padding: .1rem .42rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border));
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .035em;
+  vertical-align: .1em;
+}
 .registry-empty {
   border: 1px dashed var(--border);
   border-radius: var(--r-sm);

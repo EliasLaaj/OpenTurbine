@@ -813,7 +813,7 @@ For each configured analog input:
 - All wizards show exactly what to do, no BT command typing
 
 **Config (`/config`)**
-- Settings grouped by purpose with Essentials, Configured system, Explore all features, and Changed views
+- Settings grouped by purpose with Configured system as the default, plus Explore all features and Changed views
 - Fields show current value, units, validation warnings, and hardware dependency state
 - Config locked during active engine modes unless Dev Mode is active
 - Save to device button with change recap

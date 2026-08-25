@@ -7,7 +7,7 @@
 <style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <title>OpenTurbine - Sequence</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260824a',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260824a');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -52,11 +52,11 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
   <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
-  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" class="active" title="Edit startup, shutdown, and afterburner transitions and block timings.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
   <a href="/tools.html" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <span id="conn" class="conn-dot disconnected" title="WebSocket"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
 <main>
@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
 <div id="tab-startup">
   <div class="block-list" id="list-startup"></div>
   <div class="add-row" style="margin-top:.75rem">
-    <select id="add-startup-sel" aria-label="Startup block to add" onchange="updateBlockPreview('startup')"></select>
+    <select id="add-startup-sel" aria-label="Startup block to add" title="Choose the next startup action or wait condition to add." onchange="updateBlockPreview('startup')"></select>
     <button class="add-btn" onclick="addBlock('startup')">+ Add block</button>
     <button class="add-btn" onclick="openCustomBlockDialog('startup')">+ Custom block</button>
   </div>
@@ -98,7 +98,8 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     Afterburner operation has two parts: choose the trigger source and wiring in
     <a href="/hardware.html#grp-ab-trigger">Hardware - AB Trigger &amp; Arming</a>,
     then tune the trigger value, gate limits and light-up/light-off actions here.
-    Advanced ignition and pump behavior remains under <a href="/controllers.html#ab-cfg-section">Controllers - Afterburner</a>.
+    Ignition, flame-confirmation, and lit-running fuel behavior remain with the
+    relevant output cards on <a href="/controllers.html">Controllers</a>.
   </div>
 
   <!-- Entry criteria info box, populated by buildAbCriteriaHtml() -->
@@ -109,6 +110,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     <div class="param-grid">
       <div class="param-field" id="ab-edit-throttle-wrap" style="display:none">
         <span class="param-label">Throttle Trigger <span class="param-unit">(%)</span></span>
+        <span class="param-desc">Throttle demand at which automatic afterburner entry becomes eligible.</span>
         <input class="param-input" id="ab-edit-throttle-pct" type="number" min="0" max="100" step="1"
           oninput="setAbEntryPercent('throttle_threshold', this.value)">
       </div>
@@ -120,16 +122,19 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
       </div>
       <div class="param-field">
         <span class="param-label">Minimum N1 <span class="param-unit">(rpm)</span></span>
+        <span class="param-desc">Minimum healthy core speed required before afterburner light-up is allowed.</span>
         <input class="param-input" id="ab-edit-min-n1" type="number" min="0" max="200000" step="500"
           oninput="setAbEntryNumber('min_n1', this.value)">
       </div>
       <div class="param-field">
         <span class="param-label">Maximum N1 <span class="param-unit">(rpm, 0 = off)</span></span>
+        <span class="param-desc">Optional upper core-speed gate for light-up. Zero disables this entry gate.</span>
         <input class="param-input" id="ab-edit-max-n1" type="number" min="0" max="200000" step="500"
           oninput="setAbEntryNumber('max_n1', this.value)">
       </div>
       <div class="param-field" id="ab-edit-tot-wrap">
         <span class="param-label">Maximum EGT To Light <span class="param-unit">(<span id="ab-edit-tot-unit">°C</span>, 0 = off)</span></span>
+        <span class="param-desc">Optional maximum turbine temperature for starting afterburner light-up. Zero disables this entry gate.</span>
         <input class="param-input" id="ab-edit-max-tot" type="number" min="0" max="1000" step="10"
           oninput="setAbEntryTemp('max_tot_for_light', this.value)">
       </div>

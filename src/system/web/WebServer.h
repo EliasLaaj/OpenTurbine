@@ -2,11 +2,11 @@
 #include "../../system/CommandQueue.h"
 
 // ============================================================
-//  WebServer — ESPAsyncWebServer + WebSocket telemetry
+//  WebServer — ESPAsyncWebServer + compact REST telemetry
 //
 //  Runs on Core 0 (AsyncWebServer is FreeRTOS-native).
 //  Static files served from LittleFS (/index.html, etc.)
-//  WebSocket (/ws) serves client-pulled EngineData snapshots.
+//  /api/telemetry serves bounded live EngineData snapshots.
 //
 //  REST endpoints:
 //    GET  /              → index.html
@@ -28,7 +28,7 @@
 //    POST /update        → OTA firmware upload
 //    POST /api/web_assets → gzipped web UI asset upload
 //    GET  /api/status    → mode + health summary
-//    WS   /ws            → live telemetry, client-pulled snapshots
+//    GET  /api/telemetry → compact live telemetry snapshot
 // ============================================================
 
 class WebServer {

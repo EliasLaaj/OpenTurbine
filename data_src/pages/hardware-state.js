@@ -127,77 +127,24 @@ function mergeHardwareSettingsCleanup(baseline, edited, fresh) {
 function outputDriverIsOnOff(driver) { return [4,11].includes(Number(driver)); }
 function outputDriverIsProportional(driver) { return [5,6].includes(Number(driver)); }
 
-let ws;
-let wsPullTimer = null;
 let statusPollTimer = null;
 let hardwareStatusInFlight = false;
-let wsClosingForNavigation = false;
-let hardwareWsRequestInFlight = false;
 window.OTWaitForPageTelemetryIdle = (timeoutMs = 1500) => new Promise(resolve => {
   const started = Date.now();
   const poll = () => {
-    if (!hardwareWsRequestInFlight) resolve(true);
+    if (!hardwareStatusInFlight) resolve(true);
     else if (Date.now() - started >= timeoutMs) resolve(false);
     else setTimeout(poll, 25);
   };
   poll();
 });
-function requestHardwareTelemetry() {
-  if (ws && ws.readyState === WebSocket.OPEN && !hardwareWsRequestInFlight) {
-    hardwareWsRequestInFlight = true;
-    ws.send('p');
-  }
-}
 function stopHardwareTelemetry() {
-  wsClosingForNavigation = true;
-  if (wsPullTimer) { clearInterval(wsPullTimer); wsPullTimer = null; }
-  hardwareWsRequestInFlight = false;
   if (i2cDiscoveryTimer) { clearInterval(i2cDiscoveryTimer); i2cDiscoveryTimer = null; }
   stopStatusPoll();
-  if (ws) {
-    try {
-      ws.onclose = null;
-      ws.onerror = null;
-      ws.onmessage = null;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(1000, 'page navigation');
-    } catch(_) {}
-    ws = null;
-  }
 }
 function prepareHardwareTelemetryNavigation() {
-  wsClosingForNavigation = true;
-  if (wsPullTimer) { clearInterval(wsPullTimer); wsPullTimer = null; }
   if (i2cDiscoveryTimer) { clearInterval(i2cDiscoveryTimer); i2cDiscoveryTimer = null; }
   stopStatusPoll();
-}
-function connectWs() {
-  if (wsClosingForNavigation) return;
-  if (ws && ws.readyState <= WebSocket.OPEN) return;
-  ws = new WebSocket('ws://' + location.host + '/ws');
-  ws.onopen  = () => {
-    setConn(true, 'Connected');
-    stopStatusPoll();
-    requestHardwareTelemetry();
-    if (wsPullTimer) clearInterval(wsPullTimer);
-    wsPullTimer = setInterval(requestHardwareTelemetry, 1000);
-  };
-  ws.onclose = () => {
-    hardwareWsRequestInFlight = false;
-    if (wsPullTimer) { clearInterval(wsPullTimer); wsPullTimer = null; }
-    setConn(false, 'Reconnecting');
-    if (!wsClosingForNavigation) {
-      startStatusPoll();
-      setTimeout(connectWs, 2000);
-    }
-  };
-  ws.onerror = () => { try { ws.close(); } catch(_) {} };
-  ws.onmessage = (e) => {
-    try {
-      const d = JSON.parse(e.data);
-      if (d._frame_more !== true) hardwareWsRequestInFlight = false;
-      applyHardwareTelemetry(d);
-    } catch(_) {}
-  };
 }
 function applyHardwareTelemetry(d) {
   engineMode = d.mode || 'STANDBY';
@@ -218,8 +165,7 @@ window.addEventListener('ot:navigation-prepare', prepareHardwareTelemetryNavigat
 window.addEventListener('ot:navigation-start', stopHardwareTelemetry);
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
-  wsClosingForNavigation = false;
-  connectWs();
+  startStatusPoll();
 });
 function setConn(ok, text) {
   const dot = document.getElementById('conn');
@@ -775,7 +721,7 @@ const ACT_DEPENDENCIES = {
   oil_pump: { name:'Oil pump', controllers:['oil_loop'], logs:['oil_pct'], rules:[7], blocks:['OilPumpOn','OilPumpOff','OilPrime'],
               functions:['Automatic oil-pressure control','windmilling oil protection output','Oil pump logging','oil-pump sequence actions','rules driving oil pump'] },
   starter: { name:'Starter', rules:[5], blocks:['StarterSpin','StarterOff'], functions:['Starter sequence blocks','starter side-actions','rules driving starter'] },
-  throttle: { name:'Main fuel pump / metering ESC', controllers:['dynamic_idle','governor'], logs:['throttle'], rules:[4],
+  throttle: { name:'Main fuel metering', controllers:['dynamic_idle','governor'], logs:['throttle'], rules:[4],
               blocks:['FuelPumpIdle','ModifiedIdle','Spool','ThrottleSet'], functions:['Fuel sequence blocks','automatic idle/N2 speed-control output','fuel/throttle logging','rules driving throttle'] },
   fuel_pump2: { name:'Secondary / auxiliary fuel pump', logs:['fp2'], rules:[2], blocks:['FuelPumpRamp','FuelPump2Set','FuelPump2On','FuelPump2Off'],
                 functions:['Secondary / auxiliary fuel pump sequence blocks','secondary / auxiliary fuel logging','rules driving secondary / auxiliary fuel'] },

@@ -361,8 +361,8 @@ def validate_profile(profile: dict, *, strict: bool = False) -> list[str]:
                          len(default["id"]) <= 19 and ID_RE.fullmatch(default["id"]),
                          f"port {port_id}/{mode_id} default ID is invalid")
                 _require(isinstance(default.get("name"), str) and
-                         0 < len(default["name"]) <= 15,
-                         f"port {port_id}/{mode_id} default name must be 1..15 characters")
+                         0 < len(default["name"]) <= 23,
+                         f"port {port_id}/{mode_id} default name must be 1..23 characters")
                 _require(isinstance(default.get("role"), str) and
                          0 < len(default["role"]) <= 17,
                          f"port {port_id}/{mode_id} default role must be 1..17 characters")

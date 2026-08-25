@@ -157,7 +157,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     const migratedOutputs = await text(page, '#registry-outputs');
     for (const name of ['N1 Speed', 'N2 Speed', 'Main TOT', 'Fuel Pressure', 'Oil Temp', 'AB Flame'])
       assert.match(migratedInputs, new RegExp(name));
-    for (const name of ['Main Fuel Pump', 'Starter', 'Fuel Shutoff', 'AB Igniter', 'AB Fuel Valve', 'AB Fuel Pump', 'Glow Plug'])
+    for (const name of ['Main Fuel Metering', 'Starter', 'Fuel Shutoff', 'AB Igniter', 'AB Fuel Valve', 'AB Fuel Pump', 'Glow Plug'])
       assert.match(migratedOutputs, new RegExp(name));
     assert.match(await text(page, '#builtin-inputs'), /Afterburner trigger and arm.*Manual \/ browser command/is);
     const oilTempStatus = await page.locator('#registry-inputs .registry-card').evaluateAll(cards =>
@@ -168,10 +168,14 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
 
     await goto(page, 'calibration.html', '#calibration-jump');
     const calibrationTargets = await page.locator('#calibration-jump option').allTextContents();
-    for (const expected of ['Minimum Reliable Fuel-Pump Output', 'Oil Pressure', 'Flame / Ignition', 'Throttle Input', 'Battery Voltage'])
+    for (const expected of ['Minimum Reliable Fuel-Metering Output', 'Oil Pressure', 'Flame / Ignition', 'Throttle Input', 'Battery Voltage'])
       assert.ok(calibrationTargets.some(label => label.includes(expected)), `calibration jump list should include ${expected}`);
     await page.locator('#calibration-jump').selectOption('oil-press-cal-row');
     assert.equal(await page.locator('#oil-press-cal-row').evaluate(row => row.classList.contains('deep-link-target')), true);
+    assert.deepEqual(await page.locator('input:visible,select:visible').evaluateAll(fields =>
+      fields.filter(field => !(field.title || field.closest('label')?.title))
+        .map(field => field.id || field.getAttribute('aria-label') || field.type)), [],
+      'every visible calibration field needs hover help');
     results.push('calibration page provides a compact index of fitted sensors and actuators');
 
     await goto(page, 'hardware.html', '#hardware-profile-section');
@@ -467,9 +471,36 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     results.push('output re-purpose and removal keep explicit ownership and surviving numeric references attached to the same card');
 
     const mainFuelCard = page.locator('#registry-outputs .registry-card').first();
-    assert.match(await mainFuelCard.locator('strong').first().textContent(), /Main Fuel Pump/);
-    assert.equal(await mainFuelCard.locator('button', { hasText: 'Duplicate' }).count(), 1,
-      'core-purpose outputs remain duplicable for redundant or auxiliary hardware');
+    assert.match(await mainFuelCard.locator('strong').first().textContent(), /Main Fuel Metering/);
+    assert.equal(await mainFuelCard.locator('button', { hasText: 'Add mirrored output' }).count(), 1,
+      'core-purpose outputs can explicitly add a second electrical endpoint for the same command');
+    const mirrorBehavior = await page.evaluate(() => {
+      const before = JSON.stringify(registryRoot().outputs);
+      duplicateRegistryChannel(0);
+      const source = registryRoot().outputs[0];
+      const copy = registryRoot().outputs.at(-1);
+      const result = {
+        source: copy.mirror_of,
+        expected: source.id,
+        unassigned: copy.pin === -1,
+        independentCurrent: copy.has_current === false,
+        independentFlow: copy.has_flow_monitor === false,
+        adjacent: (() => {
+          const cards = [...document.querySelectorAll('#registry-outputs .registry-card')];
+          const sourceIndex = cards.findIndex(card => card.dataset.registryId === source.id);
+          return sourceIndex >= 0 && cards[sourceIndex + 1]?.dataset.registryId === copy.id;
+        })(),
+        marked: [...document.querySelectorAll('#registry-outputs .registry-card')]
+          .find(card => card.dataset.registryId === copy.id)?.textContent.includes('Mirrored output of') === true
+      };
+      registryRoot().outputs = JSON.parse(before);
+      renderRegistryInventory();
+      return result;
+    });
+    assert.deepEqual(mirrorBehavior, {
+      source:'main_fuel', expected:'main_fuel', unassigned:true,
+      independentCurrent:true, independentFlow:true, adjacent:true, marked:true
+    });
     assert.equal(await mainFuelCard.locator('button.danger', { hasText: 'Remove' }).count(), 1);
     const mainFuelEdit = mainFuelCard.locator('button', { hasText: 'Edit' });
     const mainFuelRemove = mainFuelCard.locator('button.remove-action', { hasText: 'Remove' });
@@ -486,15 +517,45 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.equal(actionRowsAligned, true);
     assert.equal(await page.getByText('Advanced stable ID', { exact: true }).count(), 0);
     const installedOutputCards = page.locator('#registry-outputs .registry-card');
+    const hardwareFieldsWithoutHelp = [];
     for (let i = 0; i < await installedOutputCards.count(); i++) {
       const card = installedOutputCards.nth(i);
       await card.locator('button', { hasText: 'Edit' }).click();
+      hardwareFieldsWithoutHelp.push(...await card.locator('input,select,textarea').evaluateAll((fields, cardIndex) =>
+        fields.filter(field => {
+          const wrapper = field.closest('.hw-field') || field.closest('label');
+          const subcard = field.closest('.current-sense-block, .registry-subcard');
+          const help = wrapper?.querySelector('.hw-desc')?.textContent?.trim() ||
+            subcard?.querySelector('.hw-desc')?.textContent?.trim() ||
+            field.getAttribute('title')?.trim() || wrapper?.getAttribute('title')?.trim() || '';
+          return help.length < 8;
+        }).map(field => `output ${cardIndex + 1}: ${field.getAttribute('aria-label') || field.id || field.name || field.closest('label')?.textContent?.trim() || field.type}`), i));
       const fallback = card.locator('input[onchange*="force_safe_on_fault"]');
       const fixedInvariant = card.getByText('Running fault state', { exact:true });
       assert.equal((await fallback.count()) + (await fixedInvariant.count()), 1);
       if (await fallback.count()) assert.equal(await fallback.isChecked(), false);
       await card.locator('button', { hasText: 'Done' }).click();
     }
+    assert.deepEqual(hardwareFieldsWithoutHelp, [],
+      `every installed output field needs nearby explanatory help: ${hardwareFieldsWithoutHelp.join(', ')}`);
+    const installedInputCards = page.locator('#registry-inputs .registry-card');
+    const hardwareInputFieldsWithoutHelp = [];
+    for (let i = 0; i < await installedInputCards.count(); i++) {
+      const card = installedInputCards.nth(i);
+      await card.locator('button', { hasText: 'Edit' }).click();
+      hardwareInputFieldsWithoutHelp.push(...await card.locator('input,select,textarea').evaluateAll((fields, cardIndex) =>
+        fields.filter(field => {
+          const wrapper = field.closest('.hw-field') || field.closest('label');
+          const subcard = field.closest('.registry-subcard');
+          const help = wrapper?.querySelector('.hw-desc')?.textContent?.trim() ||
+            subcard?.querySelector('.hw-desc')?.textContent?.trim() ||
+            field.getAttribute('title')?.trim() || wrapper?.getAttribute('title')?.trim() || '';
+          return help.length < 8;
+        }).map(field => `input ${cardIndex + 1}: ${field.getAttribute('aria-label') || field.id || field.name || field.closest('label')?.textContent?.trim() || field.type}`), i));
+      await card.locator('button', { hasText: 'Done' }).click();
+    }
+    assert.deepEqual(hardwareInputFieldsWithoutHelp, [],
+      `every installed input field needs nearby explanatory help: ${hardwareInputFieldsWithoutHelp.join(', ')}`);
     const igniterCard = installedOutputCards.nth(3);
     await igniterCard.locator('button', { hasText: 'Edit' }).click();
     assert.equal(await igniterCard.evaluate(card => {
@@ -1101,7 +1162,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await goto(page, 'controllers.html', '#cfg-form');
     assert.equal(await page.locator('#cfg-form input, #cfg-form select').evaluateAll(elements =>
       elements.filter(el => !el.getAttribute('aria-label') && !(el.labels && el.labels.length)).length), 0);
-    assert.ok((await page.locator('#preset-sel').getAttribute('aria-label'))?.length > 0);
+    assert.ok((await page.locator('#cfg-search').getAttribute('title'))?.length > 0);
     await goto(page, 'system.html', '#system-engine-description');
     assert.ok((await page.locator('#system-engine-description').evaluate(el => el.labels?.[0]?.textContent.trim() || ''))?.length > 0);
     assert.ok((await page.locator('#system-wifi-tx-power').evaluate(el => el.labels?.[0]?.textContent.trim() || ''))?.length > 0);
@@ -1109,9 +1170,14 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.equal(await page.locator('#registry-bindings select:not([aria-label])').count(), 0);
     await goto(page, 'sequence.html', '#add-startup-sel');
     assert.ok((await page.locator('#add-startup-sel').getAttribute('aria-label'))?.length > 0);
+    assert.ok((await page.locator('#add-startup-sel').getAttribute('title'))?.length > 0);
+    assert.deepEqual(await page.locator('.param-field input,.param-field select').evaluateAll(fields =>
+      fields.filter(field => !field.title && !field.closest('.param-field')?.title)
+        .map(field => field.id || field.getAttribute('aria-label') || field.type)), [],
+      'every sequence parameter needs hover help');
     await goto(page, 'tools.html', '#cooldown-slider');
     assert.ok((await page.locator('#cooldown-slider').getAttribute('aria-label'))?.length > 0);
-    results.push('visible generated settings and static commissioning selectors expose programmatic labels');
+    results.push('visible generated settings and static commissioning selectors expose programmatic labels, and every installed hardware field has nearby help');
 
     for (const route of ['index.html', 'hardware.html', 'controllers.html', 'system.html', 'sequence.html', 'calibration.html', 'tools.html', 'log.html']) {
       await assertNoSevereLayoutIssues(page, route, { width: 390, height: 844 });

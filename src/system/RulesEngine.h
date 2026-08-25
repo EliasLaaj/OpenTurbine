@@ -9,8 +9,8 @@
 //
 //  Rules run after sequencer/controller writes in explicitly selected engine
 //  states. Outside those states they release ownership so the last non-rule
-//  command resumes. In a selected state, false or invalid input applies the
-//  configured OFF demand. Deletion also releases ownership.
+//  command resumes. Input-driven rules apply their OFF demand when false or
+//  invalid; fixed-output rules need no input. Deletion releases ownership.
 // ============================================================
 #include "Config.h"
 #include "FeedbackControlMath.h"
@@ -107,15 +107,19 @@ public:
                 _ownedBaseDemands[_ownedTargetCount] = baseDemand;
                 ++_ownedTargetCount;
             }
-            const bool inputHealthy = _sensorUsable(r.sensor, ed);
+            const bool inputHealthy = r.kind == 3 || _sensorUsable(r.sensor, ed);
             const bool targetHealthy = r.kind != 2 || r.targetSourceType == 0 ||
                                        _sensorUsable(r.targetSensor, ed);
             const bool applies = inputHealthy && targetHealthy;
             float demand = r.offValue;
 
             if (applies) {
-                const float value = _readSensor(r.sensor, ed);
-                if (r.kind == 2) {
+                const float value = r.kind == 3 ? 0.0f : _readSensor(r.sensor, ed);
+                if (r.kind == 3) {
+                    demand = r.onValue;
+                    _ruleLatched[i] = false;
+                    FeedbackControlMath::reset(_feedbackState[i]);
+                } else if (r.kind == 2) {
                     float target = r.targetFixed;
                     if (r.targetSourceType == 1) {
                         target = _readSensor(r.targetSensor, ed) >= 0.5f
@@ -156,6 +160,15 @@ public:
                 ed.mode == SysMode::RUNNING)
                 demand = max(demand, baseDemand);
 
+            // Sequence and built-in subsystem requests share auxiliary
+            // outputs with optional user controllers. Either owner may ask
+            // for starter, oil or ignition, but an ordinary rule may not
+            // cancel an active startup/relight/protection request. This keeps
+            // a custom RUNNING igniter controller compatible with relight and
+            // leaves every output usable without a custom controller.
+            if (_usesAdditiveSubsystemAuthority(r.actuator))
+                demand = max(demand, baseDemand);
+
             if (_actuatorUsable(r.actuator))
                 _applyActuator(r.actuator, constrain(demand, 0.0f, 1.0f), ed, r.name);
             if (modeAtStart != SysMode::SHUTDOWN && ed.mode == SysMode::SHUTDOWN) return;
@@ -171,6 +184,21 @@ public:
     }
 
 private:
+    static bool _usesAdditiveSubsystemAuthority(uint8_t act) {
+        if (ChannelRegistry::isOutputActuator(act)) {
+            const uint8_t idx = ChannelRegistry::outputIndexFromActuator(act);
+            if (idx >= HardwareConfig::channelRegistry.outputCount) return false;
+            const char* purpose = HardwareConfig::channelRegistry.outputs[idx].purpose;
+            return !strcmp(purpose, "starter") || !strcmp(purpose, "starter_enable") ||
+                   !strcmp(purpose, "oil_pump") || !strcmp(purpose, "igniter") ||
+                   !strcmp(purpose, "ab_igniter") || !strcmp(purpose, "glow_plug") ||
+                   !strcmp(purpose, "air_starter");
+        }
+        return act == STARTER || act == STARTER_ENABLE || act == OIL_PUMP ||
+               act == IGNITER || act == IGNITER2 || act == GLOW_PLUG ||
+               act == AIRSTARTER;
+    }
+
     static bool _warningIndicator(uint8_t act) {
         if (!ChannelRegistry::isOutputActuator(act)) return false;
         const uint8_t idx = ChannelRegistry::outputIndexFromActuator(act);

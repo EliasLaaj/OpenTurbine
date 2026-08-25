@@ -157,14 +157,19 @@ float Config::pullbackTorqueHard    = 0.0f;
 float Config::p1TripLimit           = 0.0f;
 float Config::p2TripLimit           = 0.0f;
 float Config::torqueTripLimit       = 0.0f;
-int   Config::pressureTorqueTripConfirmMs = 250;
+int   Config::p1TripConfirmMs = 250; int Config::p2TripConfirmMs = 250; int Config::torqueTripConfirmMs = 250;
 float Config::pullbackMinThrottlePct = 8.0f;
-float Config::pullbackStrength      = 1.0f;
-int   Config::rpmLimiterMode            = 0;
-float Config::pullbackLookaheadMs       = 1500.0f;
 float Config::pullbackNearLimitRampUpMs = 4000.0f;
 float Config::pullbackApproachZoneRpm   = 0.0f;
 float Config::rpmAccelFilter            = 0.20f;
+int   Config::pullbackN1Mode = 0; int Config::pullbackN2Mode = 0; int Config::pullbackEgtMode = 0;
+int   Config::pullbackP1Mode = 0; int Config::pullbackP2Mode = 0; int Config::pullbackTorqueMode = 0;
+float Config::pullbackN1LookaheadMs = 1500.0f; float Config::pullbackN2LookaheadMs = 1500.0f;
+float Config::pullbackEgtLookaheadMs = 1500.0f; float Config::pullbackP1LookaheadMs = 1500.0f;
+float Config::pullbackP2LookaheadMs = 1500.0f; float Config::pullbackTorqueLookaheadMs = 1500.0f;
+float Config::pullbackN1Strength = 1.0f; float Config::pullbackN2Strength = 1.0f;
+float Config::pullbackEgtStrength = 1.0f; float Config::pullbackP1Strength = 1.0f;
+float Config::pullbackP2Strength = 1.0f; float Config::pullbackTorqueStrength = 1.0f;
 
 float Config::idleTargetRpm         = 44000;
 float Config::idleRampUpMs          = 10000;
@@ -265,7 +270,6 @@ float    Config::rpmZeroThreshold     = 100.0f;
 
 float    Config::oilZeroBar          = 0.1f;
 float    Config::oilPressureDeadband = 0.2f;
-uint32_t Config::oilPumpOvercurrentDelayMs = 5000;
 uint32_t Config::oilPumpUnderflowDelayMs = 5000;
 bool     Config::shutdownOnOilUnderflow = false;
 
@@ -612,7 +616,7 @@ bool validateSettingsDoc(const JsonDocument& doc) {
         !validNumber(eng["tot_safe_margin"], 0.0f, 100000.0f)) return false;
     if (present(eng["rpm_limit"]) && present(eng["min_rpm"]) && eng["min_rpm"].as<float>() >= eng["rpm_limit"].as<float>()) return false;
     // tot_cooldown_target >= tot_limit is accepted (warn only) so the
-    // config page's "Save anyway" flow works instead of hard-failing.
+    // controller/system editor's "Save anyway" flow works instead of hard-failing.
 
     JsonVariantConst oil = doc["oil"];
     if (!validNumber(oil["startup_pressure"], 0.0f, 20.0f) ||
@@ -729,12 +733,18 @@ bool validateSettingsDoc(const JsonDocument& doc) {
         !validNumber(th["pullback_torque_soft_nm"], 0.0f, 1000000.0f) ||
         !validNumber(th["pullback_torque_hard_nm"], 0.0f, 1000000.0f) ||
         !validNumber(th["pullback_min_pct"], 0.0f, 100.0f) ||
-        !validNumber(th["pullback_strength"], 0.0f, 5.0f) ||
-        !validInt(th["rpm_limiter_mode"], 0, 1) ||
-        !validNumber(th["pullback_lookahead_ms"], 0.0f, 5000.0f) ||
         !validNumber(th["pullback_near_limit_rampup_ms"], 0.0f, 20000.0f) ||
         !validNumber(th["pullback_approach_zone_rpm"], 0.0f, 1000000000.0f) ||
         !validNumber(th["rpm_accel_filter"], 0.02f, 1.0f)) return false;
+    const char* limiterModes[] = {"pullback_n1_mode","pullback_n2_mode","pullback_egt_mode",
+                                  "pullback_p1_mode","pullback_p2_mode","pullback_torque_mode"};
+    for (const char* key : limiterModes) if (!validInt(th[key], 0, 1)) return false;
+    const char* limiterHorizons[] = {"pullback_n1_lookahead_ms","pullback_n2_lookahead_ms","pullback_egt_lookahead_ms",
+                                     "pullback_p1_lookahead_ms","pullback_p2_lookahead_ms","pullback_torque_lookahead_ms"};
+    for (const char* key : limiterHorizons) if (!validNumber(th[key], 0.0f, 5000.0f)) return false;
+    const char* limiterStrengths[] = {"pullback_n1_strength","pullback_n2_strength","pullback_egt_strength",
+                                      "pullback_p1_strength","pullback_p2_strength","pullback_torque_strength"};
+    for (const char* key : limiterStrengths) if (!validNumber(th[key], 0.0f, 5.0f)) return false;
     if (present(th["pullback_n1_soft_rpm"]) && present(th["pullback_n1_hard_rpm"]) &&
         th["pullback_n1_hard_rpm"].as<float>() > 0.0f &&
         th["pullback_n1_hard_rpm"].as<float>() <= th["pullback_n1_soft_rpm"].as<float>()) return false;
@@ -799,7 +809,9 @@ bool validateSettingsDoc(const JsonDocument& doc) {
         !validNumber(sf["p1_trip_bar"], 0.0f, 1000.0f) ||
         !validNumber(sf["p2_trip_bar"], 0.0f, 1000.0f) ||
         !validNumber(sf["torque_trip_nm"], 0.0f, 1000000.0f) ||
-        !validInt(sf["pressure_torque_trip_confirm_ms"], 0, 60000) ||
+        !validInt(sf["p1_trip_confirm_ms"], 0, 60000) ||
+        !validInt(sf["p2_trip_confirm_ms"], 0, 60000) ||
+        !validInt(sf["torque_trip_confirm_ms"], 0, 60000) ||
         !validNumber(sf["surge_detect_rpm_variance"], 0.0f, 1000000000000.0f) ||
         !validInt(sf["low_oil_confirm_ms"], 0, 60000) ||
         !validInt(sf["oil_zero_confirm_ms"], 0, 60000) ||
@@ -954,7 +966,6 @@ bool validateSettingsDoc(const JsonDocument& doc) {
     if (present(oilxv) && (!oilxv.is<JsonObjectConst>() ||
         !validNumber(oilxv["zero_bar"], 0.0f, 100.0f) ||
         !validNumber(oilxv["deadband_bar"], 0.0f, 100.0f) ||
-        !validNumber(oilxv["pump_overcurrent_delay_ms"], 100.0f, 60000.0f) ||
         !validNumber(oilxv["pump_underflow_delay_ms"], 100.0f, 60000.0f) ||
         !validBool(oilxv["shutdown_on_underflow"]))) return false;
     if ((oilxv["shutdown_on_underflow"] | false)) {
@@ -1002,7 +1013,7 @@ bool validateSettingsDoc(const JsonDocument& doc) {
         for (JsonObjectConst rule : rules.as<JsonArrayConst>()) {
             const int kind = rule["kind"] | -1;
             if (!validBool(rule["enabled"]) ||
-                !validInt(rule["kind"], 0, 2) ||
+                !validInt(rule["kind"], 0, 3) ||
                 !validInt(rule["op"], 0, 1) ||
                 !validNumber(rule["threshold"], -1000000.0f, 1000000.0f) ||
                 !validNumber(rule["on_value"], 0.0f, 1.0f) ||
@@ -1013,8 +1024,10 @@ bool validateSettingsDoc(const JsonDocument& doc) {
                 !validNumber(rule["output_min"], 0.0f, 1.0f) ||
                 !validNumber(rule["output_max"], 0.0f, 1.0f) ||
                 !validInt(rule["mode_mask"], 1, 15) ||
-                !validRuleId(rule["source"], sizeof(Config::Rule::sourceId), ConfigInternal::ruleSourceHandle, ruleSensorAvailable) ||
                 !validRuleId(rule["target"], sizeof(Config::Rule::targetId), ConfigInternal::ruleTargetHandle, ruleActuatorAvailable)) return false;
+            if (kind != 3 &&
+                !validRuleId(rule["source"], sizeof(Config::Rule::sourceId),
+                             ConfigInternal::ruleSourceHandle, ruleSensorAvailable)) return false;
             if (kind == 2) {
                 const int targetSourceType = rule["target_source_type"] | -1;
                 if (!validInt(rule["target_source_type"], 0, 2) ||
@@ -1036,7 +1049,7 @@ bool validateSettingsDoc(const JsonDocument& doc) {
             // Every other enabled control must be the sole normal owner.
             const char* target = rule["target"] | "";
             const int8_t handle = ConfigInternal::ruleTargetHandle(target);
-            if (kind != 0 && !ruleActuatorSupportsVariable(handle)) return false;
+            if ((kind == 1 || kind == 2) && !ruleActuatorSupportsVariable(handle)) return false;
             if (rule["enabled"].as<bool>()) {
                 // A custom definition may replace the ordinary direct owner.
                 // The UI withholds outputs whose dedicated turbine controller
@@ -1333,9 +1346,9 @@ void Config::sanitizeForHardware() {
     int claimedTargetCount = 0;
     for (int i = 0; i < ruleCount; i++) {
         Rule r = rules[i];
-        if (!ruleSensorAvailable(r.sensor) || !ruleActuatorAvailable(r.actuator)) continue;
+        if ((r.kind != 3 && !ruleSensorAvailable(r.sensor)) || !ruleActuatorAvailable(r.actuator)) continue;
         if (r.kind == 2 && r.targetSourceType != 0 && !ruleSensorAvailable(r.targetSensor)) continue;
-        if (r.kind != 0 && !ruleActuatorSupportsVariable(r.actuator)) continue;
+        if ((r.kind == 1 || r.kind == 2) && !ruleActuatorSupportsVariable(r.actuator)) continue;
         // Afterburner fuel remains owned by its ignition/running state
         // machine. Other fitted outputs may use a custom normal owner when
         // their dedicated controller is not selected in the UI.
@@ -1346,7 +1359,7 @@ void Config::sanitizeForHardware() {
                 if (claimedTargets[j] == r.actuator) { duplicateTarget = true; break; }
         }
         if (duplicateTarget) continue;
-        r.kind = constrain(r.kind, 0, 2);
+        r.kind = constrain(r.kind, 0, 3);
         r.op = constrain(r.op, 0, 1);
         r.onValue = constrain(r.onValue, 0.0f, 1.0f);
         r.offValue = constrain(r.offValue, 0.0f, 1.0f);

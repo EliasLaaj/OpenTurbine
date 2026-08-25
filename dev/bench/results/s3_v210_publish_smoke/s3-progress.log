@@ -1,0 +1,17 @@
+S3 ESP32-S3 build=7525e9b68d58cb55; original ramp=600 ms; duration=120s
+S3 navigation 1: /controllers.html connected heap=53712/18420 ws=0 tw=8 boot=undefined reset=undefined
+S3 config PATCH response HTTP 200
+S3 edit: throttle ramp 650 ms save acknowledged
+S3 navigation 2: /tools.html connected heap=50420/31732 ws=0 tw=15 boot=undefined reset=undefined
+S3 complete engine-file download + same-file restore passed
+S3 navigation 3: / connected heap=50896/24564 ws=0 tw=14 boot=undefined reset=undefined
+S3 navigation 4: /hardware.html connected heap=51044/31732 ws=0 tw=14 boot=undefined reset=undefined
+S3 navigation 5: /system.html connected heap=51044/31732 ws=0 tw=14 boot=undefined reset=undefined
+S3 navigation 6: /calibration.html connected heap=47932/31732 ws=0 tw=15 boot=undefined reset=undefined
+S3 navigation 7: /controllers.html connected heap=51040/31732 ws=0 tw=15 boot=undefined reset=undefined
+S3 config PATCH response HTTP 200
+S3 restore: throttle ramp 600 ms save acknowledged
+S3 navigation 8: / connected heap=50448/31732 ws=0 tw=15 boot=undefined reset=undefined
+S3 recovered 2 top-level document retry/retries; every resulting page reached CONNECTED.
+S3 recovered 2 transient API GET reset(s) during page handoff.
+S3 realistic session PASSED: 91s, 8 navigations, 2 persisted config saves, original config restored.

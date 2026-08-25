@@ -328,7 +328,22 @@ void normalizeS3StatusLedDefault(JsonDocument& doc) {
     if (led["shutdown_color"].isNull()) led["shutdown_color"] = DEFAULT_STATUS_LED_SHUTDOWN_COLOR;
     if (led["blink_color"].isNull()) led["blink_color"] = DEFAULT_STATUS_LED_BLINK_COLOR;
 #else
-    (void)doc;
+    // Classic boards have a conventional built-in LED on GPIO 2. Preserve an
+    // explicit user disable, but repair old/missing enabled records so a
+    // factory/default Classic always exposes and drives its status LED.
+    JsonObject actuators = doc["actuators"].is<JsonObject>()
+        ? doc["actuators"].as<JsonObject>()
+        : doc["actuators"].to<JsonObject>();
+    JsonObject led = actuators["status_led"].is<JsonObject>()
+        ? actuators["status_led"].as<JsonObject>()
+        : actuators["status_led"].to<JsonObject>();
+    const bool enabledPresent = !led["enabled"].isNull();
+    const bool enabled = led["enabled"] | true;
+    if (!enabledPresent) led["enabled"] = true;
+    if (enabled && ((led["pin"] | DEFAULT_STATUS_LED_PIN) < 0))
+        led["pin"] = DEFAULT_STATUS_LED_PIN;
+    if (led["type"].isNull()) led["type"] = DEFAULT_STATUS_LED_TYPE;
+    if (led["mode"].isNull()) led["mode"] = DEFAULT_STATUS_LED_MODE;
 #endif
 }
 
@@ -1708,6 +1723,11 @@ bool validatePlatformPins(const JsonDocument& doc,
         !numberRange(actuators["igniter"], "coil_sat_a", 0.001f, 1000.0f) ||
         !numberRange(actuators["igniter2"], "coil_sat_a", 0.001f, 1000.0f) ||
         !numberRange(actuators["oil_pump"], "current_max_a", 0.0f, 1000.0f)) return false;
+    for (const char* key : {"oil_pump", "glow_plug", "igniter", "igniter2"}) {
+        JsonVariantConst item = actuators[key];
+        if (!intRange(item, "current_trip_delay_ms", 100, 60000) ||
+            !numberRange(item, "current_max_a", 0.0f, 1000.0f)) return false;
+    }
 
     JsonVariantConst cluster = doc["cluster_serial"];
     JsonVariantConst mavlink = doc["mavlink"];
@@ -1809,7 +1829,11 @@ bool validatePlatformPins(const JsonDocument& doc,
         return true;
     };
 
-    if (!addPin(stopPin) || !addPin(startPin)) return false;
+    // Registry START/STOP cards are independently sampled and may be repeated.
+    // Add every one in the registry loop below; only reserve the legacy pins
+    // here when no registry-backed channel replaces that control.
+    if ((!registryStop && !addPin(stopPin)) ||
+        (!registryStart && !addPin(startPin))) return false;
     JsonVariantConst i2c = doc["i2c"];
     if (!i2c.isNull() && !i2c.is<JsonObjectConst>()) return false;
     if (i2c["enabled"] | false) {
@@ -2026,12 +2050,6 @@ bool validatePlatformPins(const JsonDocument& doc,
             } else if (!gpioAllowed(ch.pin)) {
                 return false;
             }
-            // Canonical START/STOP cards populate the effective stopPin/startPin
-            // above on every platform. Their local GPIOs have therefore already
-            // entered the collision set; addressable device cards have pin=-1.
-            const bool canonicalControl = !strcmp(ch.purpose, "stop_switch") ||
-                                          !strcmp(ch.purpose, "start_switch");
-            if (canonicalControl) continue;
             if (registryMirrorsDiChannel(ch)) continue;
             if (registryMirrorsLegacyPin(ch)) continue;
             if (!addPin(ch.pin)) return false;
@@ -3169,7 +3187,7 @@ void HardwareConfig::applyDefaults() {
         throttleInputRcPwm ? ChannelRegistry::RcPwm : ChannelRegistry::Analog);
     if (hasIdleInput) addDefaultInput("operator_idle", "Idle Input", "operator", "idle", idleInputPin,
         idleInputRcPwm ? ChannelRegistry::RcPwm : ChannelRegistry::Analog);
-    if (hasThrottle) addDefaultOutput("main_fuel", "Main Fuel Pump", "fuel", "main_fuel", throttlePin, throttleType, throttleLedcFreqHz, throttleLedcBits);
+    if (hasThrottle) addDefaultOutput("main_fuel", "Main Fuel Metering", "fuel", "main_fuel", throttlePin, throttleType, throttleLedcFreqHz, throttleLedcBits);
     if (hasStarter) addDefaultOutput("starter", "Starter", "starter", "starter", starterPin, starterType, starterLedcFreqHz, starterLedcBits);
     if (hasOilPump) addDefaultOutput("oil_pump_main", "Oil Pump", "oil_pump", "oil_pump", oilPumpPin, oilPumpType, oilPumpFreqHz, oilPumpResBits);
     if (hasFuelSol) addDefaultOutput("fuel_shutoff", "Fuel Shutoff", "fuel_shutoff", "fuel_shutoff", fuelSolPin, 2);
@@ -3808,6 +3826,7 @@ void HardwareConfig::_fromDoc(const JsonDocument& doc) {
     }
 #else
     if (statusLedPin == AUTO_S3_RGB_STATUS_LED_PIN) statusLedPin = DEFAULT_STATUS_LED_PIN;
+    if (hasStatusLed && statusLedPin < 0) statusLedPin = DEFAULT_STATUS_LED_PIN;
 #endif
     auto clus = doc["cluster_serial"];
     if (!clus["enabled"].isNull()) hasClusterSerial = clus["enabled"].as<bool>();
@@ -4273,6 +4292,27 @@ void HardwareConfig::_fromDoc(const JsonDocument& doc) {
         hasIgniterCurrentSensor = hasIgniter && (ign["has_current"] | false);
         hasIgniter2CurrentSensor = hasIgniter2 && (ign2["has_current"] | false);
         hasGlowCurrentSensor = hasGlowPlug && (glw["has_current"] | false);
+        // Dedicated actuator objects retain a few mode-specific fields, while
+        // the registry is the canonical per-output protection inventory.
+        // Mirror current-sensor settings into the owning physical card so the
+        // generic safety loop treats oil, glow and both igniters uniformly.
+        auto syncCurrentProtection = [](const char* purpose, JsonVariantConst source) {
+            for (uint8_t i = 0; i < channelRegistry.outputCount; ++i) {
+                auto& c = channelRegistry.outputs[i];
+                if (strcmp(c.purpose, purpose) || !channelRegistry.ownsCoreOutput(c)) continue;
+                c.hasCurrent = source["has_current"] | false;
+                c.currentPin = source["current_pin"] | -1;
+                c.currentMvPerA = source["current_mv_a"] | 100.0f;
+                c.currentZeroV = source["current_zero_v"] | 1.65f;
+                c.currentMaxAmps = source["current_max_a"] | 0.0f;
+                c.currentTripDelayMs = source["current_trip_delay_ms"] | 5000UL;
+                break;
+            }
+        };
+        syncCurrentProtection("oil_pump", op);
+        syncCurrentProtection("glow_plug", glw);
+        syncCurrentProtection("igniter", ign);
+        syncCurrentProtection("ab_igniter", ign2);
     }
 
     auto contrl = doc["controllers"];

@@ -29,6 +29,28 @@ def _nested_matches(cfg, partial):
     return True
 
 
+def _nested_mismatches(cfg, partial, prefix=""):
+    """Return concise leaf-level differences for a failed config verification."""
+    differences = []
+    for key, expected in partial.items():
+        path = f"{prefix}.{key}" if prefix else key
+        actual = cfg.get(key) if isinstance(cfg, dict) else None
+        if isinstance(expected, dict):
+            if not isinstance(actual, dict):
+                differences.append(f"{path}: expected object, got {actual!r}")
+            else:
+                differences.extend(_nested_mismatches(actual, expected, path))
+        elif isinstance(expected, float) or isinstance(actual, float):
+            try:
+                if actual is None or abs(float(actual) - float(expected)) > 1e-4:
+                    differences.append(f"{path}: expected {expected!r}, got {actual!r}")
+            except (TypeError, ValueError):
+                differences.append(f"{path}: expected {expected!r}, got {actual!r}")
+        elif actual != expected:
+            differences.append(f"{path}: expected {expected!r}, got {actual!r}")
+    return differences
+
+
 class DutConfig:
     def __init__(self, dut):
         self.dut = dut
@@ -70,6 +92,7 @@ class DutConfig:
                     current = self.dut.data().get("boot_count")
                     if current is not None and int(current) != int(previous_boot_count):
                         time.sleep(2.0)
+                        self.dut._data_base = None
                         return True
                 down = 0
             except Exception:
@@ -84,6 +107,10 @@ class DutConfig:
             try:
                 self.dut.status()
                 time.sleep(2.0)
+                # /api/telemetry intentionally omits static registry and DI
+                # topology. A hardware reboot invalidates the DUT helper's
+                # merged /api/data base even when the process object survives.
+                self.dut._data_base = None
                 return saw_outage
             except Exception:
                 time.sleep(1.0)
@@ -150,6 +177,12 @@ class DutConfig:
                 except Exception:
                     pass
                 time.sleep(0.2)
+        try:
+            differences = _nested_mismatches(self.dut.config(), partial)
+            if differences:
+                print("Config verification mismatch: " + "; ".join(differences[:12]), flush=True)
+        except Exception as error:
+            print(f"Config verification diagnostic failed: {error}", flush=True)
         return False, resp
 
     def _wait_config_apply(self, timeout=8.0):

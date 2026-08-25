@@ -144,13 +144,13 @@ apply_profile(cfg_in, check=lambda hw: (
     hw["di_channels"][0]["pin"] == 27))
 t.set("N1", round(45000/60.0, 1)); time.sleep(1.5); n1 = dut.data().get("n1"); t.set("N1", 0)
 rec("FREQ input (N1 RPM / PCNT)", abs((n1 or 0) - 45000) < 3000, "drive 45000 -> %s" % n1)
-t.set("IDLE_IN", "HIGH"); time.sleep(0.7); hi = dut.data().get("p1")
-t.set("IDLE_IN", "LOW");  time.sleep(0.7); lo = dut.data().get("p1")
+t.set("IDLE_IN", "HIGH"); time.sleep(0.7); hi = dut.full_data().get("p1")
+t.set("IDLE_IN", "LOW");  time.sleep(0.7); lo = dut.full_data().get("p1")
 # Registry-native pressure cards publish calibrated engineering units through
 # `p1`/registry_inputs. `p1_raw` belongs only to the legacy AnalogSensor object.
 rec("ADC input (GPIO32 range)", (hi or 0) - (lo or 0) > 2.0, "high=%sbar low=%sbar" % (hi, lo))
-t.set("FLAME", 1); time.sleep(0.4); don = (dut.data().get("di_channels") or [{}])[0].get("state")
-t.set("FLAME", 0); time.sleep(0.4); doff = (dut.data().get("di_channels") or [{}])[0].get("state")
+t.set("FLAME", 1); time.sleep(0.4); don = (dut.full_data().get("di_channels") or [{}])[0].get("state")
+t.set("FLAME", 0); time.sleep(0.4); doff = (dut.full_data().get("di_channels") or [{}])[0].get("state")
 rec("DIGITAL input (DI channel)", don is True and doff is False, "on=%s off=%s" % (don, doff))
 
 # 4. V2 PULSED STARTER: actual StarterSpin output and STOP cut

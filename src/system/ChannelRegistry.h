@@ -176,9 +176,10 @@ public:
         Direction direction = Input;
         Driver driver = Digital;
         char id[20] = {};
-        char name[16] = {};
+        char name[24] = {};
         char role[18] = {"generic"};
         char purpose[20] = {"generic"};
+        char mirrorOf[20] = {}; // output command source; empty means independent
         // Empty in generic dev-board mode. In PCB-profile mode these stable
         // IDs are the persisted topology; raw pin/bus/driver fields below are
         // derived from the immutable flashed profile on every load.
@@ -238,6 +239,7 @@ public:
         float currentMvPerA = 100.0f;
         float currentZeroV = 1.65f;
         float currentMaxAmps = 0.0f;
+        uint32_t currentTripDelayMs = 5000; // continuous overcurrent before shutdown
         bool hasFlowMonitor = false;
         float minimumFlow = 0.0f;  // L/min; applies to oil/scavenge pump outputs
         char flowInputId[20] = {}; // optional when exactly one compatible input exists
@@ -384,6 +386,15 @@ public:
                 if (compatible == 0 || !selected ||
                     (compatible > 1 && !outputs[i].flowInputId[0])) return false;
             }
+            if (outputs[i].mirrorOf[0]) {
+                const Channel* source = find(outputs[i].mirrorOf, Output);
+                if (!source || source == &outputs[i] || source->mirrorOf[0] ||
+                    ownsCoreOutput(outputs[i])) {
+                    snprintf(_validationError, sizeof(_validationError),
+                             "Output %s has an invalid mirror source", outputs[i].id);
+                    return false;
+                }
+            }
         }
         uint8_t auxiliaryPcnt = 0, registryOneWire = 0, nauLoadCells = 0;
         uint8_t nauGain = 0;
@@ -489,8 +500,15 @@ public:
         // targets. This supports series valves, twin pumps/fans and unusual
         // hobby installations without giving them hidden mirrored commands.
         if (d == Output) return false;
+        // Discrete switches may be repeated. Their consumers combine them as
+        // any-active while retaining per-channel health and disconnect checks.
+        if (!strcmp(purpose, "start_switch") || !strcmp(purpose, "stop_switch") ||
+            !strcmp(purpose, "low_oil_switch") || !strcmp(purpose, "oil_zero_switch") ||
+            !strcmp(purpose, "digital_switch") || !strcmp(purpose, "fault") ||
+            !strcmp(purpose, "estop") || !strcmp(purpose, "inhibit_start") ||
+            !strcmp(purpose, "sequence_gate") || !strcmp(purpose, "ab_arm") ||
+            !strcmp(purpose, "ab_fire") || !strcmp(purpose, "limp_mode")) return false;
         return (strcmp(purpose, "oil_pressure") && isCoreManagedInputPurpose(purpose)) ||
-               !strcmp(purpose, "start_switch") || !strcmp(purpose, "stop_switch") ||
                !strcmp(purpose, "ab_command");
     }
     static bool purposeValid(Direction d, const char* purpose) {
@@ -779,7 +797,9 @@ private:
                !(c.pullup && c.pulldown) &&
                (!c.hasCurrent || (c.currentPin >= 0 && c.currentMvPerA > 0.0f &&
                                   c.currentZeroV >= 0.0f && c.currentZeroV <= 3.3f &&
-                                  c.currentMaxAmps >= 0.0f)) &&
+                                  c.currentMaxAmps >= 0.0f &&
+                                  c.currentTripDelayMs >= 100 &&
+                                  c.currentTripDelayMs <= 60000)) &&
                (!c.hasFlowMonitor ||
                 (c.direction == Output &&
                  (!strcmp(c.purpose, "oil_pump") || !strcmp(c.purpose, "scavenge_pump") ||
@@ -939,7 +959,12 @@ private:
                 o["ntc_r_fixed"] = c.thermistorRFixed;
                 o["ntc_pullup"] = c.thermistorPullup;
             }
-            if (c.safeDemand != 0.0f) o["safe_demand"] = c.safeDemand;
+            // Propeller pitch deliberately defaults to 100% coarse when an
+            // old document omits this field. Therefore an explicit 0% park is
+            // not equivalent to omission and must survive save/reboot.
+            if (c.safeDemand != 0.0f || !strcmp(c.purpose, "prop_pitch"))
+                o["safe_demand"] = c.safeDemand;
+            if (c.mirrorOf[0]) o["mirror_of"] = c.mirrorOf;
             if (c.forceSafeOnFault) o["force_safe_on_fault"] = true;
             if (c.minimumRunDemand != 0.0f) o["min_run_demand"] = c.minimumRunDemand;
             if (c.pwmTimingConfigured) { o["pwm_freq_hz"] = c.pwmFrequency; o["pwm_res_bits"] = c.pwmResolution; }
@@ -956,6 +981,7 @@ private:
                 o["current_mv_a"] = c.currentMvPerA;
                 o["current_zero_v"] = c.currentZeroV;
                 o["current_max_a"] = c.currentMaxAmps;
+                o["current_trip_delay_ms"] = c.currentTripDelayMs;
             }
             if (c.hasFlowMonitor) {
                 o["has_flow_monitor"] = true;
@@ -969,6 +995,10 @@ private:
             Channel c; c.direction = d; c.installed = true;
             strlcpy(c.id, o["id"] | "", sizeof(c.id)); strlcpy(c.name, o["name"] | c.id, sizeof(c.name)); strlcpy(c.role, o["role"] | "generic", sizeof(c.role));
             strlcpy(c.purpose, o["purpose"] | derivePurpose(d, c.id, c.role), sizeof(c.purpose));
+            if (d == Output) strlcpy(c.mirrorOf, o["mirror_of"] | "", sizeof(c.mirrorOf));
+            if (d == Output && !strcmp(c.purpose, "main_fuel") &&
+                (!strcmp(c.name, "Main Fuel Pump") || !strcmp(c.name, "Main Fuel Meteri")))
+                strlcpy(c.name, "Main Fuel Metering", sizeof(c.name));
             strlcpy(c.physicalPortId, o["physical_port"] | "", sizeof(c.physicalPortId));
             strlcpy(c.physicalModeId, o["physical_mode"] | "", sizeof(c.physicalModeId));
             c.driver = (Driver)(o["driver"] | 0); c.pin = o["pin"] | -1; c.minValue = o["min"] | 0.0f; c.maxValue = o["max"] | 1.0f;
@@ -1000,7 +1030,7 @@ private:
             c.temperatureInterface = o["temp_interface"] | 0; c.spiClk = o["spi_clk"] | -1; c.spiCs = o["spi_cs"] | -1; c.spiMiso = o["spi_miso"] | -1; c.spiMosi = o["spi_mosi"] | -1; strlcpy(c.tcType, o["tc_type"] | "K", sizeof(c.tcType));
             c.temperatureResolution = o["temp_resolution"] | 10; c.thermistorBeta = o["ntc_beta"] | 3950.0f; c.thermistorR0 = o["ntc_r0"] | 10000.0f; c.thermistorRFixed = o["ntc_r_fixed"] | 10000.0f; c.thermistorPullup = o["ntc_pullup"] | true;
             c.safeDemand = o["safe_demand"] | (!strcmp(c.purpose, "prop_pitch") ? 1.0f : 0.0f); c.forceSafeOnFault = o["force_safe_on_fault"] | false; c.minimumRunDemand = o["min_run_demand"] | 0.0f; c.pwmTimingConfigured = !o["pwm_freq_hz"].isNull() || !o["pwm_res_bits"].isNull(); c.pwmFrequency = o["pwm_freq_hz"] | 5000; c.pwmResolution = o["pwm_res_bits"] | 10;
-            c.inverted = o["invert"] | false; c.activeHigh = o["active_high"] | true; c.pullup = o["pullup"] | false; c.pulldown = o["pulldown"] | false; c.hasCurrent = o["has_current"] | false; c.currentPin = o["current_pin"] | -1; c.currentMvPerA = o["current_mv_a"] | 100.0f; c.currentZeroV = o["current_zero_v"] | 1.65f; c.currentMaxAmps = o["current_max_a"] | 0.0f;
+            c.inverted = o["invert"] | false; c.activeHigh = o["active_high"] | true; c.pullup = o["pullup"] | false; c.pulldown = o["pulldown"] | false; c.hasCurrent = o["has_current"] | false; c.currentPin = o["current_pin"] | -1; c.currentMvPerA = o["current_mv_a"] | 100.0f; c.currentZeroV = o["current_zero_v"] | 1.65f; c.currentMaxAmps = o["current_max_a"] | 0.0f; c.currentTripDelayMs = o["current_trip_delay_ms"] | 5000UL;
             c.hasFlowMonitor = o["has_flow_monitor"] | false; c.minimumFlow = o["minimum_flow_l_min"] | 0.0f;
             strlcpy(c.flowInputId, o["flow_input"] | "", sizeof(c.flowInputId));
             if (c.pullup) c.pulldown = false;

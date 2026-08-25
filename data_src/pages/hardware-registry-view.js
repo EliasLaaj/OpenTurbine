@@ -31,7 +31,7 @@ function registryPurposeLabel(direction, c) {
   return registryPurposeDefinition(direction, registryDerivedPurpose(direction,c))?.label || 'Generic channel';
 }
 const REGISTRY_SINGLETON_PURPOSES = {
-  input: new Set(['n1_speed','n2_speed','tot','tit','oil_temperature','fuel_pressure','p1_pressure','p2_pressure','fuel_flow','flame','ab_flame','torque','thrust','battery_voltage','throttle','idle','ab_command','start_switch','stop_switch','low_oil_switch','oil_zero_switch']),
+  input: new Set(['n1_speed','n2_speed','tot','tit','oil_temperature','fuel_pressure','p1_pressure','p2_pressure','fuel_flow','flame','ab_flame','torque','thrust','battery_voltage','throttle','idle','ab_command']),
   output: new Set()
 };
 function registryPurposeIsSingleton(direction, purpose) {
@@ -314,9 +314,13 @@ function registryImpactDisplay(text) {
 function registryCurrentUsers(direction, id) {
   const rows = registryRoot()[direction + 's'] || [];
   const channel = rows.find(c => String(c?.id || '') === String(id || ''));
+  const mirrors = direction === 'output' ? (registryRoot().outputs || [])
+    .filter(row => String(row?.mirror_of || '') === String(id || ''))
+    .map(row => `Mirrored output: ${registryDisplayName('output', row, row.id)}`) : [];
   return [...new Set([
     ...registryRoleUsage(direction, channel),
-    ...registryRemovalImpact(direction, id).map(registryImpactDisplay)
+    ...registryRemovalImpact(direction, id).map(registryImpactDisplay),
+    ...mirrors
   ].filter(Boolean))];
 }
 function registryBlockLabel(block) {
@@ -424,10 +428,16 @@ function registryRoleUsage(direction, c) {
   } else {
     const actKey = registryCoreActuatorKey(c);
     const dep = ACT_DEPENDENCIES[actKey];
+    const ownsCore = registryOutputOwnsCorePurpose(c);
+    const mirrorsCore = !!String(c.mirror_of || '');
     if (purpose === 'main_fuel') {
-      uses.add('Controller: fuel response & limit protection');
+      uses.add(ownsCore
+        ? 'Controller: fuel response & limit protection'
+        : mirrorsCore
+          ? 'Mirrors the final protected Main Fuel Metering command'
+          : 'Independent output: assign a controller, sequence action, or rule');
     }
-    if (dep) {
+    if (dep && (ownsCore || mirrorsCore)) {
       const controllerLabels = {
         oil_loop:'oil pressure loop',
         dynamic_idle:'automatic idle speed control',
@@ -516,66 +526,6 @@ function renderHardwareBoardSummary() {
     `${freeAdcPins} ADC-capable GPIO free`,
     `Registry: ${escapeHtmlText(registryCounts)}`
   ].map(line => `<div>${line}</div>`).join('');
-}
-function renderHardwareRequirementsSummary() {
-  const box = document.getElementById('hardware-requirements-summary');
-  if (!box || !cfg) return;
-  const items = [];
-  const hasPrimarySpeed = registryHasPurpose('input','n1_speed');
-  const hasMainFuel = registryHasPurpose('output','main_fuel');
-  const hasOilPressure = registryHasPurpose('input','oil_pressure');
-  const hasOilPump = registryHasPurpose('output','oil_pump');
-  const i2cAssignments = [...(registryRoot().inputs || []), ...(registryRoot().outputs || [])]
-    .filter(channel => Number(channel.driver) >= 8).length;
-  const spiAssignments = (registryRoot().inputs || []).filter(registryTemperatureIsSpi).length;
-  items.push({
-    state: hasPrimarySpeed ? 'ok' : 'warn',
-    text: hasPrimarySpeed ? 'Primary N1 speed input is ready' : 'No primary N1 speed input is fitted',
-    detail: hasPrimarySpeed
-      ? 'Startup, shaft-speed display, and N1 protection can use this input.'
-      : 'Timer/TOT-only startup is possible, but N1 overspeed protection, shaft-speed idle control, and RPM-based sequencing are unavailable.'
-  });
-  if (i2cAssignments && !cfg.i2c?.enabled)
-    items.push({state:'error', text:'Shared I2C bus is disabled',
-      detail:`${i2cAssignments} saved I2C assignment${i2cAssignments===1?' depends':'s depend'} on it. Enable the bus above or remove those devices.`});
-  if (spiAssignments && !cfg.spi?.enabled)
-    items.push({state:'error', text:'Shared SPI bus is disabled',
-      detail:`${spiAssignments} thermocouple assignment${spiAssignments===1?' depends':'s depend'} on it. Enable the bus above or remove those devices.`});
-  items.push({
-    state: hasMainFuel ? 'ok' : 'warn',
-    text: hasMainFuel ? 'Main fuel metering output is ready' : 'No ECU-controlled main fuel output',
-    detail: hasMainFuel
-      ? 'The ECU has an output that can command the engine fuel flow.'
-      : 'This is valid for a logging-only installation or an engine with manual fuel control. Fuel controllers and fuel-command sequence steps remain unavailable until a metering output is fitted.'
-  });
-  if (cfg.controllers?.oil_loop) {
-    items.push({state: hasOilPressure && hasOilPump ? 'ok' : 'error',
-      text: hasOilPressure && hasOilPump ? 'Automatic oil-pressure control is ready' : 'Automatic oil-pressure control needs more hardware',
-      detail: hasOilPressure && hasOilPump
-        ? 'The controller can regulate the oil pump from pressure feedback.'
-        : 'Fit both an Oil Pressure input and an Oil Pump output, or disable the Oil pressure loop controller.'});
-  } else {
-    items.push({state: hasOilPressure || hasOilPump ? 'warn' : 'ok',
-      text: hasOilPressure || hasOilPump ? 'Oil hardware is fitted; automatic pressure control is off' : 'Automatic oil-pressure control is not in use',
-      detail: hasOilPressure || hasOilPump
-        ? 'This is allowed. Sequence blocks can command a fixed pump output; enable the Oil pressure loop only if both pressure feedback and a pump output are fitted.'
-        : 'No action is needed unless this engine uses an ECU-controlled oil system.'});
-  }
-  const registryInvalid = ['input','output'].reduce((sum, dir) =>
-    sum + (registryRoot()[dir + 's'] || []).filter(c => registryStatus(c).kind === 'error').length, 0);
-  items.push({state: registryInvalid ? 'error' : 'ok',
-    text: registryInvalid ? `${registryInvalid} installed device${registryInvalid === 1 ? '' : 's'} still need setup` : 'Installed devices have valid setup fields',
-    detail: registryInvalid ? 'Open the red device card below and complete its GPIO, signal type, or range.' : 'Every installed input and output has the fields required by its selected signal type.'});
-  let conflictCount = 0;
-  try { conflictCount = _checkGpioConflicts().length; } catch (e) {}
-  items.push({state: conflictCount ? 'error' : 'ok',
-    text: conflictCount ? `${conflictCount} GPIO conflict${conflictCount === 1 ? '' : 's'} must be fixed` : 'No GPIO conflicts detected',
-    detail: conflictCount ? 'A GPIO can serve only one unrelated device. Shared thermocouple SPI bus pins are the documented exception.' : 'No unrelated devices are assigned to the same pin.'});
-  const stateLabel = item => item.state === 'ok' ? 'READY' : item.state === 'warn' ? 'CHECK' : 'ACTION NEEDED';
-  box.innerHTML = items.map(item => `<div class="requirement-row requirement-${item.state}">
-    <span class="requirement-copy"><strong>${escapeHtmlText(item.text)}</strong><small>${escapeHtmlText(item.detail || '')}</small></span>
-    <span class="requirement-state">${stateLabel(item)}</span>
-  </div>`).join('');
 }
 function controlFieldChanged(which, key) {
   const before = key === 'label'
@@ -744,14 +694,24 @@ function renderBusSummary() {
   const profileOwned = pcbProfileActive();
   const i2c = cfg.i2c || {};
   const spi = cfg.spi || {};
+  const channels = [...(registryRoot().inputs || []), ...(registryRoot().outputs || [])];
+  const assignedI2cAddresses = new Set(channels
+    .filter(channel => Number(channel.driver) >= 8 && Number(channel.i2c_address) > 0)
+    .map(channel => Number(channel.i2c_address)));
+  const connectedI2cAddresses = new Set((cfg._i2c_discovery?.devices || [])
+    .filter(device => device.present && Number(device.address) > 0)
+    .map(device => Number(device.address)));
+  const spiAssignments = (registryRoot().inputs || []).filter(registryTemperatureIsSpi).length;
+  const i2cCount = `${connectedI2cAddresses.size} connected · ${assignedI2cAddresses.size} assigned`;
+  const spiCount = `${spiAssignments} assigned device${spiAssignments === 1 ? '' : 's'}`;
   const i2cDetail = i2c.enabled
     ? (profileOwned ? 'Wiring is fixed by the flashed PCB profile'
-      : `SDA GPIO ${Number(i2c.sda_pin ?? -1)}, SCL GPIO ${Number(i2c.scl_pin ?? -1)}, ${Number(i2c.frequency_hz ?? 400000) / 1000} kHz`)
+      : `SDA GPIO ${Number(i2c.sda_pin ?? -1)}, SCL GPIO ${Number(i2c.scl_pin ?? -1)}, ${Number(i2c.frequency_hz ?? 400000) / 1000} kHz`) + ` · ${i2cCount}`
     : 'No I2C sensors or expansion devices enabled';
   const spiParts = [`SCK GPIO ${Number(spi.sck_pin ?? -1)}`, `MISO GPIO ${Number(spi.miso_pin ?? -1)}`];
   if (Number(spi.mosi_pin ?? -1) >= 0) spiParts.push(`MOSI GPIO ${Number(spi.mosi_pin)}`);
   const spiDetail = spi.enabled
-    ? (profileOwned ? 'Wiring is fixed by the flashed PCB profile' : spiParts.join(', '))
+    ? (profileOwned ? 'Wiring is fixed by the flashed PCB profile' : spiParts.join(', ')) + ` · ${spiCount}`
     : 'No shared SPI sensor bus enabled';
   box.innerHTML =
     workflowCard('I2C bus', i2cDetail, i2c.enabled ? 'Enabled' : 'Disabled') +
@@ -1015,6 +975,11 @@ function renderCommsIndicatorSummary() {
   const cluster = cfg.cluster_serial || {};
   const mav = cfg.mavlink || {};
   const led = cfg.actuators?.status_led || {};
+  if (cfg.platform !== 'esp32s3' && led.enabled !== false && (led.pin === undefined || led.pin === null || led.pin < 0)) {
+    led.enabled = true;
+    led.pin = 2;
+    if (led.type === undefined) led.type = 0;
+  }
   const buz = cfg.buzzer || {};
   const fixed = pcbProfile?.fixed_functions || {};
   const profileAllows = key => !pcbProfileActive() || fixed[key]?.available === true;
@@ -1061,7 +1026,7 @@ function renderCommsIndicatorSummary() {
     profileAllows('status_led') ? card('status_led', 'Status LED',
       ledEnabled && (led.pin ?? -1) >= 0 ? `${ledType === 1 ? 'NeoPixel RGB' : 'GPIO LED'}${pcbProfileActive() ? ' / fixed PCB indicator' : ` / GPIO ${led.pin}`}` : 'Local status indicator LED',
       ledStatus,
-      pcbProfileActive() ? true : ledEnabled,
+      pcbProfileActive() || cfg.platform !== 'esp32s3' ? true : ledEnabled,
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
          ${pcbProfileActive() ? '<div class="hw-field"><span class="hw-label">Installed indicator</span><span class="hw-desc">LED type, GPIO, polarity, and safe-off state are fixed by the flashed PCB profile.</span></div>' : `<div class="hw-field"><span class="hw-label">Status LED</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('status_led','enabled')}" type="checkbox" ${ledEnabled?'checked':''} onchange="setStatusLedEnabled(this.checked);renderHardwareWorkflowSummaries()"><span></span> Enable</label></div>
          <div class="hw-field"><span class="hw-label">LED type</span><select class="${workflowDeviceFieldClass('status_led','type')}" onchange="setStatusLedType(+this.value);renderHardwareWorkflowSummaries()"><option value="0"${ledType===0?' selected':''}>Plain GPIO on/off</option><option value="1"${ledType===1?' selected':''}>NeoPixel RGB data LED</option></select></div>
@@ -1089,7 +1054,6 @@ function renderCommsIndicatorSummary() {
 function renderHardwareWorkflowSummaries() {
   updateWorkflowEditButtons();
   renderBuiltinInputSummary();
-  renderHardwareRequirementsSummary();
   renderHardwareBoardSummary();
   renderBusSummary();
   renderCommsIndicatorSummary();
@@ -1184,13 +1148,27 @@ function renderRegistryInventory() {
   const r = registryRoot();
   const render = (direction, target) => {
     const rows = r[direction + 's'];
-    const visibleRows = rows.map((c, i) => ({c, i})).filter(({c}) => {
+    let visibleRows = rows.map((c, i) => ({c, i})).filter(({c}) => {
       if (direction !== 'input') return true;
       const purpose = registryDerivedPurpose('input', c);
       if (!['oil_flow','scavenge_flow'].includes(purpose)) return true;
       const ownerPurpose = purpose === 'oil_flow' ? 'oil_pump' : 'scavenge_pump';
       return !(r.outputs || []).some(output => registryDerivedPurpose('output', output) === ownerPurpose);
     });
+    if (direction === 'output') {
+      // Keep each physical mirror visually attached to the command source
+      // without changing registry indices used by controllers and sequences.
+      const ordered = [];
+      const placed = new Set();
+      visibleRows.filter(({c}) => !String(c?.mirror_of || '')).forEach(source => {
+        ordered.push(source);
+        placed.add(source.i);
+        visibleRows.filter(({c}) => String(c?.mirror_of || '') === String(source.c?.id || ''))
+          .forEach(mirror => { ordered.push(mirror); placed.add(mirror.i); });
+      });
+      visibleRows.forEach(row => { if (!placed.has(row.i)) ordered.push(row); });
+      visibleRows = ordered;
+    }
     document.getElementById(target).innerHTML =
       (visibleRows.length ? visibleRows.map(({c, i}) => {
         const open = _registryEditOpen.has(registryEditKey(direction, i));
@@ -1209,24 +1187,30 @@ function renderRegistryInventory() {
         const driverClass = registryFieldChangedClass(direction, i, 'driver');
         const pinClass = `${registryFieldChangedClass(direction, i, 'pin')}${(c.pin ?? -1) < 0 ? ' field-error' : ''}`;
         const displayName = registryDisplayName(direction, c, direction === 'input' ? `Input ${i+1}` : `Output ${i+1}`);
+        const mirrorSource = direction === 'output' && c.mirror_of
+          ? (registryRoot().outputs || []).find(row => String(row?.id || '') === String(c.mirror_of || '')) : null;
         return `<div class="${cardClass}" data-registry-direction="${direction}" data-registry-id="${escapeHtmlText(c.id || '')}" style="margin:.3rem 0" title="${status.kind === 'error' ? escapeHtmlText(status.text) : ''}">
         <div class="registry-card-summary">
           <div>
-            <strong>${escapeHtmlText(displayName)}</strong>
+            <strong>${escapeHtmlText(displayName)}</strong>${mirrorSource ? ' <span class="registry-mirror-label">Mirrored output</span>' : ''}
             <div class="hw-desc">${escapeHtmlText(registryPurposeLabel(direction, c))} &middot; ${escapeHtmlText(registrySignalSummary(c))} &middot; ${escapeHtmlText(registryPinSummary(c))}${direction==='output' ? ' &middot; '+escapeHtmlText(registryOutputSummary(c)) : ''}</div>
             ${registryDerivedPurpose(direction,c)==='generic' ? `<div class="hw-desc">Normalized 0.00–1.00 · Sequencer and rules only</div>` : ''}
             <div class="hw-desc">${escapeHtmlText(registryReferenceSummary(direction, c.id))}</div>
+            ${mirrorSource ? `<div class="hw-desc"><strong>Mirrored output of ${escapeHtmlText(registryDisplayName('output', mirrorSource, mirrorSource.id))}.</strong> It follows the source command; signal type, polarity, endpoints and protection remain specific to this physical output.</div>` : ''}
+            ${direction === 'output' && registryCoreActuatorKey(c) && !registryOutputOwnsCorePurpose(c) && !mirrorSource
+              ? `<div class="hw-desc"><strong>Independent command:</strong> this output is not driven by the built-in ${escapeHtmlText(registryPurposeLabel(direction, c))} command. Assign it to a controller, sequence action, or rule, or remove it and use Add mirrored output on the primary card.</div>` : ''}
           </div>
           <div class="registry-card-actions">
             <span class="registry-status registry-status-${status.kind}">${escapeHtmlText(status.text)}</span>
             ${fixedProfileFunction ? '' : `<button type="button" onclick="toggleRegistryEdit('${direction}',${i})">${open ? 'Done' : 'Edit'}</button>
-             ${direction === 'output' && !registryPurposeIsSingleton(direction, registryDerivedPurpose(direction,c)) ? `<button type="button" title="Create another output with the same purpose and signal type. The copy has no GPIO pin until you assign one." onclick="duplicateRegistryChannel(${i})">Duplicate</button>` : ''}
+             ${direction === 'output' ? `<button type="button" title="Add another physical output that follows this output's command. Its pin, driver, polarity, endpoints and protection are configured separately." onclick="duplicateRegistryChannel(${i})">Add mirrored output</button>` : ''}
              <button type="button" class="danger remove-action" onclick="removeRegistryChannel('${direction}',${i})">Remove</button>`}
           </div>
         </div>
         <div class="registry-card-editor" style="${open ? '' : 'display:none'}">
+        ${mirrorSource ? `<div class="hw-item-card registry-subcard" style="margin:0 0 .6rem"><div class="registry-card-summary"><div><strong>Mirrored command</strong><div class="hw-desc">This physical output follows ${escapeHtmlText(registryDisplayName('output', mirrorSource, mirrorSource.id))}. Use an independent output instead when it needs its own controller or sequence command.</div></div><button type="button" onclick="makeRegistryOutputIndependent(${i})">Make independent</button></div></div>` : ''}
         <div class="hw-grid">
-           <div class="hw-field"><span class="hw-label">Display name</span><span class="hw-desc">Plain name shown on Dashboard, Sequence and Tools. Example: Oil pump, Idle input, Flame sensor.</span><input class="${nameClass}" type="text" maxlength="15" value="${escapeHtmlText(displayName)}" oninput="updateRegistryChannel('${direction}',${i},'name',this.value)"></div>
+           <div class="hw-field"><span class="hw-label">Display name</span><span class="hw-desc">Plain name shown on Dashboard, Sequence and Tools. Example: Oil pump, Idle input, Flame sensor.</span><input class="${nameClass}" type="text" maxlength="23" value="${escapeHtmlText(displayName)}" oninput="updateRegistryChannel('${direction}',${i},'name',this.value)"></div>
            <div class="hw-field"><span class="hw-label">Purpose</span><span class="hw-desc">${pcbProfileActive() ? 'What this compatible connector does in the ECU. Only uses supported by its electrical mode are offered.' : 'What this channel does in the ECU. This controls which safety, controller, sequence and rule options can use it.'}</span><select class="${purposeClass}" onchange="updateRegistryChannel('${direction}',${i},'purpose',this.value)">${registryPurposeOptions(direction, registryDerivedPurpose(direction,c), c)}</select></div>
            ${registryProfilePortEditor(direction,c,i)}
            ${pcbProfileActive() ? '' : registrySignalTypeEditor(direction, c, i, driverClass)}

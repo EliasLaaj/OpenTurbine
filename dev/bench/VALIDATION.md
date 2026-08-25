@@ -18,17 +18,57 @@ either target to a build-only-by-a-few-bytes state.
 
 Systematic hardware-in-the-loop validation of the OpenTurbine firmware on the
 bench rig, aimed at finding defects **before** they reach a real turbine engine.
-The current release candidate is OpenTurbine 2.0.4. DUT and tester roles may be
+The current release candidate is OpenTurbine 2.1.0. DUT and tester roles may be
 swapped between the ESP32-S3 and Classic ESP32 as a campaign requires. Tests
 drive physical ADC/PCNT/SPI/digital paths where wired and use explicit simulator
 coverage for unavailable I²C devices.
 
 The first findings below are retained historical v1.x campaign evidence. Use
 the **v2.0.0 release-candidate HIL** section as the baseline and the newer
-2.0.4 verification audit and dated result files for current sign-off;
+2.1.0 verification audit and dated result files for current sign-off;
 superseded EGT-rate and old configuration behavior are not v2 requirements.
 
 Legend: ✅ pass · ⚠️ anomaly/concern · ❌ bug · ⏭️ not physically testable
+
+## v2.1.0 qualification — 2026-08-25
+
+- ✅ The uninterrupted publication gate passed on the final source: all 10 UI
+  audit programs, 240 safety checks, 16 representative turbine setups,
+  sensor/protocol vectors, native controller behavior, Python and Go tests,
+  generated public content, and both firmware and LittleFS builds.
+- ✅ The exact final Classic candidate was installed over USB with its matching
+  web filesystem and then
+  passed 2/2 physical fuel-isolation cases
+  (`classic_safety_hil_20260825_191214.json`). Overspeed and physical STOP both
+  removed fuel, ignition, and metering demand and the saved ECU setup was
+  restored afterward. The preceding unchanged logger implementation passed 2/2
+  bounded session-recorder
+  cases (`session_logger_hil_20260825_090750.json`). Overspeed and physical
+  STOP evidence and logging produced a valid 43-row run file with zero dropped
+  rows.
+- ✅ The exact packaged Classic firmware and final on-device web assets passed
+  a same-file engine export/import/reboot/readback round trip, complete 742-line
+  NDJSON and CSV event exports, current-session CSV export, 15 connected page
+  navigation samples, continuing live dashboard updates, and zero browser
+  console errors. The field-help regression now covers every generated
+  controller setting, installed input/output editor, visible calibration field,
+  and sequence parameter.
+- ✅ The same exact Classic candidate completed the final realistic browser
+  workflow with eight navigations, two persisted save/readback cycles, complete
+  engine-file download/upload, and original-value restoration
+  (`classic_v210_exact_final_session`). Every page reached CONNECTED.
+- ✅ ESP32-S3 release-candidate hardware completed the equivalent save,
+  engine-file transfer, navigation, and restoration workflow in 91 seconds
+  (`s3_v210_publish_smoke`). The final S3 source rebuild passed the identical
+  software suites and image/linker budgets.
+- ✅ Final image budgets pass: Classic firmware is 1,621,312 bytes with 82,624
+  bytes of OTA headroom and 33,616 bytes of statically linkable DRAM free; S3
+  firmware is 1,605,392 bytes with 1,540,336 bytes of OTA headroom and 167,048
+  bytes of statically linkable DRAM free.
+- ⚠️ These are dry-bench and simulated-plant qualifications. No fueled turbine
+  or installation-specific EMI, driver-power, plumbing, or combustion test was
+  performed; every installation still requires its own wiring inspection, dry
+  output/polarity commissioning, and controlled first-engine test.
 
 ## v2.0.4 final dual-target qualification — 2026-08-23
 

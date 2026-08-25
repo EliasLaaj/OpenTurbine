@@ -158,9 +158,17 @@ class DUT:
             self._data_base = self._get("/api/data")
             return dict(self._data_base)
 
-        merged = dict(self._data_base)
-        merged.update(telemetry)
-        return merged
+        # Compact telemetry rotates optional groups. Preserve each received
+        # group in the cached complete snapshot so a later frame that omits a
+        # field does not make the harness fall back to its boot-time value.
+        # This mirrors the browser's persistent telemetry model.
+        self._data_base.update(telemetry)
+        return dict(self._data_base)
+
+    def full_data(self):
+        """Fetch a fresh complete snapshot for fields not carried every compact frame."""
+        self._data_base = self._get("/api/data")
+        return dict(self._data_base)
 
     def status(self):
         return self._get("/api/status")
@@ -237,7 +245,17 @@ class DUT:
             if bool(d.get(key)) == bool(want):
                 return True
             code, _ = self.command(cmd)
-            time.sleep(settle if code == 200 else 0.6)
+            if code == 200:
+                # The HTTP response confirms queueing, not execution. Poll the
+                # requested state before sending another toggle; otherwise two
+                # delayed commands can cancel one another on a busy Classic/S3.
+                apply_deadline = min(deadline, time.time() + 2.0)
+                while time.time() < apply_deadline:
+                    time.sleep(0.1)
+                    if bool(self.data().get(key)) == bool(want):
+                        return True
+            else:
+                time.sleep(0.6)
         return bool(self.data().get(key)) == bool(want)
 
     def ensure_dev_mode(self, want=True):

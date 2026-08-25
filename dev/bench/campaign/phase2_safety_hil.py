@@ -93,6 +93,12 @@ class SafetyQualification:
         })
         if not ok:
             raise RuntimeError(f"safety settings did not verify: {resp}")
+        # This campaign qualifies the built-in safety paths in isolation.
+        # Clear any user rules left by a previous campaign so a deliberate
+        # request_fault rule cannot pre-empt the safety stimulus under test.
+        ok, resp = self.runner.dc.patch_cfg({"rules": []}, verify=False)
+        if not ok or self.dut.config().get("rules"):
+            raise RuntimeError(f"could not clear control rules for safety qualification: {resp}")
         self.verify_profile({"overspeed", "n2_overspeed", "overtemp", "low_oil", "hot_start", "oil_zero", "flameout"})
 
     def verify_profile(self, expected_safeties):
@@ -178,7 +184,10 @@ class SafetyQualification:
 
     def safe_cut(self):
         time.sleep(0.18)
-        data = self.dut.data()
+        # Read one coherent actuator snapshot. Compact telemetry deliberately
+        # rotates groups and its cache may still contain a pre-trip value even
+        # though the physical outputs have already been cut.
+        data = self.dut.full_data()
         fuel = self.t.get("FUEL_SOL")
         ign = self.t.get("IGNITER")
         throttle = self.t.get("THROTTLE_OUT")
@@ -190,7 +199,15 @@ class SafetyQualification:
             and int(ign.get("level") or 0) == 0
             and int(throttle.get("us") or 0) <= 1050
         )
-        return ok, {"mode": data.get("mode"), "fuel": fuel, "igniter": ign, "throttle": throttle}
+        return ok, {
+            "mode": data.get("mode"), "fuel": fuel, "igniter": ign,
+            "throttle": throttle,
+            "telemetry": {
+                "fuel_sol_open": data.get("fuel_sol_open"),
+                "igniter_on": data.get("igniter_on"),
+                "throttle_effective": data.get("throttle_effective"),
+            },
+        }
 
     def recover(self):
         try:

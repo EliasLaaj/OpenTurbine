@@ -46,7 +46,15 @@ static char              _currentPath[40] = {};
 static QueueHandle_t     _rowQueue  = nullptr;
 static volatile bool     _startPending = false;
 static volatile bool     _endPending   = false;
+#if defined(OT_PLATFORM_ESP32S3)
 static constexpr size_t  SESSION_MAX_RESERVE_BYTES = 150 * 1024;
+#else
+// A complete Classic installation plus ordinary configuration/event data can
+// leave less than one eighth of its 576 KiB LittleFS free. Capping the reserve
+// at 48 KiB still protects config/restore headroom without making the bounded
+// session recorder permanently unavailable on an otherwise healthy ECU.
+static constexpr size_t  SESSION_MAX_RESERVE_BYTES = 48 * 1024;
+#endif
 static constexpr size_t  SESSION_MIN_RESERVE_BYTES = 32 * 1024;
 static constexpr uint32_t SESSION_FREE_CHECK_MS = 5000;
 static uint32_t          _lastFreeCheckMs = 0;
@@ -69,11 +77,8 @@ uint32_t SessionLogger::evictionCount() { return _evictionCount; }
 uint32_t SessionLogger::lastEvictedSession() { return _lastEvictedSession; }
 size_t SessionLogger::freeBytes() { return LittleFS.totalBytes() - LittleFS.usedBytes(); }
 static size_t _sessionReserveBytes() {
-    // A fixed 150 KiB reserve is appropriate on S3, but the Classic build's
-    // complete web UI leaves a much smaller 576 KiB LittleFS volume. Requiring
-    // 150 KiB there disables session logging entirely even though a bounded
-    // 64-row run fits comfortably. Keep one eighth of the filesystem free,
-    // bounded to retain useful configuration/restore headroom on every target.
+    // Keep one eighth where the target has room, bounded to retain useful
+    // configuration/restore headroom without disabling the Classic recorder.
     const size_t proportional = LittleFS.totalBytes() / 8U;
     return min(SESSION_MAX_RESERVE_BYTES,
                max(SESSION_MIN_RESERVE_BYTES, proportional));
@@ -82,6 +87,8 @@ static size_t _sessionReserveBytes() {
 size_t SessionLogger::reserveBytes() { return _sessionReserveBytes(); }
 bool SessionLogger::healthy() { return _healthy; }
 uint8_t SessionLogger::errorCode() { return _errorCode; }
+bool SessionLogger::captureActive() { return _acceptRows; }
+uint32_t SessionLogger::configuredMask() { return Config::sessionLogMask; }
 
 static void _evictOldSessions();
 
@@ -393,6 +400,12 @@ static void _closeSession() {
 // ── Core 1: snapshot sensor state → queue (no file I/O) ──────
 void SessionLogger::startSession() {
     _acceptRows = false;
+    if (!_rowQueue) {
+        _startPending = false;
+        _healthy = false;
+        _errorCode = 1;
+        return;
+    }
     // An empty field mask would otherwise create timestamp-only files and
     // periodically flush LittleFS during every run. Besides wasting flash,
     // those flushes can stall the ESP32 Wi-Fi task for hundreds of

@@ -644,7 +644,7 @@ Work in this order to avoid repairing the same ownership paths twice:
 - [x] Generated `data/` assets match `data_src/`; browser matrix passes with no console errors or false success states.
 - [x] UI uses neutral terminology, concise default controls, exact reasons, and Advanced disclosure for optional tuning.
 - [x] User Guide, Setup Tool docs, release manifest/notes, and migration text match actual behavior.
-- [ ] Canonical local/CI release gates pass from a clean tree.
+- [x] Canonical local release gate passes; CI will rerun the same gate on the publication commit.
 - [x] Exact release artifacts have target/version/build ID/hash recorded.
 - [ ] Full HIL passes on the exact artifacts before publication.
 
@@ -2431,3 +2431,11 @@ covers three pumps whose long IDs intentionally collide after truncation.
   was confirmed in that pass.
 - Hardware/HIL remains the next evidence boundary: real polarity and parking, expander disconnect timing,
   sensor noise and nonlinear calibration, actuator envelopes, EMI, brownout/reset, and combustion behavior.
+
+### [x] P2 UX OT-RELEASE-102 - warn about afterburner hot-streak ordering without restricting it
+
+A custom afterburner sequence may intentionally ignite a torch or hot streak before commanding a fitted
+ECU-controlled afterburner pump. The sequencer validator now calls out that ordering and asks the user to
+verify where the ignition fuel comes from, but leaves the sequence valid. This preserves experimental
+freedom while making an accidental missing `ABPumpOn` easy to spot. The beta release audit locks in the
+warning text and its non-blocking behavior.

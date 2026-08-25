@@ -700,11 +700,11 @@ static void validateSequences(bool report) {
         }
         else if (strcmp(nm, "FuelPumpIdle") == 0) {
             if (!hw.hasThrottle)
-                addIssue(nm, "No main fuel pump / metering output configured - idle fuel demand has no physical output", false);
+                addIssue(nm, "No main fuel metering output configured - idle fuel demand has no physical output", false);
         }
         else if (strcmp(nm, "ModifiedIdle") == 0 || strcmp(nm, "ThrottleSet") == 0) {
             if (!hw.hasThrottle)
-                addIssue(nm, "No main fuel pump / metering output configured - fuel demand has no physical output", false);
+                addIssue(nm, "No main fuel metering output configured - fuel demand has no physical output", false);
         }
         else if (strcmp(nm, "WaitForInput") == 0) {
             if (Config::waitForInputTimeoutMs <= 0)
@@ -990,14 +990,20 @@ static void validateSequences(bool report) {
         // Stabilization is optional, but cannot substitute for confirmation.
         if (_abIgnCount > 0) {
             bool hasStabilize = false, hasFlameConfirm = false;
+            int abPumpOnIndex = -1, abIgniteIndex = -1;
             for (int i = 0; i < _abIgnCount; i++) {
                 if (strcmp(_abIgnBlocks[i]->name(), "ABStabilize") == 0) hasStabilize = true;
                 if (strcmp(_abIgnBlocks[i]->name(), "ABFlameConfirm") == 0) hasFlameConfirm = true;
+                if (strcmp(_abIgnBlocks[i]->name(), "ABPumpOn") == 0 && abPumpOnIndex < 0) abPumpOnIndex = i;
+                if (strcmp(_abIgnBlocks[i]->name(), "ABIgnite") == 0 && abIgniteIndex < 0) abIgniteIndex = i;
             }
             if (!hasFlameConfirm)
-                addIssue("ABFlameConfirm", "Custom AB ignition sequence must include ABFlameConfirm. Select sensor, EGT-rise, or explicit timed-assumption mode in Config.", true);
+                addIssue("ABFlameConfirm", "Custom AB ignition sequence must include ABFlameConfirm. Select sensor, EGT-rise, or explicit timed-assumption mode in the Afterburner subsystem.", true);
             if (!hasStabilize)
                 addIssue("ABStabilize", "AB ignition sequence has no stabilization hold; it enters Running immediately after explicit flame confirmation completes", false);
+            if (hw.hasAbPump && g_blkABIgnite.useTorch && abIgniteIndex >= 0 &&
+                (abPumpOnIndex < 0 || abPumpOnIndex > abIgniteIndex))
+                addIssue("ABIgnite", "Hot-streak occurs before the fitted AB pump is commanded on. This is allowed, but verify that the intended fuel is present before relying on torch ignition.", false);
         }
         if (_abShutCount == 0) {
             const char* defAbShut[] = { "ABSolClose", "ABPumpOff" };
@@ -3453,17 +3459,21 @@ static bool registryControlInput(const char* purpose, bool& configured,
     auto& hw = HardwareConfig::instance();
     auto& ed = EngineData::instance();
     configured = false;
-    healthy = false;
+    healthy = true;
     activeHigh = false;
+    bool active = false;
+    bool first = true;
     for (uint8_t i = 0; i < hw.channelRegistry.inputCount; ++i) {
         const auto& channel = hw.channelRegistry.inputs[i];
         if (!channel.installed || strcmp(channel.purpose, purpose)) continue;
         configured = true;
-        healthy = ed.registryInputHealthy[i];
-        activeHigh = channel.activeHigh;
-        return healthy && ed.registryInputValue[i] >= 0.5f;
+        if (first) { activeHigh = channel.activeHigh; first = false; }
+        const bool channelHealthy = ed.registryInputHealthy[i];
+        healthy = healthy && channelHealthy;
+        active = active || (channelHealthy && ed.registryInputValue[i] >= 0.5f);
     }
-    return false;
+    if (!configured) healthy = false;
+    return configured && healthy && active;
 }
 
 static void checkStopSwitch() {
@@ -3965,20 +3975,19 @@ void loop() {
             _configApplyDeferred = true;
             Serial.println("[OT] Config apply deferred until STANDBY");
         }
-        if (!retryForHeap)
+        if (retryForHeap && configHeapRetryCount >= 8) {
+            // A failed live publication must neither reboot the ECU nor leave
+            // START blocked behind a permanently busy transaction. Restore
+            // the still-running configuration to disk and report this exact
+            // generation as failed; the browser can retry after heap recovers.
+            Config::clearStagedJsonCandidate();
+            const bool rollbackSaved = Config::save();
+            Serial.printf("[OT] Config apply abandoned without reboot; runtime rollback %s\n",
+                          rollbackSaved ? "saved" : "could not be persisted");
+            ConfigApplyGate::completeCoreApply(candidateGeneration, false);
+            configHeapRetryCount = 0;
+        } else if (!retryForHeap) {
             ConfigApplyGate::completeCoreApply(candidateGeneration, candidateApplied);
-        if (retryForHeap && configHeapRetryCount >= 8 &&
-            (configMode == SysMode::STANDBY || configMode == SysMode::FAULT)) {
-            // The exact validated generation is already atomically persisted.
-            // A maximally fitted Classic profile can permanently lack the
-            // contiguous block needed for a second full runtime tree. Boot's
-            // section-streaming loader is the bounded fallback, but never
-            // restart while an engine is active.
-            Serial.println("[OT] Config apply heap remained fragmented; rebooting safely into persisted settings");
-            Hardware::allOff();
-            delay(50);
-            ESP.restart();
-            return;
         }
     }
 
@@ -3997,6 +4006,11 @@ void loop() {
     checkStopSwitch();
     checkStartSwitch();
 
+    // Release expired tool ownership before accepting the next queued tool
+    // command. Otherwise a command arriving on the expiry loop is reported as
+    // accepted by HTTP but handleCommand still sees the stale owner and drops
+    // it before checkToolTimers() clears that owner later in the same loop.
+    checkToolTimers();
     CommandQueue::drain(handleCommand);
     uint32_t afterCommandsUs = micros();
 
@@ -4044,7 +4058,6 @@ void loop() {
             strlcpy(ownerEd.oilCommandOwner, "Oil-pressure controller", sizeof(ownerEd.oilCommandOwner));
     }
 
-    checkToolTimers();
     checkExtraCooldown();
     checkRelight();
     checkABTrigger();

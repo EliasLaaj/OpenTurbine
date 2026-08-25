@@ -211,7 +211,7 @@ An ESP32 GPIO can provide only a logic command. Use an interface rated for the r
 <div class="table-wrap"><table>
 <thead><tr><th>Output purpose</th><th>What OpenTurbine commands</th></tr></thead>
 <tbody>
-<tr><td>Main fuel pump / throttle ESC</td><td>Primary proportional engine-power command. Used by sequences, throttle slew, idle control, governor and protections. Calibrate its minimum reliable command with fuel isolated.</td></tr>
+<tr><td>Main fuel metering output</td><td>Primary proportional engine-power command, whether the hardware is a pump, valve, metering unit or ESC. Used by sequences, throttle slew, idle control, governor and protections. Calibrate its minimum reliable command with fuel isolated.</td></tr>
 <tr><td>Fuel shutoff</td><td>Normally closed main-fuel safety valve. It opens for fuel admission and closes on shutdown. Its de-energized state should be safe.</td></tr>
 <tr><td>Starter</td><td>Relay, PWM driver or ESC demand used to spool the engine.</td></tr>
 <tr><td>Starter enable</td><td>Separate contactor/enable for starter electronics that require enable plus proportional demand.</td></tr>
@@ -335,7 +335,7 @@ Controllers disables protections whose required input is not fitted. Each expand
 ### 10.1 Safe order
 
 1. Open **Controllers** only after Hardware saves without errors; use **System** for ECU-wide behavior and communications.
-2. Select **Essentials** first. Enter limits from the exact engine, sensor and actuator documentation.
+2. Start in **Configured system**, which opens by default and shows the controls supported by the fitted hardware. Enter limits from the exact engine, sensor and actuator documentation.
 3. Use **Changed** to review every edit. Yellow fields are not saved yet.
 4. Use **Explore all features** to inspect or preconfigure features whose required hardware/controller is absent. Amber-bordered tuning values save normally but remain inactive until Hardware satisfies the displayed prerequisite. Enable switches and choices for missing hardware remain locked, so Explore cannot arm a feature unexpectedly. Search also reveals unavailable settings; neither Explore nor Developer Mode bypasses a missing physical prerequisite.
 5. Save one related group at a time and read the save recap.

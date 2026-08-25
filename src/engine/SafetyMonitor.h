@@ -164,19 +164,19 @@ public:
         if (_confirmed(HardwareConfig::hasP1 && ed.p1Healthy &&
                        Config::p1TripLimit > 0.0f &&
                        ed.p1 > Config::p1TripLimit, hardNow,
-                       Config::pressureTorqueTripConfirmMs, _p1TripSinceMs)) {
+                       Config::p1TripConfirmMs, _p1TripSinceMs)) {
             _trigger("P1_HIGH"); return;
         }
         if (_confirmed(HardwareConfig::hasP2 && ed.p2Healthy &&
                        Config::p2TripLimit > 0.0f &&
                        ed.p2 > Config::p2TripLimit, hardNow,
-                       Config::pressureTorqueTripConfirmMs, _p2TripSinceMs)) {
+                       Config::p2TripConfirmMs, _p2TripSinceMs)) {
             _trigger("P2_HIGH"); return;
         }
         if (_confirmed(HardwareConfig::hasTorque && ed.torqueHealthy &&
                        Config::torqueTripLimit > 0.0f &&
                        ed.torque > Config::torqueTripLimit, hardNow,
-                       Config::pressureTorqueTripConfirmMs, _torqueTripSinceMs)) {
+                       Config::torqueTripConfirmMs, _torqueTripSinceMs)) {
             _trigger("TORQUE_HIGH"); return;
         }
 
@@ -184,17 +184,6 @@ public:
         // Current protection uses wall time on every ECU tick; its configured
         // delay must not be stretched by the slower general safety scan.
         unsigned long fastNow = millis();
-        if (HardwareConfig::hasOilPumpCurrentSensor && ed.oilPumpOvercurrent) {
-            if (_oilOvercurrentSinceMs == 0) {
-                _oilOvercurrentSinceMs = fastNow;
-                strncpy(ed.lastEvent, "WARNING: oil pump overcurrent", sizeof(ed.lastEvent) - 1);
-            } else if (fastNow - _oilOvercurrentSinceMs >= Config::oilPumpOvercurrentDelayMs) {
-                _trigger("OIL_PUMP_OVERCURRENT");
-                return;
-            }
-        } else {
-            _oilOvercurrentSinceMs = 0;
-        }
         const auto& reg = HardwareConfig::channelRegistry;
         for (uint8_t i = 0; i < reg.outputCount; ++i) {
             const auto& c = reg.outputs[i];
@@ -206,7 +195,7 @@ public:
                 _registryOvercurrentSinceMs[i] = fastNow;
                 snprintf(ed.lastEvent, sizeof(ed.lastEvent), "WARNING: %s overcurrent",
                          c.name[0] ? c.name : c.id);
-            } else if (fastNow - _registryOvercurrentSinceMs[i] >= Config::oilPumpOvercurrentDelayMs) {
+            } else if (fastNow - _registryOvercurrentSinceMs[i] >= c.currentTripDelayMs) {
                 _trigger("OUTPUT_OVERCURRENT");
                 return;
             }
@@ -542,7 +531,6 @@ private:
     unsigned long _overspeedSinceMs = 0;     // millis() when the overspeed reading began
     bool          _n2OverspeedPending = false;
     unsigned long _n2OverspeedSinceMs = 0;
-    unsigned long _oilOvercurrentSinceMs = 0;
     unsigned long _registryOvercurrentSinceMs[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     unsigned long _oilUnderflowSinceMs[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     bool          _oilUnderflowWarned[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
@@ -642,7 +630,6 @@ private:
     }
 
     void _resetDwellConfirmations(bool resetOilFlow = true) {
-        _oilOvercurrentSinceMs = 0;
         memset(_registryOvercurrentSinceMs, 0, sizeof(_registryOvercurrentSinceMs));
         if (resetOilFlow) {
             memset(_oilUnderflowSinceMs, 0, sizeof(_oilUnderflowSinceMs));
@@ -715,7 +702,7 @@ private:
         if      (strcmp(code, "OVERSPEED")  == 0) desc =
             "Engine over-speed: RPM exceeded the safety limit.\n"
             "What to do: Wait for the engine to cool down fully. Check your RPM limit setting "
-            "in Config and verify throttle calibration before the next start.";
+            "in Controllers and verify throttle calibration before the next start.";
         else if (strcmp(code, "N2_OVERSPEED") == 0) desc =
             "N2 over-speed: power-turbine RPM exceeded its hard shutdown limit.\n"
             "What to do: Do not restart until the driven load, shaft, coupling, N2 pickup, "

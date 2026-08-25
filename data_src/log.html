@@ -7,18 +7,18 @@
 <title>OpenTurbine — Log</title>
 <style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260824a',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260824a');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body>
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
   <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
-  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" class="active" title="View fault/event history and per-run CSV session logs.">Log</a>
   <a href="/tools.html" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <span id="conn" class="conn-dot disconnected" title="WebSocket"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
 <main>

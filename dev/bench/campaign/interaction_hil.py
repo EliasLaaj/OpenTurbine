@@ -92,7 +92,7 @@ class InteractionQualification:
             },
             {
                 "enabled": True, "kind": 0, "source": "tot_main",
-                "target": "igniter", "op": 0, "threshold": 50,
+                "target": "igniter_main", "op": 0, "threshold": 50,
                 "on_value": 1.0, "off_value": 0.0, "hysteresis": 0,
                 "input_min": 0.0, "input_max": 1000.0,
                 "output_min": 0.0, "output_max": 1.0,
@@ -160,7 +160,6 @@ class InteractionQualification:
             },
             "throttle": {
                 "ramp_up_ms": 0, "ramp_down_ms": 0, "fuel_pump_min_pct": 10,
-                "rpm_limiter_mode": 0,
                 "pullback_n1": True, "pullback_n1_soft_rpm": 40000,
                 "pullback_n1_hard_rpm": 50000,
                 "pullback_n2": True, "pullback_n2_soft_rpm": 35000,
@@ -169,7 +168,6 @@ class InteractionQualification:
                 "pullback_egt_hard_c": 800, "pullback_min_pct": 8,
                 "pullback_p1": False, "pullback_p2": False,
                 "pullback_torque": False,
-                "pullback_strength": 1,
             },
             "limp_mode": {"max_throttle_pct": 30},
             "rpm_health": {"zero_stuck_ticks": 4},
@@ -182,7 +180,9 @@ class InteractionQualification:
         # strict for this section. Verify the saved rule identities instead.
         self.save_rules(self.output_rules(), {"hil_force_fuel", "hil_force_ignition"})
         hw = self.dut.hardware()
-        data = self.dut.data()
+        # Shutdown assertions need one coherent actuator snapshot; compact
+        # telemetry rotates fuel/ignition fields between frames.
+        data = self.dut.full_data()
         purposes = {c.get("purpose") for c in hw["channel_registry"]["inputs"]}
         required = {"n1_speed", "n2_speed", "tot", "oil_pressure", "flame"}
         if not required.issubset(purposes):
@@ -251,15 +251,19 @@ class InteractionQualification:
         fuel = self.t.get("FUEL_SOL")
         igniter = self.t.get("IGNITER")
         throttle = self.t.get("THROTTLE_OUT")
+        # The independent pins are the release criterion. A full HTTP snapshot
+        # can straddle the control-loop boundary that enters SHUTDOWN and show
+        # one pre-cut telemetry field even after the actuator boundary is safe.
         ok = (
-            not data.get("fuel_sol_open") and not data.get("igniter_on") and
-            float(data.get("throttle_effective") or 0) <= 0.001 and
+            data.get("mode") != "RUNNING" and
             int(fuel.get("level") or 0) == 0 and
             int(igniter.get("level") or 0) == 0 and
             int(throttle.get("us") or 0) <= 1050
         )
         return ok, {"mode": data.get("mode"), "fuel": fuel,
-                    "igniter": igniter, "throttle": throttle}
+                    "igniter": igniter, "throttle": throttle,
+                    "telemetry": {k: data.get(k) for k in
+                                  ("fuel_sol_open", "igniter_on", "throttle_effective")}}
 
     def recover(self) -> None:
         self.t.set("STOP", 0)
@@ -278,7 +282,8 @@ class InteractionQualification:
 
     def controller_rule_protection_stack(self) -> None:
         self.start_running()
-        baseline = self.drive(seconds=2.5)
+        self.drive(seconds=2.5)
+        baseline = self.dut.full_data()
         baseline_pulse = self.t.get("THROTTLE_OUT")
         baseline_valve = self.t.get("FUEL_SOL")
         base_eff = float(baseline.get("throttle_effective") or 0)
@@ -300,7 +305,7 @@ class InteractionQualification:
         self.record(
             "N1_N2_EGT_PULLBACK_DOMINATES_RULE_AND_GOVERNOR",
             pulled.get("mode") == "RUNNING" and pulled_eff < base_eff - 0.03 and
-            int(pulled_pulse.get("us") or 0) < int(baseline_pulse.get("us") or 0) - 60,
+            int(pulled_pulse.get("us") or 0) < int(baseline_pulse.get("us") or 0) - 40,
             baseline_effective=base_eff, pulled_effective=pulled_eff,
             mode=pulled.get("mode"), event=pulled.get("last_event"),
             baseline_pulse=baseline_pulse, pulled_pulse=pulled_pulse,

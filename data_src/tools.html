@@ -6,7 +6,7 @@
 <style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <title>OpenTurbine — Tools</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260824a',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260824a');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 <style>
 .test-settings-card{width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .test-settings-head,.test-settings-foot{flex:0 0 auto;padding:1rem}
@@ -21,11 +21,11 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
   <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
-  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
   <a href="/tools.html" class="active" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <span id="conn" class="conn-dot disconnected"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
 <main>
@@ -97,7 +97,7 @@ const TOOLS = [
   { id:'PULSED_STARTER_ASSIST_TEST', name:'Pulsed Starter Assist Test', durationMs:500, desc:'Runs one configured assist pulse in STANDBY. Use it to verify starter direction and pulse output before allowing the startup sequence to use the feature.',
     visibleIf: hw => !!(cfgData?.starter_control?.pulsed_assist_enabled && hw?.actuators?.starter?.enabled && Number(hw?.actuators?.starter?.type ?? 0) !== 2 && hw?.sensors?.n1_rpm?.enabled) },
   { id:'FUEL_SOL_TEST',       name:'Solenoid Click',     durationMs:1000, configKey:'tools.fuel_sol_test_ms', desc:'Brief solenoid pulse - audible click to confirm valve.', visibleIf: hw => !!hw?.actuators?.fuel_sol?.enabled },
-  { id:'IDLE_TEST',           name:'Minimum Fuel Output Test', durationMs:3000, configKey:'tools.idle_test_ms', desc:'Moves the fuel/throttle output to the calibrated minimum reliable fuel-pump output so you can verify pump operation.', visibleIf: hw => !!hw?.actuators?.throttle?.enabled },
+  { id:'IDLE_TEST',           name:'Minimum Fuel Output Test', durationMs:3000, configKey:'tools.idle_test_ms', desc:'Moves the main fuel-metering output to its calibrated minimum reliable output so you can verify the metering device.', visibleIf: hw => !!hw?.actuators?.throttle?.enabled },
   // ── Conditionally visible actuator tests (shown only when hardware is fitted) ──
   { id:'STARTER_EN_TEST',  name:'Starter Enable Test', durationMs:1000, configKey:'tools.starter_en_test_ms', desc:'Drives the starter enable output for the configured duration.', visibleIf: hw => !!hw?.actuators?.starter_en?.enabled },
   { id:'OIL_SCAV_TEST',    name:'Oil Scavenge Test',   durationMs:2000, configKey:'tools.oil_scav_test_ms', desc:'Runs oil scavenge pump for configured duration.', visibleIf: hw => !!hw?.actuators?.oil_scavenge_pump?.enabled },
@@ -127,8 +127,6 @@ let cfgData     = {};
 const TOOL_CONFIRMATION_SKIP_KEY = 'ot_tool_confirmations_skip_all';
 let toolsTelemetryTimer = null;
 let toolsTelemetryInFlight = false;
-let toolsTelemetryWs = null;
-let toolsTelemetryClosing = false;
 window.OTWaitForPageTelemetryIdle = (timeoutMs = 1500) => new Promise(resolve => {
   const started = Date.now();
   const poll = () => {
@@ -191,7 +189,7 @@ function plainRegistryToolName(raw,fallback='Output'){
   const direct={
     user_throttle:'Throttle Input',operator_throttle:'Throttle Input',operator_thrott:'Throttle Input',throttle_input:'Throttle Input',
     user_idle:'Idle Input',operator_idle:'Idle Input',idle_input:'Idle Input',
-    main_fuel:'Main Fuel Pump',main_fuel_output:'Main Fuel Pump',fuel_shutoff:'Main Fuel Shutoff',main_fuel_shutoff:'Main Fuel Shutoff',
+    main_fuel:'Main Fuel Metering',main_fuel_output:'Main Fuel Metering',fuel_shutoff:'Main Fuel Shutoff',main_fuel_shutoff:'Main Fuel Shutoff',
     oil_pump:'Oil Pump',oil_pump_main:'Oil Pump',fuel_pump:'Secondary / Auxiliary Fuel Pump',starter_enable:'Starter Enable',
     flame:'Flame Sensor',flame_main:'Flame Sensor',coolant_pump:'Coolant Pump',coolant_temperature:'Coolant Temperature',
     pilot_fuel:'Start Fuel',purge_valve:'Purge Valve',air_starter:'Air Starter',
@@ -949,8 +947,8 @@ function syncDynamicToolText() {
   setDesc('FUEL_SOL_TEST', `Output: main fuel shutoff OPEN for ${sec(tools.fuel_sol_test_ms ?? 1000)} s.`);
   const minSpin = Number(cfgData?.throttle?.fuel_pump_min_pct ?? 0);
   setDesc('IDLE_TEST', minSpin > 0
-    ? `Output: throttle/fuel to the calibrated minimum reliable fuel-pump output (${pctText(minSpin)}) for ${sec(tools.idle_test_ms ?? 3000)} s.`
-    : `Output remains Off because the minimum reliable fuel-pump output is currently 0%. Calibrate it first if this pump needs a nonzero starting output.`);
+    ? `Output: main fuel metering at its calibrated minimum reliable output (${pctText(minSpin)}) for ${sec(tools.idle_test_ms ?? 3000)} s.`
+    : `Output remains Off because the minimum reliable fuel-metering output is currently 0%. Calibrate it first if the metering device needs a nonzero starting output.`);
   setDesc('STARTER_EN_TEST', `Output: starter enable command ON for ${sec(tools.starter_en_test_ms ?? 1000)} s.`);
   // These accessories can be configured as PWM/servo outputs, but their
   // bench tests set a boolean → the actuator drives to FULL output. Say so
@@ -1037,11 +1035,6 @@ async function loadToolConfig() {
 
 async function pollToolsTelemetry() {
   if (toolsTelemetryInFlight) return;
-  if (toolsTelemetryWs && toolsTelemetryWs.readyState === WebSocket.OPEN) {
-    toolsTelemetryInFlight = true;
-    toolsTelemetryWs.send('p');
-    return;
-  }
   toolsTelemetryInFlight = true;
   try {
     // Hardware and configuration were loaded above. Tools only needs changing
@@ -1060,52 +1053,16 @@ async function pollToolsTelemetry() {
 }
 
 function startToolsTelemetry() {
-  toolsTelemetryClosing = false;
-  if (toolsTelemetryWs && toolsTelemetryWs.readyState <= WebSocket.OPEN) return;
-  toolsTelemetryWs = new WebSocket('ws://' + location.host + '/ws');
-  toolsTelemetryWs.onopen = () => {
-    setConnectionState(true, 'Connected');
-    pollToolsTelemetry();
-    if (toolsTelemetryTimer) clearInterval(toolsTelemetryTimer);
-    toolsTelemetryTimer = setInterval(pollToolsTelemetry, 2000);
-  };
-  toolsTelemetryWs.onmessage = event => {
-    try {
-      const d = JSON.parse(event.data);
-      window.applyData(d);
-      if (d._frame_more !== true) toolsTelemetryInFlight = false;
-      setConnectionState(true, 'Connected');
-    } catch (_) {}
-  };
-  toolsTelemetryWs.onerror = () => { try { toolsTelemetryWs.close(); } catch (_) {} };
-  toolsTelemetryWs.onclose = () => {
-    toolsTelemetryInFlight = false;
-    if (toolsTelemetryTimer) clearInterval(toolsTelemetryTimer);
-    toolsTelemetryTimer = null;
-    toolsTelemetryWs = null;
-    if (!toolsTelemetryClosing) {
-      setConnectionState(false, 'Reconnecting');
-      setTimeout(startToolsTelemetry, 2000);
-    }
-  };
+  if (toolsTelemetryTimer) return;
+  pollToolsTelemetry();
+  toolsTelemetryTimer = setInterval(pollToolsTelemetry, 2000);
 }
 function stopToolsTelemetry() {
-  toolsTelemetryClosing = true;
   if (toolsTelemetryTimer) clearInterval(toolsTelemetryTimer);
   toolsTelemetryTimer = null;
   toolsTelemetryInFlight = false;
-  if (toolsTelemetryWs) {
-    try {
-      toolsTelemetryWs.onclose = null;
-      toolsTelemetryWs.onerror = null;
-      toolsTelemetryWs.onmessage = null;
-      toolsTelemetryWs.close(1000, 'page navigation');
-    } catch (_) {}
-    toolsTelemetryWs = null;
-  }
 }
 function prepareToolsTelemetryNavigation() {
-  toolsTelemetryClosing = true;
   if (toolsTelemetryTimer) clearInterval(toolsTelemetryTimer);
   toolsTelemetryTimer = null;
 }
@@ -1396,7 +1353,7 @@ function startWebAssetsUpdate(input) {
   const missing = required.filter(name => !names.has(name));
   const invalid = files.filter(file => !required.includes(file.name));
   if (missing.length || invalid.length || files.length !== required.length) {
-    alert('Choose exactly the eleven generated data/*.gz web assets.\n\nMissing: ' +
+    alert('Choose exactly the twelve generated data/*.gz web assets.\n\nMissing: ' +
       (missing.join(', ') || 'none') + '\nUnexpected: ' +
       (invalid.map(file => file.name).join(', ') || 'none'));
     input.value = '';

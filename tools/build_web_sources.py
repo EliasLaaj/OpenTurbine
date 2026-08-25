@@ -94,10 +94,6 @@ def assemble(output_name: str, shell_name: str, script_names: tuple[str, ...]) -
         shell = shell.replace('placeholder="Search limits, oil, relight, N2, telemetry…"',
                               'placeholder="Search ECU runtime and display settings…"' if effective_surface == "system"
                               else 'placeholder="Search outputs, limits, oil, relight, N2…"')
-        if effective_surface == "system":
-            start = shell.index("  <!-- OT_CONTROLLER_PRESETS_START -->")
-            end = shell.index("  <!-- OT_CONTROLLER_PRESETS_END -->") + len("  <!-- OT_CONTROLLER_PRESETS_END -->")
-            shell = shell[:start] + shell[end:]
     if shell.count(PLACEHOLDER) != 1:
         raise RuntimeError(f"{shell_name} must contain exactly one {PLACEHOLDER}")
     scripts = []

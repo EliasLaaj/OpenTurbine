@@ -165,7 +165,7 @@ async function sectionVisible(page, title) {
     });
     await gotoConfig(page);
     for (const selector of [
-      '#cf-eg_src', '#cf-tot_limit', '#cf-tot_safe_margin', '#cf-tot_cooldown_target',
+      '#cf-eg_src', '#cf-tot_limit', '#cf-tot_safe_margin',
       '#cf-sf_hs', '#cf-sf_st', '#cf-sf_fo', '#cf-sf_fs',
       '#cf-rh_jt', '#cf-rh_zs',
     ]) {
@@ -174,7 +174,6 @@ async function sectionVisible(page, title) {
     for (const selector of ['#cf-th_ru', '#cf-th_rd', '#cf-th_mx', '#cf-th_ex', '#cf-lm_mt', '#cf-ms_is'])
       assert.equal(await page.locator(selector).count(), 0, `${selector} should stay out of a build without its owning output`);
     assert.equal(await sectionVisible(page, 'Cluster'), false);
-    assert.equal(await shown(page, '#ab-cfg-section'), false);
     assert.equal(await shown(page, '[data-group="power"]'), false,
       'Power System must not remain as an empty expandable group without governor or afterburner hardware');
     results.push('minimal hardware locks unavailable temperature, flameout, throttle, cluster, and AB config');
@@ -330,21 +329,28 @@ async function sectionVisible(page, title) {
 
     await reset(page);
     console.log('super-audit: relight igniter prerequisite');
+    const relightHardware = await (await page.request.get(`${base}/api/hardware`)).json();
     await patchHardware(page, {
       sensors: { n1_rpm: { enabled: true }, tot: { enabled: true } },
-      actuators: { igniter: { enabled: false } }
+      actuators: { igniter: { enabled: false } },
+      channel_registry: {
+        ...relightHardware.channel_registry,
+        outputs: relightHardware.channel_registry.outputs.filter(channel => channel.purpose !== 'igniter')
+      }
     });
     await gotoConfig(page);
-    assert.equal(await page.locator('#cf-rl_en').count(), 0);
-    assert.equal(await page.locator('#cf-rl_mr').count(), 0);
+    assert.equal(await disabled(page, '#cf-rl_en'), true);
+    assert.equal(await disabled(page, '#cf-rl_mr'), true);
 
+    await reset(page);
     await patchHardware(page, {
+      sensors: { n1_rpm: { enabled: true }, tot: { enabled: true } },
       actuators: { igniter: { enabled: true } }
     });
     await gotoConfig(page);
     assert.equal(await disabled(page, '#cf-rl_en'), false);
-    assert.equal(await disabled(page, '#cf-rl_mr'), false);
-    results.push('auto-relight requires both N1 feedback and Igniter 1 hardware');
+    assert.equal(await page.locator('#cf-rl_mr').count(), 1);
+    results.push('auto-relight requires canonical N1 and ignition-output inventory');
 
     await reset(page);
     await patchHardware(page, {
@@ -491,9 +497,7 @@ async function sectionVisible(page, title) {
       ab_trigger: { input_pin: -1 }
     });
     await gotoConfig(page);
-    assert.equal(await shown(page, '#ab-cfg-section'), false, 'Setup hides an afterburner feature with no usable hardware path');
     await page.locator('#btn-view-expert').click();
-    assert.equal(await shown(page, '#ab-cfg-section'), false, 'stale afterburner flags must not reveal settings without canonical AB hardware');
     for (const selector of ['#cf-ab_mn','#cf-ab_mx','#cf-ab_tt','#cf-ab_tpct','#cf-ab_tms','#cf-ab_ui','#cf-ab_ut','#cf-ab_mt','#cf-ab_tr','#cf-ab_tw','#cf-ab_pcm','#cf-ab_fm'])
       assert.equal(await page.locator(selector).count(), 0, `${selector} should be absent without an owning AB output`);
     results.push('stale afterburner flags cannot reveal settings without canonical AB hardware');
@@ -507,13 +511,11 @@ async function sectionVisible(page, title) {
       ab_flame: { enabled: false }
     });
     await gotoConfig(page);
-    assert.equal(await disabled(page, '#cf-ab_mn'), false);
-    assert.equal(await disabled(page, '#cf-ab_mx'), false);
-    assert.equal(await disabled(page, '#cf-ab_tt'), false);
+    assert.equal(await page.locator('#cf-ab_mn,#cf-ab_mx,#cf-ab_tt').count(), 0,
+      'afterburner entry gates belong to Sequence, not Controllers');
     assert.equal(await disabled(page, '#cf-ab_ui'), false);
     assert.equal(await disabled(page, '#cf-ab_pcm'), false);
-    assert.equal(await page.locator('#cf-ab_tt').inputValue(), '80');
-    results.push('afterburner entry fields unlock when throttle trigger, N1, and AB hardware are fitted');
+    results.push('afterburner output behavior unlocks with fitted hardware while entry gates remain sequence-owned');
 
     console.log(`Config super audit passed (${results.length} groups):`);
     for (const result of results) console.log(`- ${result}`);

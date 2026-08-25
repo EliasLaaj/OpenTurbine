@@ -189,7 +189,7 @@ function updateRegistryChannel(direction, index, key, value) {
         else if (registryRoot().bindings.length < 8) registryRoot().bindings.push({key:bindingKey,channel:c.id});
       }
     }
-    if ((!c.name || !String(c.name).trim()) && oldPurpose !== def.value) c.name = def.label.slice(0,15);
+    if ((!c.name || !String(c.name).trim()) && oldPurpose !== def.value) c.name = def.label.slice(0,23);
     dirty(); updateSaveButton(); renderRegistryInventory(); return;
   }
   if (key === 'role') {
@@ -228,6 +228,7 @@ function updateRegistryChannel(direction, index, key, value) {
       if (c.current_mv_a === undefined || Number(c.current_mv_a) <= 0) c.current_mv_a = 100;
       if (c.current_zero_v === undefined) c.current_zero_v = 1.65;
       if (c.current_max_a === undefined) c.current_max_a = 0;
+      if (c.current_trip_delay_ms === undefined) c.current_trip_delay_ms = 5000;
     } else {
       c.current_pin = -1;
     }
@@ -275,6 +276,7 @@ function updateRegistryChannel(direction, index, key, value) {
   if (key === 'current_mv_a') value = Math.max(0.001, Number(value) || 100);
   if (key === 'current_zero_v') value = Math.max(0, Math.min(3.3, Number(value) || 0));
   if (key === 'current_max_a') value = Math.max(0, Number(value) || 0);
+  if (key === 'current_trip_delay_ms') value = Math.max(100, Math.min(60000, Math.round(Number(value) || 5000)));
   if (key === 'minimum_flow_l_min') value = Math.max(0.001, Number(value) || 0.1);
   if (key === 'safe_demand') value = Math.max(0, Math.min(1, Number(value) || 0));
   if (key === 'min_run_demand') value = Math.max(0, Math.min(1, Number(value) || 0));
@@ -327,7 +329,7 @@ const REGISTRY_BINDING_LABELS = {
   primary_n1:'Primary N1 speed sensor',
   primary_n2:'Primary N2 speed sensor',
   primary_egt:'Main turbine-gas temperature sensor',
-  main_fuel_output:'Main fuel pump output',
+  main_fuel_output:'Main fuel metering output',
   main_fuel_shutoff:'Fuel shutoff output',
   main_starter:'Starter output',
   operator_throttle:'Throttle input',
@@ -371,7 +373,7 @@ function renderRegistryBindings() {
   }).join('') : '<div class="hw-desc">No controller links configured. Purpose selections normally create these automatically.</div>';
   el.innerHTML = `<details class="hw-advanced" style="margin-top:.65rem">
     <summary>Internal device links — advanced (${r.bindings.length})</summary>
-    <div class="hw-desc" style="margin:.45rem 0 .55rem"><strong>This does not select idle or governor behaviour.</strong> These links only identify which physical card supplies each core ECU signal. They are created automatically from each device's Purpose. Edit them only when several devices have the same purpose and the automatic choice is not the one you want. Choose N1/N2 idle feedback and governor tuning on the Config page.</div>
+    <div class="hw-desc" style="margin:.45rem 0 .55rem"><strong>This does not select idle or governor behaviour.</strong> These links only identify which physical card supplies each core ECU signal. They are created automatically from each device's Purpose. Edit them only when several devices have the same purpose and the automatic choice is not the one you want. Choose N1/N2 idle feedback and governor tuning on the Controllers page.</div>
     ${rows}
   </details>`;
 }
@@ -532,7 +534,7 @@ function createRegistryChannelFromPreset(index, pcbChoice, bareGpio = false) {
   if (!id) return registryAddError('Could not create an internal device reference. Close this window and try again.');
   const safe = _registryAddDirection === 'output'
     ? (purpose === 'prop_pitch' ? 1 : 0) : undefined;
-  const channel = {id, name:name.slice(0, 15), purpose, role:preset.role, driver:selectedDriver, pin:-1, min:range.min, max:range.max, invert:false};
+  const channel = {id, name:name.slice(0, 23), purpose, role:preset.role, driver:selectedDriver, pin:-1, min:range.min, max:range.max, invert:false};
   if (bareGpio) {
     channel.physical_port = '';
     channel.physical_mode = '';
@@ -690,6 +692,9 @@ function cleanupRegistryReferences(direction, id) {
   const idx = rows.findIndex(c => String(c?.id || '') === String(id || ''));
   const handle = idx >= 0 ? (direction === 'input' ? 80 + idx : 64 + idx) : -999;
   r.bindings = r.bindings.filter(b => b.channel !== id);
+  if (direction === 'output') (r.outputs || []).forEach(out => {
+    if (String(out?.mirror_of || '') === String(id || '')) delete out.mirror_of;
+  });
   cfg.oil_loops = (cfg.oil_loops || []).filter(l => !(l && (refMatches(l.pressure_input) || refMatches(l.pump_output))));
   const seqKeys = ['startup_enter_actions','startup_exit_actions','shutdown_enter_actions','shutdown_exit_actions','ab_enter_actions','ab_exit_actions','ab_shut_enter_actions','ab_shut_exit_actions'];
   seqKeys.forEach(k => { if (Array.isArray(cfg[k])) cfg[k] = cfg[k].map(slot => (slot || []).filter(a => direction !== 'output' || (!refMatches(a?.target) && Number(a?.act) !== handle))); });
@@ -767,11 +772,6 @@ function duplicateRegistryChannel(index) {
   const r = registryRoot();
   const src = r.outputs[index];
   if (!src) return;
-  const purpose = registryDerivedPurpose('output', src);
-  if (registryPurposeIsSingleton('output', purpose)) {
-    alert(`${registryPurposeLabel('output', src)} is a single-instance engine function. Edit its existing card instead.`);
-    return;
-  }
   const max = registryCapacity('output');
   if (r.outputs.length >= max) return alert(`Output registry capacity is full (${r.outputs.length}/${max}). Remove an unused output first.`);
   const role = src.role || 'generic';
@@ -779,11 +779,28 @@ function duplicateRegistryChannel(index) {
   const baseName = registryDisplayName('output', src, 'Output').replace(/\s+\d+$/, '');
   const copy = {...src};
   copy.id = registryUniqueId(src.id || role || 'output');
-  copy.name = `${baseName} ${n}`.slice(0, 15);
+  copy.name = `${baseName} ${n}`.slice(0, 23);
   copy.pin = -1;
+  copy.physical_port = '';
+  copy.physical_mode = '';
+  copy.mirror_of = src.mirror_of || src.id;
   copy.force_safe_on_fault = false;
+  copy.has_current = false;
+  copy.current_pin = -1;
+  copy.current_max_a = 0;
+  copy.current_trip_delay_ms = 5000;
+  copy.has_flow_monitor = false;
+  copy.minimum_flow_l_min = 0;
+  copy.flow_input = '';
   r.outputs.push(copy);
   _registryEditOpen.add(registryEditKey('output', r.outputs.length - 1));
+  renderRegistryInventory();
+  dirty(); updateSaveButton();
+}
+function makeRegistryOutputIndependent(index) {
+  const row = registryRoot().outputs?.[index];
+  if (!row) return;
+  delete row.mirror_of;
   renderRegistryInventory();
   dirty(); updateSaveButton();
 }

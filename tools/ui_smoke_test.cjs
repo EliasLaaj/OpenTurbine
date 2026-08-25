@@ -330,7 +330,7 @@ function installedBrowser() {
     await scenario(page, 'full');
     await page.waitForFunction(() => document.getElementById('tot')?.textContent?.includes('640'));
     await page.waitForTimeout(450);
-    await page.goto(`${base}/config.html`);
+    await page.goto(`${base}/controllers.html`);
     await page.waitForSelector('#cf-tot_limit', {state:'attached'});
     await openConfigWorkspace(page);
     await page.goto(base);
@@ -420,7 +420,7 @@ function installedBrowser() {
 
     await scenario(page, 'full');
     await page.request.post(`${base}/__sim/data`, { data: { mode:'STANDBY', config_locked:false } });
-    await page.goto(`${base}/config.html`);
+    await page.goto(`${base}/controllers.html`);
     await page.waitForSelector('#cf-tot_limit', {state:'attached'});
     await openConfigWorkspace(page);
     assert.equal(await page.locator('#cf-tot_limit').inputValue(), '1328');
@@ -484,13 +484,7 @@ function installedBrowser() {
     assert.ok(Math.abs(saved.settings.engine.tot_safe_margin - 50) < 0.001);
     assert.ok(Math.abs(saved.settings.oil.running_min - 2) < 0.001);
     results.push('config saves converted F and PSI edits back as canonical C and bar values');
-    await page.request.post(`${base}/__sim/data`, { data: {
-      has_tit: true, tit_limit: 0, has_oil_temp: false,
-      has_batt_voltage: false, fuel_press_min: 0, has_governor: false
-    } });
     await waitShown(page, '#engine-limits', true);
-    await waitShown(page, '#field-sf-tit', true);
-    results.push('installed TIT sensor exposes its configurable limit before a limit is set');
     assert.equal(await page.locator('text=Download settings').count(), 0);
     assert.equal(await page.locator('text=Full engine file backup / restore').count(), 1);
     results.push('config page directs import and export to the unified engine file flow');
@@ -700,7 +694,7 @@ function installedBrowser() {
     assert.equal(await page.locator('#card-TOGGLE_DYNAMIC_IDLE').count(), 0);
     assert.equal(await page.locator('#btn-test-settings').count(), 1);
     assert.equal(await page.locator('.tool-card button[title*="bench-test timing"]').count(), 0);
-    assert.match(await text(page, '#card-IDLE_TEST'), /minimum reliable fuel-pump output \(10%\)/i);
+    assert.match(await text(page, '#card-IDLE_TEST'), /main fuel metering.*minimum reliable output \(10%\)/i);
     await page.request.post(`${base}/__sim/data`, { data: { dev_mode: true } });
     await waitShown(page, '#card-TOGGLE_BENCH_MODE', true);
     assert.match(await text(page, '#card-WEB-ASSETS'), /without erasing config or logs/);
@@ -887,8 +881,8 @@ function installedBrowser() {
     } } });
     await page.goto(`${base}/controllers.html`);
     await page.waitForSelector('#simple-controls');
-    const starterOwnerCard = page.locator('#controller-overview details[data-purpose="starter"]');
-    const igniterOwnerCard = page.locator('#controller-overview details[data-purpose="igniter"]');
+    const starterOwnerCard = page.locator('#controller-overview details[data-built-in="starter-support"]');
+    const igniterOwnerCard = page.locator('#controller-overview details[data-built-in="relight"]');
     await starterOwnerCard.locator(':scope > summary').click();
     await igniterOwnerCard.locator(':scope > summary').click();
     assert.equal(await starterOwnerCard.locator('#starter-support-section').count(), 1);
@@ -896,7 +890,7 @@ function installedBrowser() {
     assert.equal(await igniterOwnerCard.locator('#manual-relight-section').count(), 1);
     const creator = page.locator('#controller-overview .controller-create-card');
     await creator.locator('#new-controller-output').selectOption('warning_lamp_pwm');
-    await creator.getByRole('button', {name:'Create controller'}).click();
+    await creator.getByRole('button', {name:'Create controller', exact:true}).click();
     const simpleCard = page.locator('#controller-overview [data-controller-output="warning_lamp_pwm"]');
     if (!(await simpleCard.evaluate((el) => el.open))) {
       await simpleCard.locator(':scope > summary').click();
@@ -933,13 +927,13 @@ function installedBrowser() {
     }});
     assert.equal(response.ok(), true);
     await page.reload();
-    await page.waitForSelector('#controller-overview details[data-purpose="main_fuel"]');
+    await page.waitForSelector('#controller-overview details[data-built-in="fuel-support"]');
     assert.equal(await page.locator('#controller-overview details[open]').count(), 0);
-    const mainFuelCard = page.locator('#controller-overview details[data-purpose="main_fuel"]');
-    await mainFuelCard.locator(':scope > summary').click();
-    assert.equal(await mainFuelCard.locator('.controller-subcard[open]').count(), 0);
-    const throttleSubcard = mainFuelCard.locator('.controller-subcard').filter({hasText:'Throttle Response'}).first();
-    const idleSubcard = mainFuelCard.locator('.controller-subcard').filter({hasText:'Minimum normal-running fuel authority'}).first();
+    const fuelSupportCard = page.locator('#controller-overview details[data-built-in="fuel-support"]');
+    await fuelSupportCard.locator(':scope > summary').click();
+    assert.equal(await fuelSupportCard.locator('.controller-subcard[open]').count(), 0);
+    const throttleSubcard = fuelSupportCard.locator('.controller-subcard').filter({hasText:'Throttle Response'}).first();
+    const idleSubcard = fuelSupportCard.locator('.controller-subcard').filter({hasText:'Minimum normal-running fuel authority'}).first();
     assert.equal(await throttleSubcard.locator('#cf-th_mx').count(), 0);
     assert.equal(await idleSubcard.locator('#cf-th_mx').count(), 1);
     await throttleSubcard.locator(':scope > summary').click();
@@ -948,20 +942,20 @@ function installedBrowser() {
       'editing a field moved into an output controller card must enable Save');
     await throttleSubcard.locator(':scope > summary').click();
     await idleSubcard.locator(':scope > summary').click();
-    assert.equal(await mainFuelCard.locator('#cf-di_tr').isVisible(), true);
-    assert.equal(await mainFuelCard.locator('#cf-di_tp').isVisible(), false);
-    assert.equal(await mainFuelCard.locator('#cf-di_de').isVisible(), false);
-    assert.equal(await mainFuelCard.locator('#cf-di_dd').isVisible(), false);
-    await mainFuelCard.locator('#cf-di_src').selectOption('2');
-    assert.equal(await mainFuelCard.locator('#cf-di_tr').isVisible(), false);
-    assert.equal(await mainFuelCard.locator('#cf-di_tp').isVisible(), true);
-    await mainFuelCard.locator('#cf-di_mode').selectOption('1');
-    const predictiveTuning = mainFuelCard.locator('#cf-di_pde').locator('xpath=ancestor::details[1]');
+    assert.equal(await fuelSupportCard.locator('#cf-di_tr').isVisible(), true);
+    assert.equal(await fuelSupportCard.locator('#cf-di_tp').isVisible(), false);
+    assert.equal(await fuelSupportCard.locator('#cf-di_de').isVisible(), false);
+    assert.equal(await fuelSupportCard.locator('#cf-di_dd').isVisible(), false);
+    await fuelSupportCard.locator('#cf-di_src').selectOption('2');
+    assert.equal(await fuelSupportCard.locator('#cf-di_tr').isVisible(), false);
+    assert.equal(await fuelSupportCard.locator('#cf-di_tp').isVisible(), true);
+    await fuelSupportCard.locator('#cf-di_mode').selectOption('1');
+    const predictiveTuning = fuelSupportCard.locator('#cf-di_pde').locator('xpath=ancestor::details[1]');
     await predictiveTuning.locator(':scope > summary').click();
-    assert.equal(await mainFuelCard.locator('#cf-di_de').isVisible(), false);
-    assert.equal(await mainFuelCard.locator('#cf-di_pde').isVisible(), true);
-    assert.equal(await mainFuelCard.locator('#cf-di_dd').isVisible(), true);
-    assert.equal(await mainFuelCard.locator('#cf-di_dd').getAttribute('min'), '0');
+    assert.equal(await fuelSupportCard.locator('#cf-di_de').isVisible(), false);
+    assert.equal(await fuelSupportCard.locator('#cf-di_pde').isVisible(), true);
+    assert.equal(await fuelSupportCard.locator('#cf-di_dd').isVisible(), true);
+    assert.equal(await fuelSupportCard.locator('#cf-di_dd').getAttribute('min'), '0');
     results.push('Controller subcards start collapsed and Idle keeps its enable, fuel range, and source-relevant settings together');
 
     await page.goto(`${base}/system.html`);

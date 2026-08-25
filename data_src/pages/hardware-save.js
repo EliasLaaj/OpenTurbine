@@ -45,10 +45,10 @@ function _registryFieldLabel(key) {
     spi_miso:'SPI MISO GPIO', spi_mosi:'SPI MOSI GPIO', tc_type:'Thermocouple type',
     temp_resolution:'Temperature resolution', ntc_beta:'NTC beta coefficient', ntc_r0:'NTC resistance at 25 C',
     ntc_r_fixed:'NTC fixed resistor', ntc_pullup:'NTC divider orientation',
-    safe_demand:'Power-on demand', force_safe_on_fault:'Force safe state on fault', min_run_demand:'Minimum reliable command', pwm_freq_hz:'PWM carrier frequency', pwm_res_bits:'PWM resolution', invert:'Signal inversion',
+    safe_demand:'Power-on demand', mirror_of:'Mirrored command source', force_safe_on_fault:'Force safe state on fault', min_run_demand:'Minimum reliable command', pwm_freq_hz:'PWM carrier frequency', pwm_res_bits:'PWM resolution', invert:'Signal inversion',
     active_high:'Active polarity', pullup:'Internal pull-up', pulldown:'Internal pull-down',
     has_current:'Current sensing', current_pin:'Current sensor pin', current_mv_a:'Current sensor mV/A',
-    current_zero_v:'Current zero voltage', current_max_a:'Current limit',
+    current_zero_v:'Current zero voltage', current_max_a:'Current limit', current_trip_delay_ms:'Overcurrent confirmation',
     has_flow_monitor:'Flow monitoring', minimum_flow_l_min:'Minimum oil flow', flow_input:'Flow sensor'
   })[key] || key.replace(/_/g, ' ');
 }
@@ -110,10 +110,10 @@ function _registryFieldRelevant(direction, channel, key) {
     return false;
   }
   if (key === 'invert') return true;
-  if (['safe_demand','force_safe_on_fault','min_run_demand'].includes(key)) return true;
+  if (['safe_demand','mirror_of','force_safe_on_fault','min_run_demand'].includes(key)) return true;
   if (['pwm_freq_hz','pwm_res_bits'].includes(key)) return driver === 5;
   if (key === 'has_current') return true;
-  if (['current_pin','current_mv_a','current_zero_v','current_max_a'].includes(key)) return !!channel?.has_current;
+  if (['current_pin','current_mv_a','current_zero_v','current_max_a','current_trip_delay_ms'].includes(key)) return !!channel?.has_current;
   if (key === 'has_flow_monitor') return ['oil_pump','scavenge_pump'].includes(String(channel?.purpose || ''));
   if (['minimum_flow_l_min','flow_input'].includes(key)) return !!channel?.has_flow_monitor;
   return false;
@@ -129,11 +129,11 @@ function _registryEffectiveValue(key, value) {
     torque_interface:0, hx711_clk:-1, hx711_scale:1, hx711_zero:0,
     temp_interface:0, spi_clk:-1, spi_cs:-1, spi_miso:-1, spi_mosi:-1,
     tc_type:'K', temp_resolution:10, ntc_beta:3950, ntc_r0:10000,
-    ntc_r_fixed:10000, ntc_pullup:true, safe_demand:0,
+    ntc_r_fixed:10000, ntc_pullup:true, safe_demand:0, mirror_of:'',
     force_safe_on_fault:false, min_run_demand:0, pwm_freq_hz:5000,
     pwm_res_bits:10, invert:false, active_high:true, pullup:false,
     pulldown:false, has_current:false, current_pin:-1, current_mv_a:100,
-    current_zero_v:1.65, current_max_a:0, has_flow_monitor:false,
+    current_zero_v:1.65, current_max_a:0, current_trip_delay_ms:5000, has_flow_monitor:false,
     minimum_flow_l_min:0, flow_input:''
   };
   return Object.prototype.hasOwnProperty.call(defaults, key) ? defaults[key] : value;
@@ -488,7 +488,7 @@ async function saveHardware() {
     status_led:'warning_indicator'
   };
   for (const [key, label] of Object.entries({
-    throttle:'Main Fuel Pump / Metering ESC', starter:'Starter', oil_pump:'Oil Pump',
+    throttle:'Main Fuel Metering', starter:'Starter', oil_pump:'Oil Pump',
     oil_scavenge_pump:'Oil Scavenge Pump', fuel_sol:'Main Fuel Shutoff', igniter:'Igniter',
     igniter2:'Afterburner / Secondary Igniter', starter_en:'Starter Enable', ab_sol:'Afterburner Fuel Valve',
     ab_pump:'Afterburner Fuel Pump', airstarter_sol:'Air Starter Valve', cool_fan:'Cooling Fan', fuel_pump2:'Secondary / Auxiliary Fuel Pump',
@@ -951,11 +951,9 @@ function collapseLegacyPwmTiming() {
 window.addEventListener('load', async () => {
   updateHardwareUnitButtons();
   collapseLegacyPwmTiming();
-  // Keep initial network use sequential. The complete hardware document is
-  // the largest read-only response and must finish before live telemetry
-  // starts allocating WebSocket frames on the ECU.
+  // One-hertz REST telemetry is sufficient for Hardware indicators and avoids
+  // competing with the dashboard's single live WebSocket during navigation.
   startStatusPoll();
-  const loaded = await loadHardware();
-  if (loaded) connectWs();
+  await loadHardware();
   applyContextTooltips();
 });

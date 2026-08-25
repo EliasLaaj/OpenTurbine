@@ -1066,6 +1066,13 @@ namespace Hardware {
 
     inline bool registryOutputManaged(const ChannelRegistry::Channel& c) {
         if (c.installed && c.driver == ChannelRegistry::I2cRelay) return true;
+        // Native relay channels are safe to own through the canonical registry,
+        // including built-in turbine functions. This keeps a Hardware-page
+        // channel and its physical pin on one write path instead of depending
+        // on a parallel legacy actuator object.
+        if (c.installed && c.pin >= 0 && c.driver == ChannelRegistry::Relay &&
+            (HardwareConfig::channelRegistry.ownsCoreOutput(c) ||
+             HardwareConfig::channelRegistry.boundToCoreOutput(c))) return true;
         const bool proportionalStarterEnable = !strcmp(c.purpose, "starter_enable") && c.driver != ChannelRegistry::Relay;
         const bool proportionalAirStarter = !strcmp(c.purpose, "air_starter") && c.driver != ChannelRegistry::Relay;
         return c.installed && c.pin >= 0 &&
@@ -1198,6 +1205,27 @@ namespace Hardware {
         const uint32_t nowMs = millis();
         const bool sampleAuxCurrent = !g_registryOutputCurrentLastMs ||
                                       nowMs - g_registryOutputCurrentLastMs >= 10UL;
+        auto sourceDemand = [&](const ChannelRegistry::Channel& source, float fallback) {
+            if (!reg.ownsCoreOutput(source)) return constrain(fallback, 0.0f, 1.0f);
+            const char* p = source.purpose;
+            if (!strcmp(p, "main_fuel")) return constrain(ed.mainFuelAppliedDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "fuel_shutoff")) return ed.fuelSolOpen ? 1.0f : 0.0f;
+            if (!strcmp(p, "starter")) return constrain(ed.effectiveStarterDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "starter_enable")) return ed.starterEnabled ? 1.0f : 0.0f;
+            if (!strcmp(p, "oil_pump")) return constrain(ed.oilPumpPct / 100.0f, 0.0f, 1.0f);
+            if (!strcmp(p, "igniter")) return ed.igniterOn ? 1.0f : 0.0f;
+            if (!strcmp(p, "ab_igniter")) return ed.igniter2On ? 1.0f : 0.0f;
+            if (!strcmp(p, "ab_valve")) return ed.abSolOpen ? 1.0f : 0.0f;
+            if (!strcmp(p, "air_starter")) return ed.airstarterOpen ? 1.0f : 0.0f;
+            if (!strcmp(p, "cooling_fan")) return constrain(ed.coolFanDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "scavenge_pump")) return constrain(ed.oilScavengeDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "fuel_pump")) return constrain(ed.fuelPump2Demand, 0.0f, 1.0f);
+            if (!strcmp(p, "ab_pump")) return constrain(ed.abPumpDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "glow_plug")) return constrain(ed.glowPlugDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "bleed_valve")) return constrain(ed.bleedValveDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "prop_pitch")) return constrain(ed.propPitchDemand, 0.0f, 1.0f);
+            return constrain(fallback, 0.0f, 1.0f);
+        };
         for (uint8_t i = 0; i < reg.outputCount; ++i) {
             const auto& c = reg.outputs[i];
             const uint8_t meta = g_registryOutputMeta[i];
@@ -1235,6 +1263,15 @@ namespace Hardware {
                 ed.registryOutputDemand[i] = ed.starterEnabled ? 1.0f : 0.0f;
             if (kind == REG_OUTPUT_AIR_STARTER && c.driver != ChannelRegistry::Relay && reg.ownsCoreOutput(c))
                 ed.registryOutputDemand[i] = ed.airstarterOpen ? 1.0f : 0.0f;
+            if (c.mirrorOf[0]) {
+                const auto* source = reg.find(c.mirrorOf, ChannelRegistry::Output);
+                if (source) {
+                    const uint8_t sourceIndex = static_cast<uint8_t>(source - reg.outputs);
+                    ed.registryOutputDemand[i] = sourceDemand(*source, ed.registryOutputDemand[sourceIndex]);
+                }
+            }
+            if ((meta & REG_OUTPUT_MANAGED) && reg.ownsCoreOutput(c) && !c.mirrorOf[0])
+                ed.registryOutputDemand[i] = sourceDemand(c, ed.registryOutputDemand[i]);
             if (meta & REG_OUTPUT_MANAGED)
                 writeRegistryOutputSignal(c, ed.registryOutputDemand[i]);
             bool mirroredCoreCurrent = false;
@@ -1594,13 +1631,19 @@ namespace Hardware {
             g_ctrlThrottleSlew.torqueHardLimit = Config::pullbackTorqueHard;
             g_ctrlThrottleSlew.totSoftLimit = Config::pullbackEgtSoftC > 0.0f ? Config::pullbackEgtSoftC : (egtLimit - Config::totSafeMargin);
             g_ctrlThrottleSlew.minPullbackThrottle = Config::pullbackMinThrottlePct / 100.0f;
-            g_ctrlThrottleSlew.pullbackStrength = Config::pullbackStrength;
-            g_ctrlThrottleSlew.rpmLimiterMode            = Config::rpmLimiterMode;
-            g_ctrlThrottleSlew.pullbackLookaheadMs       = Config::pullbackLookaheadMs;
             g_ctrlThrottleSlew.pullbackNearLimitRampUpMs = Config::pullbackNearLimitRampUpMs;
             g_ctrlThrottleSlew.pullbackApproachZoneRpm   = (Config::pullbackApproachZoneRpm > 0.0f)
                 ? Config::pullbackApproachZoneRpm
                 : 4.0f * (g_ctrlThrottleSlew.rpmHardLimit - g_ctrlThrottleSlew.rpmSoftLimit);
+            g_ctrlThrottleSlew.n1Mode = Config::pullbackN1Mode; g_ctrlThrottleSlew.n2Mode = Config::pullbackN2Mode;
+            g_ctrlThrottleSlew.egtMode = Config::pullbackEgtMode; g_ctrlThrottleSlew.p1Mode = Config::pullbackP1Mode;
+            g_ctrlThrottleSlew.p2Mode = Config::pullbackP2Mode; g_ctrlThrottleSlew.torqueMode = Config::pullbackTorqueMode;
+            g_ctrlThrottleSlew.n1LookaheadMs = Config::pullbackN1LookaheadMs; g_ctrlThrottleSlew.n2LookaheadMs = Config::pullbackN2LookaheadMs;
+            g_ctrlThrottleSlew.egtLookaheadMs = Config::pullbackEgtLookaheadMs; g_ctrlThrottleSlew.p1LookaheadMs = Config::pullbackP1LookaheadMs;
+            g_ctrlThrottleSlew.p2LookaheadMs = Config::pullbackP2LookaheadMs; g_ctrlThrottleSlew.torqueLookaheadMs = Config::pullbackTorqueLookaheadMs;
+            g_ctrlThrottleSlew.n1Strength = Config::pullbackN1Strength; g_ctrlThrottleSlew.n2Strength = Config::pullbackN2Strength;
+            g_ctrlThrottleSlew.egtStrength = Config::pullbackEgtStrength; g_ctrlThrottleSlew.p1Strength = Config::pullbackP1Strength;
+            g_ctrlThrottleSlew.p2Strength = Config::pullbackP2Strength; g_ctrlThrottleSlew.torqueStrength = Config::pullbackTorqueStrength;
         }
         if (hw.hasDynamicIdle) {
             g_ctrlDynamicIdle.targetRpm     = Config::idleTargetRpm;

@@ -121,11 +121,11 @@ async function optionDisabled(page, selector, value) {
     for (const [id, isShown] of Object.entries(cards)) assert.equal(isShown, true, `${id} should show with full hardware`);
     results.push('dashboard shows every fitted full-hardware card and advanced section');
 
-    await patchData(page, { has_torque: true, has_n2: false, turbo_power_w: 12345 });
-    await page.waitForTimeout(750);
+    await patchData(page, { has_torque: true, has_n2: true, n2_healthy: false, turbo_power_w: 12345 });
+    await page.waitForFunction(() => document.getElementById('turbo-power')?.textContent.trim() === 'N2 required', null, {timeout:4000});
     assert.equal(await shown(page, '#torque-card'), true, 'torque card should still show when torque is fitted without N2');
     assert.equal((await page.locator('#turbo-power').textContent()).trim(), 'N2 required');
-    results.push('dashboard shaft power display requires a fitted N2 source');
+    results.push('dashboard shaft power display requires healthy fitted N2 feedback');
 
     await patchData(page, {
       has_n2: false, has_tit: false, has_oil_press: false, has_flame: false, has_p1: false, has_p2: false,
@@ -481,8 +481,9 @@ async function optionDisabled(page, selector, value) {
     assert.equal(await disabled(page, '#cf-so_src'), true);
     assert.equal(await disabled(page, '#cf-so_rl'), true);
     assert.equal(await disabled(page, '#cf-so_fp'), true);
-    assert.equal(await disabled(page, '#cf-pb_min'), true);
-    assert.equal(await disabled(page, '#cf-rl_mode'), true);
+    assert.equal(await disabled(page, '#cf-pb_min'), null);
+    assert.equal(await disabled(page, '#cf-pb_n1m'), true);
+    assert.equal(await disabled(page, '#cf-pb_n2m'), true);
     results.push('standby oil feed requires oil pump plus a fitted N1 or N2 source and ghosts invalid shaft options');
 
     await reset(page);
@@ -551,7 +552,7 @@ async function optionDisabled(page, selector, value) {
 
     await patchHardware(page, { has_afterburner: false });
     await goto(page, 'controllers.html', '#cf-eg_src');
-    for (const selector of ['#ab-cfg-section', '#ab-ign-section', '#ab-flame-section', '#ab-run-section']) {
+    for (const selector of ['#ab-ign-section', '#ab-flame-section', '#ab-run-section']) {
       assert.equal(await shown(page, selector), false, `${selector} should hide when afterburner is not fitted`);
     }
     results.push('config page ghosts or hides dependent fields across TIT-only, no-EGT, no-throttle, and afterburner-off combinations');

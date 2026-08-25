@@ -8,7 +8,8 @@ function applyContextTooltips(root) {
     var des = el.querySelector('.param-desc');
     var l = lab && lab.textContent ? lab.textContent.trim() : '';
     var d = des && des.textContent ? des.textContent.trim() : '';
-    if (d) el.title = l ? l + ': ' + d : d;
+    var blockHelp = el.closest('.block-card')?.querySelector('.block-header')?.title || '';
+    if (d || blockHelp) el.title = l ? l + ': ' + (d || blockHelp) : (d || blockHelp);
   });
 }
 document.addEventListener('DOMContentLoaded', function () {
@@ -140,7 +141,8 @@ const BLOCKS = {
     timeout_action:null,
     desc:'Pauses the sequence for the configured duration. No actuator changes - all outputs remain in whatever state the previous block left them.',
     params:[
-      {key:'timed_delay_ms', label:'Delay', unit:'ms', type:'int', min:100, max:60000, step:100, def:1000, configKey:'timed_delay_ms'},
+      {key:'timed_delay_ms', label:'Delay', unit:'ms', type:'int', min:100, max:60000, step:100, def:1000, configKey:'timed_delay_ms',
+        desc:'How long the sequence waits while leaving every output in the state set by the preceding block.'},
     ]
   },
   FuelPumpIdle: {
@@ -149,7 +151,8 @@ const BLOCKS = {
     condition: null, timeout_action:null,
     desc:'Sets fuel demand from the configured idle input. Its calibrated 0–100% travel maps from the minimum reliable fuel output up to Max%, whether the signal is analog, RC pulse, or a profiled PCB input. If no idle input is fitted, the calibrated minimum is used as fixed idle. Completes immediately.',
     params:[
-      {key:'fp_idle_max_pct',      label:'Max pump %',            unit:'%', type:'float', min:0, max:100, step:0.5, def:18,    configKey:'fp_idle_max_pct'},
+      {key:'fp_idle_max_pct', label:'Maximum idle metering output', unit:'%', type:'float', min:0, max:100, step:0.5, def:18, configKey:'fp_idle_max_pct',
+        desc:'Upper end of the idle-input range. With no idle input fitted, the calibrated minimum metering output is used instead.'},
     ]
   },
   ModifiedIdle: {
@@ -166,7 +169,7 @@ const BLOCKS = {
     visibleIf: hw => actuatorHasProportionalOutput('throttle') && sensorEnabled('n1_rpm'),
     condition: hw => `N1 < ${hw.rpm_target ?? 32000} rpm`,
     timeout_action:'fault',
-    desc:'Sets fuel/throttle demand to the calibrated minimum reliable fuel-pump output and holds until N1 reaches the idle-entry target. Flame monitoring is active; loss of combustion causes a fault shutdown. The running oil-pressure minimum is enforced from this block onward.',
+    desc:'Sets main fuel demand to the calibrated minimum reliable metering output and holds until N1 reaches the idle-entry target. Flame monitoring is active; loss of combustion causes a fault shutdown. The running oil-pressure minimum is enforced from this block onward.',
     hwWarnings:[
       { check: hw => sensorEnabled('n1_rpm'),
         msg: 'Warning: No N1 RPM sensor - Spool cannot verify target RPM has been reached. Block will run until timeout -> FAULT SHUTDOWN.' },
@@ -365,10 +368,23 @@ const BLOCKS = {
     hwWarnings:[
       { check: hw => sensorEnabled('tot') || sensorEnabled('tit'),
         msg: 'Warning: No temperature sensor - cooldown cannot verify EGT has dropped. Block will run for the full timeout then continue (safe).' },
+      { check: () => {
+          const source = Number(cfg?.safety?.egt_source || 0);
+          const hasTot = sensorEnabled('tot');
+          const hasTit = sensorEnabled('tit');
+          const limit = source === 1 && hasTot ? Number(cfg?.engine?.tot_limit || 0) :
+                        source === 2 && hasTit ? Number(cfg?.safety?.tit_limit_c || 0) :
+                        hasTot ? Number(cfg?.engine?.tot_limit || 0) :
+                        hasTit ? Number(cfg?.safety?.tit_limit_c || 0) : 0;
+          return limit <= 0 || Number(cfg?.engine?.tot_cooldown_target || 0) < limit;
+        },
+        msg: 'Warning: Cooldown EGT target is at or above the selected engine-temperature shutdown limit. Cooldown may complete immediately while the turbine is still hot; use a verified bearing/storage-safe target.' },
     ],
     params:[
       {key:'tot_cooldown_target',       label:'EGT target',              unitType:'temp', type:'float',min:0, max:100000, step:10, def:150, configKey:'tot_cooldown_target'},
       {key:'cooldown_timeout_ms',       label:'Timeout',                 unit:'ms', type:'int',  min:10000,max:600000, step:10000, def:60000, configKey:'cooldown_timeout_ms'},
+      {key:'cooldown_skip_hold_ms',     label:'Manual skip hold',        unit:'ms', type:'int',  min:500,  max:30000,  step:500,   def:1000,  configKey:'cooldown_skip_hold_ms',
+        desc:'During SHUTDOWN, hold START and STOP together for this long to deliberately skip the remaining cooldown.'},
       {key:'cooldown_use_starter',      label:'Use starter motor',                  type:'bool',                                  def:true,   configKey:'cooldown_use_starter',
         visibleIf: hw => actuatorEnabled('starter')},
       {key:'cooldown_starter_pct',      label:'Starter speed',           unit:'%',  type:'float',min:0,    max:100,    step:5,     def:40,     configKey:'cooldown_starter_pct',
@@ -542,7 +558,8 @@ const BLOCKS = {
     timeout_action:'fault',
     desc:'Uses the configured flame sensor, EGT rise, or explicitly unverified timed assumption. Timed mode does not confirm flame. Faults if the overall timeout is exceeded.',
     params:[
-      {key:'ab_flame_timeout', label:'Overall Timeout', unit:'ms', type:'int', min:0, max:3600000, step:200, def:3000, configKey:'ab_flame_timeout'},
+      {key:'ab_flame_timeout', label:'Overall Timeout', unit:'ms', type:'int', min:0, max:3600000, step:200, def:3000, configKey:'ab_flame_timeout',
+        desc:'Maximum time allowed for the selected afterburner light-up evidence before the sequence faults and removes afterburner fuel and ignition.'},
     ]
   },
   ABStabilize: {
@@ -551,8 +568,10 @@ const BLOCKS = {
     timeout_action:'complete',
     desc:'Hold after lighting. Monitors selected EGT - faults if too hot. On completion, sets AB state to Running.',
     params:[
-      {key:'ab_stab_ms',        label:'Hold Time',       unit:'ms', type:'int', min:0, max:3600000, step:100, def:1000, configKey:'ab_stab_ms'},
-      {key:'ab_stab_max_tot',   label:'Max EGT (0=off)', unitType:'temp', zeroOff:true, type:'float', min:0, max:100000, step:10, def:0, configKey:'ab_stab_max_tot'},
+      {key:'ab_stab_ms', label:'Hold Time', unit:'ms', type:'int', min:0, max:3600000, step:100, def:1000, configKey:'ab_stab_ms',
+        desc:'Time to hold the light-up condition before declaring the afterburner stable and running.'},
+      {key:'ab_stab_max_tot', label:'Max EGT (0=off)', unitType:'temp', zeroOff:true, type:'float', min:0, max:100000, step:10, def:0, configKey:'ab_stab_max_tot',
+        desc:'Optional temperature ceiling during stabilization. Zero disables this local check; independent engine overtemperature protection remains active.'},
     ]
   },
 
@@ -673,6 +692,7 @@ const CONFIG_SECTIONS = {
   rpm_drop_threshold:      {sec:'sequence.shutdown', key:'rpm_drop_threshold'},
   rpm_drop_timeout_ms:     {sec:'sequence.shutdown', key:'rpm_drop_timeout_ms'},
   tot_cooldown_target:     {sec:'engine',            key:'tot_cooldown_target'},
+  cooldown_skip_hold_ms:   {sec:'misc',              key:'cooldown_skip_hold_ms'},
   cooldown_starter_pct:        {sec:'sequence.shutdown', key:'cooldown_starter_pct'},
   cooldown_oil_pct:            {sec:'sequence.shutdown', key:'cooldown_oil_pct'},
   cooldown_timeout_ms:         {sec:'sequence.shutdown', key:'cooldown_timeout_ms'},
@@ -818,13 +838,12 @@ const BLOCK_INFO = {
     desc: 'Waits until selected EGT rises above the configured threshold. Alternative to FlameConfirm when no flame sensor is fitted.',
     links: [
       { label: 'Engine Temperature Source', url: '/controllers.html#engine-limits' },
-      { label: 'Cooldown Target', url: '/controllers.html#engine-limits' },
     ]
   },
   Spool: {
-    desc: 'Holds fuel/throttle at the calibrated minimum reliable fuel-pump output and waits for N1 to reach the idle-entry target. Flame monitoring remains active.',
+    desc: 'Holds main fuel at the calibrated minimum reliable metering output and waits for N1 to reach the idle-entry target. Flame monitoring remains active.',
     links: [
-      { label: 'Minimum Reliable Fuel-Pump Output', url: '/calibration.html#fuelpump-min-cal-row' },
+      { label: 'Minimum Reliable Fuel-Metering Output', url: '/calibration.html#fuelpump-min-cal-row' },
       { label: 'Throttle Open Speed', url: '/controllers.html#throttle' },
       { label: 'Running Oil Min',     url: '/controllers.html#oil-config-section' },
     ]
@@ -838,9 +857,7 @@ const BLOCK_INFO = {
   },
   CooldownSpin: {
     desc: 'Spins starter and/or runs oil pump to cool EGT below target temperature. Skipped if fuel was never opened.',
-    links: [
-      { label: 'Cooldown EGT Target', url: '/controllers.html#engine-limits' },
-    ]
+    links: []
   },
   FinalStop: {
     desc: 'Waits for N1 to reach zero. Oil pump cuts; scavenge pump continues if configured.',
@@ -857,15 +874,15 @@ const BLOCK_INFO = {
     links: []
   },
   FuelPumpIdle: {
-    desc: 'Maps idle input (pot or RC) from the calibrated minimum reliable fuel-pump output up to maximum pump output. The minimum is edited on Calibration.',
+    desc: 'Maps idle input (pot or RC) from the calibrated minimum reliable fuel-metering output up to maximum metering output. The minimum is edited on Calibration.',
     links: [
-      { label: 'Minimum Reliable Fuel-Pump Output', url: '/calibration.html#fuelpump-min-cal-row' },
+      { label: 'Minimum Reliable Fuel-Metering Output', url: '/calibration.html#fuelpump-min-cal-row' },
     ]
   },
   ModifiedIdle: {
-    desc: 'Sets fuel/throttle demand from the calibrated minimum reliable fuel-pump output to the configured maximum idle output, then applies the multiplier.',
+    desc: 'Sets main-fuel demand from the calibrated minimum reliable metering output to the configured maximum idle output, then applies the multiplier.',
     links: [
-      { label: 'Minimum Reliable Fuel-Pump Output', url: '/calibration.html#fuelpump-min-cal-row' },
+      { label: 'Minimum Reliable Fuel-Metering Output', url: '/calibration.html#fuelpump-min-cal-row' },
       { label: 'Throttle Idle Max %', url: '/controllers.html#throttle' },
     ]
   },
@@ -881,9 +898,7 @@ const BLOCK_INFO = {
   },
   ABCheckReady: {
     desc: 'Gate block: checks N1, selected EGT, and throttle conditions before proceeding with AB ignition.',
-    links: [
-      { label: 'AB Ignition Conditions', url: '/controllers.html#ab-cfg-section' },
-    ]
+    links: []
   },
   ABIgnite: {
     desc: 'Fires AB ignition - torch (fuel spike through turbine), AB igniter, or both.',

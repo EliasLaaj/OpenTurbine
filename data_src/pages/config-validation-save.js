@@ -224,7 +224,7 @@ async function validateBeforeSave(cfg) {
     const kind = Number(control.kind || 0);
     if ((Number(control.mode_mask ?? 4) & 0x0f) === 0)
       errors.push(`${label}: select at least one operating state.`);
-    if (!installedInputs.has(String(control.source || '')))
+    if (kind !== 3 && !installedInputs.has(String(control.source || '')))
       errors.push(`${label}: choose a fitted input or feedback signal.`);
     if (!availableOutputs.has(output))
       errors.push(`${label}: its output is unavailable or already belongs to a dedicated controller.`);
@@ -352,7 +352,6 @@ async function validateBeforeSave(cfg) {
   const totLimit    = gv(cfg, 'engine', 'tot_limit');
   const titLimit    = gv(cfg, 'safety', 'tit_limit_c');
   const totMargin   = gv(cfg, 'engine', 'tot_safe_margin');
-  const totCooldown = gv(cfg, 'engine', 'tot_cooldown_target');
   const sourcePref = gv(cfg, 'safety', 'egt_source') || 0;
   const hasTotHw = hasRegistryInput('tot');
   const hasTitHw = hasRegistryInput('tit');
@@ -365,8 +364,6 @@ async function validateBeforeSave(cfg) {
                        hasTotHw ? 'TOT' : (hasTitHw ? 'TIT' : 'EGT');
   if (primaryLimit !== undefined && totMargin !== undefined && totMargin >= primaryLimit)
     errors.push('EGT Soft Margin (' + totMargin + '°) must be less than selected ' + primaryLabel + ' limit (' + primaryLimit + '°).');
-  if (totCooldown !== undefined && primaryLimit !== undefined && totCooldown >= primaryLimit)
-    warns.push('Cooldown EGT target (' + totCooldown + '°) is at or above selected ' + primaryLabel + ' limit (' + primaryLimit + '°). Cooldown may complete immediately while the turbine is still hot; use a verified bearing/storage-safe target.');
   const preStartLimit = Number(gv(cfg, 'sequence', 'startup', 'pre_start_egt_limit_c') || 0);
   const separateStartupLimit = Number(gv(cfg, 'sequence', 'startup', 'startup_egt_limit_c') || 0);
   const effectiveStartupLimit = separateStartupLimit > 0 ? separateStartupLimit : Number(primaryLimit || 0);
@@ -641,113 +638,4 @@ function _doSave() {
       finishSave();
     });
   } else finishSave();
-}
-
-// ── Engine type presets ───────────────────────────────────────
-// Each example proposes reviewable Config-page values; only Save performs PATCH.
-// Hardware pins are NOT touched — user handles those in hardware.html.
-const PRESETS = {
-  kj66: {
-    desc: 'Small RC Jet ~60N (KJ-66 style)',
-    patch: {
-      engine: { rpm_limit: 120000, min_rpm: 35000, tot_limit: 870, tot_safe_margin: 30, tot_cooldown_target: 150 },
-      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 115000, pullback_n1_hard_rpm: 119000, pullback_egt: true, pullback_egt_soft_c: 820, pullback_egt_hard_c: 860 },
-      dynamic_idle: { target_rpm: 45000 }
-    }
-  },
-  med_jet: {
-    desc: 'Medium RC Jet ~200N',
-    patch: {
-      engine: { rpm_limit: 90000, min_rpm: 28000, tot_limit: 800, tot_safe_margin: 30, tot_cooldown_target: 150 },
-      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 85000, pullback_n1_hard_rpm: 89000, pullback_egt: true, pullback_egt_soft_c: 750, pullback_egt_hard_c: 790 },
-      dynamic_idle: { target_rpm: 35000 }
-    }
-  },
-  large_jet: {
-    desc: 'Large RC Jet ~400N+, approximately 100,000 RPM',
-    patch: {
-      engine: { rpm_limit: 100000, min_rpm: 30000, tot_limit: 750, tot_safe_margin: 50, tot_cooldown_target: 150 },
-      throttle: { ramp_up_ms: 600, ramp_down_ms: 800, pullback_n1: true, pullback_n1_soft_rpm: 95000, pullback_n1_hard_rpm: 100000, pullback_egt: true, pullback_egt_soft_c: 700, pullback_egt_hard_c: 750 },
-      dynamic_idle: { target_rpm: 44000, rpm_limit: 60000 },
-      safety: { flameout_egt_below_c: 300, flameout_egt_fall_rate_c_s: 50 },
-      standby_oil: { source: 0, rpm_limit: 1000, feed_pct: 25, feed_bar: 0 },
-      sequence: { startup: { pre_start_egt_limit_c: 150, startup_egt_limit_c: 0 } }
-    }
-  },
-  apu_small: {
-    desc: 'Small APU (Garrett GTP30 style)',
-    patch: {
-      engine: { rpm_limit: 80000, min_rpm: 20000, tot_limit: 700, tot_safe_margin: 30, tot_cooldown_target: 100 },
-      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 75000, pullback_n1_hard_rpm: 79000, pullback_egt: true, pullback_egt_soft_c: 650, pullback_egt_hard_c: 690 },
-      dynamic_idle: { target_rpm: 25000 }
-    }
-  },
-  turboshaft: {
-    desc: 'Turboshaft / Power Turbine',
-    patch: {
-      engine: { rpm_limit: 50000, min_rpm: 10000, tot_limit: 650, tot_safe_margin: 30, tot_cooldown_target: 80 },
-      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 47000, pullback_n1_hard_rpm: 49500, pullback_egt: true, pullback_egt_soft_c: 600, pullback_egt_hard_c: 640 },
-      dynamic_idle: { target_rpm: 15000 }
-    }
-  },
-  turbocharger: {
-    desc: 'Basic Turbocharger Gas Turbine (recommended starting point)',
-    patch: {
-      engine: { rpm_limit: 65000, min_rpm: 8000, tot_limit: 650, tot_safe_margin: 50, tot_cooldown_target: 80 },
-      throttle: { pullback_n1: true, pullback_n1_soft_rpm: 60000, pullback_n1_hard_rpm: 64500, pullback_egt: true, pullback_egt_soft_c: 600, pullback_egt_hard_c: 640 },
-      oil:    { startup_pressure: 1.5, startup_min_bar: 0.8, running_min: 1.8, map_min: 2.0, map_max: 2.8 },
-      dynamic_idle: { target_rpm: 15000 },
-      glow_plug: { preheat_ms: 12000, preheat_max_pct: 80, hold_pct: 30 },
-      safety: { flameout_shutdown_ms: 4000 }
-    }
-  }
-};
-
-async function applyPreset(key) {
-  const sel = document.getElementById('preset-sel');
-  if (!key) return;
-  const preset = PRESETS[key];
-  if (!preset) { sel.value = ''; return; }
-  if (!await OTDialog.confirm('Load "' + preset.desc + '" as editable example suggestions?\n\nThese values are NOT verified for your turbine. They only change Config fields that are currently available for the fitted hardware, and do not reach the ECU unless you review and explicitly save them. Hardware assignments and sequences are not changed.', {
-    title:'Load unverified example values', confirmLabel:'Load suggestions'
-  })) {
-    sel.value = ''; return;
-  }
-  // Apply only fields represented on this Config page and currently usable
-  // with the fitted hardware. Presets never mutate sequence data or settings
-  // that the user cannot review here.
-  let applied = 0;
-  let skipped = 0;
-  SCHEMA.forEach(sec => sec.fields.forEach(f => {
-    const proposed = getPath(preset.patch, f.path);
-    if (proposed === undefined) return;
-    const el = document.getElementById('cf-' + f.key);
-    if (!el || el.disabled) { skipped++; return; }
-    setPath(cfg, f.path, proposed);
-    applied++;
-  }));
-  if (!applied) {
-    const note = document.getElementById('preset-note');
-    if (note) {
-      note.textContent = 'No values from this example apply to the currently fitted hardware.';
-      note.style.color = 'var(--yellow)';
-    }
-    sel.value = '';
-    return;
-  }
-  // Repopulate the form and indicate unsaved changes
-  renderForm();
-  _applyAllVisibility();
-  hookValidation();
-  runValidation();
-  _markDirty();
-  const saveMsg = document.getElementById('save-msg');
-  if (saveMsg) { saveMsg.textContent = '⚠ Example suggestions loaded — unverified and unsaved'; saveMsg.style.color = 'var(--yellow)'; }
-  const note = document.getElementById('preset-note');
-  if (note) {
-    note.textContent = '⚠ "' + preset.desc + '" examples loaded. Verify every changed value before saving.' +
-      (skipped ? ' ' + skipped + ' hardware-dependent suggestion' + (skipped === 1 ? ' was' : 's were') + ' skipped.' : '');
-    note.style.color = 'var(--yellow)';
-  }
-  sel.value = '';
 }

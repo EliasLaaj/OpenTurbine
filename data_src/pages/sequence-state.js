@@ -585,7 +585,7 @@ function buildFinalStateCard(tab, seq, idleRaw) {
   }
 
   const rows = [
-    hasAct('throttle') ? { label:'Main Fuel Pump / Metering Output', val: state.throttle } : null,
+    hasAct('throttle') ? { label:'Main Fuel Metering Output', val: state.throttle } : null,
     hasAct('fuel_sol') ? { label:'Main Fuel Shutoff',   val: state.fuelSol } : null,
     hasAct('igniter') ? { label:'Igniter',              val: state.igniter } : null,
     hasAct('igniter2') ? { label:'Secondary Igniter', val: state.igniter2 } : null,

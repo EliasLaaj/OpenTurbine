@@ -356,15 +356,17 @@ async function goto(page, route, waitSelector) {
       'Legacy controller-assignment toggles must not form a parallel control system');
     assert.equal(await page.locator('[data-group="bench"]').count(), 0,
       'Bench-test settings belong in Tools > Test settings, not Config');
-    assert.equal(await page.locator('#btn-view-basic').getAttribute('class').then(v => v.includes('active')), true);
+    assert.equal(await page.locator('#btn-view-basic').count(), 0,
+      'The redundant Essentials filter should not be shown');
+    assert.equal(await page.locator('#btn-view-expert').getAttribute('class').then(v => v.includes('active')), true);
     assert.equal(await page.locator('#cfg-state-badge').textContent(), 'Saved');
-    const essentialCount = await page.locator('.cfg-field:visible').count();
-    assert.ok(essentialCount <= 32, `Essentials should stay focused; rendered ${essentialCount} fields`);
+    const configuredCount = await page.locator('.cfg-field:visible').count();
+    assert.ok(configuredCount > 0, 'Configured system should expose applicable settings');
     assert.match(await page.locator('#cf-lm_mt').evaluate(el => el.closest('.cfg-field')?.textContent || ''),
       /automatically because feedback used by an enabled protection\/controller becomes unhealthy/i);
     await page.locator('#cfg-search').fill('relight');
     assert.match(await page.locator('#cfg-result-count').textContent(), /^\d+ settings?$/);
-    assert.equal(await shown(page, '[data-purpose="igniter"]'), true);
+    assert.equal(await shown(page, '[data-built-in="relight"]'), true);
     assert.equal(await shown(page, '[data-group="engine"]'), false);
     await page.locator('#cfg-search').fill('');
     assert.ok(await page.locator('.cfg-help').count() > 100,
@@ -416,15 +418,17 @@ async function goto(page, route, waitSelector) {
     assert.equal(await page.locator('#dev-mode-tools-link').getAttribute('href'), '/tools.html#card-dev-mode');
     assert.equal(await page.locator('#btn-dev-mode').count(), 0,
       'Config must not bypass the guarded Developer Mode control on Tools');
-    for (const selector of ['#ab-cfg-section', '#ab-ign-section', '#ab-flame-section']) {
-      assert.equal(await shown(page, selector), true, `${selector} should be available in Essentials for fitted AB hardware`);
+    assert.equal(await shown(page, '[data-built-in="afterburner"]'), true,
+      'the fitted afterburner subsystem should be discoverable by default');
+    for (const selector of ['#ab-ign-section', '#ab-flame-section', '#ab-run-section']) {
+      assert.equal(await page.locator(selector).count(), 1,
+        `${selector} should be attached inside the initially collapsed afterburner subsystem`);
     }
-    assert.equal(await shown(page, '#ab-run-section'), false,
-      'specialist afterburner running-fuel tuning belongs under Configured system');
     assert.equal(await page.locator('#cf-ab_pcm option[value="2"]').isDisabled(), true,
       'a stale hidden input pin must not enable Dedicated AB Input unless that trigger source is active');
-    assert.match(await page.locator('#cf-ab_tt').evaluate(el => el.closest('.cfg-field')?.title || ''), /Hardware.*Afterburner trigger and arm/i);
-    results.push('Essentials stays focused while exposing the fitted afterburner commissioning choices');
+    assert.equal(await page.locator('#ab-cfg-section').count(), 0,
+      'afterburner entry gates belong only to the Afterburner sequence page');
+    results.push('Configured system exposes the fitted afterburner commissioning choices by default');
     const firstTot = await page.locator('#cf-tot_limit').inputValue();
     assert.ok(firstTot === '720' || firstTot === '1328');
     await page.locator('#unit-temp-btn').click();
@@ -458,7 +462,7 @@ async function goto(page, route, waitSelector) {
     await page.waitForSelector('#cf-tot_limit', {state:'attached'});
     assert.equal(await shown(page, '#safety-ext-section'), false);
     assert.equal(await shown(page, '#governor-cfg-section'), false);
-    for (const selector of ['#ab-cfg-section', '#ab-ign-section', '#ab-flame-section', '#ab-run-section']) {
+    for (const selector of ['#ab-ign-section', '#ab-flame-section', '#ab-run-section']) {
       assert.equal(await shown(page, selector), false, `${selector} should hide`);
     }
     results.push('config unit conversions preserve meaning and optional sections hide when hardware is absent');
@@ -482,35 +486,6 @@ async function goto(page, route, waitSelector) {
       'Idle Max remains useful to startup and idle sequence blocks without an operator throttle input');
     results.push('Throttle Expo locks when no physical throttle input can consume it');
 
-    await reset(page);
-    await patchData(page, { mode:'STANDBY', config_locked:false });
-    const beforePresetConfig = await (await page.request.get(`${base}/api/config`)).json();
-    const beforePresetSequence = JSON.parse(JSON.stringify(beforePresetConfig.sequence));
-    await goto(page, 'controllers.html', '#preset-sel');
-    await page.locator('#preset-bar > summary').click();
-    await page.locator('#preset-sel').selectOption('turboshaft');
-    await page.waitForSelector('#ot-app-dialog.show');
-    assert.match(await page.locator('#ot-dialog-message').textContent(), /Hardware assignments and sequences are not changed/i);
-    await page.locator('#ot-dialog-confirm').click();
-    await page.locator('#btn-save').click();
-    // The full-system fixture deliberately carries a relight firing value below
-    // Minimum Running N1. A preset may therefore surface the safety warning
-    // before showing the normal change recap.
-    if (await page.locator('#ot-app-dialog.show').isVisible())
-      await page.locator('#ot-dialog-confirm').click();
-    await page.waitForSelector('#save-recap-modal', {state:'visible'});
-    const presetRecap = await page.locator('#save-recap-body').textContent();
-    assert.match(presetRecap, /Engine Protection Limits\s*\/\s*Maximum N1 Speed/i);
-    assert.match(presetRecap, /Idle\s*\/\s*Idle Target/i);
-    assert.match(presetRecap, /Engine Protection Limits\s*\/\s*Begin N1 Throttle Reduction/i);
-    assert.match(presetRecap, /Engine Protection Limits\s*\/\s*Full Temperature Reduction/i);
-    assert.doesNotMatch(presetRecap, /live:/i);
-    assert.match(await page.locator('#save-recap-subtitle').textContent(), /12 fields/i);
-    await page.locator('#save-recap-confirm-btn').click();
-    await page.waitForFunction(() => /Saved/i.test(document.querySelector('#save-msg')?.textContent || ''));
-    const afterPresetConfig = await (await page.request.get(`${base}/api/config`)).json();
-    assert.deepEqual(afterPresetConfig.sequence, beforePresetSequence);
-    results.push('engine examples change only reviewable fitted-hardware settings and recap every value with an unambiguous section label');
 
     await reset(page);
     const calibrationHardware = await (await page.request.get(`${base}/api/hardware`)).json();
@@ -643,7 +618,6 @@ async function goto(page, route, waitSelector) {
       });
     assert.equal(await disabled(page, '#cf-th_ru'), true);
     assert.equal(await disabled(page, '#cf-rpm_limit'), true);
-    assert.equal(await disabled(page, '#preset-sel'), true);
     await patchData(page, { mode:'SHUTDOWN', dev_mode:true, config_locked:true });
     await page.waitForFunction(() => document.querySelector('#cfg-lock-badge')?.textContent.includes('Read-only'));
     assert.equal(await disabled(page, '#cf-th_ru'), true);
@@ -651,17 +625,16 @@ async function goto(page, route, waitSelector) {
     await page.waitForFunction(() => document.querySelector('#cfg-lock-badge')?.textContent.includes('Limited live'));
     assert.equal(await disabled(page, '#cf-th_ru'), false);
     assert.equal(await disabled(page, '#cf-rpm_limit'), true);
-    assert.equal(await disabled(page, '#preset-sel'), true);
     results.push('STARTUP and SHUTDOWN stay read-only while RUNNING Developer Mode exposes only live-safe fields');
 
     const stalePage = await browser.newPage();
     await stalePage.goto(`${base}/controllers.html`);
-    await stalePage.locator('[data-purpose="main_fuel"] > summary').click();
+    await stalePage.locator('[data-built-in="fuel-support"] > summary').click();
     await stalePage.locator('.controller-subcard').filter({hasText:'Throttle Response'}).first().locator(':scope > summary').click();
     await stalePage.waitForSelector('#cf-th_rd');
-    if (!(await page.locator('[data-purpose="main_fuel"]').evaluate(el => el.open)))
-      await page.locator('[data-purpose="main_fuel"] > summary').click();
-    const liveThrottleCard = page.locator('[data-purpose="main_fuel"] .controller-subcard').filter({hasText:'Throttle Response'}).first();
+    if (!(await page.locator('[data-built-in="fuel-support"]').evaluate(el => el.open)))
+      await page.locator('[data-built-in="fuel-support"] > summary').click();
+    const liveThrottleCard = page.locator('[data-built-in="fuel-support"] .controller-subcard').filter({hasText:'Throttle Response'}).first();
     if (!(await liveThrottleCard.evaluate(el => el.open)))
       await liveThrottleCard.locator(':scope > summary').click();
     await page.locator('#cf-th_ru').fill('1700');

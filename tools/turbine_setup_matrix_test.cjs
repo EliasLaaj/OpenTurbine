@@ -331,7 +331,8 @@ const setups = [
         pullback_p1: true, pullback_p1_soft_bar: 1.7, pullback_p1_hard_bar: 2.0,
         pullback_p2: true, pullback_p2_soft_bar: 3.8, pullback_p2_hard_bar: 4.4,
         pullback_torque: true, pullback_torque_soft_nm: 70, pullback_torque_hard_nm: 82,
-        pullback_min_pct: 15, rpm_limiter_mode: 1
+        pullback_min_pct: 15, pullback_n1_mode: 1, pullback_n1_lookahead_ms: 1200,
+        pullback_n2_mode: 1, pullback_n2_lookahead_ms: 700
       }
     },
     commands: [{ cmd: 'SET_THROTTLE_PCT', fParam: 0.6 }]
@@ -451,14 +452,14 @@ const setups = [
       if (setup.id === 'minimal_timer_turbojet') {
         const mainFuelUsage = await page.evaluate(() => {
           const cards = Array.from(document.querySelectorAll('#registry-outputs .registry-card'));
-          const card = cards.find(card => /^Main Fuel Pump$/i.test((card.querySelector('strong')?.textContent || '').trim()));
+          const card = cards.find(card => /^Main Fuel Metering$/i.test((card.querySelector('strong')?.textContent || '').trim()));
           return card ? card.innerText : '';
         });
         assert.match(mainFuelUsage, /Controller: fuel response & limit protection/, 'main fuel should name its automatic protection user');
         assert.match(mainFuelUsage, /Core firmware: controller binding/, 'main fuel should name its controller binding');
         const removeDialogText = await page.evaluate(() => {
           const cards = Array.from(document.querySelectorAll('#registry-outputs .registry-card'));
-          const card = cards.find(card => /^Main Fuel Pump$/i.test((card.querySelector('strong')?.textContent || '').trim()));
+          const card = cards.find(card => /^Main Fuel Metering$/i.test((card.querySelector('strong')?.textContent || '').trim()));
           const remove = Array.from(card?.querySelectorAll('button') || []).find(btn => /remove/i.test(btn.textContent || ''));
           remove?.click();
           const text = document.querySelector('#registry-remove-modal')?.innerText || '';
@@ -491,7 +492,7 @@ const setups = [
         assert.equal(await page.locator('.registry-output-live').count(), 0, 'hardware output cards should not show live output bars');
         const bindingText = await page.locator('#registry-bindings').textContent();
         assert.match(bindingText, /Throttle input/);
-        assert.match(bindingText, /Main fuel pump output/);
+        assert.match(bindingText, /Main fuel metering output/);
         assert.doesNotMatch(bindingText, /operator_throttle|main_fuel_output/, 'advanced controller links should use plain labels');
       }
       if (setup.id === 'dry_sump_flow_monitored_turbine') {

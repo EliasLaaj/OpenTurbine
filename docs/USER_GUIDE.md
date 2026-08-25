@@ -159,6 +159,14 @@ Load supply  -> fuse -> driver/ESC -> actuator
 - Verify active-high/active-low behavior with the load power disconnected first.
 - Direct ignition-coil drive requires a proper current-limited switching stage. Never connect an ignition coil directly to the ESP32.
 
+**Add mirrored output** creates another physical signal that follows the same
+logical command. Use it for two separate igniters, pumps, valves, indicators,
+or driver inputs that must act together; each mirror keeps its own pin, driver
+type, polarity, endpoints, and current protection. It does not make two power
+stages safe to wire in parallel. Parallel MOSFET/driver outputs only when the
+hardware manufacturer explicitly supports current sharing; otherwise give each
+load its own correctly rated driver or use one suitably rated stage.
+
 ### Servo or ESC output
 
 ```text
@@ -277,12 +285,12 @@ The web interface is organized in the order a new installation should normally f
 1. **Hardware** — add only what is physically fitted, select signal types, assign pins, and resolve inventory requirements.
 2. **Controllers** — choose what owns each output and configure its local tuning and safety limits.
 3. **System** — configure ECU-wide runtime, communications, logging, display, and housekeeping behavior.
-4. **Calibration** — calibrate inputs and find minimum reliable pump outputs.
+4. **Calibration** — calibrate inputs and find minimum reliable fuel-metering and pump outputs.
 5. **Sequence** — review ordered startup, shutdown, and afterburner transitions.
 6. **Tools** — test one output at a time with fuel and ignition made safe.
 7. **Dashboard** — perform dry sequences before any fueled attempt.
 
-Settings that cannot apply to the fitted hardware are hidden or ghosted in normal use. Use **Essentials** for commissioning and **Configured system** for everything that can affect the fitted turbine. **Explore all features** exposes every hardware-dependent value for advance planning: amber-bordered tuning values can be edited and saved, but remain inactive until their stated sensor, output, or controller prerequisite is configured in Hardware. Enable switches and choices that name missing hardware stay locked, so browsing or preparing values cannot arm a feature unexpectedly. **Changed** reviews pending edits; search also finds unavailable features.
+Settings that cannot apply to the fitted hardware are hidden or ghosted in normal use. Controllers and System open in **Configured system**, showing everything that can affect the fitted turbine. **Explore all features** exposes every hardware-dependent value for advance planning: amber-bordered tuning values can be edited and saved, but remain inactive until their stated sensor, output, or controller prerequisite is configured in Hardware. Enable switches and choices that name missing hardware stay locked, so browsing or preparing values cannot arm a feature unexpectedly. **Changed** reviews pending edits; search also finds unavailable features.
 
 ## Complete first-time procedure
 
@@ -296,7 +304,7 @@ This is the literal path from an unopened board to a dry-tested ECU.
 6. **Configure one device at a time.** In Hardware, select the correct target, enable only fitted devices, choose electrical types, assign pins, and resolve every warning. Save and reboot.
 7. **Verify the saved hardware.** Reopen Hardware after reboot and compare every pin/type with the wiring before applying actuator power.
 8. **Check live inputs.** Power sensors only. Open Dashboard/Calibration and confirm plausible raw/live response. Do not enable a safety based on an uncalibrated sensor.
-9. **Configure control and safety.** Use Controllers search and the Essentials filter. Then review ECU-wide settings on System. Do not use example suggestions as authority.
+9. **Configure control and safety.** Review the fitted system in Controllers, using search when needed. Then review ECU-wide settings on System. Do not use example suggestions as authority.
 10. **Calibrate inputs and pump minimums.** Follow the visible Calibration wizards with fuel/ignition made safe.
 11. **Review sequences and simple controls.** Confirm startup/shutdown order, timing, sensor gates, abort behavior, output ownership, hysteresis, mappings, and safe inactive values.
 12. **Test outputs at logic level.** With load power still isolated, confirm output polarity using a meter or test indicator.
@@ -329,7 +337,7 @@ After reboot, return to Hardware and verify that every saved device and pin is s
 
 ### 2. Controllers and System
 
-Open **Controllers** and begin with **Essentials**. Start from the output: confirm what controls it, the relevant mapping or target, local response tuning, and its safety overrides. Use **Configured system** for deeper applicable tuning, **Explore all features** to inspect future options, and **Changed** to review pending edits. Then open **System** for ECU-wide runtime, communications, logging, display, and housekeeping settings. Example suggestions are editable examples only; they are not safe values for your turbine.
+Open **Controllers**, which starts in **Configured system**. Begin from the output: confirm what controls it, the relevant mapping or target, local response tuning, and its safety overrides. Use **Explore all features** to inspect future options and **Changed** to review pending edits. Then open **System** for ECU-wide runtime, communications, logging, display, and housekeeping settings. Example suggestions are editable examples only; they are not safe values for your turbine.
 
 Review at least:
 
@@ -438,7 +446,7 @@ Confirm that:
 - Fuel begins at a deliberately conservative value.
 - Light-off is confirmed by a fitted, calibrated source or an explicitly accepted timed method.
 - The engine reaches self-sustaining speed without losing lubrication.
-- Any required P1/P2 compressor-pressure evidence is established before ignition, rises after light-off, and remains stable before RUNNING.
+- Any configured Pressure 1/Pressure 2 startup evidence is established before ignition, rises after light-off, and remains stable before RUNNING.
 - **Final Startup Checks** enables only the installed N1/N2/P1/P2/oil/EGT/flame evidence your installation requires. Every enabled check must remain valid for the full stable time; starter state is not sensor evidence.
 - STOP closes fuel immediately.
 - Shutdown keeps oil/scavenge/cooling outputs active for as long as the engine requires.
@@ -547,7 +555,7 @@ Use Ctrl+F for the symptom or keyword.
 | Wi-Fi connects but page does not open | Browse directly to `http://192.168.4.1`; disable mobile-data/VPN captive routing temporarily; reinstall web assets if necessary. |
 | Page reports disconnected | Stay on the ECU Wi-Fi, reload once, check ECU power/noise, and verify another client is not overwhelming the AP. |
 | Hardware save rejected | Return to STANDBY/FAULT; resolve missing pins, conflicts, unsupported types, and dependent safety/controller settings. |
-| Config field hidden | Use Setup only for applicable essentials; use Advanced for deeper applicable fields; confirm prerequisite hardware is fitted. |
+| Controller or System field hidden | Start in Configured system; use Explore all features for inactive future settings; confirm prerequisite hardware is fitted. |
 | Calibration command rejected | ECU must be STANDBY/FAULT, required hardware must be fitted, and no other actuator test may be active. |
 | Sensor reads zero/full-scale/fault | Verify supply, common ground, signal voltage, selected pin/type, ADC1 use, divider, polarity, and calibration. |
 | RPM is wrong | Verify pulse conditioning, 3.3 V level, pulses per revolution, target geometry, and independent tachometer reading. |

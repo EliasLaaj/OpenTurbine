@@ -1,6 +1,6 @@
 <h1 align="center">OpenTurbine</h1>
 
-<p align="center">OpenTurbine 2.0 — open-source ESP32 turbine ECU with guided Windows setup and a browser-based dashboard.</p>
+<p align="center">OpenTurbine 2.1.0 — open-source ESP32 turbine ECU with guided Windows setup and a browser-based dashboard.</p>
 
 <p align="center">
   <a href="https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbineSetupTool.exe"><strong>Download for Windows</strong></a>
@@ -25,7 +25,7 @@ The normal Windows installation does not require Git, PlatformIO, or source-code
 - Optional flash-time PCB profiles that replace raw GPIO setup with board-labelled, capability-filtered connections
 - Per-pump oil-flow monitoring, electric drain-valve sequencing/controllers, and calibrated torque/thrust measurement
 - Simple and rate-predictive gradual fuel limiting for N1, N2, TOT/TIT, P1, P2, and torque, backed by independent hard trips
-- Dedicated Controllers and System workspaces with Essentials, Configured system, Explore all features, and Changed views
+- Dedicated Controllers and System workspaces that open on the configured system, with Explore all features and Changed views
 - Startup, shutdown, afterburner, and custom sequence blocks with final-state previews
 - Simple threshold/hysteresis and direct input-to-variable-output controls on Controllers
 - Guided calibration, standby-only actuator tests, complete engine-file backup/restore, event logs, and per-run session data

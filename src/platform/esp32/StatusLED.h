@@ -27,9 +27,11 @@
 namespace StatusLED {
 
 // ── Config ────────────────────────────────────────────────────
-static constexpr unsigned long BLINK_ON_MS    = 80;
-static constexpr unsigned long BLINK_OFF_MS   = 120;
-static constexpr unsigned long BURST_PAUSE_MS = 1500;
+// Deliberate enough to count reliably at a glance, including bright LEDs and
+// phone-camera viewing, without making state changes feel sluggish.
+static constexpr unsigned long BLINK_ON_MS    = 140;
+static constexpr unsigned long BLINK_OFF_MS   = 220;
+static constexpr unsigned long BURST_PAUSE_MS = 1800;
 static constexpr unsigned long FAULT_PERIOD_MS= 100;
 
 // ── State ─────────────────────────────────────────────────────

@@ -56,12 +56,27 @@ const ConfigField<float> THROTTLE_FLOAT_FIELDS[] = {
     CONFIG_FIELD(pullbackP1Hard, "pullback_p1_hard_bar"), CONFIG_FIELD(pullbackP2Soft, "pullback_p2_soft_bar"),
     CONFIG_FIELD(pullbackP2Hard, "pullback_p2_hard_bar"), CONFIG_FIELD(pullbackTorqueSoft, "pullback_torque_soft_nm"),
     CONFIG_FIELD(pullbackTorqueHard, "pullback_torque_hard_nm"), CONFIG_FIELD(pullbackMinThrottlePct, "pullback_min_pct"),
-    CONFIG_FIELD(pullbackStrength, "pullback_strength"), CONFIG_FIELD(pullbackLookaheadMs, "pullback_lookahead_ms"),
     CONFIG_FIELD(pullbackNearLimitRampUpMs, "pullback_near_limit_rampup_ms"),
     CONFIG_FIELD(pullbackApproachZoneRpm, "pullback_approach_zone_rpm"),
     CONFIG_FIELD(rpmAccelFilter, "rpm_accel_filter"),
+    CONFIG_FIELD(pullbackN1LookaheadMs, "pullback_n1_lookahead_ms"),
+    CONFIG_FIELD(pullbackN2LookaheadMs, "pullback_n2_lookahead_ms"),
+    CONFIG_FIELD(pullbackEgtLookaheadMs, "pullback_egt_lookahead_ms"),
+    CONFIG_FIELD(pullbackP1LookaheadMs, "pullback_p1_lookahead_ms"),
+    CONFIG_FIELD(pullbackP2LookaheadMs, "pullback_p2_lookahead_ms"),
+    CONFIG_FIELD(pullbackTorqueLookaheadMs, "pullback_torque_lookahead_ms"),
+    CONFIG_FIELD(pullbackN1Strength, "pullback_n1_strength"),
+    CONFIG_FIELD(pullbackN2Strength, "pullback_n2_strength"),
+    CONFIG_FIELD(pullbackEgtStrength, "pullback_egt_strength"),
+    CONFIG_FIELD(pullbackP1Strength, "pullback_p1_strength"),
+    CONFIG_FIELD(pullbackP2Strength, "pullback_p2_strength"),
+    CONFIG_FIELD(pullbackTorqueStrength, "pullback_torque_strength"),
 };
-const ConfigField<int> THROTTLE_INT_FIELDS[] = {CONFIG_FIELD(rpmLimiterMode, "rpm_limiter_mode")};
+const ConfigField<int> THROTTLE_INT_FIELDS[] = {
+    CONFIG_FIELD(pullbackN1Mode, "pullback_n1_mode"), CONFIG_FIELD(pullbackN2Mode, "pullback_n2_mode"),
+    CONFIG_FIELD(pullbackEgtMode, "pullback_egt_mode"), CONFIG_FIELD(pullbackP1Mode, "pullback_p1_mode"),
+    CONFIG_FIELD(pullbackP2Mode, "pullback_p2_mode"), CONFIG_FIELD(pullbackTorqueMode, "pullback_torque_mode")
+};
 const ConfigField<bool> THROTTLE_BOOL_FIELDS[] = {
     CONFIG_FIELD(pullbackN1Enabled, "pullback_n1"), CONFIG_FIELD(pullbackN2Enabled, "pullback_n2"),
     CONFIG_FIELD(pullbackEgtEnabled, "pullback_egt"), CONFIG_FIELD(pullbackP1Enabled, "pullback_p1"),
@@ -104,7 +119,8 @@ const ConfigField<float> SAFETY_FLOAT_FIELDS[] = {
 const ConfigField<int> SAFETY_INT_FIELDS[] = {
     CONFIG_FIELD(safetyCheckIntervalMs, "check_interval_ms"),
     CONFIG_FIELD(egtSource, "egt_source"), CONFIG_FIELD(flameoutSource, "flameout_source"),
-    CONFIG_FIELD(pressureTorqueTripConfirmMs, "pressure_torque_trip_confirm_ms"),
+    CONFIG_FIELD(p1TripConfirmMs, "p1_trip_confirm_ms"), CONFIG_FIELD(p2TripConfirmMs, "p2_trip_confirm_ms"),
+    CONFIG_FIELD(torqueTripConfirmMs, "torque_trip_confirm_ms"),
 };
 const ConfigField<uint32_t> SAFETY_U32_FIELDS[] = {
     CONFIG_FIELD(lowOilConfirmMs, "low_oil_confirm_ms"),
@@ -282,7 +298,6 @@ const ConfigField<float> OIL_ADVANCED_FLOAT_FIELDS[] = {
     CONFIG_FIELD(oilZeroBar, "zero_bar"), CONFIG_FIELD(oilPressureDeadband, "deadband_bar"),
 };
 const ConfigField<uint32_t> OIL_ADVANCED_U32_FIELDS[] = {
-    CONFIG_FIELD(oilPumpOvercurrentDelayMs, "pump_overcurrent_delay_ms"),
     CONFIG_FIELD(oilPumpUnderflowDelayMs, "pump_underflow_delay_ms"),
 };
 const ConfigField<bool> OIL_ADVANCED_BOOL_FIELDS[] = {
@@ -464,10 +479,16 @@ void Config::_applyDefaults() {
     pullbackEgtSoftC = 700.0f; pullbackEgtHardC = 750.0f;
     pullbackP1Soft = pullbackP1Hard = pullbackP2Soft = pullbackP2Hard = 0.0f;
     pullbackTorqueSoft = pullbackTorqueHard = 0.0f;
-    p1TripLimit = p2TripLimit = torqueTripLimit = 0.0f; pressureTorqueTripConfirmMs = 250;
-    pullbackMinThrottlePct = 8.0f; pullbackStrength = 1.0f;
-    rpmLimiterMode = 0; pullbackLookaheadMs = 1500.0f; pullbackNearLimitRampUpMs = 4000.0f;
+    p1TripLimit = p2TripLimit = torqueTripLimit = 0.0f;
+    p1TripConfirmMs = p2TripConfirmMs = torqueTripConfirmMs = 250;
+    pullbackMinThrottlePct = 8.0f; pullbackNearLimitRampUpMs = 4000.0f;
     pullbackApproachZoneRpm = 0.0f; rpmAccelFilter = 0.20f;
+    pullbackN1Mode = pullbackN2Mode = pullbackEgtMode = 0;
+    pullbackP1Mode = pullbackP2Mode = pullbackTorqueMode = 0;
+    pullbackN1LookaheadMs = pullbackN2LookaheadMs = pullbackEgtLookaheadMs = 1500.0f;
+    pullbackP1LookaheadMs = pullbackP2LookaheadMs = pullbackTorqueLookaheadMs = 1500.0f;
+    pullbackN1Strength = pullbackN2Strength = pullbackEgtStrength = 1.0f;
+    pullbackP1Strength = pullbackP2Strength = pullbackTorqueStrength = 1.0f;
     idleTargetRpm = 44000; idleRampUpMs = 10000; idleRampDownMs = 20000;
     idleDeadbandRpm = 300; idleRpmLimit = 60000; idleMaxMultiplier = 1.50f;
     idleUseN2 = ConfigInternal::idleUseN2Default; idleIGain = 0.0f; idleIMax = 0.10f;
@@ -499,7 +520,7 @@ void Config::_applyDefaults() {
     strcpy(uiTheme, "carbon");
     starterAssistEnabled = false; starterAssistPwmPct = 15.0f; starterAssistUntilRpm = 1000.0f;
     starterAssistOnMs = 500; starterAssistOffMs = 250; starterStartupRampPctPerSec = 10.0f;
-    oilZeroBar = 0.1f; oilPressureDeadband = 0.2f; oilPumpOvercurrentDelayMs = 5000;
+    oilZeroBar = 0.1f; oilPressureDeadband = 0.2f;
     oilPumpUnderflowDelayMs = 5000; shutdownOnOilUnderflow = false;
     standbyOilSource = 0; standbyOilRpmLimit = 1000.0f; standbyOilFeedPct = 25.0f;
     standbyOilFeedBar = 0.0f;
@@ -797,7 +818,6 @@ void Config::_fromDoc(const JsonDocument& doc) {
     if (oilAdjustScale < 0.0f) oilAdjustScale = 0.0f;
     if (oilZeroBar < 0.0f) oilZeroBar = 0.0f;
     if (oilPressureDeadband < 0.0f) oilPressureDeadband = 0.0f;
-    oilPumpOvercurrentDelayMs = constrain(oilPumpOvercurrentDelayMs, 100UL, 60000UL);
     oilPumpUnderflowDelayMs = constrain(oilPumpUnderflowDelayMs, 100UL, 60000UL);
     if (safetyCheckIntervalMs < 10) safetyCheckIntervalMs = 10;
     if (safetyCheckIntervalMs > 250) safetyCheckIntervalMs = 250;
@@ -858,10 +878,10 @@ void Config::_fromDoc(const JsonDocument& doc) {
     standbyOilSource = constrain(standbyOilSource, 0, 2);
     manualRelightIgnitionTarget = constrain(manualRelightIgnitionTarget, 0, 2);
     for (int i = 0; i < ruleCount; i++) {
-        if (rules[i].sensor > RulesEngine::THRUST &&
+        if (rules[i].kind != 3 && rules[i].sensor > RulesEngine::THRUST &&
             !ChannelRegistry::isInputSensor(rules[i].sensor))
             rules[i].enabled = false;
-        rules[i].kind = constrain(rules[i].kind, 0, 2);
+        rules[i].kind = constrain(rules[i].kind, 0, 3);
         rules[i].op = constrain(rules[i].op, 0, 1);
         if (rules[i].actuator > 17 && !ChannelRegistry::isOutputActuator(rules[i].actuator))
             rules[i].enabled = false;
@@ -948,14 +968,28 @@ void Config::_fromDoc(const JsonDocument& doc) {
     p1TripLimit = constrain(p1TripLimit, 0.0f, 1000.0f);
     p2TripLimit = constrain(p2TripLimit, 0.0f, 1000.0f);
     torqueTripLimit = constrain(torqueTripLimit, 0.0f, 1000000.0f);
-    pressureTorqueTripConfirmMs = constrain(pressureTorqueTripConfirmMs, 0, 60000);
+    p1TripConfirmMs = constrain(p1TripConfirmMs, 0, 60000);
+    p2TripConfirmMs = constrain(p2TripConfirmMs, 0, 60000);
+    torqueTripConfirmMs = constrain(torqueTripConfirmMs, 0, 60000);
     pullbackMinThrottlePct = constrain(pullbackMinThrottlePct, 0.0f, 100.0f);
-    pullbackStrength = constrain(pullbackStrength, 0.0f, 5.0f);
-    rpmLimiterMode = constrain(rpmLimiterMode, 0, 1);
-    pullbackLookaheadMs = constrain(pullbackLookaheadMs, 0.0f, 5000.0f);
     pullbackNearLimitRampUpMs = constrain(pullbackNearLimitRampUpMs, 0.0f, 20000.0f);
     if (pullbackApproachZoneRpm < 0.0f) pullbackApproachZoneRpm = 0.0f;
     rpmAccelFilter = constrain(rpmAccelFilter, 0.02f, 1.0f);
+    pullbackN1Mode = constrain(pullbackN1Mode, 0, 1); pullbackN2Mode = constrain(pullbackN2Mode, 0, 1);
+    pullbackEgtMode = constrain(pullbackEgtMode, 0, 1); pullbackP1Mode = constrain(pullbackP1Mode, 0, 1);
+    pullbackP2Mode = constrain(pullbackP2Mode, 0, 1); pullbackTorqueMode = constrain(pullbackTorqueMode, 0, 1);
+    pullbackN1LookaheadMs = constrain(pullbackN1LookaheadMs, 0.0f, 5000.0f);
+    pullbackN2LookaheadMs = constrain(pullbackN2LookaheadMs, 0.0f, 5000.0f);
+    pullbackEgtLookaheadMs = constrain(pullbackEgtLookaheadMs, 0.0f, 5000.0f);
+    pullbackP1LookaheadMs = constrain(pullbackP1LookaheadMs, 0.0f, 5000.0f);
+    pullbackP2LookaheadMs = constrain(pullbackP2LookaheadMs, 0.0f, 5000.0f);
+    pullbackTorqueLookaheadMs = constrain(pullbackTorqueLookaheadMs, 0.0f, 5000.0f);
+    pullbackN1Strength = constrain(pullbackN1Strength, 0.0f, 5.0f);
+    pullbackN2Strength = constrain(pullbackN2Strength, 0.0f, 5.0f);
+    pullbackEgtStrength = constrain(pullbackEgtStrength, 0.0f, 5.0f);
+    pullbackP1Strength = constrain(pullbackP1Strength, 0.0f, 5.0f);
+    pullbackP2Strength = constrain(pullbackP2Strength, 0.0f, 5.0f);
+    pullbackTorqueStrength = constrain(pullbackTorqueStrength, 0.0f, 5.0f);
     if (idleTargetRpm < 0.0f) idleTargetRpm = 0.0f;
     if (idleDeadbandRpm < 0.0f) idleDeadbandRpm = 0.0f;
     if (idleRpmLimit < 0.0f) idleRpmLimit = 0.0f;

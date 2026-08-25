@@ -91,13 +91,22 @@ def main() -> int:
         time.sleep(0.35)
         main_during_delay = tester.get("OILPUMP_OUT")
         scav_during_delay = tester.get("STARTER_EN")
-        phase_ok, phase = dut.poll_until(
-            lambda d: d.get("mode") == "SHUTDOWN" and d.get("oil_scavenge_on")
-                      and float(d.get("oil_pct") or 0) < 0.05,
-            timeout=2.0, interval=0.02,
-        )
-        main_during_scavenge = tester.get("OILPUMP_OUT")
-        scav_active = tester.get("STARTER_EN")
+        # Scavenge state is not in every compact telemetry frame. Capture the
+        # deliberately short overrun at the independent pins, then take one
+        # coherent full snapshot for diagnostics.
+        phase_ok = False
+        phase = {}
+        main_during_scavenge = {}
+        scav_active = {}
+        deadline = time.monotonic() + 2.2
+        while time.monotonic() < deadline:
+            main_during_scavenge = tester.get("OILPUMP_OUT")
+            scav_active = tester.get("STARTER_EN")
+            if (float(main_during_scavenge.get("duty") or 0) < 0.05 and
+                    int(scav_active.get("level") or 0) == 1):
+                phase_ok = True
+                phase = dut.full_data()
+                break
         standby, stopped = dut.poll_until(
             lambda d: d.get("mode") == "STANDBY", timeout=3.0, interval=0.02,
         )
@@ -161,8 +170,8 @@ def main() -> int:
         start_running()
         dut.stop()
         active, active_data = dut.poll_until(
-            lambda d: d.get("mode") == "SHUTDOWN" and d.get("current_block") == "TimedDelay"
-                      and d.get("oil_scavenge_on"),
+            lambda d: d.get("mode") == "SHUTDOWN" and
+                      d.get("current_block") == "TimedDelay",
             timeout=2.0, interval=0.02,
         )
         physical_active = tester.get("STARTER_EN")
@@ -175,7 +184,7 @@ def main() -> int:
         tester.set("STOP", 0)
         immediate_off = tester.get("STARTER_EN")
         time.sleep(5.4)
-        later = dut.data()
+        later = dut.full_data()
         later_output = tester.get("STARTER_EN")
         record(
             "COOLDOWN_OVERRIDE_CANCELS_UNMATCHED_SCAVENGE_SEQUENCE",

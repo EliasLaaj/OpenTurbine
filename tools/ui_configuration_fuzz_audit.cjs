@@ -166,7 +166,9 @@ function selected(registry, direction, purpose) {
       settings.profile_id = hardware.profile_id;
       settings.relight.enabled = random()<.45;
       settings.safety.shutdown_on_underflow = random()<.5;
-      settings.throttle.rpm_limiter_mode = random()<.5 ? 0 : 1;
+      settings.throttle.pullback_n1_mode = random()<.5 ? 0 : 1;
+      settings.throttle.pullback_n2_mode = random()<.5 ? 0 : 1;
+      settings.throttle.pullback_egt_mode = random()<.5 ? 0 : 1;
       const save = await page.request.post(`${base}/api/ecu_config`, {data:{hardware,settings}});
       assert.equal(save.ok(), true, `seed ${seed} profile save`);
       await page.request.post(`${base}/__sim/data`, {data:{

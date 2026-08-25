@@ -52,14 +52,14 @@ public:
     float torqueSoftLimit   = 0.0f;
     float torqueHardLimit   = 0.0f;
     float minPullbackThrottle = 0.08f;
-    float pullbackStrength  = 1.0f;
-
-    // ── Advanced (predictive) RPM-limiter mode ────────────────
-    // Simple (0) leaves every value below unused → identical behaviour.
-    int   rpmLimiterMode            = 0;       // 0 = simple (reactive), 1 = advanced (predictive)
-    float pullbackLookaheadMs       = 1500.0f; // project RPM this far ahead from accel
+    // ── Advanced per-source predictive limiter behavior ──────
     float pullbackNearLimitRampUpMs = 4000.0f; // slower throttle-open ramp near the limit (≈25 %/s)
     float pullbackApproachZoneRpm   = 0.0f;    // RPM band below soft limit where softening begins (assigned in Hardware.h; 0 = auto)
+    int n1Mode=0, n2Mode=0, egtMode=0, p1Mode=0, p2Mode=0, torqueMode=0;
+    float n1LookaheadMs=1500.0f, n2LookaheadMs=1500.0f, egtLookaheadMs=1500.0f;
+    float p1LookaheadMs=1500.0f, p2LookaheadMs=1500.0f, torqueLookaheadMs=1500.0f;
+    float n1Strength=1.0f, n2Strength=1.0f, egtStrength=1.0f;
+    float p1Strength=1.0f, p2Strength=1.0f, torqueStrength=1.0f;
 
     void begin() override {
         // Carry forward the current throttle demand so the physical actuator
@@ -103,14 +103,14 @@ public:
         // Guard: rpmHardLimit must be strictly above rpmSoftLimit — equal limits
         // would cause division by zero and NaN throttle demand.
         const float unrestrictedTarget = target;
-        auto applyPullback = [&](float value, float soft, float hard) {
+        auto applyPullback = [&](float value, float soft, float hard, float sourceStrength) {
             if (hard <= soft || value <= soft) return;
             float over = constrain((value - soft) / (hard - soft), 0.0f, 1.0f);
             float floor = constrain(minPullbackThrottle, 0.0f, unrestrictedTarget);
             // All sources use the same predictable authority: at the configured
             // full-reduction point, strength 1.0 reaches the user-set floor.
             // Lower strength is gentler; greater than 1 reaches the floor sooner.
-            const float reduction = (unrestrictedTarget - floor) * over * pullbackStrength;
+            const float reduction = (unrestrictedTarget - floor) * over * sourceStrength;
             const float ceiling =
                 constrain(unrestrictedTarget - reduction, floor, unrestrictedTarget);
             target = fminf(target, ceiling); // the most restrictive active limiter wins
@@ -149,14 +149,13 @@ public:
                          _p2SeenSeq, _p2LastMs, _lastP2, _p2Rate);
         updateSampleRate(ed.torque, ed.torqueSampleSeq, ed.torqueSampleMs, ed.torqueHealthy,
                          _torqueSeenSeq, _torqueLastMs, _lastTorque, _torqueRate);
-        if (rpmLimiterMode == 1) {
-            const float horizon = pullbackLookaheadMs * 0.001f;
-            n1val = ed.n1Rpm + fmaxf(0.0f, ed.n1RpmAccel) * horizon;   // only anticipate a rising shaft
-            n2val = ed.n2Rpm + fmaxf(0.0f, ed.n2RpmAccel) * horizon;
-            p1val = ed.p1 + fmaxf(0.0f, _p1Rate) * horizon;
-            p2val = ed.p2 + fmaxf(0.0f, _p2Rate) * horizon;
-            torqueVal = ed.torque + fmaxf(0.0f, _torqueRate) * horizon;
-            egtVal = Config::primaryEgtC(ed) + fmaxf(0.0f, ed.totRiseRate) * horizon;
+        if (n1Mode == 1) n1val = ed.n1Rpm + fmaxf(0.0f, ed.n1RpmAccel) * n1LookaheadMs * 0.001f;
+        if (n2Mode == 1) n2val = ed.n2Rpm + fmaxf(0.0f, ed.n2RpmAccel) * n2LookaheadMs * 0.001f;
+        if (p1Mode == 1) p1val = ed.p1 + fmaxf(0.0f, _p1Rate) * p1LookaheadMs * 0.001f;
+        if (p2Mode == 1) p2val = ed.p2 + fmaxf(0.0f, _p2Rate) * p2LookaheadMs * 0.001f;
+        if (torqueMode == 1) torqueVal = ed.torque + fmaxf(0.0f, _torqueRate) * torqueLookaheadMs * 0.001f;
+        if (egtMode == 1) egtVal = Config::primaryEgtC(ed) + fmaxf(0.0f, ed.totRiseRate) * egtLookaheadMs * 0.001f;
+        if (n1Mode == 1) {
             if (ed.n1Healthy && pullbackApproachZoneRpm > 0.0f) {
                 const float approachStart = rpmSoftLimit - pullbackApproachZoneRpm;
                 if (n1val > approachStart) {
@@ -165,14 +164,14 @@ public:
                 }
             }
         }
-        if (n1PullbackEnabled && ed.n1Healthy) applyPullback(n1val, rpmSoftLimit, rpmHardLimit);
-        if (n2PullbackEnabled && ed.n2Healthy) applyPullback(n2val, n2SoftLimit, n2HardLimit);
+        if (n1PullbackEnabled && ed.n1Healthy) applyPullback(n1val, rpmSoftLimit, rpmHardLimit, n1Strength);
+        if (n2PullbackEnabled && ed.n2Healthy) applyPullback(n2val, n2SoftLimit, n2HardLimit, n2Strength);
         if (egtPullbackEnabled && Config::primaryEgtHealthy(ed)) {
-            applyPullback(egtVal, totSoftLimit, totHardLimit);
+            applyPullback(egtVal, totSoftLimit, totHardLimit, egtStrength);
         }
-        if (p1PullbackEnabled && ed.p1Healthy) applyPullback(p1val, p1SoftLimit, p1HardLimit);
-        if (p2PullbackEnabled && ed.p2Healthy) applyPullback(p2val, p2SoftLimit, p2HardLimit);
-        if (torquePullbackEnabled && ed.torqueHealthy) applyPullback(torqueVal, torqueSoftLimit, torqueHardLimit);
+        if (p1PullbackEnabled && ed.p1Healthy) applyPullback(p1val, p1SoftLimit, p1HardLimit, p1Strength);
+        if (p2PullbackEnabled && ed.p2Healthy) applyPullback(p2val, p2SoftLimit, p2HardLimit, p2Strength);
+        if (torquePullbackEnabled && ed.torqueHealthy) applyPullback(torqueVal, torqueSoftLimit, torqueHardLimit, torqueStrength);
         if (target + 0.0001f < unrestrictedTarget) protectionActive = true;
 
         // Guard: if rampMs is 0 (instant) or dt is 0 (same-millisecond tick),

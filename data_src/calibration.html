@@ -7,18 +7,18 @@
 <title>OpenTurbine — Calibration</title>
 <style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260816q',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260816q');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260824a',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260824a');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
 </head>
 <body>
 <nav>
   <a href="/" title="Live dashboard, start/stop controls, mode, faults, and fitted sensor cards.">Dashboard</a>
   <a href="/hardware.html" title="Choose fitted sensors, actuators, GPIO pins, Wi-Fi, and hardware safety enables.">Hardware</a>
   <a href="/controllers.html" title="Choose what controls each output and configure related safety limits.">Controllers</a>
-  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <a href="/calibration.html" class="active" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
   <a href="/tools.html" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
+  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <span id="conn" class="conn-dot disconnected"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
 <main>
@@ -45,20 +45,20 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     <div id="thrust-loadcell-wizard"></div>
   </div>
 
-  <!-- Minimum reliable fuel-pump output calibration -->
+  <!-- Minimum reliable main-fuel-metering output calibration -->
   <div class="sensor-row" id="fuelpump-min-cal-row">
-    <div class="sensor-name">Minimum Reliable Fuel-Pump Output</div>
+    <div class="sensor-name">Minimum Reliable Fuel-Metering Output</div>
     <div class="wizard" id="fuelpump-min-tools">
-      <div class="wizard-title">Find the lowest output that starts the pump reliably</div>
+      <div class="wizard-title">Find the lowest output that meters fuel reliably</div>
       <div class="wizard-steps">
-        ⚠ In STANDBY with ignition disabled, route fuel safely back to the tank or use a dry line. Click <b>Start sweep</b>; output rises by 0.25% every 0.25 seconds. As soon as the pump turns, click <b>Pump started — stop</b>. Fine-adjust if needed, run the three-cycle restart test, then save the lowest value that starts reliably. Leave 0% only when the pump does not need a minimum starting output.
+        ⚠ In STANDBY with ignition disabled, route fuel safely back to the tank or use a dry line. Click <b>Start sweep</b>; output rises by 0.25% every 0.25 seconds. As soon as the pump turns or the valve begins metering repeatably, click <b>Metering started — stop</b>. Fine-adjust if needed, run the three-cycle restart test, then save the lowest repeatable value. Leave 0% when the metering device does not need a nonzero starting output.
       </div>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.5rem 0">
-        <span style="font-size:.78rem;color:var(--dim)">Pump %</span>
+        <span style="font-size:.78rem;color:var(--dim)">Metering %</span>
         <input type="range" id="fp-min-slider" min="0" max="40" step="0.25" value="0" style="flex:1;min-width:120px" oninput="fpMinSlide()">
         <span class="sv-val" id="fp-min-live" style="min-width:3.2rem">0.0%</span>
         <button id="btn-fp-sweep" onclick="fpMinSweepStart()">Start 1%/s sweep</button>
-        <button id="btn-fp-stop" onclick="fpMinStop(true)" class="danger" disabled>Pump started — stop</button>
+        <button id="btn-fp-stop" onclick="fpMinStop(true)" class="danger" disabled>Metering started — stop</button>
       </div>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.4rem">
         <button onclick="fpMinTest()" id="btn-fp-test">Test restart</button>
@@ -2385,8 +2385,8 @@ function renderLoadCellWizard(kind, channel) {
     <div class="wizard-title">${torque?'Torque':'Thrust'} Load Cell (NAU7802)</div>
     <div class="wizard-steps">1. Remove all load and capture zero.<br>2. Apply a trusted known load, enter it below, and save. OpenTurbine stores force internally in newtons.${torque?' Enter the perpendicular lever arm; torque is force × lever arm.':''}</div>
     <div style="display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin:.6rem 0">
-      <label>Known load <input id="${kind}-lc-known" type="number" min="0.000001" step="0.001" style="width:8rem"></label>
-      <label>Unit <select id="${kind}-lc-unit"><option value="N">N</option><option value="kg">kg mass</option><option value="g">grams</option><option value="kgf">kgf</option><option value="lbf">lbf</option></select></label>
+      <label>Known load <input id="${kind}-lc-known" title="Enter the trusted calibration load currently applied to the load cell." type="number" min="0.000001" step="0.001" style="width:8rem"></label>
+      <label>Unit <select id="${kind}-lc-unit" title="Choose the unit used for the known calibration load; it is converted to newtons internally."><option value="N">N</option><option value="kg">kg mass</option><option value="g">grams</option><option value="kgf">kgf</option><option value="lbf">lbf</option></select></label>
       ${torque?`<label>Lever arm (m) <input id="${kind}-lc-arm" type="number" min="0.000001" max="100" step="0.001" value="${Number(channel.lever_arm_m??1)}" style="width:7rem"></label>`:''}
     </div>
     <div class="wiz-buttons"><button onclick="captureLoadCellZero('${kind}')">Capture zero</button><button onclick="saveLoadCellKnown('${kind}')">Capture known load &amp; save</button></div>
@@ -2778,7 +2778,7 @@ function installCalibrationHelp() {
     'btn-fp-sweep':'Starts at 0% and increases by 1% per second. The ECU returns to zero if commands stop.',
     'btn-fp-stop':'Immediately commands 0% but keeps the discovered percentage for adjustment and saving.',
     'btn-fp-test':'Runs three candidate-percent restart cycles. Watch or listen and confirm all three starts.',
-    'btn-fp-min-save':'Stores this percentage as the minimum reliable fuel-pump output.',
+    'btn-fp-min-save':'Stores this percentage as the minimum reliable main-fuel-metering output.',
     'oil-zero-reference':'Gauge sensors read 0 bar at ambient pressure. Absolute sensors read local atmospheric pressure, approximately 1 bar.',
     'oil-fit-mode':'Automatic chooses the simpler straight-line model unless a curved fit is substantially better.',
     'oil-mv-bar':'Datasheet sensitivity measured at the ECU ADC pin, after any voltage divider or conditioning circuit.',

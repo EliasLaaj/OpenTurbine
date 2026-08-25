@@ -232,6 +232,8 @@ function setGlowCurrentEnabled(en) {
   if (!cfg.actuators) cfg.actuators = {};
   if (!cfg.actuators.glow_plug) cfg.actuators.glow_plug = {};
   cfg.actuators.glow_plug.has_current = en;   // independent of glow type (plain/wet)
+  const row = (registryRoot().outputs || []).find(c => registryCoreActuatorKey(c) === 'glow_plug');
+  if (row) row.has_current = !!en;
   setOptionalGroupVisible('grp-glowcurrent', en);
   refreshAllPins(); dirty();
 }
@@ -255,6 +257,8 @@ function setOilPumpCurrentEnabled(en) {
   if (!cfg.actuators) cfg.actuators = {};
   if (!cfg.actuators.oil_pump) cfg.actuators.oil_pump = {};
   cfg.actuators.oil_pump.has_current = en;
+  const row = (registryRoot().outputs || []).find(c => registryCoreActuatorKey(c) === 'oil_pump');
+  if (row) row.has_current = !!en;
   setOptionalGroupVisible('grp-oilpumpcurrent', en);
   refreshAllPins(); dirty();
 }
@@ -267,7 +271,10 @@ async function setActCurrentSensor(actKey, field, val) {
   const keyMap = { pin: 'current_pin', mv_a: 'current_mv_a',
                    zero_v: 'current_zero_v', max_a: 'current_max_a',
                    ready_a: 'current_ready_a' };
-  cfg.actuators[actKey][keyMap[field] || field] = val;
+  const key = keyMap[field] || field;
+  cfg.actuators[actKey][key] = val;
+  const row = (registryRoot().outputs || []).find(c => registryCoreActuatorKey(c) === actKey);
+  if (row && ['current_pin','current_mv_a','current_zero_v','current_max_a','current_trip_delay_ms'].includes(key)) row[key] = val;
   if (field === 'pin') refreshAllPins();
   dirty();
 }
@@ -275,6 +282,8 @@ function setIgniterCurrentEnabled(en) {
   if (!cfg.actuators) cfg.actuators = {};
   if (!cfg.actuators.igniter) cfg.actuators.igniter = {};
   cfg.actuators.igniter.has_current = en;
+  const row = (registryRoot().outputs || []).find(c => registryCoreActuatorKey(c) === 'igniter');
+  if (row) row.has_current = !!en;
   refreshAllPins(); dirty();
 }
 
@@ -298,6 +307,8 @@ function setIgniter2Mode(mode) {
   if (!cfg.actuators) cfg.actuators = {};
   if (!cfg.actuators.igniter2) cfg.actuators.igniter2 = {};
   cfg.actuators.igniter2.has_current = (mode === 'coil');
+  const row = (registryRoot().outputs || []).find(c => registryCoreActuatorKey(c) === 'igniter2');
+  if (row) row.has_current = mode === 'coil';
   refreshAllPins(); dirty();
   updateIgniter2ModeUI(mode);
 }

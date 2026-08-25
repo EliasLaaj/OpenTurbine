@@ -133,13 +133,13 @@ window.applyData = function(d) {
   // Dev Mode button label
 };
 window.applyData._configExtended = true;
-// app.js is injected by the shared DOMContentLoaded bootstrap. Its WebSocket
+// app.js is injected by the shared DOMContentLoaded bootstrap. Its compact
 // can deliver the first complete frame before this page-specific listener runs.
 // Replay the already merged snapshot immediately so mode locks, fitted-feature
 // visibility, and live badges are correct on the first rendered frame rather
 // than waiting for the next telemetry interval.
 if (typeof _lastData !== 'undefined' && _lastData) window.applyData(_lastData);
-// Controllers and System do not hold a WebSocket merely to learn the ECU mode.
+// Controllers and System do not hold a live telemetry stream merely to learn the ECU mode.
 // Prime the compact status state now; the shared 3 s status heartbeat keeps it
 // current while this page remains open.
 fetch('/api/status', { cache:'no-store' })
@@ -152,11 +152,6 @@ document.addEventListener('DOMContentLoaded', installConfigTelemetryExtension, {
 function applyDeveloperLiveFields() {
   const liveRun = runtimeMode === 'RUNNING' && runtimeDevMode;
   const activeMode = ['STARTUP','RUNNING','SHUTDOWN'].includes(runtimeMode);
-  const preset = document.getElementById('preset-sel');
-  if (preset) {
-    preset.disabled = activeMode;
-    preset.title = activeMode ? 'Stop the engine to apply a multi-field example.' : '';
-  }
   SCHEMA.forEach(section => section.fields.forEach(field => {
     const el = document.getElementById('cf-' + field.key);
     const wrap = el?.closest('.cfg-field');
@@ -264,7 +259,7 @@ function applyRcPwmVisibility() {
 // ── AB sections — show only when hasAfterburner ───────────────
 let hasAfterburnerCfg = false;
 function applyAbCfgVisibility() {
-  const ids = ['ab-cfg-section','ab-ign-section','ab-flame-section','ab-run-section'];
+  const ids = ['ab-ign-section','ab-flame-section','ab-run-section'];
   ids.forEach(id => {
     const sec = document.getElementById(id);
     if (sec) {
@@ -482,10 +477,6 @@ function applyHwConditions() {
   const oilPressFields = ['oil_rm','oil_zb','oil_tm','oil_mm','oil_mx','oil_as','oil_mp','oa_db','oil_fd','oil_fp'];
   oilPressFields.forEach(k =>
     ghostField(k, hasOilPress, 'Oil pressure sensor is not configured in Hardware. Enable an oil pressure sensor to unlock closed-loop oil pressure settings.'));
-  ghostField('oil_ocd', hasOilPump && hasOilPumpCurrent,
-    !hasOilPump
-      ? 'Oil pump output is not configured in Hardware.'
-      : 'Oil-pump current sensing is not enabled in Hardware. This shutdown delay has no current signal to monitor.');
   ghostField('oil_ufd', hasMonitoredOilFlow,
     'No pump has flow monitoring enabled with its matching flow-meter input in Hardware.');
   ghostField('oil_ufs', hasMonitoredOilFlow,
@@ -548,7 +539,7 @@ function applyHwConditions() {
   ghostSelectOption('eg_src', 1, hasTot, 'TOT sensor is not configured in Hardware.');
   ghostSelectOption('eg_src', 2, hasTit, 'TIT sensor is not configured in Hardware.');
   ghostField('tot_limit', usesTotEgt, usesTitEgt ? 'TIT is selected as primary EGT; TIT Limit is used instead.' : 'TOT sensor is not configured in Hardware.');
-  ['tot_safe_margin','tot_cooldown_target'].forEach(k =>
+  ['tot_safe_margin'].forEach(k =>
     ghostField(k, hasEgt, 'Selected EGT safety requires a configured TOT or TIT sensor.'));
   ghostField('sf_hs', hasEgt, 'Hot-start protection requires a configured TOT or TIT sensor.');
   ghostField('sf_st', hasEgt, 'The startup EGT hard limit requires a configured TOT or TIT sensor.');
@@ -565,39 +556,49 @@ function applyHwConditions() {
   // Fuel response shaping and gradual protection are automatic whenever the
   // main-fuel output exists; users configure the behavior here without a
   // second internal-controller enable.
-  ghostField('th_ru', hasThrottleOut, 'Main fuel pump / metering output is not configured in Hardware.');
-  ghostField('th_rd', hasThrottleOut, 'Main fuel pump / metering output is not configured in Hardware.');
-  ghostField('th_mx', hasThrottleOut, 'Main fuel pump / metering output is not configured in Hardware.');
+  ghostField('th_ru', hasThrottleOut, 'Main fuel metering output is not configured in Hardware.');
+  ghostField('th_rd', hasThrottleOut, 'Main fuel metering output is not configured in Hardware.');
+  ghostField('th_mx', hasThrottleOut, 'Main fuel metering output is not configured in Hardware.');
   ghostField('th_ex', hasThrottleOut && hasThrottleInput,
     !hasThrottleOut
-      ? 'Main fuel pump / metering output is not configured in Hardware.'
+      ? 'Main fuel metering output is not configured in Hardware.'
       : 'Low-throttle sensitivity only applies to a physical throttle input configured in Hardware.');
   const hasN1Pb = hasRegistryInput('n1_speed');
   const hasEgtPb = hasRegistryInput('tot', 'tit');
-  ['pb_n1e','pb_n1s','pb_n1h'].forEach(k =>
+  ['pb_n1e','pb_n1s','pb_n1h','pb_n1m','pb_n1l','pb_n1str','rl_ramp','rl_zone','rl_acc'].forEach(k =>
     ghostField(k, hasThrottleOut && hasN1Pb,
       !hasN1Pb ? 'N1 pullback requires an N1 RPM sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_n2e','pb_n2s','pb_n2h'].forEach(k =>
+  ['pb_n2e','pb_n2s','pb_n2h','pb_n2m','pb_n2l','pb_n2str'].forEach(k =>
     ghostField(k, hasThrottleOut && hasN2,
       !hasN2 ? 'N2 pullback requires an N2 RPM sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_egte','pb_egts','pb_egth'].forEach(k =>
+  ['pb_egte','pb_egts','pb_egth','pb_egtm','pb_egtl','pb_egtstr'].forEach(k =>
     ghostField(k, hasThrottleOut && hasEgtPb,
       !hasEgtPb ? 'EGT pullback requires a TOT or TIT sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_p1e','pb_p1s','pb_p1h'].forEach(k =>
+  ['pb_p1e','pb_p1s','pb_p1h','pb_p1m','pb_p1l','pb_p1str'].forEach(k =>
     ghostField(k, hasThrottleOut && hasP1,
       !hasP1 ? 'P1 pullback requires a P1 pressure sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_p2e','pb_p2s','pb_p2h'].forEach(k =>
+  ['pb_p2e','pb_p2s','pb_p2h','pb_p2m','pb_p2l','pb_p2str'].forEach(k =>
     ghostField(k, hasThrottleOut && hasP2,
       !hasP2 ? 'P2 pullback requires a P2 pressure sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_tqe','pb_tqs','pb_tqh'].forEach(k =>
+  ['pb_tqe','pb_tqs','pb_tqh','pb_tqm','pb_tql','pb_tqstr'].forEach(k =>
     ghostField(k, hasThrottleOut && hasTorque,
       !hasTorque ? 'Torque pullback requires a shaft-torque sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
   const hasAnyPullbackSource = hasN1Pb || hasN2 || hasEgtPb || hasP1 || hasP2 || hasTorque;
-  ['pb_min','pb_str'].forEach(k =>
+  ['pb_min'].forEach(k =>
     ghostField(k, hasThrottleOut && hasAnyPullbackSource,
       !hasAnyPullbackSource ? 'Pullback floor has no effect until an N1, N2, TOT, TIT, P1, P2, or torque sensor is configured in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ghostField('rl_mode', hasThrottleOut && (hasN1Pb || hasN2),
-    !(hasN1Pb || hasN2) ? 'RPM limiter mode requires an N1 or N2 RPM sensor in Hardware.' : 'Main fuel output is not configured in Hardware.');
+  const configurePullbackVisibility = (enableKey, modeKey, normalKeys, predictiveKeys) => {
+    const enabled = !!document.getElementById('cf-' + enableKey)?.checked;
+    const predictive = Number(document.getElementById('cf-' + modeKey)?.value || 0) === 1;
+    normalKeys.forEach(key => setCfgFieldHardHidden(key, !enabled));
+    predictiveKeys.forEach(key => setCfgFieldHardHidden(key, !enabled || !predictive));
+  };
+  configurePullbackVisibility('pb_n1e','pb_n1m',['pb_n1s','pb_n1h','pb_n1m','pb_n1str'],['pb_n1l','rl_ramp','rl_zone','rl_acc']);
+  configurePullbackVisibility('pb_n2e','pb_n2m',['pb_n2s','pb_n2h','pb_n2m','pb_n2str'],['pb_n2l']);
+  configurePullbackVisibility('pb_egte','pb_egtm',['pb_egts','pb_egth','pb_egtm','pb_egtstr'],['pb_egtl']);
+  configurePullbackVisibility('pb_p1e','pb_p1m',['pb_p1s','pb_p1h','pb_p1m','pb_p1str'],['pb_p1l']);
+  configurePullbackVisibility('pb_p2e','pb_p2m',['pb_p2s','pb_p2h','pb_p2m','pb_p2str'],['pb_p2l']);
+  configurePullbackVisibility('pb_tqe','pb_tqm',['pb_tqs','pb_tqh','pb_tqm','pb_tqstr'],['pb_tql']);
   ghostField('lm_mt', hasThrottleOut, 'Reduced-power mode requires a throttle/fuel output.');
   const hasAnyIgnitionOutput = hasIgniter || hasIgniter2 || hasGlowPlug;
   ghostField('ms_is', hasAnyIgnitionOutput, 'Igniter-on-START requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
@@ -684,10 +685,11 @@ function applyHwConditions() {
   ghostField('sf_p1t', hasP1, 'P1 pressure sensor is not configured in Hardware. This hard shutdown limit does not apply.');
   ghostField('sf_p2t', hasP2, 'P2 pressure sensor is not configured in Hardware. This hard shutdown limit does not apply.');
   ghostField('sf_tqt', hasTorque, 'Shaft-torque sensor is not configured in Hardware. This hard shutdown limit does not apply.');
-  ghostField('sf_pt_d', hasP1 || hasP2 || hasTorque, 'Pressure / torque confirmation has no fitted P1, P2, or torque input to protect.');
+  ghostField('sf_p1d', hasP1, 'Pressure 1 hard-trip confirmation has no fitted Pressure 1 input.');
+  ghostField('sf_p2d', hasP2, 'Pressure 2 hard-trip confirmation has no fitted Pressure 2 input.');
+  ghostField('sf_tqd', hasTorque, 'Torque hard-trip confirmation has no fitted torque input.');
   ghostField('sf_lo_d', hasOilPress, 'Low-oil confirmation has no effect without an oil-pressure sensor.');
   ghostField('sf_oz_d', hasOilPress, 'Near-zero-oil confirmation has no effect without an oil-pressure sensor.');
-  ['rpm_limit','n2_rpm_limit','tot_limit','sf_tit','sf_p1t','sf_p2t','sf_tqt'].forEach(keepUnavailableFieldVisible);
   ghostField('cl_tw', hasEgt, 'Cluster EGT warning needs a fitted TOT or TIT sensor.');
   ghostField('cl_ow', hasOilPress, 'Cluster oil warning needs a fitted oil pressure sensor.');
 
@@ -748,8 +750,7 @@ function applyHwConditions() {
     ghostField(k, hasAbPump, 'AB fuel pump output is not configured in Hardware.'));
   // A lone igniter or flame sensor is not an operable afterburner. Apply this
   // last so individual dependency checks cannot accidentally unlock a field.
-  ['Afterburner — Ignition Conditions','Afterburner — Ignition Method',
-   'Afterburner — Flame Confirmation','Afterburner — Running'].forEach(title =>
+  ['Afterburner — Ignition Method','Afterburner — Flame Confirmation','Afterburner — Running'].forEach(title =>
     ghostSectionByTitle(title, hasAbFuelHardware,
       'Configure an afterburner fuel pump or fuel valve in Hardware before tuning afterburner operation.'));
 

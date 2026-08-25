@@ -343,10 +343,11 @@ expect('temperature safety defaults separate pre-start, startup, and flameout be
   configCpp.includes('standbyOilRpmLimit  = 1000.0f') &&
   configCpp.includes('prevHotStart') &&
   configCpp.includes('autofill:pre_start_egt_limit_c'));
-expect('gradual limiters share the visible floor-based authority model',
-  throttleSlew.includes('(unrestrictedTarget - floor) * over * pullbackStrength') &&
+expect('gradual limiters share the physical fuel floor but tune each feedback response independently',
+  throttleSlew.includes('(unrestrictedTarget - floor) * over * sourceStrength') &&
+  throttleSlew.includes('n1LookaheadMs') && throttleSlew.includes('egtLookaheadMs') &&
   !throttleSlew.includes('float authority') &&
-  configHtml.includes('Gradual Limit-Protection Method'));
+  configHtml.includes('N1 Reduction Method') && configHtml.includes('Temperature Reduction Method'));
 expect('afterburner EGT confirmation enforces its configured rise window',
   abFlameConfirm.includes('totRiseWindowMs > 0') &&
   abFlameConfirm.includes('elapsed >= (unsigned long)totRiseWindowMs') &&
@@ -386,9 +387,6 @@ expect('event log routes preserve specific downloads and reject malformed displa
 expect('windmilling oil setup warns when it cannot activate or command oil',
   configHtml.includes('windmilling oil protection can never activate') &&
   configHtml.includes('both zero; this protection would command no oil'));
-expect('large RC jet example is internally based on a 100000 RPM shaft',
-  configHtml.includes("desc: 'Large RC Jet ~400N+, approximately 100,000 RPM'") &&
-  configHtml.includes('rpm_limit: 100000') && configHtml.includes('pullback_n1_soft_rpm: 95000'));
 expect('dedicated temperature interfaces ignore irrelevant analog range fields',
   channelRegistry.includes('c.temperatureInterface != 0') &&
   channelRegistry.includes('return temperatureInterfaceValid(c)'));
@@ -433,11 +431,15 @@ expect('registry import enforces the browser purpose-role-driver contract',
   channelRegistry.includes('purposeRoleDriverValid(c.direction, c.purpose, c.role, c.driver)') &&
   channelRegistry.includes('if (!strcmp(purpose, "main_fuel")) return output("fuel", false, true, true, false)') &&
   channelRegistry.includes('!strcmp(purpose, "ab_flame")'));
-expect('mirrored canonical control and AB inputs cannot self-collide during pin validation',
+expect('repeatable safety switches retain independent pins and aggregate any-active with all-channel health',
   channelRegistry.includes('!strcmp(purpose, "ab_flame")') &&
   channelRegistry.includes('!strcmp(purpose, "ab_command")') &&
-  channelRegistry.includes('!strcmp(purpose, "start_switch") || !strcmp(purpose, "stop_switch")') &&
-  hwConfig.includes('if (registryMirrorsLegacyPin(ch)) continue') &&
+  channelRegistry.includes('if (!strcmp(purpose, "start_switch") || !strcmp(purpose, "stop_switch")') &&
+  main.includes('healthy = healthy && channelHealthy;') &&
+  main.includes('active = active || (channelHealthy && ed.registryInputValue[i] >= 0.5f);') &&
+  !read('data_src/pages/hardware-registry-view.js').includes("'start_switch','stop_switch','low_oil_switch','oil_zero_switch'") &&
+  hwConfig.includes('(!registryStop && !addPin(stopPin))') &&
+  !hwConfig.includes('if (canonicalControl) continue;') &&
   hwConfig.includes('if (!addPin(ch.pin)) return false'));
 expect('local digital flame detectors use GPIO rather than ADC-only validation',
   hwConfig.includes('localDigital ? gpioAllowed : adcGpioAllowed') &&
@@ -532,28 +534,88 @@ const pioHook = fs.readFileSync(path.join(root, 'tools', 'pio_s3_dynconfig.py'),
 expect('Tools polls compact live telemetry after loading its configuration and hardware documents',
   toolsHtml.includes("fetchJsonWithTimeout('/api/telemetry', 3000)") &&
   !toolsHtml.includes("fetchJsonWithTimeout('/api/data', 3000)"));
-expect('Classic and S3 browser telemetry use one compact persistent transport with REST fallback',
-  webApp.includes('_useWebSocketTelemetry = true;') &&
+expect('Classic and S3 browser telemetry use one compact persistent HTTP transport',
   webApp.includes("fetch('/api/telemetry'") &&
+  webApp.includes('return 500;') &&
+  !webApp.includes('new WebSocket(') &&
   !webApp.includes("info?.target !== 'esp32dev'"));
-expect('HTTP TIME_WAIT pressure relief is scoped to port 80 and quarantines fresh tuples',
+expect('runtime configuration heap pressure fails without rebooting the ECU',
+  main.includes('Config apply abandoned without reboot') &&
+  !main.includes('rebooting safely into persisted settings'));
+expect('mirrored outputs use an explicit stable source and retain independent electrical protection',
+  hardware.includes('if (c.mirrorOf[0])') &&
+  hardware.includes('sourceDemand(*source') &&
+  channelRegistry.includes('char mirrorOf[20]') &&
+  channelRegistry.includes('currentTripDelayMs'));
+expect('HTTP TIME_WAIT diagnostics never mutate live lwIP PCB state',
   web.includes('if (pcb->local_port == 80) ++count;') &&
-  web.includes('while (count >= 8)') &&
-  web.includes('oldestAge < MIN_REAP_AGE_TICKS') &&
-  web.includes('tcp_abort(oldest)') &&
-  web.includes('s_httpTimeWaitPcbs = count'));
-expect('HTTP completion leaves advertised close to the peer without ECU TIME_WAIT or browser resets',
-  pioHook.includes('Let the peer send FIN after') &&
-  pioHook.includes('retired by the peer or RX timeout') &&
+  web.includes('s_httpTimeWaitPcbs = count') &&
+  !web.includes('tcp_abort(oldest)') &&
+  !web.includes('MIN_REAP_AGE_TICKS'));
+expect('HTTP completion gracefully closes after queued response bytes are acknowledged',
+  pioHook.includes('AsyncTCP retains the PCB and retries') &&
+  pioHook.includes('_client->close();') &&
   !pioHook.includes('_client->abort();'));
-expect('WebSocket replacement never disconnects a client while the library client-list lock is held',
-  web.includes('if (client != s_activeWsClient) return;') &&
-  web.includes('The 250 ms cleanup in tick() safely reaps') &&
-  !web.includes('if (superseded) superseded->abort()'));
-expect('normal page navigation lets the browser close superseded WebSockets without filling lwIP TIME_WAIT',
-  web.includes('_ws.cleanupClients(4)') &&
-  web.includes('server-initiated TCP close') &&
-  !web.includes('_ws.cleanupClients(1)'));
+expect('graceful HTTP close is retried from poll when the final ACK cannot close lwIP yet',
+  pioHook.includes('No further ACK callback is guaranteed') &&
+  pioHook.includes('retry graceful close from the normal poll') &&
+  pioHook.includes('if (!_response->_finished())'));
+expect('AsyncTCP retries graceful close instead of aborting queued response bytes',
+  pioHook.includes('patch_asynctcp_graceful_close') &&
+  pioHook.includes('_bind_tcp_callbacks(pcb, msg->close)') &&
+  pioHook.includes('retry on a later ACK instead of truncating via abort()'));
+expect('cold browser asset streams use one MSS each to bound Classic peak heap',
+  pioHook.includes('patch_async_webserver_stream_buffer') &&
+  pioHook.includes('#define ASYNC_RESPONCE_BUFF_SIZE CONFIG_LWIP_TCP_MSS') &&
+  pioHook.includes('lowers first-page memory pressure'));
+expect('fixed-length streams drain their final pending chunk before graceful close',
+  pioHook.includes('patch_async_webserver_final_stream_flush') &&
+  pioHook.includes('Do not enter RESPONSE_END here') &&
+  pioHook.includes('next ACK drains'));
+expect('HTTP accept rejects low-memory requests without throwing through firmware',
+  pioHook.includes('new (std::nothrow) AsyncWebServerRequest') &&
+  pioHook.includes('#include <new>') &&
+  pioHook.includes('ESP.getFreeHeap() < 16384') &&
+  pioHook.includes('ESP.getMaxAllocHeap() < 4096'));
+expect('top-level HTTP response allocation fails closed instead of terminating on fragmented heap',
+  pioHook.includes('patch_async_webserver_responses') &&
+  pioHook.includes('new (std::nothrow) AsyncBasicResponse'));
+expect('HTTP requests retain only headers needed after parsing on the Classic heap',
+  pioHook.includes('patch_async_webserver_header_retention') &&
+  pioHook.includes('const bool retainHeader') &&
+  pioHook.includes('Sec-WebSocket-Key') &&
+  pioHook.includes('If-None-Match'));
+expect('protocol-owned HTTP response headers do not allocate STL nodes at send time',
+  pioHook.includes('patch_async_webserver_default_response_headers') &&
+  pioHook.includes('appendDefault(T_Connection, T_close)') &&
+  pioHook.includes('char contentLength[24]') &&
+  pioHook.includes('without allocating std::list nodes'));
+expect('Classic rejects unrelated HTTP work while an atomic config apply owns its candidate buffer',
+  web.includes('request->method() == HTTP_GET &&') &&
+  web.includes('(ConfigApplyGate::busy() || _maintenanceUploadInProgress() ||') &&
+  web.includes('AsyncBasicResponse builds several throwing STL header nodes'));
+expect('OTA releases live browser telemetry before streaming flash data',
+  web.includes('OTA is a maintenance takeover') &&
+  web.includes('_releaseLiveTelemetryWorkspace();'));
+expect('maintenance transactions release disposable compact telemetry state',
+  web.includes('static void _releaseLiveTelemetryWorkspace()') &&
+  web.includes('s_restTelemetryDoc.clear();') &&
+  web.includes('s_restTelemetryDoc.shrinkToFit();'));
+expect('config PATCH releases its large temporary JSON tree before allocating the response',
+  /ConfigApplyGate::publishCandidate\([\s\S]{0,700}current\.clear\(\);[\s\S]{0,200}current\.shrinkToFit\(\);[\s\S]{0,200}req->send\(200, "application\/json", active/.test(web));
+expect('settings saves retire disposable live telemetry before constructing full validation trees',
+  (web.match(/_releaseLiveTelemetryWorkspace\(\);/g) || []).length >= 4 &&
+  web.includes('handoff live instead of rebooting into the persisted file'));
+expect('live telemetry has no dead WebSocket transport or client ownership state',
+  !web.includes('AsyncWebSocket') &&
+  !web.includes('s_activeWsClient') &&
+  !web.includes('_sendTelemetryFrame') &&
+  !web.includes('_ws.cleanupClients'));
+expect('Classic live telemetry is a bounded complete REST document',
+  web.includes('static constexpr size_t COMPACT_TELEMETRY_MAX = 1400;') &&
+  web.includes('static size_t _buildCompactTelemetry(') &&
+  web.includes('measured > COMPACT_TELEMETRY_MAX') &&
+  web.includes('_sendOwnedJson(req, g_webTxBuf, n)'));
 expect('OTA success uses delayed guarded restart so its HTTP response can leave first',
   web.includes('_scheduleRestart("firmware OTA", 3000)') &&
   !web.includes('if (_otaPendingRestart) {\n        _restartCleanly("firmware OTA")'));
@@ -563,6 +625,14 @@ expect('active session logging buffers a bounded newest tail in RAM',
   sessionLogger.includes('_acceptRows = true;') &&
   sessionLogger.includes('if (!_acceptRows || !_rowQueue) return;') &&
   sessionLogger.includes('(_acceptRows || _startPending || _endPending || _open) ? "" : _currentPath'));
+expect('compact telemetry keeps live session-recorder state current',
+  web.includes('doc["session_dropped_rows"] = SessionLogger::droppedRows();') &&
+  web.includes('doc["session_queued_rows"] = SessionLogger::queuedRows();') &&
+  web.includes('doc["session_logger_healthy"] = SessionLogger::healthy();') &&
+  web.includes('doc["session_capture_active"] = SessionLogger::captureActive();') &&
+  web.includes('doc["session_log_path"] = SessionLogger::currentPath();'));
+expect('session logger reports an unavailable queue instead of pretending to record',
+  /void SessionLogger::startSession\(\) \{[\s\S]{0,300}if \(!_rowQueue\) \{[\s\S]{0,180}_healthy = false;[\s\S]{0,100}_errorCode = 1;/.test(sessionLogger));
 expect('flight recorder overflow preserves newest fault and shutdown evidence',
   flightRecorder.includes('s_drainActive') &&
   flightRecorder.includes('s_ringTail = (uint8_t)((s_ringTail + 1) % RING_SLOTS)') &&
@@ -606,7 +676,7 @@ expect('cooldown defaults agree at sixty seconds',
 expect('configuration warnings describe actual startup and cooldown ordering',
   configHtml.includes('later spool stage may already be satisfied') &&
   configHtml.includes('Startup may pass and then immediately fault') &&
-  configHtml.includes('Cooldown may complete immediately while the turbine is still hot'));
+  sequenceHtml.includes('Cooldown may complete immediately while the turbine is still hot'));
 expect('custom controllers disclose single ownership and safety authority',
   configHtml.includes('One normal owner per output') &&
   configHtml.includes('STOP, FAULT, and hardware safety remain authoritative'));
@@ -620,6 +690,11 @@ expect('custom controllers expose normal operating states but never FAULT owners
   configHtml.includes('Standby') && configHtml.includes('Startup') &&
   configHtml.includes('Running') && configHtml.includes('Shutdown') &&
   rulesEngine.includes('FAULT is never an automation state'));
+expect('built-in auxiliary requests remain authoritative beside optional user controllers',
+  configHtml.includes('Built-in turbine subsystems') &&
+  configHtml.includes('They do not prevent a separate normal output controller') &&
+  rulesEngine.includes('_usesAdditiveSubsystemAuthority') &&
+  rulesEngine.includes('demand = max(demand, baseDemand)'));
 expect('starter-enable output resolves as a supported custom on-off target',
   configCpp.includes('starter_enable_main') &&
   configCpp.includes('case 6:  return HardwareConfig::hasStarterEn'));
@@ -875,6 +950,10 @@ expect('physical-output activity follows the real core owner and accepts neutral
   outputActivity.includes('!strcmp(p, "bleed_valve") || !strcmp(c.id, "bleed_valve")') &&
   outputActivity.includes('demand >= parked - 0.001f && demand <= parked + 0.001f') &&
   outputActivity.includes('return index < ChannelRegistry::MAX_OUTPUT_CHANNELS'));
+expect('pitch park zero survives serialization and hardware-save restart handoff',
+  channelRegistry.includes('c.safeDemand != 0.0f || !strcmp(c.purpose, "prop_pitch")') &&
+  web.includes('float parkedPitch = HardwareConfig::hasPropPitch ? 1.0f : 0.0f') &&
+  web.includes('EngineData::instance().propPitchDemand = parkedPitch'));
 expect('firmware and Hardware UI enforce fixed-Off boot demand for core engine outputs',
   channelRegistry.includes('const bool fixedOffAtBoot') &&
   channelRegistry.includes('!fixedOffAtBoot || c.safeDemand == 0.0f') &&
@@ -887,7 +966,8 @@ expect('external conditioned AB flame mode is accepted from UI through runtime',
   configCpp.includes('if (abFlameMode < 0 || abFlameMode > 3)') &&
   abFlameConfirm.includes('case 3:'));
 expect('advanced controller selectors and tuning use the normal save-time range contract',
-  configCpp.includes('validInt(th["rpm_limiter_mode"], 0, 1)') &&
+  configCpp.includes('const char* limiterModes[]') &&
+  configCpp.includes('pullback_n1_mode') && configCpp.includes('pullback_egt_lookahead_ms') &&
   configCpp.includes('validNumber(th["rpm_accel_filter"], 0.02f, 1.0f)') &&
   configCpp.includes('validInt(di["idle_mode"], 0, 1)') &&
   configCpp.includes('validNumber(di["learn_rate"], 0.0f, 1.0f)') &&
@@ -1018,19 +1098,25 @@ expect('full telemetry defers without a conflict when the bounded response works
   webApp.includes('data?._snapshot_deferred') &&
   webApp.includes('loadDashboardSnapshot(attempt + 1)'));
 expect('low-heap request rejection uses the framework-safe abort path only on Classic',
-  web.includes('#if defined(OT_PLATFORM_ESP32)\n        if (ESP.getFreeHeap() < 24576') &&
+  web.includes('#if defined(OT_PLATFORM_ESP32)') &&
+  web.includes('request->method() == HTTP_GET &&') &&
+  web.includes('(ConfigApplyGate::busy() || _maintenanceUploadInProgress() ||') &&
+  web.includes('ESP.getFreeHeap() < 24576 || ESP.getMaxAllocHeap() < 8192)') &&
   (web.match(/request->abort\(\)/g) || []).length >= 1 &&
   web.includes('if (req->client()) req->abort();') &&
   !web.includes('req->client()->close()'));
-expect('S3 config reads use the bounded transfer workspace instead of a fragile second full copy',
-  web.includes('#if defined(OT_PLATFORM_ESP32S3)\n        _sendLargeReadJson(req, g_webTxBuf, n);\n#else\n        _sendOwnedJson(req, g_webTxBuf, n);'));
+expect('both targets use the bounded transfer workspace for large config reads',
+  web.includes('Settings can exceed 7 KB') &&
+  web.includes('_sendLargeReadJson(req, g_webTxBuf, n);') &&
+  !web.includes('#if defined(OT_PLATFORM_ESP32S3)\n        _sendLargeReadJson(req, g_webTxBuf, n);\n#else\n        _sendOwnedJson(req, g_webTxBuf, n);'));
 expect('completed bounded log views release their read gate before TCP keep-alive teardown',
   web.includes('The LittleFS read and response construction are complete.') &&
   (web.match(/_releaseLogRead\(req\);/g) || []).length >= 3);
-expect('session logging keeps proportional filesystem headroom on both flash sizes',
+expect('session logging keeps usable target-aware filesystem headroom',
   sessionLogger.includes('LittleFS.totalBytes() / 8U') &&
   sessionLogger.includes('SESSION_MIN_RESERVE_BYTES = 32 * 1024') &&
   sessionLogger.includes('SESSION_MAX_RESERVE_BYTES = 150 * 1024') &&
+  sessionLogger.includes('SESSION_MAX_RESERVE_BYTES = 48 * 1024') &&
   sessionLogger.includes('return min(SESSION_MAX_RESERVE_BYTES'));
 expect('idle event snapshots honor the disabled toggle in both STANDBY and FAULT and omit absent channels',
   flightRecorder.includes('ed.mode == SysMode::STANDBY || ed.mode == SysMode::FAULT') &&
@@ -1038,5 +1124,36 @@ expect('idle event snapshots honor the disabled toggle in both STANDBY and FAULT
   flightRecorder.includes('if (hw.hasN1Rpm)') &&
   flightRecorder.includes('if (hw.hasTot)') &&
   flightRecorder.includes('if (hw.hasThrottle)'));
+expect('Classic live telemetry stays within one transport response and rotates optional channels',
+  web.includes('static size_t _buildCompactTelemetry(') &&
+  web.includes('measured > COMPACT_TELEMETRY_MAX') &&
+  web.includes('const uint8_t thisGroup = group++ & 0x03u;') &&
+  web.includes('constexpr uint8_t CHANNELS_PER_FRAME = 3;') &&
+  web.includes('size_t n = _buildCompactTelemetry(\n            g_webTxBuf'));
+expect('dashboard compact telemetry has one in-flight request and a bounded timeout',
+  webApp.includes('if (!isLiveTelemetryPage() || document.hidden || _restFallbackInFlight) return;') &&
+  webApp.includes('const timeout = setTimeout(() => controller.abort(), 1800);') &&
+  webApp.includes("fetch('/api/telemetry'") &&
+  webApp.includes('_restFallbackInFlight = false;'));
+expect('normal dashboard and calibration telemetry use a uniform 2 Hz compact HTTP path',
+  webApp.includes('return 500;') &&
+  webApp.includes('const period = Math.max(500, desiredPullPeriodMs());') &&
+  webApp.includes('setInterval(restTelemetryFallbackNow, period);'));
+expect('web assets and JSON replies reuse bounded HTTP connections',
+  (web.match(/addHeader\("Connection", "keep-alive"\)/g) || []).length >= 3 &&
+  web.includes('addHeader("Keep-Alive", "timeout=15, max=64")') &&
+  web.includes('addHeader("Keep-Alive", "timeout=3, max=32")') &&
+  web.includes('resp->addHeader("Keep-Alive", "timeout=5, max=16")') &&
+  web.includes('TIME_WAIT PCB per page change'));
+expect('Hardware uses its sufficient one-hertz REST status path without competing websocket ownership',
+  hardwareState.includes("fetch('/api/telemetry'") &&
+  hardwareState.includes('setInterval(refreshHardwareStatus, 1000)') &&
+  !hardwareState.includes('new WebSocket('));
+expect('Sequence and Tools use compact REST telemetry without page-local websocket ownership',
+  sequenceRules !== undefined &&
+  read('data_src/pages/sequence-runtime.js').includes("fetch('/api/telemetry'") &&
+  !read('data_src/pages/sequence-runtime.js').includes('new WebSocket(') &&
+  toolsHtml.includes("fetchJsonWithTimeout('/api/telemetry', 3000)") &&
+  !toolsHtml.includes('new WebSocket('));
 
 console.log(`Safety regression audit passed (${checks.length} checks).`);

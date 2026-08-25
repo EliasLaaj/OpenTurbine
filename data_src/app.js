@@ -14,7 +14,7 @@ function plainRegistryName(raw, fallback = '') {
   const direct = {
     user_throttle:'Throttle Input', operator_throttle:'Throttle Input', operator_thrott:'Throttle Input', throttle_input:'Throttle Input',
     user_idle:'Idle Input', operator_idle:'Idle Input', idle_input:'Idle Input',
-    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Secondary / Auxiliary Fuel Pump', main_fuel:'Main Fuel Pump',
+    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Secondary / Auxiliary Fuel Pump', main_fuel:'Main Fuel Metering',
     fuel_shutoff:'Main Fuel Shutoff', fuel_sol:'Main Fuel Shutoff', flame:'Flame Sensor', flame_main:'Flame Sensor',
     coolant_pump:'Coolant Pump', coolant_temperature:'Coolant Temperature',
     pilot_fuel:'Start Fuel', purge_valve:'Purge Valve', air_starter:'Air Starter',
@@ -262,30 +262,14 @@ function drawSparkline(canvasId, data, color) {
   ctx.stroke();
 }
 
-// ── WebSocket live telemetry ──────────────────────────────────
-// Architecture: client-pull model.
-//
-// The server pushes telemetry in response to a tiny "p" message sent by the
-// client at the page-specific live interval.  This ensures the push runs inside the async_tcp task
-// context (WS_EVT_DATA callback) rather than from webTask — eliminating the
-// cross-task notification lag that caused 5-20 s burst-then-silence behaviour.
-//
-// setInterval at 333 ms is reliable for a visible foreground tab; if the tab
-// is backgrounded the rate drops to ~1 s which is acceptable for monitoring.
-let ws = null;
-// Both ESP32 targets use one compact WebSocket while a live page is open.
-// REST remains a timed fallback, but must not be the normal polling transport:
-// this server intentionally closes completed HTTP responses, and repeated
-// polling can exhaust lwIP's small connection pool during a long session.
-let _useWebSocketTelemetry = null;
+// ── Compact live telemetry ────────────────────────────────────
+// One bounded REST sample at 2 Hz is sufficient for the human-facing UI and
+// proved robust on Classic while the
+// user navigates. Browsers reuse the HTTP connection; only one request may be
+// in flight, and every response is a complete JSON document.
 let _lastMsgMs = 0;
-let _lastConnectMs = 0;
-let _pullTimer = null;
-let _pullPeriodMs = 0;
 let _restFallbackTimer = null;
 let _restFallbackInFlight = false;
-let _wsRequestInFlight = false;
-let _wsRequestSentMs = 0;
 let _lastUptimeS = null;
 let _lastBootCount = null;
 let _statusHeartbeatTimer = null;
@@ -293,7 +277,6 @@ let _staleTimer = null;
 let _telemetryStale = false;
 let _dashboardBootstrapTimer = null;
 let _dashboardBootstrapRetryTimer = null;
-let _connectTimer = null;
 
 function isLiveTelemetryPage() {
   if (document.body?.dataset?.page === 'dashboard') return true;
@@ -328,37 +311,19 @@ function hasPageLocalTelemetry() {
 function desiredPullPeriodMs() {
   if (!isLiveTelemetryPage()) return 2000;
   if (isConfigPage()) return 1000;
-  // Dashboard and Calibration are live-control pages.  Keep them at 3 Hz from
-  // the first load; slower background pages still use the 2 s period above.
-  return 333;
-}
-
-function startPullTimer() {
-  const period = desiredPullPeriodMs();
-  if (_pullTimer && _pullPeriodMs === period) return;
-  if (_pullTimer) clearInterval(_pullTimer);
-  _pullPeriodMs = period;
-  requestTelemetryNow();
-  _pullTimer = setInterval(requestTelemetryNow, period);
+  return 500;
 }
 
 function requestTelemetryNow() {
-  if (_wsRequestInFlight && Date.now() - _wsRequestSentMs > 1200) {
-    _wsRequestInFlight = false;
-  }
-  if (ws && ws.readyState === WebSocket.OPEN && !_wsRequestInFlight) {
-    _wsRequestInFlight = true;
-    _wsRequestSentMs = Date.now();
-    ws.send('p');
-  }
+  return restTelemetryFallbackNow();
 }
 
 function waitForGlobalTelemetryIdle(timeoutMs = 1500) {
-  if (!_wsRequestInFlight) return Promise.resolve(true);
+  if (!_restFallbackInFlight) return Promise.resolve(true);
   return new Promise(resolve => {
     const started = Date.now();
     const poll = () => {
-      if (!_wsRequestInFlight) resolve(true);
+      if (!_restFallbackInFlight) resolve(true);
       else if (Date.now() - started >= timeoutMs) resolve(false);
       else setTimeout(poll, 25);
     };
@@ -369,9 +334,7 @@ window.OTWaitForTelemetryIdle = waitForGlobalTelemetryIdle;
 
 async function restTelemetryFallbackNow() {
   if (!isLiveTelemetryPage() || document.hidden || _restFallbackInFlight) return;
-  const freshForMs = _useWebSocketTelemetry === false
-    ? Math.max(250, Math.floor(desiredPullPeriodMs() * 0.8))
-    : 2500;
+  const freshForMs = Math.max(250, Math.floor(desiredPullPeriodMs() * 0.8));
   if (_lastMsgMs && Date.now() - _lastMsgMs < freshForMs) return;
   _restFallbackInFlight = true;
   const controller = new AbortController();
@@ -394,34 +357,18 @@ async function restTelemetryFallbackNow() {
 
 function startRestFallbackTimer() {
   if (_restFallbackTimer || !isLiveTelemetryPage()) return;
-  const period = _useWebSocketTelemetry === false
-    ? Math.max(500, desiredPullPeriodMs())
-    : 1500;
+  const period = Math.max(500, desiredPullPeriodMs());
   _restFallbackTimer = setInterval(restTelemetryFallbackNow, period);
 }
 
 function stopGlobalTelemetry() {
-  if (_connectTimer) { clearTimeout(_connectTimer); _connectTimer = null; }
-  if (_pullTimer) { clearInterval(_pullTimer); _pullTimer = null; _pullPeriodMs = 0; }
   if (_restFallbackTimer) { clearInterval(_restFallbackTimer); _restFallbackTimer = null; }
   if (_statusHeartbeatTimer) { clearInterval(_statusHeartbeatTimer); _statusHeartbeatTimer = null; }
   if (_dashboardBootstrapTimer) { clearTimeout(_dashboardBootstrapTimer); _dashboardBootstrapTimer = null; }
   if (_dashboardBootstrapRetryTimer) { clearTimeout(_dashboardBootstrapRetryTimer); _dashboardBootstrapRetryTimer = null; }
-  _wsRequestInFlight = false;
   _restFallbackInFlight = false;
-  if (ws) {
-    try {
-      ws.onclose = null;
-      ws.onerror = null;
-      ws.onmessage = null;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(1000, 'page navigation');
-    } catch (_) {}
-    ws = null;
-  }
 }
 function prepareGlobalTelemetryNavigation() {
-  if (_connectTimer) { clearTimeout(_connectTimer); _connectTimer = null; }
-  if (_pullTimer) { clearInterval(_pullTimer); _pullTimer = null; _pullPeriodMs = 0; }
   if (_restFallbackTimer) { clearInterval(_restFallbackTimer); _restFallbackTimer = null; }
   if (_statusHeartbeatTimer) { clearInterval(_statusHeartbeatTimer); _statusHeartbeatTimer = null; }
   if (_dashboardBootstrapTimer) { clearTimeout(_dashboardBootstrapTimer); _dashboardBootstrapTimer = null; }
@@ -454,51 +401,6 @@ function startStatusHeartbeat() {
   };
   poll();
   _statusHeartbeatTimer = setInterval(poll, 3000);
-}
-
-function connect() {
-  if (!usesGlobalTelemetry()) return;
-  if (ws && ws.readyState <= WebSocket.OPEN) return;
-  startStaleMonitor();
-  _lastConnectMs = Date.now();
-  ws = new WebSocket('ws://' + location.host + '/ws');
-
-  ws.onopen = () => {
-    setConnectionState(true, 'Connected');
-    _lastMsgMs = Date.now();
-    // Start sending pull requests — server responds with compact live telemetry.
-    // /api/data supplies full boot snapshots for slow labels and limits.
-    // Dashboard and calibration require responsive live values. Keep them at 1-3 Hz;
-    // other pages only need the connection indicator and can poll more slowly.
-    startPullTimer();
-  };
-
-  ws.onclose = () => {
-    _wsRequestInFlight = false;
-    _wsRequestSentMs = 0;
-    if (_pullTimer) { clearInterval(_pullTimer); _pullTimer = null; _pullPeriodMs = 0; }
-    setConnectionState(false, 'Reconnecting - values retained');
-    const wait = 1000 - (Date.now() - _lastConnectMs);
-    if (wait <= 0) {
-      connect();
-    } else {
-      setTimeout(connect, wait);
-    }
-  };
-
-  ws.onerror = () => { ws.close(); };
-
-  ws.onmessage = (ev) => {
-    _lastMsgMs = Date.now();
-    try {
-      const frame = JSON.parse(ev.data);
-      if (frame._frame_more !== true) {
-        _wsRequestInFlight = false;
-        _wsRequestSentMs = 0;
-      }
-      applyData(frame);
-    } catch(e) {}
-  };
 }
 
 // ── Apply telemetry frame to DOM ──────────────────────────────
@@ -554,7 +456,6 @@ function applyData(d) {
   if (d.uptime_s !== undefined && Number.isFinite(Number(d.uptime_s))) {
     _lastUptimeS = Number(d.uptime_s);
   }
-  if (ws && ws.readyState === WebSocket.OPEN) startPullTimer();
   if (bootChanged && usesGlobalTelemetry()) {
     fetch('/api/data', { cache: 'no-store' })
       .then(r => r.json())
@@ -1956,32 +1857,19 @@ else
   startDomEnhancements();
 window.addEventListener('focus', requestTelemetryNow);
 window.addEventListener('pageshow', (e) => {
-  // bfcache restore (iOS Safari back/forward): pagehide tore down the WS and
-  // all timers, but the DOM comes back showing the old green Connected dot.
-  // Restart whichever telemetry path this page uses. Only on real restores
-  // (e.persisted) — a normal first show must not defeat the staggered
-  // startTelemetryBoot() below.
+  // bfcache restore: pagehide stopped the timers, so restart the compact
+  // telemetry path only on a real restored page.
   if (!e.persisted) return;
   if (usesGlobalTelemetry()) {
-    if (_useWebSocketTelemetry === false) {
-      startStaleMonitor();
-      startRestFallbackTimer();
-      restTelemetryFallbackNow();
-    } else if (!ws) {
-      setConnectionState(false, 'Reconnecting - values retained');
-      connect();
-      startRestFallbackTimer();
-    }
+    startStaleMonitor();
+    startRestFallbackTimer();
     requestTelemetryNow();
   } else if (!hasPageLocalTelemetry()) {
     startStatusHeartbeat();
   }
 });
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
-    if (_useWebSocketTelemetry && usesGlobalTelemetry() && (!ws || ws.readyState > WebSocket.OPEN)) connect();
-    requestTelemetryNow();
-  }
+  if (!document.hidden) requestTelemetryNow();
 });
 window.addEventListener('pagehide', stopGlobalTelemetry);
 window.addEventListener('beforeunload', stopGlobalTelemetry);
@@ -1989,10 +1877,10 @@ window.addEventListener('ot:navigation-prepare', prepareGlobalTelemetryNavigatio
 window.addEventListener('ot:navigation-start', stopGlobalTelemetry);
 
 async function loadDashboardSnapshot(attempt = 0) {
-  if (!isDashboardPage() || document.hidden) return;
+  if (!isDashboardPage() || document.hidden) return false;
   try {
     const response = await fetch('/api/data', { cache: 'no-store' });
-    if (!response.ok) return;
+    if (!response.ok) return false;
     const data = await response.json();
     if (data?._snapshot_deferred) {
       if (attempt < 5 && isDashboardPage()) {
@@ -2001,10 +1889,13 @@ async function loadDashboardSnapshot(attempt = 0) {
           loadDashboardSnapshot(attempt + 1);
         }, 350 + attempt * 200);
       }
-      return;
+      return false;
     }
     applyData(data);
-  } catch (_) {}
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 
 async function startTelemetryBoot() {
@@ -2012,34 +1903,19 @@ async function startTelemetryBoot() {
     if (!hasPageLocalTelemetry()) startStatusHeartbeat();
     return;
   }
-  if (_useWebSocketTelemetry === null) {
-    _useWebSocketTelemetry = true;
-  }
-  if (_useWebSocketTelemetry) {
-    // Do not create a TCP/WebSocket transport for a page the user is merely
-    // passing through. Rapid menu navigation previously accumulated teardown
-    // work faster than the ESP32 network stack could retire it. A page that is
-    // actually being viewed becomes live after this short, unobtrusive delay.
-    _connectTimer = setTimeout(() => {
-      _connectTimer = null;
-      if (usesGlobalTelemetry() && !document.hidden) connect();
-    }, 900);
-  } else {
-    startStaleMonitor();
-    await restTelemetryFallbackNow();
-  }
-  startRestFallbackTimer();
   if (isDashboardPage()) {
-    // Live values arrive immediately over WS. Delay the much larger full
-    // snapshot until the user has actually remained on Dashboard; otherwise a
-    // quick menu click can abandon this Classic ESP32 transfer behind the next
-    // page request. The navigation teardown cancels this timer.
-    const delay = _useWebSocketTelemetry ? 2500 : 0;
-    _dashboardBootstrapTimer = setTimeout(() => {
-      _dashboardBootstrapTimer = null;
-      loadDashboardSnapshot();
-    }, delay);
+    // Load the one full dashboard snapshot before opening the compact live
+    // transport. On Classic, starting this larger HTTP response 2.5 seconds
+    // beside repeated live requests fragmented the small heap and could
+    // leave later samples deferred. It also briefly rendered the
+    // unconfigured/default dashboard layout. Sequential startup gives the UI
+    // its labels and fitted-channel layout first, then keeps only the compact
+    // 2 Hz stream active.
+    await loadDashboardSnapshot();
   }
+  startStaleMonitor();
+  await restTelemetryFallbackNow();
+  startRestFallbackTimer();
 }
 
 function setTelemetryStale(stale, ageMs = 0) {

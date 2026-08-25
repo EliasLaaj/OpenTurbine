@@ -14,28 +14,30 @@ function updateEngineMode(mode) {
 }
 
 async function refreshEngineStatus() {
+  if (seqStatusInFlight) return;
+  seqStatusInFlight = true;
   try {
-    const r = await fetch('/api/status', { cache: 'no-store' });
+    const r = await fetch('/api/telemetry', { cache: 'no-store' });
     if (!r.ok) { setSeqConnectionState(false, 'Disconnected'); return; }
     const d = await r.json();
     setSeqConnectionState(true, 'Connected');
     if (d.mode !== undefined) updateEngineMode(d.mode);
+    if (d.seq_issues !== undefined) _applySeqValidation(d);
   } catch (_) { setSeqConnectionState(false, 'Disconnected'); }
+  finally { seqStatusInFlight = false; }
 }
 
 let statusPollTimer = null;
-let seqWsPullTimer = null;
-let seqWsRequestInFlight = false;
+let seqStatusInFlight = false;
 window.OTWaitForPageTelemetryIdle = (timeoutMs = 1500) => new Promise(resolve => {
   const started = Date.now();
   const poll = () => {
-    if (!seqWsRequestInFlight) resolve(true);
+    if (!seqStatusInFlight) resolve(true);
     else if (Date.now() - started >= timeoutMs) resolve(false);
     else setTimeout(poll, 25);
   };
   poll();
 });
-let seqClosingForNavigation = false;
 function setSeqConnectionState(ok, text) {
   const dot = document.getElementById('conn');
   const lbl = document.getElementById('conn-label');
@@ -45,7 +47,7 @@ function setSeqConnectionState(ok, text) {
 function startStatusPoll() {
   if (statusPollTimer) return;
   refreshEngineStatus();
-  statusPollTimer = setInterval(refreshEngineStatus, 3000);
+  statusPollTimer = setInterval(refreshEngineStatus, 2000);
 }
 function stopStatusPoll() {
   if (!statusPollTimer) return;
@@ -53,64 +55,13 @@ function stopStatusPoll() {
   statusPollTimer = null;
 }
 
-function startWS() {
-  if (seqClosingForNavigation) return;
-  if (ws && ws.readyState <= WebSocket.OPEN) return;
-  ws = new WebSocket('ws://' + location.host + '/ws');
-  const pull = () => {
-    if (ws && ws.readyState === WebSocket.OPEN && !seqWsRequestInFlight) {
-      seqWsRequestInFlight = true;
-      ws.send('p');
-    }
-  };
-  ws.onopen = () => {
-    setSeqConnectionState(true, 'Connected');
-    stopStatusPoll();
-    pull();
-    if (seqWsPullTimer) clearInterval(seqWsPullTimer);
-    seqWsPullTimer = setInterval(pull, 1000);
-  };
-  ws.onmessage = e => {
-    try {
-      const d = JSON.parse(e.data);
-      if (d._frame_more !== true) seqWsRequestInFlight = false;
-      if (d.mode !== undefined) updateEngineMode(d.mode);
-      if (d.seq_issues !== undefined) _applySeqValidation(d);
-    } catch(_){}
-  };
-  ws.onclose = () => {
-    seqWsRequestInFlight = false;
-    if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
-    setSeqConnectionState(false, 'Reconnecting');
-    if (!seqClosingForNavigation) {
-      startStatusPoll();
-      setTimeout(startWS, 3000);
-    }
-  };
-  ws.onerror = () => { try { ws.close(); } catch(_) {} };
-}
 function startSequenceTelemetryForPlatform() {
-  seqClosingForNavigation = false;
-  startWS();
+  startStatusPoll();
 }
 function stopSequenceTelemetry() {
-  seqClosingForNavigation = true;
-  if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
-  seqWsRequestInFlight = false;
   stopStatusPoll();
-  if (ws) {
-    try {
-      ws.onclose = null;
-      ws.onerror = null;
-      ws.onmessage = null;
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(1000, 'page navigation');
-    } catch (_) {}
-    ws = null;
-  }
 }
 function prepareSequenceTelemetryNavigation() {
-  seqClosingForNavigation = true;
-  if (seqWsPullTimer) { clearInterval(seqWsPullTimer); seqWsPullTimer = null; }
   stopStatusPoll();
 }
 window.addEventListener('pagehide', stopSequenceTelemetry);

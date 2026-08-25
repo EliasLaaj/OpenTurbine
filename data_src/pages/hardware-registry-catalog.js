@@ -33,7 +33,7 @@ function applyActuatorVisibility() {
     }
   }
   main.querySelectorAll('.hw-section').forEach(function (section) {
-    if (['hardware-buses-panel','hardware-inputs-panel','hardware-outputs-panel','hardware-requirements-panel','hardware-comms-panel',
+    if (['hardware-buses-panel','hardware-inputs-panel','hardware-outputs-panel','hardware-comms-panel',
          'hardware-controllers-panel','hardware-safety-panel','hardware-profile-section'].includes(section.id)) return;
     const title = (section.querySelector('.hw-title')?.textContent || '').trim();
     if (title === 'System Profile') return;
@@ -128,7 +128,7 @@ const REGISTRY_INPUT_PURPOSES=[
   {value:'generic',label:'Generic automation input',role:'generic',drivers:[0,1,2,3,7,8,9],group:'Generic automation I/O'}
 ];
 const REGISTRY_OUTPUT_PURPOSES=[
-  {value:'main_fuel',label:'Main fuel pump / throttle ESC',role:'fuel',drivers:[5,6],group:'Engine actuators'},
+  {value:'main_fuel',label:'Main fuel metering',role:'fuel',drivers:[5,6],group:'Engine actuators'},
   {value:'fuel_shutoff',label:'Fuel shutoff',role:'fuel_shutoff',drivers:[4,11],group:'Engine actuators'},
   {value:'starter',label:'Starter',role:'starter',drivers:[4,5,6,11],group:'Engine actuators'},
   {value:'starter_enable',label:'Starter enable',role:'starter_en',drivers:[4,5,6,11],group:'Engine actuators'},
@@ -233,7 +233,7 @@ const REGISTRY_INPUT_PRESETS=[
   {group:'Generic inputs',role:'generic',label:'Generic PWM duty input',id:'generic_pwm_duty_input',name:'PWM Duty Input',driver:7}
 ];
 const REGISTRY_OUTPUT_PRESETS=[
-  {group:'Engine actuators',role:'fuel',label:'Main fuel pump',id:'main_fuel',name:'Main Fuel Pump',driver:5},
+  {group:'Engine actuators',role:'fuel',label:'Main fuel metering',id:'main_fuel',name:'Main Fuel Metering',driver:5},
   {group:'Engine actuators',role:'starter',label:'Starter',id:'starter',name:'Starter',driver:5},
   {group:'Engine actuators',role:'starter_en',label:'Starter enable',id:'starter_enable',name:'Starter Enable',driver:4},
   {group:'Engine actuators',role:'oil_pump',label:'Oil pump',id:'oil_pump',name:'Oil Pump',driver:5},
@@ -268,8 +268,8 @@ const REGISTRY_PRESET_HELP = {
     tit:'Turbine-inlet thermocouple or temperature transmitter. A K-type thermocouple with MAX31855 is the default starting point; other supported interfaces remain selectable. Use when the engine limit is specified as TIT rather than exhaust temperature.',
     oil_pressure:'Oil-system pressure feedback for protection and optional closed-loop pump control.',
     fuel_pressure:'Fuel-manifold pressure feedback for low-pressure protection and diagnostics.',
-    p1_pressure:'Compressor inlet pressure measurement for pressure-ratio monitoring and rules.',
-    p2_pressure:'Compressor discharge pressure measurement for pressure-ratio monitoring and rules.',
+    p1_pressure:'General calibrated pressure channel 1. Rename it for the actual measurement; it can feed display, logging, rules, idle feedback, fuel limiting, or shutdown protection.',
+    p2_pressure:'General calibrated pressure channel 2. Rename it for the actual measurement; it can feed display, logging, rules, idle feedback, fuel limiting, or shutdown protection.',
     coolant_pressure:'Liquid-cooling circuit pressure for custom rules, sequencing and logging.',
     oil_temperature:'Oil or gearbox temperature for overtemperature protection and calibration.',
     coolant_temp:'Liquid-cooling temperature for fan/pump rules and protection logic.',
@@ -357,7 +357,7 @@ function registryHumanizeIdentifier(raw, direction) {
   const direct = {
     user_throttle:'Throttle Input', operator_throttle:'Throttle Input', operator_thrott:'Throttle Input', throttle_input:'Throttle Input',
     user_idle:'Idle Input', operator_idle:'Idle Input', idle_input:'Idle Input',
-    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Secondary / Auxiliary Fuel Pump', main_fuel:'Main Fuel Pump',
+    oil_pump:'Oil Pump', oil_pump_main:'Oil Pump', fuel_pump:'Secondary / Auxiliary Fuel Pump', main_fuel:'Main Fuel Metering',
     fuel_shutoff:'Fuel Shutoff', fuel_sol:'Fuel Shutoff',
     flame:'Flame Sensor', flame_main:'Flame Sensor',
     low_oil_switch:'Low Oil Switch', oil_zero_switch:'Zero Oil Pressure Switch',
@@ -384,6 +384,8 @@ function registryNameLooksInternal(name) {
 }
 function registryDisplayName(direction, c, fallback) {
   const raw = String(c?.name || '').trim();
+  if (direction === 'output' && registryDerivedPurpose(direction, c) === 'main_fuel' &&
+      ['Main Fuel Pump','Main Fuel Meteri'].includes(raw)) return 'Main Fuel Metering';
   if (raw && !registryNameLooksInternal(raw)) return raw;
   if (raw) return registryHumanizeIdentifier(raw, direction);
   const purpose = registryPurposeLabel(direction, c);
@@ -644,7 +646,7 @@ function registryTemperatureInterfaceEditor(c, index) {
   const pin = (key, mode) => {
     const busMode = mode;
     const pinClass = `${registryFieldChangedClass('input', index, key)}${Number(c[key] ?? -1) < 0 ? ' field-error' : ''}`;
-    return `<div class="hw-field"><span class="hw-label">${key.replace('spi_','').toUpperCase()} GPIO</span><select class="${pinClass}" onchange="updateRegistryChannel('input',${index},'${key}',+this.value)">${buildPinOptions(c[key] ?? -1, busMode)}</select></div>`;
+    return `<div class="hw-field"><span class="hw-label">${key.replace('spi_','').toUpperCase()} GPIO</span><span class="hw-desc">Dedicated chip-select output for this sensor on the shared SPI bus.</span><select class="${pinClass}" onchange="updateRegistryChannel('input',${index},'${key}',+this.value)">${buildPinOptions(c[key] ?? -1, busMode)}</select></div>`;
   };
   let choices = `${option(0,'Analog temperature transmitter')}`;
   if (turbineGas || oil) choices += `${option(1,'MAX6675 (K-type)')}${option(2,'MAX31855 (K-type)')}${option(3,'MAX31856 (configurable TC type)')}`;
@@ -654,8 +656,8 @@ function registryTemperatureInterfaceEditor(c, index) {
     : lowTemperature ? 'Choose the actual low-temperature sensor interface. NTC and DS18B20 must never be used for turbine-gas temperatures.'
     : 'Calibrated analog transmitter. Choose a MAX thermocouple amplifier for turbine-gas temperature probes.';
   let details = '';
-  if (iface >= 1 && iface <= 3) details = `<div class="hw-field"><span class="hw-label">Shared SPI bus</span><span class="hw-desc">${cfg.spi?.enabled ? `SCK GPIO ${Number(cfg.spi.sck_pin ?? -1)}, MISO GPIO ${Number(cfg.spi.miso_pin ?? -1)}${iface===3?`, MOSI GPIO ${Number(cfg.spi.mosi_pin ?? -1)}`:''}. Change these once under Shared sensor buses.` : 'SPI bus is disabled. Enable it under Shared sensor buses before this device can work.'}</span></div>${pin('spi_cs','out')}${iface===3?`<div class="hw-field"><span class="hw-label">Thermocouple type</span><select onchange="updateRegistryChannel('input',${index},'tc_type',this.value)">${['K','J','N','T','E','R','S','B'].map(v=>`<option value="${v}"${String(c.tc_type||'K')===v?' selected':''}>${v}</option>`).join('')}</select></div>`:''}`;
-  if (iface === 4) details = `<div class="hw-field"><span class="hw-label">Divider orientation</span><span class="hw-desc">This is the external calibrated resistor, not an internal GPIO pull.</span><select onchange="updateRegistryChannel('input',${index},'ntc_pullup',this.value==='1')"><option value="1"${c.ntc_pullup!==false?' selected':''}>Fixed resistor to 3.3 V, NTC to ground</option><option value="0"${c.ntc_pullup===false?' selected':''}>NTC to 3.3 V, fixed resistor to ground</option></select></div><div class="hw-field"><span class="hw-label">NTC beta coefficient</span><input type="number" min="1" step="1" value="${registryFormatValue(c.ntc_beta ?? 3950)}" oninput="updateRegistryChannel('input',${index},'ntc_beta',registryParseValue(this.value))"></div><div class="hw-field"><span class="hw-label">NTC resistance at 25 °C (Ω)</span><input type="number" min="1" step="1" value="${registryFormatValue(c.ntc_r0 ?? 10000)}" oninput="updateRegistryChannel('input',${index},'ntc_r0',registryParseValue(this.value))"></div><div class="hw-field"><span class="hw-label">Fixed divider resistor (Ω)</span><input type="number" min="1" step="1" value="${registryFormatValue(c.ntc_r_fixed ?? 10000)}" oninput="updateRegistryChannel('input',${index},'ntc_r_fixed',registryParseValue(this.value))"></div>`;
+  if (iface >= 1 && iface <= 3) details = `<div class="hw-field"><span class="hw-label">Shared SPI bus</span><span class="hw-desc">${cfg.spi?.enabled ? `SCK GPIO ${Number(cfg.spi.sck_pin ?? -1)}, MISO GPIO ${Number(cfg.spi.miso_pin ?? -1)}${iface===3?`, MOSI GPIO ${Number(cfg.spi.mosi_pin ?? -1)}`:''}. Change these once under Shared sensor buses.` : 'SPI bus is disabled. Enable it under Shared sensor buses before this device can work.'}</span></div>${pin('spi_cs','out')}${iface===3?`<div class="hw-field"><span class="hw-label">Thermocouple type</span><span class="hw-desc">Select the probe alloy fitted to this MAX31856 channel.</span><select onchange="updateRegistryChannel('input',${index},'tc_type',this.value)">${['K','J','N','T','E','R','S','B'].map(v=>`<option value="${v}"${String(c.tc_type||'K')===v?' selected':''}>${v}</option>`).join('')}</select></div>`:''}`;
+  if (iface === 4) details = `<div class="hw-field"><span class="hw-label">Divider orientation</span><span class="hw-desc">This is the external calibrated resistor, not an internal GPIO pull.</span><select onchange="updateRegistryChannel('input',${index},'ntc_pullup',this.value==='1')"><option value="1"${c.ntc_pullup!==false?' selected':''}>Fixed resistor to 3.3 V, NTC to ground</option><option value="0"${c.ntc_pullup===false?' selected':''}>NTC to 3.3 V, fixed resistor to ground</option></select></div><div class="hw-field"><span class="hw-label">NTC beta coefficient</span><span class="hw-desc">Beta value from the thermistor datasheet, normally specified between 25 °C and 50 °C.</span><input type="number" min="1" step="1" value="${registryFormatValue(c.ntc_beta ?? 3950)}" oninput="updateRegistryChannel('input',${index},'ntc_beta',registryParseValue(this.value))"></div><div class="hw-field"><span class="hw-label">NTC resistance at 25 °C (Ω)</span><span class="hw-desc">Nominal thermistor resistance at 25 °C from its datasheet.</span><input type="number" min="1" step="1" value="${registryFormatValue(c.ntc_r0 ?? 10000)}" oninput="updateRegistryChannel('input',${index},'ntc_r0',registryParseValue(this.value))"></div><div class="hw-field"><span class="hw-label">Fixed divider resistor (Ω)</span><span class="hw-desc">Measured value of the external fixed resistor paired with the thermistor.</span><input type="number" min="1" step="1" value="${registryFormatValue(c.ntc_r_fixed ?? 10000)}" oninput="updateRegistryChannel('input',${index},'ntc_r_fixed',registryParseValue(this.value))"></div>`;
   if (iface === 5) details = `<div class="hw-field"><span class="hw-label">DS18B20 resolution</span><span class="hw-desc">Uses one data GPIO and an external 4.7 kΩ pull-up to 3.3 V. The 10-bit default updates in about 188 ms; higher resolution is slower.</span><select onchange="updateRegistryChannel('input',${index},'temp_resolution',+this.value)">${[9,10,11,12].map(v=>`<option value="${v}"${Number(c.temp_resolution ?? 10)===v?' selected':''}>${v}-bit</option>`).join('')}</select></div>`;
   return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Sensor interface</span><span class="hw-desc">${heading}</span><select onchange="updateRegistryChannel('input',${index},'temp_interface',+this.value)">${choices}</select></div>${details}`;
 }
@@ -828,10 +830,11 @@ function registryCurrentEditor(direction, c, index) {
   const mvA = dedicated ? (act.current_mv_a ?? (actKey === 'glow_plug' ? 185 : 100)) : (c.current_mv_a ?? 100);
   const zeroV = dedicated ? (act.current_zero_v ?? 1.65) : (c.current_zero_v ?? 1.65);
   const maxA = dedicated ? (act.current_max_a ?? 0) : (c.current_max_a ?? 0);
+  const tripDelay = dedicated ? (act.current_trip_delay_ms ?? 5000) : (c.current_trip_delay_ms ?? 5000);
   const fieldSet = dedicated
     ? (field, expr) => `setActCurrentSensor('${actKey}','${field}',${expr})`
     : (field, expr) => {
-        const keyMap = {pin:'current_pin', mv_a:'current_mv_a', zero_v:'current_zero_v', current_max_a:'current_max_a'};
+        const keyMap = {pin:'current_pin', mv_a:'current_mv_a', zero_v:'current_zero_v', current_max_a:'current_max_a', current_trip_delay_ms:'current_trip_delay_ms'};
         return `updateRegistryChannel('output',${index},'${keyMap[field] || field}',${expr})`;
       };
   return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0">
@@ -844,7 +847,8 @@ function registryCurrentEditor(direction, c, index) {
       <div class="hw-field"><span class="hw-label">Sensor sensitivity (mV/A)</span><span class="hw-desc">Datasheet sensitivity at the ECU ADC pin. Example: ACS712-20A = 100 mV/A.</span><input type="number" min="1" max="10000" step="1" value="${registryFormatValue(mvA)}" oninput="${fieldSet('mv_a','+this.value')}"></div>
       <div class="hw-field"><span class="hw-label">Zero-current voltage (V)</span><span class="hw-desc">Sensor output voltage when no current flows.</span><input type="number" min="0" max="3.3" step="0.01" value="${registryFormatValue(zeroV)}" oninput="${fieldSet('zero_v','+this.value')}"></div>
        ${actKey === 'glow_plug' ? `<div class="hw-field"><span class="hw-label">Ready current (A)</span><input type="number" min="0" max="1000" step="0.1" value="${registryFormatValue(act.current_ready_a ?? 3)}" oninput="${fieldSet('ready_a','+this.value')}"></div>` : ''}
-       ${(!dedicated || actKey === 'oil_pump') ? `<div class="hw-field"><span class="hw-label">Overcurrent trip (A)</span><span class="hw-desc">Warn immediately and shut down after the configured continuous-current delay. 0 disables this output's trip.</span><input type="number" min="0" max="1000" step="0.1" value="${registryFormatValue(maxA)}" oninput="${fieldSet('current_max_a','+this.value')}"></div>` : ''}
+       <div class="hw-field"><span class="hw-label">Overcurrent shutdown (A)</span><span class="hw-desc">Warn immediately and shut down if this output remains above the limit. 0 disables this output's overcurrent trip.</span><input type="number" min="0" max="1000" step="0.1" value="${registryFormatValue(maxA)}" oninput="${fieldSet('current_max_a','+this.value')}"></div>
+       <div class="hw-field"><span class="hw-label">Overcurrent confirmation (ms)</span><span class="hw-desc">Current must remain continuously above the limit for this long before the ECU shuts down. Shorter spikes are ignored.</span><input type="number" min="100" max="60000" step="100" value="${Math.round(Number(tripDelay))}" oninput="${fieldSet('current_trip_delay_ms','+this.value')}"></div>
     </div></div>` : ''}
   </div>`;
 }

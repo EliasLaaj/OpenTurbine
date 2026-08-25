@@ -65,68 +65,32 @@ static char _pendingRestartBlocker[80] = {};
 static const char*   _pendingRestartReason   = nullptr;
 static void _endMaintenanceWriteWindow();
 
-// ── WebSocket telemetry state ─────────────────────────────────
-// _wsPendingResponse: set when a "p" arrived but canSend() was false.
-// tick() detects this and sends a WS PING; the PONG fires WS_EVT_PONG
-// inside the async_tcp task (correct context), which then delivers the
-// queued telemetry frame without waiting for another "p" from the client.
-static volatile bool _wsPendingResponse = false;
-static unsigned long _wsPingMs          = 0;   // last ping timestamp
-static AsyncWebSocketClient* s_activeWsClient = nullptr;
-// Keep capacity while one page is live, then release it so configuration
-// validation can reclaim the largest contiguous heap block.
-static JsonDocument s_wsTelemetryDoc;
 static JsonDocument s_restTelemetryDoc;
+// Keep each live response below a conservative Classic TCP payload. Optional
+// channel groups rotate between requests so the dashboard remains complete
+// without large allocations or multipart transport state.
+// Leave room for the complete actionable faultDescription (up to 319 bytes).
+// The former 1100-byte cap made /api/telemetry return HTTP 500 whenever a
+// normal detailed startup-abort reason was present. 1400 remains below the
+// usual TCP MSS while keeping the response and its allocation tightly bounded.
+static constexpr size_t COMPACT_TELEMETRY_MAX = 1400;
 
-// ESP-IDF's prebuilt lwIP permits only 16 active TCP PCBs and retains an
-// actively closed connection in TIME_WAIT for 60 seconds. Most browser peers
-// close first, but even occasional server-side timeout closes can accumulate
-// during long configuration sessions. Keep normal TIME_WAIT protection, then
-// relieve only local HTTP pressure before it can starve Wi-Fi and the safety UI.
+// Observe HTTP TIME_WAIT pressure from the lwIP thread for diagnostics. Never
+// abort or unlink a TIME_WAIT PCB: a delayed packet can still be in tcp_input,
+// and recycling that tuple caused tcp_receive "wrong state" panics on Classic.
+// Connection reuse and peer-side close policy must control pressure instead.
 static volatile uint16_t s_httpTimeWaitPcbs = 0;
-static volatile uint32_t s_httpTimeWaitReaped = 0;
 static volatile bool s_tcpMaintenancePending = false;
 
 static void _maintainHttpTimeWait(void*) {
     uint16_t count = 0;
     for (tcp_pcb* pcb = tcp_tw_pcbs; pcb; pcb = pcb->next)
         if (pcb->local_port == 80) ++count;
-
-    // Seven retained entries leave over half of lwIP's 16-PCB pool available
-    // for new work.  Never recycle a just-closed tuple, though: the peer may be
-    // the passive closer and can immediately reuse its source port.  Four lwIP
-    // slow-timer ticks provide a two-second quarantine for delayed packets
-    // before exceptional HTTP pressure is relieved.
-    static constexpr uint32_t MIN_REAP_AGE_TICKS = 4;
-    while (count >= 8) {
-        tcp_pcb* oldest = nullptr;
-        uint32_t oldestAge = 0;
-        for (tcp_pcb* pcb = tcp_tw_pcbs; pcb; pcb = pcb->next) {
-            if (pcb->local_port != 80) continue;
-            const uint32_t age = tcp_ticks - pcb->tmr;
-            if (!oldest || age > oldestAge) {
-                oldest = pcb;
-                oldestAge = age;
-            }
-        }
-        if (!oldest || oldestAge < MIN_REAP_AGE_TICKS) break;
-        tcp_abort(oldest);  // TIME_WAIT has no live application callback.
-        --count;
-        s_httpTimeWaitReaped = s_httpTimeWaitReaped + 1;
-    }
     s_httpTimeWaitPcbs = count;
     s_tcpMaintenancePending = false;
 }
 
-static void _releaseLiveTelemetryTransport() {
-    if (s_activeWsClient) {
-        AsyncClient* telemetry = s_activeWsClient->client();
-        s_activeWsClient = nullptr;
-        if (telemetry) telemetry->abort();
-    }
-    _wsPendingResponse = false;
-    s_wsTelemetryDoc.clear();
-    s_wsTelemetryDoc.shrinkToFit();
+static void _releaseLiveTelemetryWorkspace() {
     s_restTelemetryDoc.clear();
     s_restTelemetryDoc.shrinkToFit();
 }
@@ -956,7 +920,6 @@ public:
 };
 
 static AsyncWebServer  _server(80);
-static AsyncWebSocket  _ws("/ws");
 static DNSServer       _dns;                 // captive portal DNS
 
 // ESPAsyncWebServer builds every response header in throwing STL containers.
@@ -969,7 +932,19 @@ class LowHeapRequestGuard final : public AsyncMiddleware {
 public:
     void run(AsyncWebServerRequest* request, ArMiddlewareNext next) override {
 #if defined(OT_PLATFORM_ESP32)
-        if (ESP.getFreeHeap() < 24576 || ESP.getMaxAllocHeap() < 8192) {
+        // A staged configuration candidate deliberately owns a large JSON
+        // buffer until the core can parse and atomically publish it. Do not
+        // admit unrelated browser polls during that short window: even a tiny
+        // AsyncBasicResponse builds several throwing STL header nodes, and a
+        // status request could otherwise reboot a fragmented Classic ECU.
+        // ESPAsyncWebServer runs this middleware after a POST/PATCH body
+        // handler has already consumed the payload and prepared its response.
+        // Never abort that owner request's acknowledgement. Only disposable
+        // GET/page polling is rejected here; write routes have their own
+        // transaction gates for competing state changes.
+        if (request && request->method() == HTTP_GET &&
+            (ConfigApplyGate::busy() || _maintenanceUploadInProgress() ||
+             ESP.getFreeHeap() < 24576 || ESP.getMaxAllocHeap() < 8192)) {
             // abort() marks the request sent before closing its client. Calling
             // client()->close() directly leaves _sent false; the framework then
             // enters _send() after the middleware returns and dereferences the
@@ -1121,15 +1096,13 @@ static void _sendGzipAsset(AsyncWebServerRequest* req, const char* path,
     resp->addHeader("Cache-Control", versionedPage
         ? "public, max-age=31536000, immutable"
         : cacheControl);
-    // Desktop/mobile browsers retain several idle HTTP/1.1 connections per
-    // origin. Each costs AsyncTCP/lwIP memory; a feature-rich S3 hardware
-    // profile can have less free internal heap than a minimal Classic profile,
-    // so chip type is not a safe proxy for transport headroom. Visiting a few
-    // different large pages could otherwise leave too little heap to transmit
-    // the next one even though every response completed. Shared assets and
-    // versioned pages remain browser-cached, so closing the completed transport
-    // does not make them download again on either supported chip.
-    resp->addHeader("Connection", "close");
+    // Reuse the browser's small connection set across nearby page changes.
+    // Explicit close created one 60-second TIME_WAIT PCB per menu click; enough
+    // normal navigation could then starve live telemetry. A bounded keep-alive
+    // leaves room for telemetry and maintenance traffic while the
+    // immutable cache prevents repeated flash reads.
+    resp->addHeader("Connection", "keep-alive");
+    resp->addHeader("Keep-Alive", "timeout=15, max=64");
     req->send(resp);
 }
 
@@ -1149,13 +1122,13 @@ static constexpr const char* PAGE_ASSET_CACHE =
 static void _finalizeJsonResponse(AsyncWebServerResponse* resp) {
     if (!resp) return;
     resp->addHeader("Cache-Control", "no-store");
-    // API replies are complete, bounded documents rather than flash-backed
-    // streaming assets.  Retiring their TCP transport after the declared body
-    // is acknowledged prevents abandoned browser/editor requests from filling
-    // AsyncTCP's client pool across repeated page navigation.  WebSocket
-    // telemetry remains persistent. Classic flash-backed assets also close
-    // their transports after completion to avoid accumulating idle sockets.
-    resp->addHeader("Connection", "close");
+    // Reuse the browser's bounded API connection across nearby page loads.
+    // Closing every successful config/snapshot reply created a 60-second
+    // TIME_WAIT PCB; a few normal page changes could consume nearly all
+    // Classic TCP slots and starve dashboard telemetry. Response classes
+    // release their JSON storage as soon as the final bytes enter AsyncTCP.
+    resp->addHeader("Connection", "keep-alive");
+    resp->addHeader("Keep-Alive", "timeout=3, max=32");
 }
 
 // ArduinoJson reports bytes actually written, not bytes required. A truncated
@@ -1176,7 +1149,7 @@ static size_t _serializeJsonBounded(const JsonDocument& doc, char* buf, size_t l
 class OwnedJsonResponse final : public AsyncAbstractResponse {
 public:
     OwnedJsonResponse(const char* json, size_t len, int status = 200)
-        : _data(new (std::nothrow) uint8_t[len]), _index(0) {
+        : _data(new (std::nothrow) uint8_t[len]), _index(0), _released(false) {
         _code = status;
         _contentType = "application/json";
         _contentLength = len;
@@ -1184,7 +1157,7 @@ public:
     }
 
     ~OwnedJsonResponse() override { delete[] _data; }
-    bool _sourceValid() const override { return _data != nullptr; }
+    bool _sourceValid() const override { return _released || _data != nullptr; }
 
     size_t _fillBuffer(uint8_t* out, size_t maxLen) override {
         if (!_data || _index >= _contentLength) return 0;
@@ -1192,12 +1165,20 @@ public:
         if (count > maxLen) count = maxLen;
         memcpy(out, _data + _index, count);
         _index += count;
+        // The payload no longer needs to live for the duration of a reused
+        // HTTP connection once AsyncTCP has copied its final bytes.
+        if (_index >= _contentLength) {
+            delete[] _data;
+            _data = nullptr;
+            _released = true;
+        }
         return count;
     }
 
 private:
     uint8_t* _data;
     size_t _index;
+    bool _released;
 };
 
 // The hardware document is assembled in the reserved request buffer. Borrow
@@ -1320,88 +1301,6 @@ static void _sendLargeReadJson(AsyncWebServerRequest* req, const char* json,
     _sendBorrowedWebRxJson(req, json, len, status);
 }
 
-static bool _sendTelemetryFrame(AsyncWebSocketClient* client, const char* buf, size_t len) {
-    // ESPAsyncWebServer copies each text frame into a heap-backed vector.
-    // Avoid entering that allocator when RAM is already under pressure.
-    static unsigned long lastDropLogMs = 0;
-    const size_t reserve = len + 24576;
-    if (!client || !client->canSend() ||
-        ESP.getFreeHeap() <= reserve || ESP.getMaxAllocHeap() <= len + 8192) {
-        if (millis() - lastDropLogMs >= 5000) {
-            lastDropLogMs = millis();
-            Serial.printf("[WebSocket] Telemetry deferred - low heap (frame=%u free=%u max_alloc=%u)\n",
-                          (unsigned)len, (unsigned)ESP.getFreeHeap(),
-                          (unsigned)ESP.getMaxAllocHeap());
-        }
-        return false;
-    }
-    // ESPAsyncWebServer fragments a message larger than the current AsyncTCP
-    // window. Under Classic heap/TCP pressure that path can enqueue a second
-    // header after an incomplete fragment, which browsers correctly reject as
-    // overlapping or invalid UTF-8 WebSocket frames. Split the flat telemetry
-    // object at top-level member boundaries so every queued WS message is a
-    // complete JSON object smaller than one conservative TCP payload. The UI
-    // merges each object and requests the next sample only after the last part.
-    static constexpr size_t WS_JSON_PART_MAX = 1100;
-    if (len <= WS_JSON_PART_MAX) return client->text(buf, len);
-    if (len < 2 || buf[0] != '{' || buf[len - 1] != '}') return false;
-
-    char part[WS_JSON_PART_MAX + 1];
-    size_t partLen = 1;
-    part[0] = '{';
-    size_t fieldStart = 1;
-    int depth = 1;
-    bool inString = false;
-    bool escaped = false;
-
-    auto sendPart = [&](bool more) -> bool {
-        static constexpr const char MORE_TRUE[] = "\"_frame_more\":true}";
-        static constexpr const char MORE_FALSE[] = "\"_frame_more\":false}";
-        const char* suffix = more ? MORE_TRUE : MORE_FALSE;
-        const size_t suffixLen = strlen(suffix);
-        if (partLen > 1) part[partLen++] = ',';
-        if (partLen + suffixLen > sizeof(part) - 1) return false;
-        memcpy(part + partLen, suffix, suffixLen);
-        partLen += suffixLen;
-        part[partLen] = '\0';
-        const bool queued = client->canSend() && client->text(part, partLen);
-        partLen = 1;
-        part[0] = '{';
-        return queued;
-    };
-
-    auto appendField = [&](size_t start, size_t end, bool moreFields) -> bool {
-        const size_t fieldLen = end > start ? end - start : 0;
-        static constexpr size_t MARKER_RESERVE = 24;
-        if (!fieldLen || fieldLen + MARKER_RESERVE + 2 > sizeof(part)) return false;
-        if (partLen > 1 && partLen + 1 + fieldLen + MARKER_RESERVE > sizeof(part)) {
-            if (!sendPart(true)) return false;
-        }
-        if (partLen > 1) part[partLen++] = ',';
-        memcpy(part + partLen, buf + start, fieldLen);
-        partLen += fieldLen;
-        if (!moreFields) return sendPart(false);
-        return true;
-    };
-
-    for (size_t i = 1; i < len - 1; ++i) {
-        const char c = buf[i];
-        if (inString) {
-            if (escaped) escaped = false;
-            else if (c == '\\') escaped = true;
-            else if (c == '"') inString = false;
-            continue;
-        }
-        if (c == '"') { inString = true; continue; }
-        if (c == '{' || c == '[') ++depth;
-        else if (c == '}' || c == ']') --depth;
-        else if (c == ',' && depth == 1) {
-            if (!appendField(fieldStart, i, true)) return false;
-            fieldStart = i + 1;
-        }
-    }
-    return appendField(fieldStart, len - 1, false);
-}
 
 
 // ── WiFi AP setup ─────────────────────────────────────────────
@@ -1490,11 +1389,186 @@ static void _restartCleanly(const char* reason) {
 }
 
 // ── Telemetry JSON builder ────────────────────────────────────
-// full=true  → complete frame: all fields (served by /api/data REST)
-// full=false → fast frame: only real-time sensor/state fields (WebSocket)
-//
-// The JS keeps the last received value for every field, so omitting slow
-// fields on fast frames has no visible effect after the first full frame.
+// The JS retains the last received value for rotating optional fields, while
+// continuously important state is present in every compact REST response.
+static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
+    alignas(EngineData) uint8_t snapshotStorage[sizeof(EngineData)];
+    const uint32_t snapshotVersion = EngineData::readPublishedSnapshot(
+        snapshotStorage, sizeof(snapshotStorage));
+    const auto& ed = *reinterpret_cast<const EngineData*>(snapshotStorage);
+    doc.clear();
+
+    // Keep continuously watched values in every 2 Hz response. Optional groups
+    // rotate at 0.5 Hz. Each response stays within one conservative Classic
+    // TCP payload, avoiding fragile multipart state and heap churn.
+    doc["snapshot_id"] = snapshotVersion;
+    doc["mode"] = sysModeStr(ed.mode);
+    doc["n1"] = (int)ed.n1Rpm;
+    doc["n2"] = (int)ed.n2Rpm;
+    doc["n1_rpm_accel"] = (int)ed.n1RpmAccel;
+    doc["n2_rpm_accel"] = (int)ed.n2RpmAccel;
+    doc["tot"] = (float)(int)(ed.tot * 10) / 10.0f;
+    doc["tit"] = (float)(int)(ed.tit * 10) / 10.0f;
+    doc["oil"] = (float)(int)(ed.oilPressure * 100) / 100.0f;
+    doc["n1_healthy"] = ed.n1Healthy;
+    doc["n2_healthy"] = ed.n2Healthy;
+    doc["tot_healthy"] = ed.totHealthy;
+    doc["tit_healthy"] = ed.titHealthy;
+    doc["oil_healthy"] = ed.oilHealthy;
+    doc["throttle_input_raw"] = ed.throttleInputRaw;
+    float inputNorm = 0.0f;
+    if (HardwareConfig::throttleInputRcPwm) {
+        inputNorm = ed.rcThrottleValid ? ed.rcThrottleNorm : 0.0f;
+    } else {
+        const int range = Config::throttleMaxRaw - Config::throttleMinRaw;
+        if (range != 0) inputNorm = constrain(
+            (ed.throttleInputRaw - Config::throttleMinRaw) / (float)range, 0.0f, 1.0f);
+    }
+    doc["throttle_input_norm"] = (float)(int)(inputNorm * 1000) / 1000.0f;
+    doc["idle_input_raw"] = ed.idleInputRaw;
+    doc["rc_throttle_norm"] = (float)(int)(ed.rcThrottleNorm * 1000) / 1000.0f;
+    doc["throttle_demand"] = (float)(int)(ed.throttleDemand * 1000) / 1000.0f;
+    doc["throttle_effective"] = (float)(int)(ed.mainFuelAppliedDemand * 1000) / 1000.0f;
+    doc["oil_pct"] = (int)ed.oilPumpPct;
+    // These are live dashboard actuator values, not occasional diagnostics.
+    // Keep them in every compact frame so a second client cannot repeatedly
+    // consume their rotating group and leave the visible UI stale.
+    doc["prop_pitch_demand"] = (float)(int)(ed.propPitchDemand * 1000) / 1000.0f;
+    doc["ab_fuel_offset"] = (float)(int)(ed.abFuelOffset * 1000) / 1000.0f;
+    doc["stop_switch_active"] = ed.stopSwitchActive;
+    doc["start_switch_active"] = ed.startSwitchActive;
+    doc["start_switch_healthy"] = ed.startSwitchHealthy;
+    doc["start_switch_ready"] = ed.startSwitchReady;
+    doc["limp_mode"] = ed.limpMode;
+    doc["uptime_s"] = ed.uptimeMs / 1000;
+    doc["last_event"] = ed.lastEvent;
+    doc["fault_description"] = ed.faultDescription;
+
+    static uint8_t group = 0;
+    const uint8_t thisGroup = group++ & 0x03u;
+    if (thisGroup == 0) {
+        doc["oil_raw"] = ed.oilPressureRaw;
+        doc["oil_demand"] = (float)(int)(ed.oilTargetBar * 100) / 100.0f;
+        doc["flame"] = ed.flameDetected;
+        doc["flame_raw"] = ed.flameSensorRaw;
+        doc["flame_healthy"] = ed.flameHealthy;
+        doc["p1"] = (float)(int)(std::max(0.0f, (float)ed.p1) * 100) / 100.0f;
+        doc["p2"] = (float)(int)(std::max(0.0f, (float)ed.p2) * 100) / 100.0f;
+        doc["p1_healthy"] = ed.p1Healthy;
+        doc["p2_healthy"] = ed.p2Healthy;
+        doc["fuel_press"] = (float)(int)(ed.fuelPressure * 100) / 100.0f;
+        doc["fuel_press_healthy"] = ed.fuelPressHealthy;
+        doc["fuel_flow"] = (float)(int)(ed.fuelFlow * 100) / 100.0f;
+        doc["fuel_flow_healthy"] = ed.fuelFlowHealthy;
+        doc["oil_temp"] = (float)(int)(ed.oilTemp * 10) / 10.0f;
+        doc["oil_temp_healthy"] = ed.oilTempHealthy;
+        doc["batt_voltage"] = (float)(int)(ed.battVoltage * 100) / 100.0f;
+        doc["batt_healthy"] = ed.battHealthy;
+        doc["torque"] = (float)(int)(ed.torque * 10) / 10.0f;
+        doc["torque_healthy"] = ed.torqueHealthy;
+        doc["thrust"] = (float)(int)(ed.thrust * 10) / 10.0f;
+        doc["thrust_healthy"] = ed.thrustHealthy;
+    } else if (thisGroup == 1) {
+        doc["starter_demand"] = (float)(int)(ed.starterDemand * 1000) / 1000.0f;
+        doc["starter_enabled"] = ed.starterEnabled;
+        doc["fuel_sol_open"] = ed.fuelSolOpen;
+        doc["igniter_on"] = ed.igniterOn;
+        doc["igniter2_on"] = ed.igniter2On;
+        doc["dynamic_idle_enabled"] = ed.dynamicIdleEnabled;
+        doc["idle_controller_state"] = ed.limpMode ? "Reduced-power mode" : ed.idleControllerState;
+        doc["manual_relight_active"] = ed.manualRelightActive;
+        doc["oil_failsafe_active"] = ed.oilFailsafeActive;
+        doc["standby_oil_feed_active"] = ed.standbyOilFeedActive;
+        doc["dev_mode"] = ed.devMode;
+        doc["bench_mode"] = ed.benchMode;
+        doc["relight_armed"] = ed.relightArmed;
+        doc["relight_attempts"] = (int)ed.relightAttempts;
+        doc["extra_cooldown_active"] = ed.extraCooldownActive;
+        const long remainingMs = (long)(ed.extraCooldownUntilMs - millis());
+        doc["extra_cooldown_remaining_s"] =
+            (ed.extraCooldownActive && remainingMs > 0) ? (int)(remainingMs / 1000L) : 0;
+    } else if (thisGroup == 2) {
+        const char* abStr = "Off";
+        switch (ed.abMode) {
+            case ABMode::Arming: abStr = "Arming"; break;
+            case ABMode::Igniting: abStr = "Igniting"; break;
+            case ABMode::Running: abStr = "Running"; break;
+            case ABMode::ShuttingDown: abStr = "ShuttingDown"; break;
+            case ABMode::Fault: abStr = "Fault"; break;
+            default: break;
+        }
+        doc["ab_mode"] = abStr;
+        doc["ab_trigger_active"] = ed.abTriggerActive;
+        doc["ab_flame_on"] = ed.abFlameOn;
+        doc["ab_flame_healthy"] = ed.abFlameHealthy;
+        doc["ab_permitted"] = ed.abPermitted;
+        doc["ab_execution_active"] = ed.abExecutionActive;
+        doc["ab_inhibit_reason"] = ed.abInhibitReason;
+        doc["ab_fault_reason"] = ed.abFaultReason;
+        doc["ab_sol_open"] = ed.abSolOpen;
+        doc["ab_pump_demand"] = (float)(int)(ed.abPumpDemand * 1000) / 1000.0f;
+        doc["current_block"] = ed.currentBlock;
+        doc["seq_block_idx"] = (int)ed.seqBlockIdx;
+        doc["seq_block_total"] = (int)ed.seqBlockTotal;
+        doc["seq_wait_reason"] = ed.seqWaitReason[0] ? ed.seqWaitReason : nullptr;
+        doc["seq_last_result"] = ed.seqLastResult[0] ? ed.seqLastResult : nullptr;
+        doc["seq_fault_block"] = ed.seqFaultBlock[0] ? ed.seqFaultBlock : nullptr;
+        doc["limited_start_allowed"] = _limitedStartRejectReason() == nullptr;
+        const uint32_t eligible = FeedbackRequirements::eligibleSingleStartOverride(ed, millis());
+        doc["limited_start_sensor"] = eligible != FeedbackRequirements::NONE
+            ? FeedbackRequirements::sensorName(eligible) : nullptr;
+    } else {
+        static uint8_t registryPage = 0;
+        constexpr uint8_t CHANNELS_PER_FRAME = 3;
+        const uint8_t first = registryPage++ * CHANNELS_PER_FRAME;
+        auto inArr = doc["registry_inputs"].to<JsonArray>();
+        auto outArr = doc["registry_outputs"].to<JsonArray>();
+        for (uint8_t offset = 0; offset < CHANNELS_PER_FRAME; ++offset) {
+            const uint8_t i = first + offset;
+            if (i < HardwareConfig::channelRegistry.inputCount) {
+                auto ch = inArr.add<JsonObject>();
+                ch["id"] = HardwareConfig::channelRegistry.inputs[i].id;
+                ch["value"] = (float)(int)(ed.registryInputValue[i] * 1000) / 1000.0f;
+                ch["raw"] = ed.registryInputRaw[i];
+                ch["healthy"] = ed.registryInputHealthy[i];
+            }
+            if (i < HardwareConfig::channelRegistry.outputCount) {
+                auto ch = outArr.add<JsonObject>();
+                ch["id"] = HardwareConfig::channelRegistry.outputs[i].id;
+                ch["demand"] = (float)(int)(ed.registryOutputDemand[i] * 1000) / 1000.0f;
+                ch["current_amps"] = (float)(int)(ed.registryOutputCurrentAmps[i] * 100) / 100.0f;
+                ch["current_healthy"] = ed.registryOutputCurrentHealthy[i];
+            }
+        }
+        const uint8_t count = std::max(
+            HardwareConfig::channelRegistry.inputCount,
+            HardwareConfig::channelRegistry.outputCount);
+        const uint8_t pageCount = std::max<uint8_t>(
+            1, (count + CHANNELS_PER_FRAME - 1) / CHANNELS_PER_FRAME);
+        if (registryPage >= pageCount) registryPage = 0;
+
+        // Recorder state changes throughout a run and while its bounded RAM
+        // queue is being committed after shutdown. It must not live only in
+        // the one-time /api/data snapshot: compact REST clients merge these
+        // rotating frames with that snapshot and would otherwise display the
+        // boot values forever.
+        doc["session_dropped_rows"] = SessionLogger::droppedRows();
+        doc["session_queued_rows"] = SessionLogger::queuedRows();
+        doc["session_logger_healthy"] = SessionLogger::healthy();
+        doc["session_logger_error"] = SessionLogger::errorCode();
+        doc["session_capture_active"] = SessionLogger::captureActive();
+        doc["session_log_path"] = SessionLogger::currentPath();
+    }
+
+    const size_t measured = measureJson(doc);
+    if (measured + 1 > len || measured > COMPACT_TELEMETRY_MAX) {
+        Serial.printf("[Web] Compact telemetry overflow (%u bytes, group %u)\n",
+                      (unsigned)measured, (unsigned)thisGroup);
+        return len;
+    }
+    return serializeJson(doc, buf, len);
+}
+
 static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool full) {
     alignas(EngineData) uint8_t snapshotStorage[sizeof(EngineData)];
     const uint32_t snapshotVersion = EngineData::readPublishedSnapshot(snapshotStorage, sizeof(snapshotStorage));
@@ -1647,6 +1721,8 @@ static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool ful
     doc["session_queued_rows"]   = SessionLogger::queuedRows();
     doc["session_logger_healthy"] = SessionLogger::healthy();
     doc["session_logger_error"]   = SessionLogger::errorCode();
+    doc["session_capture_active"] = SessionLogger::captureActive();
+    doc["session_log_mask"]       = SessionLogger::configuredMask();
     doc["session_log_path"]       = SessionLogger::currentPath();
     doc["session_eviction_count"] = SessionLogger::evictionCount();
     doc["session_last_evicted"]   = SessionLogger::lastEvictedSession();
@@ -2094,12 +2170,9 @@ void WebServer::_setupRoutes() {
     };
 
     // ── Captive portal landing ─────────────────────────────────
-    // Serve a SMALL, self-contained landing page to OS captive probes — NOT the full
-    // dashboard. The dashboard opens a WebSocket, and the OS captive-portal mini-browser
-    // (CNA/WebView) that shows this page would then hold the single /ws slot
-    // (cleanupClients keeps only 1), starving the real browser's dashboard/hardware pages
-    // and forcing them onto the slow status-poll fallback. A static page with a link keeps
-    // the /ws slot free and gives a clearer "open in your browser" prompt.
+    // Serve a small, self-contained landing page to OS captive probes instead
+    // of the full dashboard. This keeps captive mini-browsers from generating
+    // live telemetry traffic and gives a clearer "open in your browser" prompt.
     auto sendPortalPage = [](AsyncWebServerRequest* req) {
         String ip = WiFi.softAPIP().toString();
         String html = F("<!DOCTYPE html><html><head><meta charset=utf-8>"
@@ -2123,8 +2196,7 @@ void WebServer::_setupRoutes() {
     };
     // Redirect the OS connectivity probes to the portal with a 302 + Location header.
     // A bare 200 page leaves Windows unable to learn the portal URL, so it opens its own
-    // default (msn.com) instead. The Location points at a lightweight /portal page (no
-    // WebSocket) so it never hogs the single /ws slot.
+    // default (msn.com) instead. The Location points at the lightweight portal.
     auto redirectToPortal = [](AsyncWebServerRequest* req) {
         auto* resp = req->beginResponse(302, "text/plain", "");
         resp->addHeader("Location", String("http://") + WiFi.softAPIP().toString() + "/portal");
@@ -2235,7 +2307,7 @@ void WebServer::_setupRoutes() {
         // allocation error.  Drop this disposable poll before constructing a
         // response.  The browser already retries status requests, while the
         // configuration gate remains authoritative and START stays blocked.
-        if (ConfigApplyGate::busy() && ESP.getMaxAllocHeap() < 8192) {
+        if (ConfigApplyGate::busy()) {
             if (req->client()) req->abort();
             return;
         }
@@ -2252,9 +2324,8 @@ void WebServer::_setupRoutes() {
             ConfigApplyGate::busy() ? "true" : "false",
             static_cast<unsigned>(ESP.getFreeHeap()),
             static_cast<unsigned>(ESP.getMaxAllocHeap()),
-            static_cast<unsigned>(_ws.count()),
-            static_cast<unsigned>(s_httpTimeWaitPcbs),
-            static_cast<unsigned>(s_httpTimeWaitReaped));
+            0U,
+            static_cast<unsigned>(s_httpTimeWaitPcbs), 0U);
         AsyncWebServerResponse* resp = req->beginResponse(200, "application/json", buf);
         _finalizeJsonResponse(resp);
         req->send(resp);
@@ -2322,11 +2393,10 @@ void WebServer::_setupRoutes() {
         // free heap remains healthy. Borrow the reserved transfer workspace on
         // S3 instead; it is released as soon as the final response bytes enter
         // TCP, before fetch() resolves and the editor can issue its save.
-#if defined(OT_PLATFORM_ESP32S3)
+        // Settings can exceed 7 KB. Borrow the preallocated transfer workspace
+        // on both targets instead of allocating an owned copy plus the async
+        // response's send buffer while the JsonDocument is still unwinding.
         _sendLargeReadJson(req, g_webTxBuf, n);
-#else
-        _sendOwnedJson(req, g_webTxBuf, n);
-#endif
     });
 
     // POST /api/config — replace only the settings section in ecu_config.json.
@@ -2375,6 +2445,11 @@ void WebServer::_setupRoutes() {
                 req->send(409, "application/json", "{\"error\":\"engine became active before full settings replacement\"}");
                 return;
             }
+            // A settings transaction temporarily needs one complete validated
+            // tree and then one core-side apply tree. Retire the disposable
+            // browser telemetry workspace first so Classic can perform that
+            // handoff live instead of rebooting into the persisted file.
+            _releaseLiveTelemetryWorkspace();
             JsonDocument incoming;
             if (deserializeJson(incoming, g_webRxBuf, g_webRxLen) !=
                     DeserializationError::Ok ||
@@ -2443,6 +2518,9 @@ void WebServer::_setupRoutes() {
                 req->send(409, "application/json", "{\"error\":\"configuration became locked before it could be applied\"}");
                 return;
             }
+            // See the full settings replacement above. The browser reconnects
+            // telemetry after the atomic apply gate returns to idle.
+            _releaseLiveTelemetryWorkspace();
             JsonDocument patch;
             if (deserializeJson(patch, g_webRxBuf, g_webRxLen) != DeserializationError::Ok) {
                 ConfigApplyGate::release();
@@ -2498,6 +2576,12 @@ void WebServer::_setupRoutes() {
             FlightRecorder::logConfigChange("config.patch", 0, 0);
             bool active = !_isStandbyLike(EngineData::instance().mode);
             ConfigApplyGate::publishCandidate(candidateJson, candidateLen, 1000);
+            // Config::toJson() builds a comparatively large temporary tree.
+            // Release it before AsyncWebServer allocates the tiny success
+            // response; retaining the tree until the callback returned could
+            // exhaust a fragmented Classic heap after normal page browsing.
+            current.clear();
+            current.shrinkToFit();
             req->send(200, "application/json", active
                 ? "{\"ok\":true,\"saved\":true,\"applying\":true,\"live_now\":false}"
                 : "{\"ok\":true,\"saved\":true,\"applying\":true}");
@@ -2629,9 +2713,13 @@ void WebServer::_setupRoutes() {
     });
 
     // Frequent dynamic data only. Static labels, limits, capabilities and
-    // registry metadata remain in the one-time /api/data boot snapshot.
+    // registry metadata remain in the one-time /api/data boot snapshot. Use
+    // the same conservative single-packet compact document so
+    // the Classic can sustain a reused 2 Hz HTTP connection without large
+    // transient response allocations.
     _server.on("/api/telemetry", HTTP_GET, [](AsyncWebServerRequest* req) {
-        size_t n = _buildTelemetry(g_webTxBuf, sizeof(g_webTxBuf), s_restTelemetryDoc, false);
+        size_t n = _buildCompactTelemetry(
+            g_webTxBuf, sizeof(g_webTxBuf), s_restTelemetryDoc);
         if (n >= sizeof(g_webTxBuf)) {
             req->send(500, "application/json", "{\"error\":\"telemetry response too large\"}");
             return;
@@ -3042,6 +3130,10 @@ void WebServer::_setupRoutes() {
                     _otaError = true;
                     return;
                 }
+                // OTA is a maintenance takeover. Release the browser's
+                // heap-backed telemetry workspace before flash streaming and
+                // let it reconnect after the deliberate successful reboot.
+                _releaseLiveTelemetryWorkspace();
                 // Guard: never flash firmware while the engine is running.
                 // FAULT is accepted — OTA is a legitimate repair path.
                 if (!_isStandbyLike(EngineData::instance().mode)) {
@@ -3580,6 +3672,23 @@ void WebServer::_setupRoutes() {
                     "{\"ok\":false,\"error\":\"Failed to atomically save hardware and settings\"}");
                 return;
             }
+            // HardwareConfig is now the new, persisted map, but physical
+            // actuator objects still belong to the old map until reboot.
+            // Align only the semantic pitch state with the newly configured
+            // parked position. Otherwise adding/removing pitch can leave an
+            // old non-parked value blocking the very reboot required to
+            // initialize its new driver, while maintenance commands are
+            // intentionally locked by the pending transaction.
+            float parkedPitch = HardwareConfig::hasPropPitch ? 1.0f : 0.0f;
+            for (uint8_t i = 0; i < HardwareConfig::channelRegistry.outputCount; ++i) {
+                const auto& output = HardwareConfig::channelRegistry.outputs[i];
+                if (output.installed && (!strcmp(output.purpose, "prop_pitch") ||
+                                         !strcmp(output.role, "prop_pitch"))) {
+                    parkedPitch = constrain(output.safeDemand, 0.0f, 1.0f);
+                    break;
+                }
+            }
+            EngineData::instance().propPitchDemand = parkedPitch;
             Serial.printf("[WebServer] POST /api/hardware: saved (%u bytes) - reboot in 1s\n",
                           (unsigned)g_webRxLen);
             req->send(200, "application/json", "{\"ok\":true,\"reboot\":true}");
@@ -3790,7 +3899,12 @@ void WebServer::_setupRoutes() {
             LittleFS, Config::PATH, "application/json");
         resp->addHeader("Content-Disposition", "attachment; filename=\"ecu_config.json\"");
         resp->addHeader("Cache-Control", "no-store");
-        resp->addHeader("Connection", "close");
+        // Controllers, Hardware and System all read this unified file. Forcing
+        // close here created one 60-second TIME_WAIT PCB per page change and
+        // eventually starved Classic of sockets. Reuse the browser's bounded
+        // connection just like the other read-only configuration endpoints.
+        resp->addHeader("Connection", "keep-alive");
+        resp->addHeader("Keep-Alive", "timeout=5, max=16");
         req->send(resp);
     });
 
@@ -3830,7 +3944,7 @@ void WebServer::_setupRoutes() {
                 // complete engine file arrives. Waiting until the last body
                 // chunk left too little contiguous heap to parse Hardware on
                 // a busy S3/Classic UI session.
-                _releaseLiveTelemetryTransport();
+                _releaseLiveTelemetryWorkspace();
                 _configRestoreOwner = req;
                 // Boot accepts this same maximum. The browser must be able to
                 // restore every engine file the firmware can legally load,
@@ -4011,8 +4125,8 @@ void WebServer::_setupRoutes() {
     // 404
     _server.onNotFound([isCaptive](AsyncWebServerRequest* req) {
         if (isCaptive(req)) {
-            // Send captive clients to the lightweight portal page (no WebSocket), not the
-            // dashboard, so they get a clear "open the panel" prompt without hogging /ws.
+            // Send captive clients to the lightweight portal page rather than
+            // starting a full dashboard telemetry session.
             String target = "http://";
             target += WiFi.softAPIP().toString();
             target += "/portal";
@@ -4022,101 +4136,6 @@ void WebServer::_setupRoutes() {
         req->send(404);
     });
 
-    // WebSocket — client-pull model with PING/PONG rescue.
-    //
-    // Core problem: async_tcp (AsyncTCP 3.x + IDF5) intermittently blocks for
-    // 2–20 s waiting for events, even when "p" messages are arriving every 500 ms.
-    // This is the same root cause that required CONFIG_ASYNC_TCP_USE_WDT=0.
-    //
-    // Primary path: JS sends "p" periodically and WS_EVT_DATA replies inside
-    // async_tcp. WebSocket messages are live-data frames only; each page loads
-    // one full snapshot from /api/data during boot for limits and labels. This
-    // prevents large full frames growing the async TCP telemetry allocation.
-    //
-    // Rescue path: if canSend() was false when "p" arrived (previous frame still
-    // in-flight), _wsPendingResponse is set.  tick() notices and calls pingAll()
-    // every 200 ms — a tiny PING that crosses the task boundary cheaply.  The
-    // client auto-replies with PONG, which fires WS_EVT_PONG inside async_tcp,
-    // where canSend() will be true and the pending frame is delivered.
-    _ws.onEvent([](AsyncWebSocket*, AsyncWebSocketClient* client, AwsEventType type,
-                   void*, uint8_t*, size_t) {
-        bool shouldSend = false;
-        bool full       = false;
-
-        if (type == WS_EVT_CONNECT) {
-            // This ECU intentionally serves one live telemetry browser. A page
-            // navigation can establish its replacement socket before the old
-            // page's graceful close completes. Do not close/abort the old
-            // client from this callback: ESPAsyncWebServer invokes CONNECT
-            // while holding its client-list lock, and disconnect cleanup
-            // needs that same lock. The 250 ms cleanup in tick() safely reaps
-            // clients after their browser-side disconnect instead.
-            s_activeWsClient = client;
-            _wsPendingResponse = false;
-            // Every UI client sends an immediate pull from its onopen handler.
-            // Do not also enqueue an unsolicited frame here: two back-to-back
-            // 5 KiB frames make page teardown race a still-queued TCP write on
-            // Classic and eventually exhaust its small connection pool.
-            return;
-        } else if (type == WS_EVT_DISCONNECT) {
-            // A superseded client's delayed disconnect may arrive after its
-            // replacement is already active. It no longer owns the shared
-            // telemetry document and must not clear the replacement's state.
-            if (s_activeWsClient == client) {
-                s_activeWsClient = nullptr;
-                _wsPendingResponse = false;
-                s_wsTelemetryDoc.clear();
-                s_wsTelemetryDoc.shrinkToFit();
-            }
-            return;
-        }
-
-        // A superseded page can send one final pull before tick() closes it.
-        // It no longer owns the shared telemetry document and must not enqueue
-        // another frame or alter the replacement page's pending state.
-        if (client != s_activeWsClient) return;
-
-        if (type == WS_EVT_DATA) {
-            if (!client->canSend()) {
-                _wsPendingResponse = true;
-                return;
-            }
-            // A new pull from the browser is already proof that the socket is
-            // responsive again; resume immediately instead of waiting for ping.
-            _wsPendingResponse = false;
-            full = false;
-            shouldSend = true;
-        } else if (type == WS_EVT_PONG && _wsPendingResponse) {
-            // Rescue: tick() sent a PING because canSend() was false; now we are
-            // back inside async_tcp context and the pipe should be clear.
-            shouldSend = true;
-            full       = false;
-        }
-
-        if (!shouldSend || !client || !client->canSend()) return;
-        _wsPendingResponse = false;
-        // Keep each WebSocket frame small. ESPAsyncWebServer copies outgoing text
-        // into a heap-backed vector; the previous full-frame size could exhaust
-        // ESP32 heap and throw from operator new in the async TCP task.
-        static char buf[6144];
-        JsonDocument& doc = s_wsTelemetryDoc;
-        size_t n = _buildTelemetry(buf, sizeof(buf), doc, full);
-        if (n < sizeof(buf)) {
-            if (!_sendTelemetryFrame(client, buf, n)) _wsPendingResponse = true;
-        } else if (full) {
-            Serial.printf("[WebSocket] Full telemetry frame too large (%u >= %u), falling back to fast frame\n",
-                          (unsigned)n, (unsigned)sizeof(buf));
-            doc.clear();
-            n = _buildTelemetry(buf, sizeof(buf), doc, false);
-            if (n >= sizeof(buf) || !_sendTelemetryFrame(client, buf, n))
-                _wsPendingResponse = true;
-        } else {
-            Serial.printf("[WebSocket] Fast telemetry frame too large (%u >= %u)\n",
-                          (unsigned)n, (unsigned)sizeof(buf));
-            _wsPendingResponse = true;
-        }
-    });
-    _server.addHandler(&_ws);
 }
 
 // ── Public API ────────────────────────────────────────────────
@@ -4221,21 +4240,6 @@ void WebServer::tick() {
     }
     if (storageWriteWindow) _endStorageWriteWindow();
 
-    // ── PING rescue ───────────────────────────────────────────
-    // If a "p" pull arrived while canSend() was false, _wsPendingResponse is
-    // set.  Send a tiny WS PING every 200 ms; the client auto-replies with
-    // PONG, which fires WS_EVT_PONG inside async_tcp — the correct context to
-    // deliver the pending telemetry frame without a cross-task handoff.
-    if (_wsPendingResponse && _ws.count() > 0 &&
-        !s_maintenanceWriteActive &&
-        ESP.getFreeHeap() >= 24576 && ESP.getMaxAllocHeap() >= 8192) {
-        unsigned long now = millis();
-        if (now - _wsPingMs >= 200) {
-            _wsPingMs = now;
-            _ws.pingAll();
-        }
-    }
-
     // Successful OTA uses the normal delayed restart scheduler below. Keeping
     // _otaPendingRestart asserted excludes its completed upload from the
     // interrupted-upload timeout until that restart occurs.
@@ -4283,18 +4287,6 @@ void WebServer::tick() {
             _pendingRestartBlocker[0] = '\0';
             _restartCleanly(_pendingRestartReason);
         }
-    }
-    // Reap WebSocket objects that the TCP stack has already disconnected. Do
-    // not force every superseded page closed here: server-initiated TCP close
-    // leaves a 60 s TIME_WAIT PCB on this lwIP build, and quick navigation can
-    // consume the whole 16-PCB pool. One browser normally closes its old page
-    // socket itself; allowing up to four transient clients covers that overlap
-    // while still bounding genuinely stale peers.
-    unsigned long now = millis();
-    static unsigned long _lastCleanMs = 0;
-    if (now - _lastCleanMs >= 250) {
-        _lastCleanMs = now;
-        _ws.cleanupClients(4);
     }
 }
 
