@@ -143,6 +143,9 @@ def output_path(built: Path, href: str, current: Path) -> Path | None:
 
 
 def check_built_site(built: Path, errors: list[str]) -> None:
+    # Resolve once so diagnostics remain valid when callers pass the normal
+    # relative `_site` path while discovered pages are stored as absolute paths.
+    built = built.resolve()
     pages: dict[Path, PageParser] = {}
     title_set: set[str] = set()
     for route in PUBLIC_ROUTES:
