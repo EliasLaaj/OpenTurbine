@@ -23,7 +23,7 @@ Keep fuel disconnected, ignition energy disabled, starter/load power isolated, a
 7. [Install OpenTurbine and connect](#part-7-install-openturbine-and-connect)
 8. [Describe the hardware in the dashboard](#part-8-describe-the-hardware-in-the-dashboard)
 9. [Understand controllers and safety functions](#part-9-understand-controllers-and-safety-functions)
-10. [Configure all ECU settings](#part-10-configure-all-ecu-settings)
+10. [Configure Controllers and System](#part-10-configure-controllers-and-system)
 11. [Calibrate inputs and outputs](#part-11-calibrate-inputs-and-outputs)
 12. [Build startup and shutdown sequences](#part-12-build-startup-and-shutdown-sequences)
 13. [Use custom controllers](#part-13-use-custom-controllers)
