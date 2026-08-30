@@ -1052,8 +1052,16 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await patchHardware(page, { channel_registry: registryAbHardware.channel_registry });
     await goto(page, 'sequence.html', '#save-btn');
     assert.equal((await page.evaluate(() => getEnabledSensors().filter(row => row.key === 'ab_input').length)), 1);
-    await goto(page, 'config.html', '#rc-pwm-section');
+    await goto(page, 'controllers.html', '#rc-pwm-section');
     await page.locator('#btn-view-expert').click();
+    // Controller groups deliberately start collapsed for page navigation. Open
+    // the owning group before asserting viewport visibility of this configured
+    // section; its filter state is independent of the disclosure state.
+    await page.locator('#rc-pwm-section').evaluate(section => {
+      const group = section.closest('details.config-group');
+      if (group) group.open = true;
+    });
+    await page.locator('#rc-pwm-section').waitFor({ state: 'visible' });
     assert.equal(await visible(page, '#rc-pwm-section'), true);
     assert.equal(await page.locator('#cf-ab_pcm option[value="2"]').isDisabled(), false);
     results.push('registry RC afterburner command is one named sequence source and exposes its signal-loss settings');
