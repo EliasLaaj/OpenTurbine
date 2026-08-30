@@ -153,12 +153,15 @@ public:
                 FeedbackControlMath::reset(_feedbackState[i]);
             }
 
-            // Automatic idle is a floor, not a competing fuel owner. Its
-            // already-calculated command remains authoritative beneath a
-            // custom Main Fuel definition.
+            // Automatic Idle is a floor, not a competing fuel owner. Combine
+            // the user's current Main Fuel request with the floor calculated
+            // this tick. Do not use baseDemand here: releaseOwnedTargets()
+            // restores the previous non-rule demand before controllers run,
+            // so that value can contain yesterday's idle floor and prevent a
+            // pressure/RPM controller from ever backing down.
             if (r.actuator == THROTTLE && HardwareConfig::hasDynamicIdle &&
                 ed.mode == SysMode::RUNNING)
-                demand = max(demand, baseDemand);
+                demand = max(demand, (float)ed.dynamicIdleFloorDemand);
 
             // Sequence and built-in subsystem requests share auxiliary
             // outputs with optional user controllers. Either owner may ask
@@ -259,7 +262,7 @@ private:
             case OIL_PRESS:       return HardwareConfig::hasOilPress && ed.oilHealthy;
             case TIT:             return HardwareConfig::hasTit && ed.titHealthy;
             case BATT_V:          return HardwareConfig::hasBattVoltage && ed.battHealthy;
-            case N2_RPM:          return HardwareConfig::hasTwoShaft && HardwareConfig::hasN2Rpm && ed.n2Healthy;
+            case N2_RPM:          return HardwareConfig::hasN2Rpm && ed.n2Healthy;
             case DI_CH0:          return HardwareConfig::diCh[0].pin >= 0;
             case DI_CH1:          return HardwareConfig::diCh[1].pin >= 0;
             case DI_CH2:          return HardwareConfig::diCh[2].pin >= 0;
@@ -449,10 +452,10 @@ private:
             return;
         }
         switch (act) {
-            case COOL_FAN:    ed.coolFanDemand = dem; ed.coolFanOn = RelayDemand::requested(dem); break;
-            case BLEED_VALVE: ed.bleedValveDemand = dem; ed.bleedValveOpen = RelayDemand::requested(dem); break;
+            case COOL_FAN:    ed.coolFanDemand = dem; break;
+            case BLEED_VALVE: ed.bleedValveDemand = dem; break;
             case FUEL_PUMP2:  ed.fuelPump2Demand = constrain(dem, 0.0f, 1.0f); break;
-            case OIL_SCAVENGE:ed.oilScavengeDemand = dem; ed.oilScavengeOn = RelayDemand::requested(dem); break;
+            case OIL_SCAVENGE:ed.oilScavengeDemand = dem; break;
             case THROTTLE:
                 ed.throttleDemand = constrain(dem, 0.0f, 1.0f);
                 if (ruleName) strlcpy(ed.throttleCommandOwner, ruleName, sizeof(ed.throttleCommandOwner));

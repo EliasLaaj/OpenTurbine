@@ -29,9 +29,11 @@ public:
 
     // Called only by the web writer while it owns WebWriting. Ownership of
     // the heap buffer transfers to the ECU core.
-    static uint32_t publishCandidate(char* data, size_t length, uint32_t settleMs = 0) {
+    static uint32_t publishCandidate(char* data, size_t length, uint32_t settleMs = 0,
+                                     bool livePatch = false) {
         _pendingData = data;
         _pendingLength = length;
+        _pendingLivePatch.store(livePatch, std::memory_order_relaxed);
         const uint32_t generation =
             _nextGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
         _pendingGeneration.store(generation, std::memory_order_release);
@@ -41,11 +43,13 @@ public:
     }
 
     // Called only after the ECU core has changed ReadyForCore to CoreApplying.
-    static char* takeCandidate(size_t& length) {
+    static char* takeCandidate(size_t& length, bool& livePatch) {
         char* data = _pendingData;
         length = _pendingLength;
+        livePatch = _pendingLivePatch.load(std::memory_order_relaxed);
         _pendingData = nullptr;
         _pendingLength = 0;
+        _pendingLivePatch.store(false, std::memory_order_relaxed);
         return data;
     }
 
@@ -122,6 +126,7 @@ private:
     static inline std::atomic<uint32_t> _readyAfterMs{0};
     static inline std::atomic<uint32_t> _completedGeneration{0};
     static inline std::atomic<bool> _completedSucceeded{false};
+    static inline std::atomic<bool> _pendingLivePatch{false};
     static inline char* _pendingData = nullptr;
     static inline size_t _pendingLength = 0;
 };

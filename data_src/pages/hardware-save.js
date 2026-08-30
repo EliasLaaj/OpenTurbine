@@ -48,7 +48,13 @@ function _registryFieldLabel(key) {
     safe_demand:'Power-on demand', mirror_of:'Mirrored command source', force_safe_on_fault:'Force safe state on fault', min_run_demand:'Minimum reliable command', pwm_freq_hz:'PWM carrier frequency', pwm_res_bits:'PWM resolution', invert:'Signal inversion',
     active_high:'Active polarity', pullup:'Internal pull-up', pulldown:'Internal pull-down',
     has_current:'Current sensing', current_pin:'Current sensor pin', current_mv_a:'Current sensor mV/A',
-    current_zero_v:'Current zero voltage', current_max_a:'Current limit', current_trip_delay_ms:'Overcurrent confirmation',
+    current_zero_v:'Current zero voltage', current_max_a:'Current limit', current_ready_a:'Glow ready current', current_trip_delay_ms:'Overcurrent confirmation',
+    ignition_mode:'Ignition mode', ignition_dwell_ms:'Ignition dwell', ignition_rest_ms:'Ignition rest',
+    ignition_coil_sat_a:'Coil saturation current', ignition_preheat_ms:'Device preheat duration',
+    ignition_peak_demand:'Glow peak command', ignition_hold_demand:'Glow hold command',
+    ignition_wait_hot:'Wait for hot confirmation', ignition_hot_timeout_ms:'Hot-confirm timeout',
+    paired_output:'Paired start-fuel output', paired_output_delay_ms:'Pilot-fuel delay',
+    paired_output_demand:'Pilot-fuel command',
     has_flow_monitor:'Flow monitoring', minimum_flow_l_min:'Minimum oil flow', flow_input:'Flow sensor'
   })[key] || key.replace(/_/g, ' ');
 }
@@ -133,8 +139,12 @@ function _registryEffectiveValue(key, value) {
     force_safe_on_fault:false, min_run_demand:0, pwm_freq_hz:5000,
     pwm_res_bits:10, invert:false, active_high:true, pullup:false,
     pulldown:false, has_current:false, current_pin:-1, current_mv_a:100,
-    current_zero_v:1.65, current_max_a:0, current_trip_delay_ms:5000, has_flow_monitor:false,
-    minimum_flow_l_min:0, flow_input:''
+    current_zero_v:1.65, current_max_a:0, current_ready_a:3, current_trip_delay_ms:5000, has_flow_monitor:false,
+    minimum_flow_l_min:0, flow_input:'', ignition_mode:0, ignition_dwell_ms:6,
+    ignition_rest_ms:3, ignition_coil_sat_a:8, ignition_preheat_ms:10000,
+    ignition_peak_demand:.8, ignition_hold_demand:.3, ignition_wait_hot:false,
+    ignition_hot_timeout_ms:30000, paired_output:'', paired_output_delay_ms:8000,
+    paired_output_demand:1
   };
   return Object.prototype.hasOwnProperty.call(defaults, key) ? defaults[key] : value;
 }
@@ -397,7 +407,17 @@ async function saveHardware() {
   for (const [purpose, key, label] of [
     ['igniter','igniter','Igniter'], ['ab_igniter','igniter2','Afterburner / Secondary Igniter']
   ]) {
-    const channel = (registryRoot().outputs || []).find(c => registryDerivedPurpose('output', c) === purpose);
+    (registryRoot().outputs || []).filter(c => registryDerivedPurpose('output', c) === purpose)
+      .forEach(c => {
+        if ([4,11].includes(Number(c.driver)) && Number(c.ignition_mode || 0) !== 0) {
+          igniterModeConversions.push({label:(c.name || label) + ' / Igniter mode',
+            was:Number(c.ignition_mode) === 2 ? 'Current-limited coil dwell' : 'Dwell / rest PWM cycle',
+            now:'Simple on/off (relay capability)'});
+          c.ignition_mode = 0;
+        }
+      });
+    const channel = (registryRoot().outputs || []).find(c =>
+      registryDerivedPurpose('output', c) === purpose && registryOutputOwnsCorePurpose(c));
     const actuator = cfg.actuators?.[key];
     if (channel && [4,11].includes(Number(channel.driver)) && actuator && (actuator.pwm || actuator.coil)) {
       igniterModeConversions.push({label:label + ' / Igniter mode', was:actuator.coil ? 'Current-limited coil dwell' : 'Dwell / rest PWM cycle', now:'Simple on/off (relay capability)'});
@@ -951,9 +971,11 @@ function collapseLegacyPwmTiming() {
 window.addEventListener('load', async () => {
   updateHardwareUnitButtons();
   collapseLegacyPwmTiming();
-  // One-hertz REST telemetry is sufficient for Hardware indicators and avoids
-  // competing with the dashboard's single live WebSocket during navigation.
-  startStatusPoll();
-  await loadHardware();
+  // Load the comparatively large editor document before starting live polls.
+  // On Classic, constructing both responses at once can temporarily consume
+  // every affordable HTTP/TCP allocation and leave the page half-loaded.
+  // Hardware indicators do not need telemetry until their cards exist.
+  const loaded = await loadHardware();
+  if (loaded) startStatusPoll();
   applyContextTooltips();
 });

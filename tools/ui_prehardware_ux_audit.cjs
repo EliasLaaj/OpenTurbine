@@ -198,6 +198,8 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(inputAddChoices['TOT / EGT']?.description || '', /MAX31855.*default/i);
     assert.match(inputAddChoices['TIT']?.description || '', /MAX31855.*default/i);
     assert.match(inputAddChoices['AB flame']?.description || '', /afterburner.*flame/i);
+    assert.match(inputAddChoices['General flow']?.description || '', /repeatable user-named flow measurement/i);
+    assert.match(inputAddChoices['General current']?.description || '', /not tied to an output/i);
     assert.equal(inputAddChoices['Main oil-pump flow'], undefined, 'main oil flow belongs inside the oil-pump card');
     assert.equal(inputAddChoices['Scavenge-pump flow'], undefined, 'scavenge flow belongs inside the scavenge-pump card');
     await page.locator('#registry-add-modal button[onclick="closeRegistryAddDialog()"]' ).click();
@@ -225,7 +227,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match((await oilPumpCard.textContent()).trim(), /Flow sensing & monitoring.*Main oil-pump flow sensor.*Pulses \/ litre.*Minimum flow.*Safety & Limits.*Oil Pressure Safety/is);
     assert.match((await oilPumpCard.textContent()).trim(), /Current sensing.*Calibration page/is);
     assert.equal(await oilPumpCard.locator('a[href="/controllers.html#cf-oil_mm"]').count(), 1);
-    assert.equal(await oilPumpCard.locator('a[href="/controllers.html#cf-so_rl"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/controllers.html#cf-so_en"]').count(), 1);
     assert.equal(await oilPumpCard.locator('a[href="/sequence.html#tab-startup"]').count(), 1);
     results.push('add-device catalog reserves singleton checks for sensors while multi-instance outputs and pump-owned monitoring remain clear');
 
@@ -247,9 +249,10 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
         thirdLookup: pumpFlowInput(cfg.channel_registry.outputs[2]).channel?.id || ''
       };
     });
-    assert.equal(multiPumpFlow.links[0], 'oil_flow');
+    assert.notEqual(multiPumpFlow.links[0], 'oil_flow', 'an unlinked standalone/legacy flow sensor must not be claimed when several pumps exist');
+    assert.equal(multiPumpFlow.ids.includes('oil_flow'), true, 'standalone flow input must be preserved');
     assert.equal(new Set(multiPumpFlow.links).size, 3);
-    assert.equal(new Set(multiPumpFlow.ids).size, 3);
+    assert.equal(new Set(multiPumpFlow.ids).size, 4);
     assert.equal(multiPumpFlow.secondLookup, multiPumpFlow.links[1]);
     assert.equal(multiPumpFlow.thirdLookup, multiPumpFlow.links[2]);
     results.push('multiple oil pumps receive deterministic independent flow sensors with collision-safe IDs');
@@ -556,10 +559,10 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     }
     assert.deepEqual(hardwareInputFieldsWithoutHelp, [],
       `every installed input field needs nearby explanatory help: ${hardwareInputFieldsWithoutHelp.join(', ')}`);
-    const igniterCard = installedOutputCards.nth(3);
+    const igniterCard = page.locator('#registry-outputs .registry-card[data-registry-id="igniter"]');
     await igniterCard.locator('button', { hasText: 'Edit' }).click();
     assert.equal(await igniterCard.evaluate(card => {
-      const behavior = Array.from(card.querySelectorAll('strong')).find(el => el.textContent.trim() === 'Igniter behavior');
+      const behavior = Array.from(card.querySelectorAll('strong')).find(el => el.textContent.trim().startsWith('Igniter behavior'));
       const advanced = Array.from(card.querySelectorAll('summary')).find(el => el.textContent.trim() === 'Advanced output settings');
       return !!behavior && !!advanced && !!(behavior.compareDocumentPosition(advanced) & Node.DOCUMENT_POSITION_FOLLOWING);
     }), true);
@@ -1012,15 +1015,17 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await goto(page, 'sequence.html', '#save-btn');
     assert.equal(await page.locator('#save-btn').isDisabled(), true);
     assert.equal(await page.locator('#seq-discard-btn').isDisabled(), true);
-    const missingOilBlock = page.locator('.block-card', { hasText: 'Oil Pump On' }).first();
+    const missingOilBlock = page.locator('.block-card.block-hardware-missing', { hasText: 'Set Output' }).first();
     assert.match(await missingOilBlock.getAttribute('class'), /block-hardware-missing/);
     assert.match(await missingOilBlock.textContent(), /Missing hardware/i);
+    await missingOilBlock.locator('.block-header').click();
+    assert.match(await missingOilBlock.textContent(), /Missing output: oil_pump/i);
     await missingOilBlock.getByRole('button', { name: /Drag to reorder block/ }).press('ArrowDown');
     assert.equal(await page.locator('#save-btn').isDisabled(), false);
     assert.equal(await page.locator('#seq-discard-btn').isDisabled(), false);
     await page.locator('#save-btn').click();
     await page.waitForSelector('#ot-app-dialog.show');
-    assert.match(await page.locator('#ot-dialog-message').textContent(), /Oil Pump On.*cannot run with the fitted hardware/is);
+    assert.match(await page.locator('#ot-dialog-message').textContent(), /Set Output.*missing output "oil_pump"/is);
     await page.locator('#ot-dialog-confirm').click();
     results.push('sequence cards expose missing hardware immediately and block an invalid save');
 

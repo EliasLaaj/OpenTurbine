@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+from contextlib import nullcontext
 import shutil
 import subprocess
 import sys
@@ -79,7 +80,9 @@ def main() -> int:
     host_tmp = ROOT / "artifacts" if os.name == "nt" else None
     if host_tmp is not None:
         host_tmp.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="ot-sensor-vectors-", dir=host_tmp) as tmp:
+    tmp_context = (nullcontext(str(host_tmp)) if host_tmp is not None else
+                   tempfile.TemporaryDirectory(prefix="ot-sensor-vectors-"))
+    with tmp_context as tmp:
         compiler = compiler_command()
         sensor_exe = str(Path(tmp) / ("sensor_vectors.exe" if os.name == "nt" else "sensor_vectors"))
         run("extended real sensor protocol vectors", compiler + ["-std=c++17", "tools/sensor_protocol_vectors.cpp", "-o", sensor_exe])
@@ -121,9 +124,12 @@ def main() -> int:
         return 0
 
     pio = pio_command()
-    for env, partitions, minimum_dram in (
-        ("esp32dev", "partitions.csv", "16384"),
-        ("esp32s3dev", "partitions_8mb.csv", "65536"),
+    for env, partitions, minimum_dram, app_reserve, filesystem_free in (
+        # Classic is now feature-complete inside its fixed 1.625 MiB OTA
+        # slots. Keep a hard 32 KiB image margin and roughly 140 KiB of raw
+        # LittleFS working/log space; the S3 retains the broader defaults.
+        ("esp32dev", "partitions.csv", "16384", "0x8000", "0x23000"),
+        ("esp32s3dev", "partitions_8mb.csv", "65536", "0x10000", "0x28000"),
     ):
         run(f"{env} firmware", pio + ["run", "-e", env, "-j", "2"])
         run(f"{env} LittleFS", pio + ["run", "-e", env, "-t", "buildfs", "-j", "2"])
@@ -144,6 +150,10 @@ def main() -> int:
                 f".pio3/{env}/firmware.map",
                 "--minimum-dram-headroom",
                 minimum_dram,
+                "--app-reserve",
+                app_reserve,
+                "--minimum-filesystem-free",
+                filesystem_free,
             ],
         )
 

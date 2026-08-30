@@ -58,6 +58,7 @@ async function json(response, label) {
   let originalRamp;
   let editedRamp;
   let restored = false;
+  let classicStandbySaveReboots = false;
   let saves = 0;
   let navigations = 0;
   let navigationEpoch = 0;
@@ -159,19 +160,27 @@ async function json(response, label) {
 
   async function telemetrySafe(where) {
     let response;
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < 10; attempt++) {
       try {
         response = await page.request.get(`${base}/api/data?_soak=${Date.now()}`, { timeout: 8000 });
       } catch (error) {
-        if (attempt === 5) throw error;
+        if (attempt === 9) throw error;
         await page.waitForTimeout(500 + attempt * 250);
         continue;
       }
-      if (response.ok()) break;
-      if (![409, 503].includes(response.status())) break;
+      if (response.ok()) {
+        const telemetry = await response.json();
+        // Classic intentionally returns this tiny frame when the bounded
+        // transfer workspace is still finishing another large response. It is
+        // a retry signal, not a telemetry sample and has no boot counter.
+        if (!telemetry?._snapshot_deferred && Number.isFinite(Number(telemetry?.boot_count)))
+          return telemetry;
+      } else if (![409, 503].includes(response.status())) {
+        break;
+      }
       await page.waitForTimeout(500 + attempt * 250);
     }
-    return json(response, `${where} telemetry`);
+    throw new Error(`${where}: complete telemetry remained unavailable`);
   }
 
   async function configSafe(where) {
@@ -250,7 +259,10 @@ async function json(response, label) {
 
   async function saveRamp(value, purpose, expectedBefore) {
     await navigate('/controllers.html');
-    await page.waitForSelector('#cf-th_ru', { state: 'attached', timeout: 12000 });
+    // Classic serves the settings and hardware documents serially from one
+    // bounded workspace. After a cold reconnect the second document can need
+    // more than 12 s without indicating a broken page.
+    await page.waitForSelector('#cf-th_ru', { state: 'attached', timeout: 30000 });
     await page.waitForFunction(() => typeof isLocked !== 'undefined' && !isLocked, null, { timeout:12000 });
     const field = page.locator('#cf-th_ru');
     await field.evaluate(el => {
@@ -282,7 +294,7 @@ async function json(response, label) {
     await acknowledgeDialogsUntil('#save-recap-confirm-btn');
     await page.locator('#save-recap-confirm-btn').click();
     try {
-      await page.waitForFunction(() => /Saved|Applied live/.test(document.getElementById('save-msg')?.textContent || ''), null, { timeout: 35000 });
+      await page.waitForFunction(() => /Saved|Applied live|Live update queued/.test(document.getElementById('save-msg')?.textContent || ''), null, { timeout: 35000 });
     } catch (error) {
       const message = await page.locator('#save-msg').textContent().catch(() => '(missing)');
       throw new Error(`${purpose}: save acknowledgement timed out; UI message: ${message}; requests: ${failures.join(' | ') || 'none'}; ${error.message}`);
@@ -433,17 +445,33 @@ async function json(response, label) {
     let stableSince = 0;
     let changed = false;
     const end = Date.now() + 45000;
-    while (Date.now() < end) {
-      const telemetry = await telemetrySafe(`${purpose} reboot settling`);
-      const current = Number(telemetry.boot_count);
-      if (current !== Number(previousBootCount)) changed = true;
-      if (current !== last) { last = current; stableSince = Date.now(); }
-      if (changed && Date.now() - stableSince >= 8000) {
-        assert.equal(Number(telemetry.reset_reason), 3,
-          `${purpose} reboot did not report the expected software-reset reason`);
-        return current;
+    const recoveryApi = await request.newContext({
+      baseURL: base,
+      extraHTTPHeaders: { Connection: 'close', 'Cache-Control': 'no-cache' }
+    });
+    try {
+      while (Date.now() < end) {
+        let telemetry;
+        try {
+          const response = await recoveryApi.get(`/api/data?_reboot=${Date.now()}`, { timeout: 5000 });
+          if (response.ok()) telemetry = await response.json();
+        } catch (_) {}
+        if (!telemetry) {
+          await page.waitForTimeout(500);
+          continue;
+        }
+        const current = Number(telemetry.boot_count);
+        if (current !== Number(previousBootCount)) changed = true;
+        if (current !== last) { last = current; stableSince = Date.now(); }
+        if (changed && Date.now() - stableSince >= 8000) {
+          assert.equal(Number(telemetry.reset_reason), 3,
+            `${purpose} reboot did not report the expected software-reset reason`);
+          return current;
+        }
+        await page.waitForTimeout(1000);
       }
-      await page.waitForTimeout(1000);
+    } finally {
+      await recoveryApi.dispose();
     }
     throw new Error(`boot counter did not change and settle after the expected ${purpose} reboot`);
   }
@@ -465,13 +493,16 @@ async function json(response, label) {
     const initialTelemetry = await telemetrySafe('initial');
     assert.match(info.target, /esp32/, 'unexpected target');
     const initialCfg = await configSafe('initial');
+    classicStandbySaveReboots = info.target === 'esp32dev';
     originalRamp = Number(initialCfg.throttle.ramp_up_ms);
     editedRamp = originalRamp >= 9950 ? originalRamp - 50 : originalRamp + 50;
     assert.notEqual(editedRamp, originalRamp);
     console.log(`${label} ${info.chip} build=${info.build_id}; original ramp=${originalRamp} ms; duration=${durationSec}s`);
 
     await saveRamp(editedRamp, 'edit', originalRamp);
-    const editedBootCount = await proveSaveWithoutReboot(initialTelemetry.boot_count, 'controller save');
+    const editedBootCount = classicStandbySaveReboots
+      ? await waitForExpectedReboot(initialTelemetry.boot_count, 'Classic controller save')
+      : await proveSaveWithoutReboot(initialTelemetry.boot_count, 'controller save');
     await exerciseEngineFileRoundTrip();
     const soakBootCount = await waitForExpectedReboot(editedBootCount, 'engine-file restore');
     const actions = [exerciseDashboard, exerciseHardware, exerciseSystem, exerciseCalibration, exerciseSequence, exerciseLog, exerciseTools];
@@ -489,7 +520,9 @@ async function json(response, label) {
     assert.equal(Number(beforeCleanup.boot_count), Number(soakBootCount),
       `ECU rebooted unexpectedly during ordinary browsing (boot ${soakBootCount} -> ${beforeCleanup.boot_count}, reset reason ${beforeCleanup.reset_reason})`);
     await saveRamp(originalRamp, 'restore', editedRamp);
-    const cleanupBootCount = await proveSaveWithoutReboot(soakBootCount, 'cleanup controller save');
+    const cleanupBootCount = classicStandbySaveReboots
+      ? await waitForExpectedReboot(soakBootCount, 'Classic cleanup controller save')
+      : await proveSaveWithoutReboot(soakBootCount, 'cleanup controller save');
     restored = true;
     await exerciseDashboard();
     await deviceSafe('final');
@@ -534,27 +567,51 @@ async function json(response, label) {
         });
         let response;
         try {
-          for (let attempt = 0; attempt < 12; attempt++) {
-            try {
-              response = await cleanupApi.patch('/api/config', {
-                data: { throttle: { ramp_up_ms: originalRamp } }, timeout: 10000
-              });
-            } catch (_) {
-              await page.waitForTimeout(750);
-              continue;
+          if (classicStandbySaveReboots) {
+            let engineFile;
+            for (let attempt = 0; attempt < 20 && !engineFile; attempt++) {
+              try {
+                const download = await cleanupApi.get(`/api/ecu_config?_cleanup=${Date.now()}`, { timeout:10000 });
+                if (download.ok()) engineFile = await download.json();
+              } catch (_) {}
+              if (!engineFile) await page.waitForTimeout(750);
             }
-            if (response.ok()) break;
-            if (response.status() !== 409) throw new Error(`HTTP ${response.status()}`);
-            await page.waitForTimeout(750);
+            if (!engineFile) throw new Error('complete engine file could not be downloaded');
+            engineFile.settings.throttle.ramp_up_ms = originalRamp;
+            for (let attempt = 0; attempt < 20; attempt++) {
+              try {
+                response = await cleanupApi.post('/api/ecu_config', { data:engineFile, timeout:20000 });
+              } catch (_) {
+                await page.waitForTimeout(750);
+                continue;
+              }
+              if (response.ok()) break;
+              if (![409, 503].includes(response.status())) throw new Error(`HTTP ${response.status()}`);
+              await page.waitForTimeout(750);
+            }
+          } else {
+            for (let attempt = 0; attempt < 20; attempt++) {
+              try {
+                response = await cleanupApi.patch('/api/config', {
+                  data: { throttle: { ramp_up_ms: originalRamp } }, timeout: 10000
+                });
+              } catch (_) {
+                await page.waitForTimeout(750);
+                continue;
+              }
+              if (response.ok()) break;
+              if (![409, 503].includes(response.status())) throw new Error(`HTTP ${response.status()}`);
+              await page.waitForTimeout(750);
+            }
           }
           if (!response?.ok()) throw new Error(`HTTP ${response?.status()}`);
-          for (let attempt = 0; attempt < 10; attempt++) {
-            await page.waitForTimeout(500);
+          for (let attempt = 0; attempt < 40; attempt++) {
+            await page.waitForTimeout(750);
             try {
               const cfg = await cleanupApi.get(`/api/config?_cleanup=${Date.now()}`, { timeout: 10000 });
               if (cfg.ok() && Number((await cfg.json()).throttle.ramp_up_ms) === originalRamp) break;
             } catch (_) {}
-            if (attempt === 9) throw new Error('restored value did not read back');
+            if (attempt === 39) throw new Error('restored value did not read back');
           }
         } finally {
           await cleanupApi.dispose();

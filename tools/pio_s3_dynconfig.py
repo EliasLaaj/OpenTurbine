@@ -32,12 +32,14 @@ if dynconfig:
 
 
 def patch_async_webserver_request(env):
-    """Retire completed ``Connection: close`` responses gracefully.
+    """Let the HTTP peer retire completed ``Connection: close`` responses.
 
-    A streamed response becomes finished when its final bytes are queued. The
-    next ACK must close the AsyncClient so the response/request objects and any
-    fixed-buffer lease are released. This is a graceful close, not abort(), and
-    is required for clients that do not proactively send FIN after Content-Length.
+    OpenTurbine explicitly sends ``Connection: close``. Chromium and normal
+    HTTP clients therefore close after consuming Content-Length. If the ECU
+    actively closes on the final ACK instead, its tiny lwIP table owns every
+    60-second TIME_WAIT entry and a short page tour exhausts Classic. Waiting
+    for the peer FIN moves TIME_WAIT to the PC/browser; the request RX timeout
+    remains the bounded fallback for a non-compliant client.
     """
     import os
 
@@ -74,6 +76,14 @@ def patch_async_webserver_request(env):
   if (_response && _client && _client->canSend()) {
     if (!_response->_finished()) {
       _response->_ack(this, 0, 0);
+    }
+  }
+}"""
+    active_closing_poll = """void AsyncWebServerRequest::_onPoll() {
+  // os_printf("p\\n");
+  if (_response && _client && _client->canSend()) {
+    if (!_response->_finished()) {
+      _response->_ack(this, 0, 0);
     } else {
       // tcp_close() can temporarily return ERR_MEM while the final response
       // bytes remain queued in lwIP. No further ACK callback is guaranteed
@@ -84,6 +94,8 @@ def patch_async_webserver_request(env):
 }"""
     if original_poll in text:
         text = text.replace(original_poll, retrying_poll, 1)
+    elif active_closing_poll in text:
+        text = text.replace(active_closing_poll, retrying_poll, 1)
     elif retrying_poll not in text:
         raise RuntimeError("ESPAsyncWebServer poll handler changed; review pinned dependency")
     patched_method = """void AsyncWebServerRequest::_onAck(size_t len, uint32_t time) {
@@ -94,9 +106,6 @@ def patch_async_webserver_request(env):
 
   if (!_response->_finished()) {
     _response->_ack(this, len, time);
-  } else if (_client) {
-    // AsyncTCP retains the PCB and retries if lwIP still has queued bytes.
-    _client->close();
   }
 }"""
     start = text.find("void AsyncWebServerRequest::_onAck(size_t len, uint32_t time) {")
@@ -234,9 +243,14 @@ def patch_async_webserver_header_retention(env):
     if (retainHeader) {
       _headers.emplace_back(std::move(header));
     }"""
-    if retain_all in text:
+    # The replacement itself contains ``_headers.emplace_back``. Check for the
+    # complete patched form first; otherwise every PlatformIO invocation wraps
+    # the already-patched line in another copy and produces a different image.
+    if retain_needed in text:
+        pass
+    elif retain_all in text:
         text = text.replace(retain_all, retain_needed, 1)
-    elif retain_needed not in text:
+    else:
         raise RuntimeError("ESPAsyncWebServer request-header retention changed; review dependency")
     with open(request_cpp, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text)

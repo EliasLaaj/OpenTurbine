@@ -48,7 +48,7 @@ function runValidation() {
     });
   }
 
-  const n1PullbackEnabled = !!document.getElementById('cf-pb_n1e')?.checked;
+  const n1PullbackEnabled = Number(document.getElementById('cf-pb_n1e')?.value || 0) > 0;
   const n1PullbackSoft = fv('pb_n1s'), n1PullbackFull = fv('pb_n1h');
   if (n1PullbackEnabled && rpmLimit > 0 &&
       ((n1PullbackSoft > 0 && n1PullbackSoft >= rpmLimit) ||
@@ -67,19 +67,38 @@ function runValidation() {
       msg:'⚠ Automatic N2 speed control is enabled in Hardware, but Target N2 RPM is 0. The controller remains inactive until a rated target is entered.'});
   }
 
+  const standbyOilEnabledNow = !!document.getElementById('cf-so_en')?.checked;
   const standbySourceNow = Number(document.getElementById('cf-so_src')?.value || 0);
   const standbyRpmNow = fv('so_rl') || 0;
   const standbyLimitsNow = standbySourceNow === 0 ? [rpmLimit || 0] :
                            standbySourceNow === 1 ? [n2RpmLimit || 0] :
                            [rpmLimit || 0, n2RpmLimit || 0];
   const usableStandbyLimitsNow = standbyLimitsNow.filter(v => v > 0);
-  if (usableStandbyLimitsNow.length && usableStandbyLimitsNow.every(limit => standbyRpmNow >= limit)) {
+  if (standbyOilEnabledNow && usableStandbyLimitsNow.length && usableStandbyLimitsNow.every(limit => standbyRpmNow >= limit)) {
     warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-rpm',
       msg:'⚠ Start threshold is at/above every selected shaft limit, so windmilling oil protection can never activate.'});
   }
-  if ((fv('so_fp') || 0) <= 0 && (fv('so_fb') || 0) <= 0) {
+  if (standbyOilEnabledNow && (fv('so_fp') || 0) <= 0 && (fv('so_fb') || 0) <= 0) {
     warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-output',
       msg:'⚠ Pump output and pressure target are both zero; this protection would command no oil.'});
+  }
+  const standbyPumpId = String(document.getElementById('cf-so_oid')?.value || '');
+  const standbyPumps = (hwCfg?.channel_registry?.outputs || []).filter(row =>
+    row?.installed !== false && !String(row?.mirror_of || '') &&
+    String(row?.purpose || '') === 'oil_pump');
+  const standbyPump = standbyPumps.find(row => String(row.id || '') === standbyPumpId);
+  if (standbyOilEnabledNow && !standbyPump) {
+    warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-device',
+      msg:standbyPumps.length > 1
+        ? '⚠ Choose which exact oil pump windmilling protection controls.'
+        : standbyPumps.length === 1
+          ? '⚠ The selected oil pump is missing or incompatible.'
+          : '⚠ Fit an oil pump before enabling windmilling oil protection.'});
+  } else if (standbyOilEnabledNow && standbyPump && (fv('so_fb') || 0) > 0) {
+    const matchingLoop = (hwCfg?.oil_loops || []).some(loop => loop?.enabled !== false &&
+      String(loop?.pump_output || '') === standbyPumpId && String(loop?.pressure_input || ''));
+    if (!matchingLoop) warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-loop',
+      msg:'⚠ This pressure target needs an enabled oil-pressure controller using the same pump. Otherwise use a fixed output.'});
   }
 
   const abMainOffsetNow = fv('ab_mo') || 0;
@@ -92,7 +111,7 @@ function runValidation() {
 
   // N2 control targets should leave operating margin below the independent trip.
   if (hwCfg.safety?.n2_overspeed && n2RpmLimit > 0) {
-    const pbEnabled = !!document.getElementById('cf-pb_n2e')?.checked;
+    const pbEnabled = Number(document.getElementById('cf-pb_n2e')?.value || 0) > 0;
     const pbSoft = fv('pb_n2s'), pbFull = fv('pb_n2h');
     if (pbEnabled && ((pbSoft > 0 && pbSoft >= n2RpmLimit) ||
                       (pbFull > 0 && pbFull >= n2RpmLimit))) {
@@ -214,6 +233,22 @@ async function validateBeforeSave(cfg) {
   const hasFlame = hasRegistryInput('flame');
   const hasAnyIdleRpm = hasN1 || hasN2;
 
+  const windmillEnabled = !!gv(cfg, 'standby_oil', 'enabled');
+  const windmillPumpId = String(gv(cfg, 'standby_oil', 'output_id') || '');
+  const fittedOutputs = _independentFittedOutputs();
+  const fittedOilPumps = fittedOutputs.filter(row => String(row?.purpose || '') === 'oil_pump');
+  const windmillPump = fittedOutputs.find(row => String(row.id || '') === windmillPumpId);
+  if (windmillEnabled && !windmillPump)
+    errors.push(fittedOilPumps.length
+      ? 'Windmilling Oil Protection: choose the fitted output this protection should command.'
+      : 'Windmilling Oil Protection: choose a fitted output or turn this optional protection off.');
+  if (windmillEnabled && windmillPump && Number(gv(cfg, 'standby_oil', 'feed_bar') || 0) > 0) {
+    const matchingLoop = (hwCfg?.oil_loops || []).some(loop => loop?.enabled !== false &&
+      String(loop?.pump_output || '') === windmillPumpId && String(loop?.pressure_input || ''));
+    if (!matchingLoop)
+      errors.push('Windmilling Oil Protection: its pressure target needs an enabled oil-pressure controller using the same pump. Use a fixed output or configure that loop.');
+  }
+
   const customControls = _controllerRulesDirty && Array.isArray(cfg.rules) ? cfg.rules : [];
   const installedInputs = new Set(simpleControlInputs().map(row => String(row.id || '')));
   const availableOutputs = new Set(simpleControlOutputs().map(row => String(row.id || '')));
@@ -264,15 +299,25 @@ async function validateBeforeSave(cfg) {
   if (gv(cfg, 'relight', 'enabled')) {
     const relightMin = Number(gv(cfg, 'relight', 'min_rpm') || 0);
     const relightConfirm = Number(gv(cfg, 'relight', 'confirm_rpm') || 0);
+    const relightTriggerSource = Number(gv(cfg, 'relight', 'trigger_source') || 0);
     const relightConfirmSource = Number(gv(cfg, 'relight', 'confirm_source') || 0);
-    const flameoutSource = Number(gv(cfg, 'safety', 'flameout_source') || 0);
-    const effectiveConfirmSource = relightConfirmSource || flameoutSource || (hasFlame ? 1 : (hasN1 ? 2 : 0));
+    const automaticSource = hasFlame ? 1 : (hasN1 ? 2 : ((hasRegistryInput('tot') || hasRegistryInput('tit')) ? 3 : 0));
+    const effectiveTriggerSource = relightTriggerSource || automaticSource;
+    const effectiveConfirmSource = relightConfirmSource || effectiveTriggerSource;
     if (relightMin <= 0)
       errors.push('Automatic relight requires an explicit Minimum N1 to Fire Relight Ignition above 0 RPM.');
     if (effectiveConfirmSource === 2 && relightConfirm <= 0)
       errors.push('N1-based relight confirmation requires an explicit N1 Recovery Confirmation above 0 RPM.');
+    if (!effectiveTriggerSource)
+      errors.push('Automatic relight requires its own fitted flame, N1, TOT, or TIT trigger source.');
+    if (effectiveTriggerSource === 3 &&
+        Number(gv(cfg, 'relight', 'trigger_egt_below_c') || 0) <= 0 &&
+        Number(gv(cfg, 'relight', 'trigger_egt_fall_rate_c_s') || 0) <= 0)
+      errors.push('EGT-triggered automatic relight requires a low-temperature threshold, a fall-rate threshold, or both.');
     const minimumRunningN1 = Number(gv(cfg, 'engine', 'min_rpm') || 0);
     const effectiveRelightMin = Math.max(relightMin, minimumRunningN1);
+    if (effectiveTriggerSource === 2 && relightConfirm <= effectiveRelightMin)
+      errors.push('N1-triggered automatic relight needs its trigger/recovery speed above the effective minimum firing speed, creating a usable relight band.');
     if (relightMin > 0 && minimumRunningN1 > 0 && relightMin < minimumRunningN1)
       warns.push(`Minimum N1 to fire relight is below Minimum Running N1. The ECU will use ${Math.round(minimumRunningN1)} RPM as the automatic-relight floor.`);
     if (effectiveConfirmSource === 2 && relightConfirm < effectiveRelightMin)
@@ -323,6 +368,7 @@ async function validateBeforeSave(cfg) {
     warns.push('Automatic N2 speed control is enabled in Hardware, but Target N2 RPM is 0. The governor remains inactive until you enter the rated output-shaft speed.');
 
   // Windmilling oil protection must be able to trigger and command oil.
+  const standbyEnabled = !!gv(cfg, 'standby_oil', 'enabled');
   const standbySource = Number(gv(cfg, 'standby_oil', 'source') || 0);
   const standbyRpm = Number(gv(cfg, 'standby_oil', 'rpm_limit') || 0);
   const standbyPct = Number(gv(cfg, 'standby_oil', 'feed_pct') || 0);
@@ -331,9 +377,9 @@ async function validateBeforeSave(cfg) {
                        standbySource === 1 ? [Number(n2RpmLimit) || 0] :
                        [Number(rpmLimit) || 0, Number(n2RpmLimit) || 0];
   const usableLimits = sourceLimits.filter(v => v > 0);
-  if (usableLimits.length && usableLimits.every(limit => standbyRpm >= limit))
+  if (standbyEnabled && usableLimits.length && usableLimits.every(limit => standbyRpm >= limit))
     warns.push('Windmilling-oil start threshold (' + standbyRpm + ' RPM) is at or above every selected shaft limit. The protective oil pump can never start; use a threshold well below normal shaft speed.');
-  if (standbyPct <= 0 && standbyBar <= 0)
+  if (standbyEnabled && standbyPct <= 0 && standbyBar <= 0)
     warns.push('Windmilling-oil protection commands neither pump output nor pressure. Set a protective pump percentage or pressure target, or it will run without delivering oil.');
 
   // Oil system cross-checks
@@ -429,8 +475,14 @@ async function saveConfig() {
     sec.fields.forEach(f => {
       const el = document.getElementById('cf-' + f.key);
       if (!el) return;
-      if (f.type === 'checkbox') {
+      if (f.type === 'pullback_mode') {
+        const mode = Number(el.value || 0);
+        setPath(cfg, f.path, mode > 0);
+        setPath(cfg, f.modePath, mode === 2 ? 1 : 0);
+      } else if (f.type === 'checkbox') {
         setPath(cfg, f.path, el.checked);
+      } else if (f.string) {
+        setPath(cfg, f.path, String(el.value || ''));
       } else {
         let v = parseFloat(el.value);
         if (!isNaN(v)) {
@@ -540,6 +592,10 @@ function _doSave() {
     if (runningLive && !LIVE_CONFIG_KEYS.has(field.key)) return;
     const value = field.path.reduce((obj, key) => obj?.[key], cfg);
     if (value !== undefined) setPath(payload, field.path, value);
+    if (field.type === 'pullback_mode') {
+      const modeValue = field.modePath.reduce((obj, key) => obj?.[key], cfg);
+      if (modeValue !== undefined) setPath(payload, field.modePath, modeValue);
+    }
   }));
   if (_controllerRulesDirty) {
     payload.rules = JSON.parse(JSON.stringify(cfg.rules || []));
@@ -559,37 +615,18 @@ function _doSave() {
   // filesystem transaction, then resume normal telemetry automatically.
   const pauseTelemetry = typeof stopGlobalTelemetry === 'function';
   const sendSave = async () => {
-    let lastError;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      try {
-        const r = await fetch('/api/config', {
-          method: 'PATCH',
-          body: JSON.stringify(payload),
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal
-        });
-        const d = await r.json().catch(() => ({}));
-        if (r.ok && d.ok !== false) return d;
-        lastError = new Error(d.error || d.reason || ('HTTP ' + r.status));
-        if (![500, 503].includes(r.status)) throw lastError;
-      } catch (error) {
-        lastError = error;
-        if (attempt >= 2) throw error;
-      } finally {
-        clearTimeout(timeout);
-      }
-      saveMsg.textContent = 'Storage busy — retrying…';
-      await new Promise(resolve => setTimeout(resolve, 1200 + attempt * 600));
-    }
-    throw lastError || new Error('Save failed');
+    if (typeof window.OTSaveConfigPatch !== 'function')
+      throw new Error('Shared save support did not load; reload this page and retry');
+    const { response, data } = await window.OTSaveConfigPatch(payload);
+    if (response?.ok && data?.ok !== false) return data;
+    throw new Error(data?.error || data?.reason || ('HTTP ' + (response?.status || 0)));
   };
   const finishSave = () => sendSave().then(async d => {
     if (d.ok) {
       if (window.OTSetup) OTSetup.mark('config');
-      // Firmware returns success only after validating and durably persisting
-      // this candidate. Keep the exact values just sent as the new baseline.
+      // Firmware returns success after validation and queueing. Ordinary saves
+      // are already durable; Developer-Mode live tuning is deliberately kept
+      // out of flash until the engine reaches a safe mode.
       // A full immediate /api/config reread is both unnecessary (PATCH contains
       // no stale sibling fields) and unreliable on Classic while the prior
       // large response finishes releasing its bounded shared-buffer lease.
@@ -601,7 +638,9 @@ function _doSave() {
       applyDeveloperLiveFields();
       runValidation();
       saveMsg.textContent = (d.warn ? 'Saved — ' + d.warn :
-        (d.live_now ? '✓ Applied live — ' : '✓ Saved — ') + new Date().toLocaleTimeString());
+        (d.persist === 'deferred_until_safe'
+          ? '✓ Live update queued — saves permanently after STOP'
+          : (d.live_now ? '✓ Applied live — ' : '✓ Saved — ') + new Date().toLocaleTimeString()));
       saveMsg.style.color = d.warn ? 'var(--yellow)' : 'var(--green)';
       if (cb) cb.disabled = false;
     } else {

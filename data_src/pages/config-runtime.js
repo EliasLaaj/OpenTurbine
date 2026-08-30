@@ -94,9 +94,6 @@ window.applyData = function(d) {
   if (d.has_governor !== undefined && !!d.has_governor !== _hasGovernorCfg) {
     _hasGovernorCfg = !!d.has_governor; extChanged = true;
   }
-  if (d.has_glow_plug !== undefined && !!d.has_glow_plug !== _hasGlowCfg) {
-    _hasGlowCfg = !!d.has_glow_plug; extChanged = true;
-  }
   if (d.has_pulsed_starter_assist !== undefined && !!d.has_pulsed_starter_assist !== _hasStarterSupportCfg) {
     _hasStarterSupportCfg = !!d.has_pulsed_starter_assist; extChanged = true;
   }
@@ -229,6 +226,7 @@ function _cfgShowField(key, show) {
 
 function applyFlameoutRelightVisibility() {
   const flSrc = parseInt(document.getElementById('cf-sf_fs')?.value || '0', 10);
+  const rlTriggerSrc = parseInt(document.getElementById('cf-rl_ts')?.value || '0', 10);
   const rlSrc = parseInt(document.getElementById('cf-rl_cs')?.value || '0', 10);
   const hasFlame = hasRegistryInput('flame');
   const hasN1 = hasRegistryInput('n1_speed');
@@ -237,11 +235,14 @@ function applyFlameoutRelightVisibility() {
   const hasEgt = hasTot || hasTit;
   const autoFlameSrc = hasFlame ? 1 : (hasN1 ? 2 : (hasEgt ? 3 : 0));
   const effFl = flSrc || autoFlameSrc;
-  const effRl = rlSrc || effFl;
+  const effTrigger = rlTriggerSrc || autoFlameSrc;
+  const effRl = rlSrc || effTrigger;
   _cfgShowField('sf_fn', effFl === 2);
   _cfgShowField('sf_eb', effFl === 3);
   _cfgShowField('sf_ef', effFl === 3);
-  _cfgShowField('rl_cr', effRl === 2);
+  _cfgShowField('rl_tb', effTrigger === 3);
+  _cfgShowField('rl_tf', effTrigger === 3);
+  _cfgShowField('rl_cr', effTrigger === 2 || effRl === 2);
   _cfgShowField('rl_tr', effRl === 3);
   applyView();
 }
@@ -270,12 +271,11 @@ function applyAbCfgVisibility() {
 }
 
 // ── Safety-ext / Governor / Glow / StarterAssist sections — show when hardware fitted ──
-let _hasGovernorCfg = false, _hasGlowCfg = false, _hasSafetyExtCfg = false, _hasStarterSupportCfg = false;
+let _hasGovernorCfg = false, _hasSafetyExtCfg = false, _hasStarterSupportCfg = false;
 function refreshFeatureCachesFromHardware() {
   const a = hwCfg.actuators || {};
   hasAfterburnerCfg = hasActualAfterburnerHardware();
   _hasGovernorCfg = !!hwCfg.controllers?.governor;
-  _hasGlowCfg = hasRegistryOutput('glow_plug');
   const starterDriver = Number(registryOutputByPurpose('starter')?.driver);
   _hasStarterSupportCfg = !!(hasRegistryOutput('starter') && starterDriver !== 4 && hasRegistryInput('n1_speed'));
   // AB servo-PWM input uses the same shared RC failsafe timeout, so an
@@ -301,9 +301,6 @@ function applyExtSectionVisibility() {
 
   const govSec = document.getElementById('governor-cfg-section');
   if (govSec) { govSec.dataset.forceHidden = _hasGovernorCfg ? '0' : '1'; govSec.style.display = ''; }
-
-  const glowSec = document.getElementById('glow-cfg-section');
-  if (glowSec) { glowSec.dataset.forceHidden = _hasGlowCfg ? '0' : '1'; glowSec.style.display = ''; }
 
   const supportSec = document.getElementById('starter-support-section');
   if (supportSec) { supportSec.dataset.forceHidden = _hasStarterSupportCfg ? '0' : '1'; supportSec.style.display = ''; }
@@ -339,7 +336,8 @@ function registryInputByPurpose(...purposes) {
 function registryOutputByPurpose(...purposes) {
   const wanted = new Set(purposes.map(String));
   return (hwCfg.channel_registry?.outputs || []).find(channel =>
-    registryChannelInstalled(channel) && wanted.has(String(channel.purpose || channel.id || '')));
+    registryChannelInstalled(channel) && !String(channel.mirror_of || '') &&
+    wanted.has(String(channel.purpose || channel.id || '')));
 }
 function hasRegistryInput(...purposes) { return !!registryInputByPurpose(...purposes); }
 function hasRegistryOutput(...purposes) { return !!registryOutputByPurpose(...purposes); }
@@ -439,7 +437,7 @@ function applyHwConditions() {
     } else if (el.type === 'checkbox' && !el.checked) {
       const unlockHints = {
         oil_tm: 'Turn this on to unlock Map Max and make oil pressure target rise with throttle.',
-        rl_en: 'Turn this on to allow automatic relight settings to affect running flameout recovery.',
+        rl_en: 'Turn this on to run the independent automatic-relight detector and ignition attempt.',
         ab_ut: 'Turn this on to unlock torch fuel-spike duration and EGT cut settings.',
         ab_ui: 'Turn this on to fire the dedicated afterburner igniter during AB ignition.'
       };
@@ -509,21 +507,27 @@ function applyHwConditions() {
 
   // ── Windmilling oil protection from N1/N2, no oil-pressure sensor required ─────
   const hasStandbyOilSource = hasN1 || hasN2;
-  const standbyOilAvailable = hasOilPump && hasStandbyOilSource;
+  const hasStandbyOilActuator = _independentFittedOutputs().length > 0;
+  const standbyOilAvailable = hasStandbyOilActuator && hasStandbyOilSource;
+  const standbyOilEnabled = !!document.getElementById('cf-so_en')?.checked;
   ghostSectionByTitle('Windmilling Oil Protection', standbyOilAvailable,
-    !hasOilPump
-      ? 'Oil pump output is not configured in Hardware. Enable an oil pump to unlock windmilling oil protection.'
+    !hasStandbyOilActuator
+      ? 'No fitted output is available. Add an oil pump (recommended) or another usable output in Hardware.'
       : 'No N1 or N2 RPM sensor is configured. Enable a shaft RPM sensor to unlock windmilling oil protection.');
-  ghostField('so_src', standbyOilAvailable,
-    'Windmilling oil protection needs an oil pump and at least one shaft RPM sensor.');
+  ghostField('so_en', standbyOilAvailable,
+    'Windmilling oil protection needs a fitted output and at least one shaft RPM sensor.');
+  ghostField('so_src', standbyOilAvailable && standbyOilEnabled,
+    'Windmilling oil protection needs a fitted output and at least one shaft RPM sensor.');
   ghostSelectOption('so_src', 0, hasN1,
     'N1 RPM sensor is not configured in Hardware.');
   ghostSelectOption('so_src', 1, hasN2,
     'N2 RPM sensor is not configured in Hardware.');
   ghostSelectOption('so_src', 2, hasStandbyOilSource,
     'No N1 or N2 RPM sensor is configured in Hardware.');
-  ['so_rl','so_fp','so_fb'].forEach(k => ghostField(k, standbyOilAvailable,
-    'Windmilling oil protection needs an oil pump and at least one shaft RPM sensor.'));
+  ['so_oid','so_rl','so_fp','so_fb'].forEach(k => ghostField(k, standbyOilAvailable && standbyOilEnabled,
+    standbyOilEnabled
+      ? 'Windmilling oil protection needs a fitted output and at least one shaft RPM sensor.'
+      : 'Enable Windmilling Oil Protection to edit this setting.'));
 
   // ── Core sensor-dependent limits stay visible but ghosted so users can see
   // which common protections need hardware before they matter.
@@ -565,47 +569,54 @@ function applyHwConditions() {
       : 'Low-throttle sensitivity only applies to a physical throttle input configured in Hardware.');
   const hasN1Pb = hasRegistryInput('n1_speed');
   const hasEgtPb = hasRegistryInput('tot', 'tit');
-  ['pb_n1e','pb_n1s','pb_n1h','pb_n1m','pb_n1l','pb_n1str','rl_ramp','rl_zone','rl_acc'].forEach(k =>
+  ['pb_n1e','pb_n1s','pb_n1h','pb_n1l','pb_n1str','rl_ramp','rl_zone','rl_acc'].forEach(k =>
     ghostField(k, hasThrottleOut && hasN1Pb,
       !hasN1Pb ? 'N1 pullback requires an N1 RPM sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_n2e','pb_n2s','pb_n2h','pb_n2m','pb_n2l','pb_n2str'].forEach(k =>
+  ['pb_n2e','pb_n2s','pb_n2h','pb_n2l','pb_n2str'].forEach(k =>
     ghostField(k, hasThrottleOut && hasN2,
       !hasN2 ? 'N2 pullback requires an N2 RPM sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_egte','pb_egts','pb_egth','pb_egtm','pb_egtl','pb_egtstr'].forEach(k =>
+  ['pb_egte','pb_egts','pb_egth','pb_egtl','pb_egtstr'].forEach(k =>
     ghostField(k, hasThrottleOut && hasEgtPb,
       !hasEgtPb ? 'EGT pullback requires a TOT or TIT sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_p1e','pb_p1s','pb_p1h','pb_p1m','pb_p1l','pb_p1str'].forEach(k =>
+  ['pb_p1e','pb_p1s','pb_p1h','pb_p1l','pb_p1str'].forEach(k =>
     ghostField(k, hasThrottleOut && hasP1,
       !hasP1 ? 'P1 pullback requires a P1 pressure sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_p2e','pb_p2s','pb_p2h','pb_p2m','pb_p2l','pb_p2str'].forEach(k =>
+  ['pb_p2e','pb_p2s','pb_p2h','pb_p2l','pb_p2str'].forEach(k =>
     ghostField(k, hasThrottleOut && hasP2,
       !hasP2 ? 'P2 pullback requires a P2 pressure sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_tqe','pb_tqs','pb_tqh','pb_tqm','pb_tql','pb_tqstr'].forEach(k =>
+  ['pb_tqe','pb_tqs','pb_tqh','pb_tql','pb_tqstr'].forEach(k =>
     ghostField(k, hasThrottleOut && hasTorque,
       !hasTorque ? 'Torque pullback requires a shaft-torque sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
   const hasAnyPullbackSource = hasN1Pb || hasN2 || hasEgtPb || hasP1 || hasP2 || hasTorque;
   ['pb_min'].forEach(k =>
     ghostField(k, hasThrottleOut && hasAnyPullbackSource,
       !hasAnyPullbackSource ? 'Pullback floor has no effect until an N1, N2, TOT, TIT, P1, P2, or torque sensor is configured in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  const configurePullbackVisibility = (enableKey, modeKey, normalKeys, predictiveKeys) => {
-    const enabled = !!document.getElementById('cf-' + enableKey)?.checked;
-    const predictive = Number(document.getElementById('cf-' + modeKey)?.value || 0) === 1;
+  const configurePullbackVisibility = (modeKey, normalKeys, predictiveKeys) => {
+    const mode = Number(document.getElementById('cf-' + modeKey)?.value || 0);
+    const enabled = mode > 0;
+    const predictive = mode === 2;
     normalKeys.forEach(key => setCfgFieldHardHidden(key, !enabled));
     predictiveKeys.forEach(key => setCfgFieldHardHidden(key, !enabled || !predictive));
   };
-  configurePullbackVisibility('pb_n1e','pb_n1m',['pb_n1s','pb_n1h','pb_n1m','pb_n1str'],['pb_n1l','rl_ramp','rl_zone','rl_acc']);
-  configurePullbackVisibility('pb_n2e','pb_n2m',['pb_n2s','pb_n2h','pb_n2m','pb_n2str'],['pb_n2l']);
-  configurePullbackVisibility('pb_egte','pb_egtm',['pb_egts','pb_egth','pb_egtm','pb_egtstr'],['pb_egtl']);
-  configurePullbackVisibility('pb_p1e','pb_p1m',['pb_p1s','pb_p1h','pb_p1m','pb_p1str'],['pb_p1l']);
-  configurePullbackVisibility('pb_p2e','pb_p2m',['pb_p2s','pb_p2h','pb_p2m','pb_p2str'],['pb_p2l']);
-  configurePullbackVisibility('pb_tqe','pb_tqm',['pb_tqs','pb_tqh','pb_tqm','pb_tqstr'],['pb_tql']);
+  configurePullbackVisibility('pb_n1e',['pb_n1s','pb_n1h'],['pb_n1l','pb_n1str','rl_ramp','rl_zone','rl_acc']);
+  configurePullbackVisibility('pb_n2e',['pb_n2s','pb_n2h'],['pb_n2l','pb_n2str']);
+  configurePullbackVisibility('pb_egte',['pb_egts','pb_egth'],['pb_egtl','pb_egtstr']);
+  configurePullbackVisibility('pb_p1e',['pb_p1s','pb_p1h'],['pb_p1l','pb_p1str']);
+  configurePullbackVisibility('pb_p2e',['pb_p2s','pb_p2h'],['pb_p2l','pb_p2str']);
+  configurePullbackVisibility('pb_tqe',['pb_tqs','pb_tqh'],['pb_tql','pb_tqstr']);
   ghostField('lm_mt', hasThrottleOut, 'Reduced-power mode requires a throttle/fuel output.');
   const hasAnyIgnitionOutput = hasIgniter || hasIgniter2 || hasGlowPlug;
   ghostField('ms_is', hasAnyIgnitionOutput, 'Igniter-on-START requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
-  ghostField('ms_it', hasAnyIgnitionOutput, 'START relight output requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
-  ghostSelectOption('ms_it', 0, hasIgniter, 'Igniter 1 is not configured in Hardware.');
-  ghostSelectOption('ms_it', 1, hasIgniter2, 'Secondary Igniter is not configured in Hardware.');
-  ghostSelectOption('ms_it', 2, hasGlowPlug, 'Glow/Wet Glow is not configured in Hardware.');
+  const manualRelightId = String((document.getElementById('cf-ms_oid') || {}).value || cfg?.misc?.igniter_on_start_output_id || '');
+  const hasManualRelightOutput = _installedIgnitionOutputs().some(row => String(row.id || '') === manualRelightId);
+  ghostField('ms_oid', hasAnyIgnitionOutput,
+    hasAnyIgnitionOutput
+      ? 'Choose the fitted ignition device controlled while START is held during RUNNING.'
+      : 'START relight requires an Igniter, Afterburner Igniter, or Glow/Wet Glow output in Hardware.');
+  ghostField('ms_is', hasManualRelightOutput,
+    hasAnyIgnitionOutput
+      ? 'Select a fitted START relight output first.'
+      : 'Igniter-on-START requires a fitted ignition output in Hardware.');
   ghostField('tl_fp', hasFuelSol, 'Main Fuel Prime duration requires a main fuel shutoff output.');
   ghostField('tl_fs', hasFuelSol, 'Main Fuel Shutoff Pulse duration requires a main fuel shutoff output.');
   ghostField('tl_op', hasOilPump, 'Oil Prime duration requires an oil pump output.');
@@ -705,22 +716,24 @@ function applyHwConditions() {
   ghostSelectOption('rl_cs', 1, hasFlame, 'Flame sensor is not configured in Hardware.');
   ghostSelectOption('rl_cs', 2, hasN1, 'N1 RPM sensor is not configured in Hardware.');
   ghostSelectOption('rl_cs', 3, hasEgt, 'No primary EGT source is configured in Hardware.');
-  ghostSelectOption('rl_it', 0, hasIgniter, 'Igniter 1 is not configured in Hardware.');
-  ghostSelectOption('rl_it', 1, hasIgniter2, 'Secondary Igniter is not configured in Hardware.');
-  ghostSelectOption('rl_it', 2, hasGlowPlug, 'Glow/Wet Glow is not configured in Hardware.');
-  const relightTarget = Number((document.getElementById('cf-rl_it') || {}).value || 0);
-  const hasRelightIgnition = relightTarget === 1 ? hasIgniter2 : relightTarget === 2 ? hasGlowPlug : hasIgniter;
+  ghostSelectOption('rl_ts', 1, hasFlame, 'Flame sensor is not configured in Hardware.');
+  ghostSelectOption('rl_ts', 2, hasN1, 'N1 RPM sensor is not configured in Hardware.');
+  ghostSelectOption('rl_ts', 3, hasEgt, 'No primary EGT source is configured in Hardware.');
+  const relightOutputId = String((document.getElementById('cf-rl_oid') || {}).value || cfg?.relight?.output_id || '');
+  const hasRelightIgnition = _installedIgnitionOutputs().some(row => String(row.id || '') === relightOutputId);
   const hasAutoRelightHardware = hasN1 && hasRelightIgnition;
-  ghostField('rl_it', hasN1 && hasAnyIgnitionOutput,
+  ghostField('rl_oid', hasN1 && hasAnyIgnitionOutput,
     !hasN1
       ? 'Auto-relight requires N1 RPM feedback so the ECU can prove the engine is still windmilling.'
       : 'Auto-relight requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
-  ['rl_en','rl_mr','rl_cs','rl_cr','rl_tr','rl_to'].forEach(k =>
+  ['rl_en','rl_ts','rl_td','rl_tb','rl_tf','rl_mr','rl_cs','rl_cr','rl_tr','rl_to'].forEach(k =>
     ghostField(k, hasAutoRelightHardware,
       !hasN1
         ? 'Auto-relight requires N1 RPM feedback so the ECU can prove the engine is still windmilling.'
         : 'Auto-relight requires the selected ignition output to be configured in Hardware.'));
   ghostField('rl_tr', hasAutoRelightHardware && hasEgt, 'EGT relight recovery requires N1, the selected ignition output, and a configured TOT or TIT sensor.');
+  ghostField('rl_tb', hasAutoRelightHardware && hasEgt, 'An EGT relight trigger requires N1, the selected ignition output, and a configured TOT or TIT sensor.');
+  ghostField('rl_tf', hasAutoRelightHardware && hasEgt, 'An EGT relight trigger requires N1, the selected ignition output, and a configured TOT or TIT sensor.');
 
   ghostSelectOption('ab_fm', 0, hasAbFlame, 'AB flame sensor is not configured in Hardware.');
   ghostSelectOption('ab_fm', 1, hasEgt, 'No primary EGT source is configured in Hardware.');
@@ -843,6 +856,7 @@ document.addEventListener('DOMContentLoaded', () => {
   .then(([c, hw]) => {
     cfg   = c;
     hwCfg = hw;
+    migrateBuiltInOutputIds();
     const controllerMigrated = CONFIG_SURFACE === 'controllers' && migrateLegacyControllerDefinitions();
     renderForm();
     _applyAllVisibility();

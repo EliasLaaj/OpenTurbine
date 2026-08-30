@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
-<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}@keyframes otFailsafeReveal{to{visibility:visible}}html:not(.ot-theme-ready) body{visibility:hidden;animation:otFailsafeReveal 0s 8s forwards}</style>
 <title>OpenTurbine — Tools</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260824a',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260824a');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260828c',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260828c');s.setAttribute('data-ot-app','true');s.text=c;document.head.appendChild(s);},{once:true});</script>
 <style>
 .test-settings-card{width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .test-settings-head,.test-settings-foot{flex:0 0 auto;padding:1rem}
@@ -55,7 +55,7 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
 
   <div id="tool-area"></div>
 
-  <div class="tool-card tools-wide-card" id="loop-diag-card" title="Main ECU loop speed and execution timing. Enable ECU loop timing in session logging only when you want these values written to CSV." style="margin-top:1rem">
+  <div class="tool-card tools-wide-card" id="loop-diag-card" title="Main ECU loop speed and execution timing. Worst cycle includes waiting and scheduling; missed deadlines count loop bodies that took longer than the configured period. Enable ECU loop timing in session logging only when you want these values written to CSV." style="margin-top:1rem">
     <div class="tool-header">
       <div class="tool-name">ECU Loop Timing</div>
       <div class="tool-state off" id="loop-diag-state">Live</div>
@@ -63,8 +63,10 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.65rem;margin-top:.45rem">
       <div><div class="tool-desc">Loop rate</div><div style="font-family:monospace;font-weight:700" id="diag-loop-hz">-</div></div>
       <div><div class="tool-desc">Period</div><div style="font-family:monospace;font-weight:700" id="diag-loop-period">-</div></div>
+      <div><div class="tool-desc">Worst cycle</div><div style="font-family:monospace;font-weight:700" id="diag-loop-period-max">-</div></div>
       <div><div class="tool-desc">Exec avg</div><div style="font-family:monospace;font-weight:700" id="diag-loop-avg">-</div></div>
       <div><div class="tool-desc">Exec max</div><div style="font-family:monospace;font-weight:700" id="diag-loop-max">-</div></div>
+      <div><div class="tool-desc">Missed deadlines</div><div style="font-family:monospace;font-weight:700" id="diag-loop-overruns">-</div></div>
       <div><div class="tool-desc">Counter</div><div style="font-family:monospace;font-weight:700" id="diag-loop-count">-</div></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:.55rem;margin-top:.8rem;padding-top:.75rem;border-top:1px solid var(--border)">
@@ -271,8 +273,8 @@ async function saveTestSettings(){
     }
     toolsPatch[el.dataset.key]=el.dataset.kind==='seconds'?Math.round(v*1000):v;
   }
-  const r=await fetch('/api/config',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({tools:toolsPatch})});
-  const d=await r.json().catch(()=>({})); if(!r.ok||d.ok===false){document.getElementById('test-settings-status').textContent='Save failed: '+(d.error||d.reason||r.status);return;}
+  const saved=await window.OTSaveConfigPatch({tools:toolsPatch});
+  const r=saved.response,d=saved.data; if(!r.ok||d.ok===false){document.getElementById('test-settings-status').textContent='Save failed: '+(d.error||d.reason||r.status);return;}
   try{
     if(document.getElementById('tool-always-confirm')?.checked) localStorage.removeItem(TOOL_CONFIRMATION_SKIP_KEY);
     else localStorage.setItem(TOOL_CONFIRMATION_SKIP_KEY,'1');
@@ -574,15 +576,6 @@ function updateToolConfirmationReset() {
   catch (_) { checkbox.checked = true; }
 }
 
-function resetToolConfirmations() {
-  try {
-    localStorage.removeItem(TOOL_CONFIRMATION_SKIP_KEY);
-    Object.keys(localStorage).filter(key => key.startsWith('ot_tool_confirmation_skip:'))
-      .forEach(key => localStorage.removeItem(key));
-  } catch (_) {}
-  updateToolConfirmationReset();
-}
-
 // ── Extra Cooldown start / stop ───────────────────────────────
 function startCooldown() {
   const secs = parseInt(document.getElementById('cooldown-slider').value, 10) || 120;
@@ -648,8 +641,10 @@ function refreshToggleState(tool) {
 function updateLoopDiagnostics(d) {
   const hz = Number(d.loop_hz);
   const period = Number(d.loop_period_ms);
+  const periodMax = Number(d.loop_period_max_ms);
   const avg = Number(d.loop_exec_avg_ms);
   const max = Number(d.loop_exec_max_ms);
+  const overruns = Number(d.loop_overrun_count);
   const count = Number(d.loop_counter);
   const fmtMs = v => Number.isFinite(v) ? v.toFixed(3) + ' ms' : '-';
   const set = (id, text) => {
@@ -658,8 +653,10 @@ function updateLoopDiagnostics(d) {
   };
   set('diag-loop-hz', Number.isFinite(hz) ? hz.toFixed(1) + ' Hz' : '-');
   set('diag-loop-period', Number.isFinite(period) ? period.toFixed(2) + ' ms' : '-');
+  set('diag-loop-period-max', fmtMs(periodMax));
   set('diag-loop-avg', fmtMs(avg));
   set('diag-loop-max', fmtMs(max));
+  set('diag-loop-overruns', Number.isFinite(overruns) ? fmtInt(overruns) : '-');
   set('diag-loop-count', Number.isFinite(count) ? fmtInt(count) : '-');
   set('diag-loop-sensors', fmtMs(Number(d.loop_sensors_ms)));
   set('diag-loop-sequencer', fmtMs(Number(d.loop_sequencer_ms)));
@@ -1370,39 +1367,56 @@ function startWebAssetsUpdate(input) {
   state.textContent = 'Uploading...'; state.className = 'tool-state active';
   msg.style.display = 'none';
 
-  const form = new FormData();
-  required.forEach(name => form.append('asset', files.find(file => file.name === name), name));
-  const xhr = new XMLHttpRequest();
-  xhr.open('POST', '/api/web_assets');
-  xhr.upload.onprogress = e => {
-    if (e.lengthComputable) {
-      const pct = (e.loaded / e.total * 100).toFixed(0);
-      fill.style.width = pct + '%';
-      state.textContent = 'Uploading ' + pct + '%';
-    }
+  const ordered = required.map(name => files.find(file => file.name === name));
+  const totalBytes = ordered.reduce((sum, file) => sum + file.size, 0);
+  let completedBytes = 0;
+  const fail = message => {
+    state.textContent = 'Error'; state.className = 'tool-state fault';
+    msg.textContent = message;
+    msg.style.color = 'var(--red)'; msg.style.display = '';
+    btn.disabled = false;
   };
-  xhr.onload = () => {
+  const sendNext = (index, offset = 0) => {
+    const file = ordered[index];
+    const end = Math.min(offset + 8192, file.size);
+    const chunk = file.slice(offset, end);
+    const fileFinal = end === file.size ? '1' : '0';
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/web_asset_chunk?name=' + encodeURIComponent(file.name) +
+      '&offset=' + offset + '&final=' + fileFinal);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable) {
+        const pct = ((completedBytes + Math.min(e.loaded, chunk.size)) / totalBytes * 100).toFixed(0);
+        fill.style.width = pct + '%';
+        state.textContent = 'Uploading ' + pct + '%';
+      }
+    };
+    xhr.onload = () => {
     try {
       const r = JSON.parse(xhr.responseText);
       if (!r.ok) throw new Error(r.error || 'Unknown error');
+      completedBytes += chunk.size;
+      if (end < file.size) {
+        sendNext(index, end);
+        return;
+      }
+      if (index + 1 < ordered.length) {
+        sendNext(index + 1);
+        return;
+      }
       fill.style.width = '100%'; fill.classList.remove('running');
       state.textContent = 'Done - rebooting...'; state.className = 'tool-state done';
       msg.textContent = 'Web pages updated; configuration and logs were retained. Reconnect, then refresh the page without cache if styles or scripts look old.';
       msg.style.color = 'var(--green)'; msg.style.display = '';
     } catch (e) {
-      state.textContent = 'Error'; state.className = 'tool-state fault';
-      msg.textContent = 'Web asset update failed: ' + e.message;
-      msg.style.color = 'var(--red)'; msg.style.display = '';
-      btn.disabled = false;
+      fail('Web asset update failed: ' + e.message);
     }
+    };
+    xhr.onerror = () => fail('Network error - reconnect and select the complete asset set again. START remains safely inhibited until all files are installed.');
+    xhr.send(chunk);
   };
-  xhr.onerror = () => {
-    state.textContent = 'Error'; state.className = 'tool-state fault';
-    msg.textContent = 'Network error - the existing web assets remain usable if the complete update was not applied.';
-    msg.style.color = 'var(--red)'; msg.style.display = '';
-    btn.disabled = false;
-  };
-  xhr.send(form);
+  sendNext(0);
   input.value = '';
 }
 </script>

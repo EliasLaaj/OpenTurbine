@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Calibration</title>
-<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}@keyframes otFailsafeReveal{to{visibility:visible}}html:not(.ot-theme-ready) body{visibility:hidden;animation:otFailsafeReveal 0s 8s forwards}</style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260824a',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260824a');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260828c',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260828c');s.setAttribute('data-ot-app','true');s.text=c;document.head.appendChild(s);},{once:true});</script>
 </head>
 <body>
 <nav>
@@ -729,9 +729,6 @@ function registryChannelByPurpose(hw, direction, purpose) {
 }
 function hwSensorEnabled(hw, key, flatKey) {
   return !!registryChannelByPurpose(hw, 'inputs', REGISTRY_SENSOR_PURPOSES[key]);
-}
-function hwActuatorEnabled(hw, key, flatKey) {
-  return !!registryChannelByPurpose(hw, 'outputs', REGISTRY_ACTUATOR_PURPOSES[key]);
 }
 function hwCurrentEnabled(hw, key, flatKey) {
   const registry = registryChannelByPurpose(hw, 'outputs', REGISTRY_ACTUATOR_PURPOSES[key]);
@@ -1616,10 +1613,8 @@ async function fpMinTest() {
 }
 function fpMinSave() {
   const pct = parseFloat(document.getElementById('fp-min-slider').value) || 0;
-  fetch('/api/config', { method:'PATCH', body: JSON.stringify({ throttle: { fuel_pump_min_pct: pct } }),
-                         headers: { 'Content-Type':'application/json' } })
-    .then(async r => {
-      const b = await r.json().catch(() => ({}));
+  window.OTSaveConfigPatch({ throttle: { fuel_pump_min_pct: pct } })
+    .then(({response:r, data:b}) => {
       if (!r.ok || b.ok === false) throw new Error(b.error || b.reason || ('HTTP ' + r.status));
       return b;
     }).then(b => {
@@ -1946,10 +1941,6 @@ function clearFlame() {
 // ── Throttle calibration ──────────────────────────────────────
 // For ADC input: captures raw ADC counts.
 // For servo signal input: captures µs pulse width.
-function _thCurrentValue() {
-  if (throttleInputType === 'servo') return live.throttle_input_us;
-  return live.throttle_input_raw;
-}
 function _thUnit() {
   return throttleInputType === 'servo' ? ' µs' : '';
 }
@@ -2007,9 +1998,6 @@ function saveThrottle() {
 }
 
 // ── P1 / P2 zero calibration ─────────────────────────────────
-function _idleCurrentValue() {
-  return idleInputType === 'servo' ? live.idle_input_us : live.idle_input_raw;
-}
 function _idleUnit() {
   return idleInputType === 'servo' ? ' µs' : '';
 }
@@ -2482,9 +2470,7 @@ function saveTorqueScale() {
 // ── Config patch ──────────────────────────────────────────────
 function patchConfig(patch, msg, onOk, gateRetries = 0) {
   let apiWarn = '';
-  fetch('/api/config', {method:'PATCH', body:JSON.stringify(patch),
-    headers:{'Content-Type':'application/json'}}).then(async r => {
-    const d = await r.json().catch(() => ({}));
+  window.OTSaveConfigPatch(patch).then(({response:r, data:d}) => {
     if (!r.ok || d.ok === false) {
       const error = new Error(d.error || d.reason || ('HTTP ' + r.status));
       error.status = r.status;

@@ -2,6 +2,7 @@
 #include "CommandQueue.h"
 #include "Config.h"
 #include "HardwareConfig.h"
+#include "../hal/actuators/RelayDemand.h"
 #include <Arduino.h>
 #include <math.h>
 #include <string.h>
@@ -178,7 +179,7 @@ struct FieldDef {
 };
 
 bool yes() { return true; }
-bool hasN2() { return HardwareConfig::hasTwoShaft && HardwareConfig::hasN2Rpm; }
+bool hasN2() { return HardwareConfig::hasN2Rpm; }
 bool hasTot() { return HardwareConfig::hasTot; }
 bool hasTit() { return HardwareConfig::hasTit; }
 bool hasPrimaryEgt() { return Config::effectiveEgtSource() != 0; }
@@ -265,10 +266,10 @@ float rFuelSol() { return EngineData::instance().fuelSolOpen ? 1.0f : 0.0f; }
 float rIgniter1() { return EngineData::instance().igniterOn ? 1.0f : 0.0f; }
 float rIgniter2() { return EngineData::instance().igniter2On ? 1.0f : 0.0f; }
 float rStarterEnable() { return EngineData::instance().starterEnabled ? 1.0f : 0.0f; }
-float rCoolFan() { return EngineData::instance().coolFanOn ? 1.0f : 0.0f; }
+float rCoolFan() { return RelayDemand::binary(RelayDemand::requested(EngineData::instance().coolFanDemand)); }
 float rAirstarter() { return EngineData::instance().airstarterOpen ? 1.0f : 0.0f; }
-float rOilScavenge() { return EngineData::instance().oilScavengeOn ? 1.0f : 0.0f; }
-float rBleedValve() { return EngineData::instance().bleedValveOpen ? 1.0f : 0.0f; }
+float rOilScavenge() { return RelayDemand::binary(RelayDemand::requested(EngineData::instance().oilScavengeDemand)); }
+float rBleedValve() { return RelayDemand::binary(RelayDemand::requested(EngineData::instance().bleedValveDemand)); }
 float rAbSol() { return EngineData::instance().abSolOpen ? 1.0f : 0.0f; }
 float rAbTrigger() { return EngineData::instance().abTriggerActive ? 1.0f : 0.0f; }
 float rAbArm() { return EngineData::instance().abArmSwitchOn ? 1.0f : 0.0f; }

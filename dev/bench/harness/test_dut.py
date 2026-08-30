@@ -71,7 +71,14 @@ class DutTelemetryCacheTests(unittest.TestCase):
             self.dut._reconnect_wifi()
             self.dut._reconnect_wifi()
             self.dut._reconnect_wifi()
-        self.assertEqual(run.call_count, 2)
+        # Each permitted recovery probes association, probes the DHCP address,
+        # then requests a reconnect. The middle call is throttled completely.
+        self.assertEqual(run.call_count, 6)
+        connect_calls = [
+            item for item in run.call_args_list
+            if item.args and item.args[0][:3] == ["netsh", "wlan", "connect"]
+        ]
+        self.assertEqual(len(connect_calls), 2)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 #include "HardwareConfig.h"
 #include "RulesEngine.h"
 #include "hardware_profile.h"
+#include <cstring>
 #if defined(OT_PLATFORM_ESP32) || defined(OT_PLATFORM_ESP32S3)
 #include <LittleFS.h>
 #endif
@@ -26,6 +27,19 @@ void readConfigFields(JsonVariantConst object, const ConfigField<T> (&fields)[N]
 template <typename T, size_t N>
 void writeConfigFields(JsonObject object, const ConfigField<T> (&fields)[N]) {
     for (const auto& field : fields) object[field.key] = *field.value;
+}
+
+template <typename T, size_t N>
+bool liveSectionKeysValid(JsonObjectConst object, const ConfigField<T> (&fields)[N]) {
+    for (JsonPairConst pair : object) {
+        bool known = false;
+        for (const auto& field : fields) {
+            if (!strcmp(pair.key().c_str(), field.key)) { known = true; break; }
+        }
+        if (!known || pair.value().is<JsonObjectConst>() || pair.value().is<JsonArrayConst>())
+            return false;
+    }
+    return object.size() > 0;
 }
 
 #define CONFIG_FIELD(name, jsonKey) {jsonKey, &Config::name}
@@ -176,6 +190,10 @@ const ConfigField<float> GOVERNOR_FLOAT_FIELDS[] = {
     CONFIG_FIELD(governorKp, "kp"), CONFIG_FIELD(governorPitchKp, "pitch_kp"),
     CONFIG_FIELD(governorPitchRampSec, "pitch_ramp_sec"),
 };
+const ConfigField<float> LIVE_THROTTLE_FLOAT_FIELDS[] = {
+    CONFIG_FIELD(throttleRampUpMs, "ramp_up_ms"),
+    CONFIG_FIELD(throttleRampDownMs, "ramp_down_ms"),
+};
 const ConfigField<float> GLOW_FLOAT_FIELDS[] = {
     CONFIG_FIELD(glowPreheatMaxPct, "preheat_max_pct"), CONFIG_FIELD(glowHoldPct, "hold_pct"),
 };
@@ -203,9 +221,13 @@ const ConfigField<float> OIL_POLY_FLOAT_FIELDS[] = {
 const ConfigField<float> RELIGHT_FLOAT_FIELDS[] = {
     CONFIG_FIELD(relightMinRpm, "min_rpm"), CONFIG_FIELD(relightConfirmRpm, "confirm_rpm"),
     CONFIG_FIELD(relightTotRiseC, "tot_rise_c"),
+    CONFIG_FIELD(relightTriggerEgtBelowC, "trigger_egt_below_c"),
+    CONFIG_FIELD(relightTriggerEgtFallRateCPerSec, "trigger_egt_fall_rate_c_s"),
 };
 const ConfigField<int> RELIGHT_INT_FIELDS[] = {
     CONFIG_FIELD(relightIgnitionTarget, "ignition_target"),
+    CONFIG_FIELD(relightTriggerSource, "trigger_source"),
+    CONFIG_FIELD(relightTriggerConfirmMs, "trigger_confirm_ms"),
     CONFIG_FIELD(relightConfirmSource, "confirm_source"),
     CONFIG_FIELD(relightTimeoutMs, "relight_timeout_ms"),
 };
@@ -308,6 +330,7 @@ const ConfigField<float> STANDBY_OIL_FLOAT_FIELDS[] = {
     CONFIG_FIELD(standbyOilFeedBar, "feed_bar"),
 };
 const ConfigField<int> STANDBY_OIL_INT_FIELDS[] = {CONFIG_FIELD(standbyOilSource, "source")};
+const ConfigField<bool> STANDBY_OIL_BOOL_FIELDS[] = {CONFIG_FIELD(standbyOilEnabled, "enabled")};
 const ConfigField<int> MISC_INT_FIELDS[] = {
     CONFIG_FIELD(cooldownSkipHoldMs, "cooldown_skip_hold_ms"),
     CONFIG_FIELD(manualRelightIgnitionTarget, "igniter_on_start_target"),
@@ -347,6 +370,36 @@ bool Config::applyJsonRuntimeOnly(const JsonDocument& doc, bool allowActiveLive,
     _fromDoc(doc);
     profileMatch = true;
     EngineData::instance().configVersionMismatch = false;
+    return true;
+}
+
+bool Config::applyJsonLivePatch(const JsonDocument& patch) {
+    JsonObjectConst root = patch.as<JsonObjectConst>();
+    if (root.isNull() || root.size() == 0) return false;
+
+    // The HTTP gate accepts only these three sections and their explicitly
+    // live-safe scalar fields. Recheck the section envelope on Core 1 so a
+    // future producer cannot turn this narrow transaction into a full config
+    // replacement while an engine is active.
+    for (JsonPairConst section : root) {
+        const char* name = section.key().c_str();
+        if (!section.value().is<JsonObjectConst>()) return false;
+        JsonObjectConst values = section.value().as<JsonObjectConst>();
+        if (!strcmp(name, "throttle")) {
+            if (!liveSectionKeysValid(values, LIVE_THROTTLE_FLOAT_FIELDS)) return false;
+        } else if (!strcmp(name, "governor")) {
+            if (!liveSectionKeysValid(values, GOVERNOR_FLOAT_FIELDS)) return false;
+        } else if (!strcmp(name, "dynamic_idle")) {
+            if (!liveSectionKeysValid(values, IDLE_FLOAT_FIELDS)) return false;
+        } else return false;
+    }
+
+    JsonVariantConst throttle = root["throttle"];
+    JsonVariantConst governor = root["governor"];
+    JsonVariantConst idle = root["dynamic_idle"];
+    if (!throttle.isNull()) readConfigFields(throttle, LIVE_THROTTLE_FLOAT_FIELDS);
+    if (!governor.isNull()) readConfigFields(governor, GOVERNOR_FLOAT_FIELDS);
+    if (!idle.isNull()) readConfigFields(idle, IDLE_FLOAT_FIELDS);
     return true;
 }
 
@@ -506,7 +559,10 @@ void Config::_applyDefaults() {
     flameoutEgtBelowC = 300.0f; flameoutEgtFallRateCPerSec = 50.0f;
     titLimit = 0.0f; oilTempLimit = 120.0f;
     fuelPressMin = 0.0f; battVoltMin = 0.0f; surgeDetectRpmVariance = 0.0f;
-    relightEnabled = false; relightIgnitionTarget = 0; relightConfirmSource = 0; relightMinRpm = 30000.0f;
+    relightEnabled = false; relightTriggerSource = 0; relightTriggerConfirmMs = 200;
+    relightTriggerEgtBelowC = 300.0f; relightTriggerEgtFallRateCPerSec = 50.0f;
+    relightIgnitionTarget = 0; relightConfirmSource = 0; relightMinRpm = 30000.0f;
+    relightOutputId[0] = '\0';
     relightConfirmRpm = 35000.0f; relightTotRiseC = 30.0f; relightTimeoutMs = 2000;
     toolFuelPrimeMs = 3000; toolOilPrimeMs = 5000; toolIgnTestMs = 2000; toolIgn2TestMs = 2000;
     toolGlowTestMs = 10000; toolGlowTestPct = 100.0f;
@@ -522,10 +578,13 @@ void Config::_applyDefaults() {
     starterAssistOnMs = 500; starterAssistOffMs = 250; starterStartupRampPctPerSec = 10.0f;
     oilZeroBar = 0.1f; oilPressureDeadband = 0.2f;
     oilPumpUnderflowDelayMs = 5000; shutdownOnOilUnderflow = false;
+    standbyOilEnabled = false;
     standbyOilSource = 0; standbyOilRpmLimit = 1000.0f; standbyOilFeedPct = 25.0f;
     standbyOilFeedBar = 0.0f;
+    standbyOilOutputId[0] = '\0';
     limpMaxThrottlePct = 50.0f; igniterOnStart = true; manualRelightIgnitionTarget = 0;
     cooldownSkipHoldMs = 1000;
+    manualRelightOutputId[0] = '\0';
     fp2StartPct = 0.0f; fp2EndPct = 80.0f; fp2RampMs = 3000; fp2DemandPct = 0.0f;
     govHoldTimeoutMs = 10000;
     abMinN1 = 30000.0f; abMaxN1 = 0.0f; abMaxTotForLight = 0.0f;
@@ -550,9 +609,41 @@ void Config::_applyDefaults() {
     fuelPressRawMin = 0; fuelPressRawMax = 4095; fuelPressValMax = 10.0f;
     fuelFlowRawMin = 0; fuelFlowRawMax = 4095; fuelFlowValMax = 10.0f;
     sessionLogMask = SLOG_DEFAULT; sessionLogIntervalMs = 1000;
-    controllerSchema = 0;
+    sessionRegistryInputCount = 0;
+    memset(sessionRegistryInputIds, 0, sizeof(sessionRegistryInputIds));
+    // New/factory profiles use the explicit output-first controller model.
+    // Keep schema 0 only when loading an older saved document so the UI can
+    // offer its reviewable one-time migration. A fresh ECU must never open
+    // Controllers already claiming that untouched defaults are unsaved.
+    controllerSchema = 1;
     ruleCount = 0;
     for (int i = 0; i < MAX_RULES; i++) rules[i] = {};
+    {
+        Rule& fuel = rules[ruleCount++];
+        fuel.enabled = true;
+        fuel.kind = 1;  // mapped input
+        // Fresh defaults have not passed through _fromDoc(), so initialize
+        // both runtime handles as well as their persistent IDs. Otherwise the
+        // first hardware-dependency cleanup treats this valid default rule as
+        // an unavailable sensor/output and silently removes it.
+        fuel.sensor = RulesEngine::THROTTLE_INPUT;
+        fuel.actuator = RulesEngine::THROTTLE;
+        fuel.inputMin = 0.0f;
+        fuel.inputMax = 1.0f;
+        fuel.outputMin = 0.0f;
+        fuel.outputMax = 1.0f;
+        fuel.onValue = 1.0f;
+        fuel.offValue = 0.0f;
+        fuel.targetHigh = 1.0f;
+        fuel.targetInputMax = 1.0f;
+        fuel.responseGain = 0.02f;
+        fuel.integralGain = 0.005f;
+        fuel.deadband = 0.01f;
+        fuel.modeMask = 4;  // RUNNING
+        strlcpy(fuel.name, "Main Fuel", sizeof(fuel.name));
+        strlcpy(fuel.sourceId, "operator_throttle", sizeof(fuel.sourceId));
+        strlcpy(fuel.targetId, "main_fuel", sizeof(fuel.targetId));
+    }
     loadWarning[0] = '\0';
     // Runtime stats are NOT reset here; hour meter data persists across config reloads.
 }
@@ -649,6 +740,7 @@ void Config::_fromDoc(const JsonDocument& doc) {
     readConfigFields(rl, RELIGHT_FLOAT_FIELDS);
     readConfigFields(rl, RELIGHT_INT_FIELDS);
     readConfigFields(rl, RELIGHT_BOOL_FIELDS);
+    strlcpy(relightOutputId, rl["output_id"] | "", sizeof(relightOutputId));
 
     auto tl = doc["tools"];
     readConfigFields(tl, TOOL_U32_FIELDS);
@@ -671,6 +763,8 @@ void Config::_fromDoc(const JsonDocument& doc) {
     auto sob = doc["standby_oil"];
     readConfigFields(sob, STANDBY_OIL_FLOAT_FIELDS);
     readConfigFields(sob, STANDBY_OIL_INT_FIELDS);
+    readConfigFields(sob, STANDBY_OIL_BOOL_FIELDS);
+    strlcpy(standbyOilOutputId, sob["output_id"] | "", sizeof(standbyOilOutputId));
 
     auto limp = doc["limp_mode"];
     readConfigFields(limp, LIMP_FLOAT_FIELDS);
@@ -678,6 +772,7 @@ void Config::_fromDoc(const JsonDocument& doc) {
     auto misc = doc["misc"];
     readConfigFields(misc, MISC_INT_FIELDS);
     readConfigFields(misc, MISC_BOOL_FIELDS);
+    strlcpy(manualRelightOutputId, misc["igniter_on_start_output_id"] | "", sizeof(manualRelightOutputId));
 
     auto rh = doc["rpm_health"];
     readConfigFields(rh, RPM_HEALTH_FLOAT_FIELDS);
@@ -727,6 +822,20 @@ void Config::_fromDoc(const JsonDocument& doc) {
         if (sl["thrust"]     | false) mask |= SLOG_THRUST;
         sessionLogMask = mask;
         sessionLogIntervalMs = sl["interval_ms"] | sessionLogIntervalMs;
+        sessionRegistryInputCount = 0;
+        memset(sessionRegistryInputIds, 0, sizeof(sessionRegistryInputIds));
+        JsonArrayConst registryInputs = sl["registry_inputs"].as<JsonArrayConst>();
+        for (JsonVariantConst item : registryInputs) {
+            const char* id = item.as<const char*>();
+            if (!id || !id[0] || strlen(id) >= sizeof(sessionRegistryInputIds[0])) continue;
+            bool duplicate = false;
+            for (uint8_t i = 0; i < sessionRegistryInputCount; ++i)
+                if (!strcmp(sessionRegistryInputIds[i], id)) { duplicate = true; break; }
+            if (duplicate || sessionRegistryInputCount >= MAX_SESSION_REGISTRY_INPUTS) continue;
+            strncpy(sessionRegistryInputIds[sessionRegistryInputCount], id,
+                    sizeof(sessionRegistryInputIds[0]) - 1);
+            ++sessionRegistryInputCount;
+        }
     }
 
     auto stats = doc["stats"];
@@ -866,6 +975,10 @@ void Config::_fromDoc(const JsonDocument& doc) {
     if (relightTimeoutMs > 30000)
         Serial.printf("[Config] relight_timeout_ms %d exceeds hard maximum; using 30000 ms\n", relightTimeoutMs);
     relightTimeoutMs = constrain(relightTimeoutMs, 0, 30000);
+    relightTriggerSource = constrain(relightTriggerSource, 0, 3);
+    relightTriggerConfirmMs = constrain(relightTriggerConfirmMs, 0, 60000);
+    if (relightTriggerEgtBelowC < 0.0f) relightTriggerEgtBelowC = 0.0f;
+    if (relightTriggerEgtFallRateCPerSec < 0.0f) relightTriggerEgtFallRateCPerSec = 0.0f;
     relightIgnitionTarget = constrain(relightIgnitionTarget, 0, 2);
     relightConfirmSource = constrain(relightConfirmSource, 0, 3);
     if (relightMinRpm < 1.0f) relightMinRpm = max(1.0f, minRpm);
@@ -1185,6 +1298,7 @@ void Config::_writeDoc(JsonObject doc) {
     writeConfigFields(rl, RELIGHT_FLOAT_FIELDS);
     writeConfigFields(rl, RELIGHT_INT_FIELDS);
     writeConfigFields(rl, RELIGHT_BOOL_FIELDS);
+    rl["output_id"] = relightOutputId;
 
     auto tl = doc["tools"].to<JsonObject>();
     writeConfigFields(tl, TOOL_U32_FIELDS);
@@ -1208,6 +1322,8 @@ void Config::_writeDoc(JsonObject doc) {
     auto sob = doc["standby_oil"].to<JsonObject>();
     writeConfigFields(sob, STANDBY_OIL_FLOAT_FIELDS);
     writeConfigFields(sob, STANDBY_OIL_INT_FIELDS);
+    writeConfigFields(sob, STANDBY_OIL_BOOL_FIELDS);
+    sob["output_id"] = standbyOilOutputId;
 
     auto limp = doc["limp_mode"].to<JsonObject>();
     writeConfigFields(limp, LIMP_FLOAT_FIELDS);
@@ -1215,6 +1331,7 @@ void Config::_writeDoc(JsonObject doc) {
     auto misc = doc["misc"].to<JsonObject>();
     writeConfigFields(misc, MISC_INT_FIELDS);
     writeConfigFields(misc, MISC_BOOL_FIELDS);
+    misc["igniter_on_start_output_id"] = manualRelightOutputId;
 
 
     auto rh = doc["rpm_health"].to<JsonObject>();
@@ -1261,6 +1378,9 @@ void Config::_writeDoc(JsonObject doc) {
     sl["starter"]    = (bool)(sessionLogMask & SLOG_STARTER);
     sl["thrust"]     = (bool)(sessionLogMask & SLOG_THRUST);
     sl["interval_ms"]= sessionLogIntervalMs;
+    auto registryInputs = sl["registry_inputs"].to<JsonArray>();
+    for (uint8_t i = 0; i < sessionRegistryInputCount; ++i)
+        if (sessionRegistryInputIds[i][0]) registryInputs.add(sessionRegistryInputIds[i]);
 
     auto stats = doc["stats"].to<JsonObject>();
     stats["total_run_seconds"] = totalRunSeconds;

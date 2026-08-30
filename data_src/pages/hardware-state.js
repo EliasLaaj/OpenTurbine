@@ -203,8 +203,10 @@ function stopStatusPoll() {
 async function fetchHardwareJson(url, attempts = 4) {
   let lastError = null;
   for (let attempt = 0; attempt < attempts; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
-      const response = await fetch(url, {cache:'no-store'});
+      const response = await fetch(url, {cache:'no-store', signal:controller.signal});
       if (response.ok) return await response.json();
       const detail = await response.json().catch(() => ({}));
       lastError = new Error(detail.error || `HTTP ${response.status}`);
@@ -212,6 +214,8 @@ async function fetchHardwareJson(url, attempts = 4) {
     } catch (error) {
       lastError = error;
       if (attempt + 1 >= attempts) break;
+    } finally {
+      clearTimeout(timeout);
     }
     await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
   }
@@ -442,7 +446,7 @@ function pcbModeCompatible(direction, purpose, role, mode) {
     if (['throttle','idle','ab_command'].includes(purpose) &&
         ![...analog,'rc_pwm_input','pwm_duty_input'].includes(adapter)) return false;
     if (switchPurposes.includes(purpose) && !digital.includes(adapter)) return false;
-    if (['n1_speed','n2_speed','shaft_speed','fuel_flow','oil_flow','scavenge_flow'].includes(purpose) &&
+    if (['n1_speed','n2_speed','shaft_speed','fuel_flow','general_flow','oil_flow','scavenge_flow'].includes(purpose) &&
         ![...analog,'pcnt_input'].includes(adapter)) return false;
     if (['oil_pressure','fuel_pressure','p1_pressure','p2_pressure','coolant_pressure',
          'battery_voltage'].includes(purpose) && !analog.includes(adapter)) return false;

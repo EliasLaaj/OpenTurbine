@@ -93,12 +93,23 @@ class SafetyQualification:
         })
         if not ok:
             raise RuntimeError(f"safety settings did not verify: {resp}")
-        # This campaign qualifies the built-in safety paths in isolation.
-        # Clear any user rules left by a previous campaign so a deliberate
-        # request_fault rule cannot pre-empt the safety stimulus under test.
-        ok, resp = self.runner.dc.patch_cfg({"rules": []}, verify=False)
-        if not ok or self.dut.config().get("rules"):
-            raise RuntimeError(f"could not clear control rules for safety qualification: {resp}")
+        # This campaign qualifies the built-in safety paths in isolation, but
+        # schema 1 intentionally has no hidden Main Fuel owner. Install the
+        # ordinary mapped controller a user would create while excluding any
+        # unrelated request_fault/request_shutdown rules from prior profiles.
+        main_fuel_rule = {
+            "enabled": True, "kind": 1,
+            "source": "operator_throttle", "target": "main_fuel",
+            "op": 0, "threshold": 0.5,
+            "on_value": 1.0, "off_value": 0.0, "hysteresis": 0.0,
+            "input_min": 0.0, "input_max": 1.0,
+            "output_min": 0.1, "output_max": 1.0,
+            "mode_mask": 4, "name": "Main Fuel",
+        }
+        ok, resp = self.runner.dc.patch_cfg({"controller_schema": 1, "rules": [main_fuel_rule]}, verify=False)
+        saved_rules = self.dut.config().get("rules", [])
+        if not ok or len(saved_rules) != 1 or saved_rules[0].get("target") != "main_fuel":
+            raise RuntimeError(f"could not isolate the Main Fuel control rule: {resp} {saved_rules}")
         self.verify_profile({"overspeed", "n2_overspeed", "overtemp", "low_oil", "hot_start", "oil_zero", "flameout"})
 
     def verify_profile(self, expected_safeties):

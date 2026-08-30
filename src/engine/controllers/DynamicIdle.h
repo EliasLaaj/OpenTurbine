@@ -39,7 +39,10 @@ public:
 
     void tick() override {
         auto& ed = EngineData::instance();
-        if (!ed.dynamicIdleEnabled) { setState(ed, "Off"); reset(); return; }
+        if (!ed.dynamicIdleEnabled) {
+            ed.dynamicIdleFloorDemand = 0.0f;
+            setState(ed, "Off"); reset(); return;
+        }
         if (source != _lastSource) {
             reset();
             _lastSource = source;
@@ -50,6 +53,7 @@ public:
         const float limit = pressureMode ? pressureLimit : rpmLimit;
         const float deadband = pressureMode ? pressureDeadband : deadbandRpm;
         if (target <= 0.0f || limit <= 0.0f) {
+            ed.dynamicIdleFloorDemand = 0.0f;
             setState(ed, "Inhibited: target/cutoff disabled");
             reset();
             return;
@@ -72,6 +76,7 @@ public:
         else if (dt > 0.05f) dt = 0.05f;
 
         if (!installed || !healthy) {
+            ed.dynamicIdleFloorDemand = 0.0f;
             setState(ed, "Feedback lost");
             _idleFloor = 0.0f;
             _integrator = 0.0f;
@@ -99,6 +104,7 @@ public:
         }
 
         if (feedback > limit) {
+            ed.dynamicIdleFloorDemand = 0.0f;
             setState(ed, "Waiting: above cutoff");
             _idleFloor = 0.0f;
             _integrator = 0.0f;
@@ -145,6 +151,7 @@ public:
                 }
             }
             const float demand = constrain(_idleFloor, minFloor, maxFloor);
+            ed.dynamicIdleFloorDemand = demand;
             if (ed.throttleDemand < demand) ed.throttleDemand = demand;
             return;
         }
@@ -165,6 +172,7 @@ public:
             _integrator = 0.0f;
         }
         const float demand = constrain(_idleFloor + _integrator, minFloor, maxFloor);
+        ed.dynamicIdleFloorDemand = demand;
         if (ed.throttleDemand < demand) ed.throttleDemand = demand;
     }
 

@@ -5,8 +5,25 @@ function validateSequenceHardwareForSave() {
   tabs.forEach(([label, tab]) => (hwCfg[seqKey(tab)] || []).forEach((name, index) => {
     const def = BLOCKS[name] || customBlocks[name];
     if (!def) errors.push(`${label} block ${index + 1} (${name}) is unknown to this firmware.`);
-    else if (def.visibleIf && !def.visibleIf(hwCfg))
+    else if (!BLOCK_OUTPUT_PURPOSES[name] && def.visibleIf && !def.visibleIf(hwCfg))
       errors.push(`${label} block ${index + 1} (${def.label || name}) cannot run with the fitted hardware.`);
+    if (BLOCK_OUTPUT_PURPOSES[name]) {
+      ensureDeviceTargetSlots(tab);
+      const target = String(hwCfg[deviceTargetSeqKey(tab)]?.[index] || '');
+      const choices = compatibleBlockOutputs(name);
+      if (!target)
+        errors.push(`${label} block ${index + 1} (${def?.label || name}) needs an output device.`);
+      else if (!choices.some(output => String(output.id || '') === target))
+        errors.push(`${label} block ${index + 1} (${def?.label || name}) references missing output "${target}".`);
+    }
+    if (name === 'SetOutput') {
+      const action = setOutputAction(tab, index);
+      const target = String(action?.target || ACT_KEY_BY_ENUM[Number(action?.act)] || '');
+      if (!action)
+        errors.push(`${label} block ${index + 1} (Set Output) needs an output device.`);
+      else if (!sideActionMeta(action))
+        errors.push(`${label} block ${index + 1} (Set Output) references missing output "${target || 'unknown'}".`);
+    }
   }));
   return errors;
 }
@@ -26,10 +43,12 @@ function validateCustomBlockLimits() {
     if ((def?.desc || '').length > MAX_CUSTOM_DESC_LEN) errors.push(`${label}: description is longer than ${MAX_CUSTOM_DESC_LEN} characters.`);
     if (steps.length > MAX_CUSTOM_STEPS) errors.push(`${label}: ${steps.length}/${MAX_CUSTOM_STEPS} steps.`);
     if (def?.type === 'action' && !steps.length) errors.push(`${label}: action block has no steps.`);
-    if (def?.type === 'while' && !sensors.some(sensor => sensor.key === def?.condition?.sensor))
+    if (def?.type === 'while' && !sensors.some(sensor =>
+      sensor.key === def?.condition?.sensor || sensor.source === def?.condition?.source))
       errors.push(`${label}: condition sensor is not configured.`);
     steps.forEach((step, index) => {
-      if (step?.type === 'set_act' && !acts.some(act => act.key === step.act))
+      if (step?.type === 'set_act' && !acts.some(act =>
+        act.key === step.act && (!step.target || act.target === step.target)))
         errors.push(`${label}: step ${index + 1} actuator is not configured.`);
     });
     if (!['action','wait','while'].includes(def?.type)) errors.push(`${label}: unknown custom block type.`);

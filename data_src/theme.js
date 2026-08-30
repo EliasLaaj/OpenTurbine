@@ -131,35 +131,100 @@
     var version = (bootScript && bootScript.getAttribute('data-ot-version')) || '';
     var suffix = version ? '?v=' + encodeURIComponent(version) : '';
     function read(url) {
+      // One synchronous attempt preserves the normal single-request Classic
+      // boot path. Repeating a blocked synchronous read can starve the very
+      // connection that must serve it, so recovery below is asynchronous.
       try {
         var xhr = new XMLHttpRequest();
         xhr.open('GET', url, false);
         xhr.send(null);
-        return xhr.status >= 200 && xhr.status < 300 ? xhr.responseText : '';
-      } catch (e) { return ''; }
+        if (xhr.status >= 200 && xhr.status < 300 && xhr.responseText)
+          return xhr.responseText;
+      } catch (e) {}
+      return '';
+    }
+    function readAsync(url, attempts) {
+      return new Promise(function (resolve) {
+        function tryRead(left) {
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', url, true);
+          xhr.timeout = 5000;
+          xhr.onload = function () {
+            if (xhr.status >= 200 && xhr.status < 300 && xhr.responseText) resolve(xhr.responseText);
+            else retry(left);
+          };
+          xhr.onerror = xhr.ontimeout = function () { retry(left); };
+          function retry(remaining) {
+            if (remaining <= 1) return resolve('');
+            setTimeout(function () { tryRead(remaining - 1); }, 450);
+          }
+          try { xhr.send(null); } catch (e) { retry(left); }
+        }
+        tryRead(attempts);
+      });
+    }
+    function installCss(text) {
+      if (!text) return;
+      var style = document.createElement('style');
+      style.setAttribute('data-ot-shared-css', 'true');
+      style.textContent = text;
+      document.head.appendChild(style);
+    }
+    function installScript(text, marker) {
+      if (!text) return;
+      var script = document.createElement('script');
+      script.setAttribute(marker, 'true');
+      script.textContent = text;
+      document.head.appendChild(script);
     }
     var sharedCss = read('/style.css' + suffix);
     if (sharedCss) {
-      var style = document.createElement('style');
-      style.textContent = sharedCss;
-      document.head.appendChild(style);
+      installCss(sharedCss);
     }
     var dialogs = read('/ui_dialog.js' + suffix);
     if (dialogs) {
-      var dialogScript = document.createElement('script');
-      dialogScript.textContent = dialogs;
-      document.head.appendChild(dialogScript);
+      installScript(dialogs, 'data-ot-dialog');
     }
     if (bootScript && bootScript.getAttribute('data-ot-app') === 'true') {
       var app = read('/app.js' + suffix);
       if (app) {
-        var appScript = document.createElement('script');
-        appScript.textContent = app;
-        document.head.appendChild(appScript);
+        installScript(app, 'data-ot-shared-app');
       }
     }
-    reconcileFromDevice();
-    renderPicker(document.getElementById('appearance-picker'));
+    function finishBoot() {
+      if (!sharedCss || !window.OTDialog ||
+          (bootScript && bootScript.getAttribute('data-ot-app') === 'true' && !window.OTSaveConfigPatch)) return false;
+      reconcileFromDevice();
+      renderPicker(document.getElementById('appearance-picker'));
+      document.documentElement.classList.add('ot-theme-ready');
+      document.documentElement.removeAttribute('data-ot-assets-retrying');
+      return true;
+    }
+    if (finishBoot()) return;
+
+    // A page change can overlap the previous flash response on Classic. Let
+    // that connection close, then fetch only the missing assets in sequence.
+    // This avoids both parallel requests and the former infinite blank reload.
+    document.documentElement.setAttribute('data-ot-assets-retrying', 'true');
+    var recovery = Promise.resolve();
+    if (!sharedCss) recovery = recovery.then(function () {
+      return readAsync('/style.css' + suffix, 5).then(function (text) { sharedCss = text; installCss(text); });
+    });
+    if (!dialogs) recovery = recovery.then(function () {
+      return readAsync('/ui_dialog.js' + suffix, 5).then(function (text) { dialogs = text; installScript(text, 'data-ot-dialog'); });
+    });
+    if (bootScript && bootScript.getAttribute('data-ot-app') === 'true' && !app) recovery = recovery.then(function () {
+      return readAsync('/app.js' + suffix, 5).then(function (text) { app = text; installScript(text, 'data-ot-shared-app'); });
+    });
+    recovery.then(function () {
+      if (finishBoot()) return;
+      document.documentElement.classList.add('ot-theme-ready');
+      document.documentElement.setAttribute('data-ot-assets-failed', 'true');
+      var notice = document.createElement('div');
+      notice.setAttribute('style', 'position:fixed;z-index:99999;left:12px;right:12px;top:12px;padding:14px 16px;background:#311;color:#fff;border:1px solid #f66;border-radius:8px;font:16px sans-serif');
+      notice.innerHTML = 'Web interface files could not be loaded. The ECU is still running. <button style="margin-left:12px;padding:6px 10px" onclick="location.reload()">Reload interface</button>';
+      document.body.insertBefore(notice, document.body.firstChild);
+    });
   }
   loadBootAssets();
 })();

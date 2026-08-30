@@ -456,9 +456,17 @@ function installedBrowser() {
     for (const id of ['#cf-th_ru','#cf-di_tr','#cf-di_db','#cf-di_ig'])
       assert.equal(await page.locator(id).isEnabled(), true, `${id} should be live-editable in RUNNING Developer Mode`);
     assert.equal(await page.locator('#cf-tot_limit').isDisabled(), true);
+    await page.locator('#cf-th_ru').fill('1700');
+    await page.locator('#btn-save').click();
+    if (await page.locator('#ot-dialog-confirm').isVisible().catch(() => false))
+      await page.locator('#ot-dialog-confirm').click();
+    await page.locator('#save-recap-confirm-btn').click();
+    await page.waitForFunction(() => document.querySelector('#save-msg')?.textContent.includes('saves permanently after STOP'));
+    saved = await state(page);
+    assert.equal(saved.last_config_patch.throttle.ramp_up_ms, 1700);
     await page.request.post(`${base}/__sim/data`, { data: { mode:'STANDBY', dev_mode:true, config_locked:false } });
     await page.waitForFunction(() => runtimeMode === 'STANDBY');
-    results.push('RUNNING Developer Mode exposes live-safe controller response values and ramps, while structural safety settings remain locked');
+    results.push('RUNNING Developer Mode exposes only live-safe tuning and clearly defers its flash save until STOP');
 
     await page.locator('#unit-temp-btn').click();
     assert.equal(await page.locator('#cf-tot_limit').inputValue(), '720');
@@ -469,6 +477,7 @@ function installedBrowser() {
     results.push('switching config units converts configuration inputs without changing meaning');
 
     await page.locator('#btn-view-expert').click();
+    await openConfigWorkspace(page);
     await page.locator('#cf-tot_limit').fill('1220');
     await page.locator('#cf-tot_safe_margin').fill('90');
     await page.locator('#cf-oil_rm').fill('29.008');
@@ -728,6 +737,84 @@ function installedBrowser() {
     } });
     await page.goto(`${base}/sequence.html`);
     await page.waitForFunction(() => document.body.textContent.includes('Oil Pump On'));
+    const unifiedOutputBlock = await page.evaluate(() => {
+      const snapshot = JSON.parse(JSON.stringify(hwCfg));
+      const select = document.querySelector('#add-startup-sel');
+      const option = Array.from(select.options).find(row => row.value.startsWith('SetOutput::'));
+      if (!option) return {available:false};
+      select.value = option.value;
+      const expectedTarget = option.value.split('::')[1];
+      addBlock('startup');
+      const index = hwCfg.startup_seq.length - 1;
+      const action = hwCfg.startup_enter_actions[index]?.[0];
+      const label = document.querySelector(`#list-startup .block-card[data-idx="${index}"] .block-name`)?.textContent || '';
+      const result = {
+        available:true,
+        block:hwCfg.startup_seq[index],
+        target:action?.target || '',
+        expectedTarget,
+        professionalLabel:/^Set\s+\S/.test(label)
+      };
+      hwCfg = snapshot;
+      render('startup', lastIdleRaw);
+      populateAddSelects();
+      return result;
+    });
+    assert.deepEqual(unifiedOutputBlock, {
+      available:true, block:'SetOutput', target:unifiedOutputBlock.expectedTarget,
+      expectedTarget:unifiedOutputBlock.expectedTarget, professionalLabel:true
+    });
+    results.push('sequence offers one editable Set Output action per fitted device and stores its exact physical target');
+    const stableDeviceBinding = await page.evaluate(() => {
+      const snapshot = JSON.parse(JSON.stringify(hwCfg));
+      const physicalActionsHaveIds = getEnabledActuators().every(action => !!action.target);
+      const fuelOpenSuggested = suggestedBlockOutputs('FuelOpen');
+      const fuelOpenAll = compatibleBlockOutputs('FuelOpen');
+      const fuelOpenHtml = buildDeviceTargetHtml('FuelOpen', 0, 'startup');
+      const groupedOverrides = fuelOpenSuggested.length >= 1 &&
+        fuelOpenAll.length > fuelOpenSuggested.length &&
+        fuelOpenHtml.includes('Suggested') && fuelOpenHtml.includes('Other fitted outputs');
+      const tab = 'startup';
+      const sequence = hwCfg[seqKey(tab)] || [];
+      const index = sequence.findIndex((name, row) => name === 'SetOutput' && sideActionMeta(setOutputAction(tab, row)));
+      if (index < 0) return {physicalActionsHaveIds, exercised:false};
+      const originalMeta = sideActionMeta(setOutputAction(tab, index));
+      const original = hwCfg.channel_registry.outputs.find(output => output.id === originalMeta.target);
+      const duplicate = JSON.parse(JSON.stringify(original));
+      duplicate.id = 'smoke_exact_output';
+      duplicate.name = 'Smoke exact output';
+      duplicate.mirror_of = '';
+      duplicate.installed = true;
+      hwCfg.channel_registry.outputs.push(duplicate);
+      const choices = getEnabledActuators().length;
+      ensureActionSlots(tab);
+      const sideKey = actionKey(tab, 'enter');
+      hwCfg[sideKey][index] = [{act:originalMeta.actuator, target:original.id, value:.5}];
+      updateSetOutput(tab, index, duplicate.id, null);
+      const exactSideAction = hwCfg[sideKey][index][0].target === duplicate.id &&
+        hwCfg[sideKey][index][0].act >= 64;
+      const destination = index === 0 ? 1 : 0;
+      moveBlockTo(tab, index, destination);
+      const followedReorder = hwCfg[sideKey][destination]?.[0]?.target === duplicate.id;
+      hwCfg.channel_registry.outputs = hwCfg.channel_registry.outputs.filter(output => output.id !== duplicate.id);
+      render(tab, lastIdleRaw);
+      const missingVisible = Array.from(document.querySelectorAll('#list-startup select option'))
+        .some(option => option.selected && option.textContent.includes('Missing output: smoke_exact_output'));
+      const saveBlocked = validateSequenceHardwareForSave().some(error => error.includes('smoke_exact_output'));
+      hwCfg = snapshot;
+      migrateLegacyDeviceTargets();
+      render(tab, lastIdleRaw);
+      return {physicalActionsHaveIds, exercised:true, choices, exactSideAction, followedReorder, missingVisible, saveBlocked, groupedOverrides};
+    });
+    assert.equal(stableDeviceBinding.physicalActionsHaveIds, true);
+    assert.equal(stableDeviceBinding.exercised, true);
+    assert.ok(stableDeviceBinding.choices >= 2);
+    assert.equal(stableDeviceBinding.exactSideAction, true);
+    assert.equal(stableDeviceBinding.followedReorder, true);
+    assert.equal(stableDeviceBinding.missingVisible, true);
+    assert.equal(stableDeviceBinding.saveBlocked, true);
+    assert.equal(stableDeviceBinding.groupedOverrides, true,
+      'sequence output selectors should group purpose matches before explicit alternate outputs');
     const reorderHandles = page.locator('#list-startup .drag-handle');
     assert.equal(await reorderHandles.count(), await page.locator('#list-startup .block-card').count());
     assert.match(await reorderHandles.first().getAttribute('aria-label'), /arrow keys/i);
@@ -788,7 +875,7 @@ function installedBrowser() {
     await page.locator('#ab-edit-min-n1').dispatchEvent('input');
     assert.equal(await page.evaluate(() => hwCfg.ab_trigger.input_threshold), Math.round(72 * 4095 / 100));
     assert.equal(await page.evaluate(() => cfg.afterburner.min_n1), 50000);
-    results.push('sequence editor drag-reorders blocks, keeps independent delays, and edits AB gates in friendly units');
+    results.push('sequence editor preserves exact device IDs through reorder/removal, keeps independent delays, and edits AB gates in friendly units');
     await page.goto(`${base}/hardware.html`);
     await page.waitForFunction(() => /Loaded|Converted/i.test(document.querySelector('#save-msg')?.textContent || ''));
     assert.equal(await page.evaluate(() => cfg.ab_trigger.input_rc_pwm), true);
@@ -862,8 +949,19 @@ function installedBrowser() {
     } });
     await page.reload();
     await page.waitForFunction(() => document.querySelector('#save-status')?.textContent === 'No unsaved changes');
-    assert.equal(await page.locator('#add-afterburner-sel option[value="ABPumpOn"]').count(), 1);
-    assert.equal(await page.locator('#add-afterburner-sel option[value="ABSolOpen"]').count(), 1);
+    const afterburnerOutputChoices = await page.evaluate(() => {
+      const choices = Array.from(document.querySelectorAll('#add-afterburner-sel option'))
+        .filter(option => option.value.startsWith('SetOutput::'))
+        .map(option => option.value.split('::')[1]);
+      const actions = getEnabledActuators();
+      return {
+        choices,
+        pump:actions.find(action => action.key === 'ab_pump')?.target || '',
+        valve:actions.find(action => action.key === 'ab_sol')?.target || ''
+      };
+    });
+    assert.ok(afterburnerOutputChoices.choices.includes(afterburnerOutputChoices.pump));
+    assert.ok(afterburnerOutputChoices.choices.includes(afterburnerOutputChoices.valve));
     assert.equal((await page.evaluate(() => getEnabledSensors().map(row => row.key))).includes('n2_rpm'), true);
     assert.equal((await page.evaluate(() => getEnabledSensors().map(row => row.key))).includes('ab_input'), true);
     assert.equal((await page.evaluate(() => getEnabledActuators().map(row => row.key))).includes('ab_sol'), true);

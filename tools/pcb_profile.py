@@ -73,8 +73,9 @@ def _default_compatible(adapter: str, purpose: str, role: str) -> bool:
     input_groups = {
         "speed": ({"n1_speed", "n2_speed", "shaft_speed"},
                   ANALOG_INPUTS | {"pcnt_input"}),
-        "flow": ({"fuel_flow", "oil_flow", "scavenge_flow"},
+        "flow": ({"fuel_flow", "general_flow", "oil_flow", "scavenge_flow"},
                  ANALOG_INPUTS | {"pcnt_input"}),
+        "current": ({"general_current"}, ANALOG_INPUTS),
         "pressure": ({"oil_pressure", "fuel_pressure", "p1_pressure", "p2_pressure", "coolant_pressure"},
                      ANALOG_INPUTS),
         "flame": ({"flame", "ab_flame"}, ANALOG_INPUTS | DIGITAL_INPUTS),

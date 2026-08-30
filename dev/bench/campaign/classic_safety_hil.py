@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import time
+from copy import deepcopy
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,7 +22,6 @@ from otbench.dut import DUT
 from otbench.dutconfig import DutConfig
 from otbench.tester import Tester
 from reversed_digital_sensor_hil import ReversedDigitalSensorHil
-from ten_build_webui_hil import chan_input, chan_output
 
 
 def hz(rpm):
@@ -34,7 +34,7 @@ class ClassicSafetyHil:
         self.dc = DutConfig(self.dut)
         self.tester = Tester(os.environ.get("OTBENCH_PORT", "COM4")).open()
         self.original_hw = self.dut.hardware()
-        self.original_cfg = self.dut.config()
+        self.original_ecu = self.dut._get("/api/ecu_config")
         self.rows = []
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.result_path = os.path.join(
@@ -59,18 +59,24 @@ class ClassicSafetyHil:
         )
         for key in hw["safety"]:
             hw["safety"][key] = key == "overspeed"
+        # Keep the Classic POST deliberately compact. Missing optional channel
+        # fields use the same firmware defaults as the Hardware UI.
         hw["channel_registry"] = {
             "version": 1,
             "inputs": [
-                chan_input("n1_main", "N1 Speed", "speed", "n1_speed", 2, 4,
-                           pulses_per_unit=1.0),
+                {"id": "n1_main", "name": "N1 Speed", "role": "speed",
+                 "purpose": "n1_speed", "driver": 2, "pin": 4,
+                 "pulses_per_unit": 1.0},
             ],
             "outputs": [
-                chan_output("main_fuel", "Main Fuel", "fuel", "main_fuel", 6, 17,
-                            min=1000, max=2000),
-                chan_output("fuel_shutoff", "Fuel Shutoff", "fuel_shutoff",
-                            "fuel_shutoff", 4, 22),
-                chan_output("igniter", "Igniter", "igniter", "igniter", 4, 23),
+                {"id": "main_fuel", "name": "Main Fuel", "role": "fuel",
+                 "purpose": "main_fuel", "driver": 6, "pin": 17,
+                 "min": 1000, "max": 2000},
+                {"id": "fuel_shutoff", "name": "Fuel Shutoff",
+                 "role": "fuel_shutoff", "purpose": "fuel_shutoff",
+                 "driver": 4, "pin": 22},
+                {"id": "igniter", "name": "Igniter", "role": "igniter",
+                 "purpose": "igniter", "driver": 4, "pin": 23},
             ],
             "bindings": [
                 {"key": "primary_n1", "channel": "n1_main"},
@@ -88,28 +94,36 @@ class ClassicSafetyHil:
         hw["shutdown_ignition_target"] = [0, 0]
         hw["shutdown_enter_actions"] = [[], []]
         hw["shutdown_exit_actions"] = [[], []]
+        hw["ab_startup_seq"] = []
+        hw["ab_startup_delay_ms"] = []
+        hw["ab_startup_ignition_target"] = []
+        hw["ab_startup_enter_actions"] = []
+        hw["ab_startup_exit_actions"] = []
+        hw["ab_shutdown_seq"] = []
+        hw["ab_shutdown_delay_ms"] = []
+        hw["ab_shutdown_ignition_target"] = []
+        hw["ab_shutdown_enter_actions"] = []
+        hw["ab_shutdown_exit_actions"] = []
 
     def install(self):
-        ok, detail = self.dc.multi(
-            self.profile,
-            check=lambda hw: (
-                hw["controls"].get("stop_pin") == 14
-                and hw["safety"].get("overspeed") is True
-                and any(c.get("id") == "main_fuel"
-                        for c in hw["channel_registry"]["outputs"])
-            ),
+        temporary = deepcopy(self.original_ecu)
+        self.profile(temporary["hardware"])
+        settings = temporary["settings"]
+        settings["engine"].update(rpm_limit=50000, min_rpm=0)
+        settings["throttle"].update(
+            ramp_up_ms=0, ramp_down_ms=0, fuel_pump_min_pct=30
         )
-        if not ok:
-            raise RuntimeError(f"Classic safety profile rejected: {detail}")
-        ok, detail = self.dc.patch_cfg({
-            "engine": {"rpm_limit": 50000, "min_rpm": 0},
-            "throttle": {
-                "ramp_up_ms": 0, "ramp_down_ms": 0, "fuel_pump_min_pct": 30
-            },
-            "safety": {"check_interval_ms": 20},
-        })
-        if not ok:
-            raise RuntimeError(f"Classic safety settings rejected: {detail}")
+        settings["safety"]["check_interval_ms"] = 20
+        previous_boot = self.dut.data().get("boot_count")
+        code, detail = self.dut._post("/api/ecu_config", temporary)
+        if code != 200 or not self.dc._wait_reboot(previous_boot):
+            raise RuntimeError(f"Classic safety engine file rejected: {detail}")
+        saved = self.dut._get("/api/ecu_config")
+        if (saved["hardware"]["controls"].get("stop_pin") != 14
+                or saved["settings"]["engine"].get("rpm_limit") != 50000
+                or not any(c.get("id") == "main_fuel"
+                           for c in saved["hardware"]["channel_registry"]["outputs"])):
+            raise RuntimeError("Classic safety engine file did not persist exactly")
 
     def start_running(self):
         self.tester.set("STOP", 0)
@@ -155,6 +169,14 @@ class ClassicSafetyHil:
         self.tester.set("STOP", 0)
         self.tester.set("N1", 0)
         self.dut.stop()
+        # Overspeed intentionally latches FAULT. Clear that acknowledged test
+        # fault before the independent physical-STOP scenario; otherwise the
+        # second START correctly remains blocked and the campaign tests its own
+        # sequencing mistake instead of ECU behaviour.
+        try:
+            self.dut.command("CLEAR_FAULT")
+        except Exception:
+            pass
         self.dut.ensure_mode_standby(timeout=25)
 
     def overspeed(self):
@@ -202,30 +224,13 @@ class ClassicSafetyHil:
 
     def restore(self):
         self.recover()
-        ok, detail = self.dc.restore(self.original_hw)
+        previous_boot = self.dut.data().get("boot_count")
+        code, detail = self.dut._post("/api/ecu_config", self.original_ecu)
+        ok = code == 200 and self.dc._wait_reboot(previous_boot)
+        if ok:
+            ok = self.dut._get("/api/ecu_config") == self.original_ecu
         if not ok:
-            raise RuntimeError(f"hardware restore failed: {detail}")
-        # Restore only fields this campaign changed. Replaying an entire
-        # settings snapshot after changing the hardware profile can correctly
-        # fail validation when that snapshot contains controller options tied
-        # to the temporary profile.
-        original = self.original_cfg
-        restore_patch = {
-            "engine": {
-                key: original["engine"][key]
-                for key in ("rpm_limit", "min_rpm")
-            },
-            "throttle": {
-                key: original["throttle"][key]
-                for key in ("ramp_up_ms", "ramp_down_ms", "fuel_pump_min_pct")
-            },
-            "safety": {
-                "check_interval_ms": original["safety"]["check_interval_ms"]
-            },
-        }
-        ok, detail = self.dc.patch_cfg(restore_patch)
-        if not ok:
-            raise RuntimeError(f"settings restore failed: {detail}")
+            raise RuntimeError(f"complete engine-file restore failed: {detail}")
         self.dut.ensure_dev_mode(False)
         self.tester.close()
 

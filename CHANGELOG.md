@@ -8,7 +8,93 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ---
 
-## [Unreleased]
+## [2.2.0] — Unreleased
+
+### Development focus
+- Harden real-time behavior, turbine-plant fault coverage, persistence, and long-duration operation without expanding OpenTurbine beyond its role as a versatile experimental turbine ECU.
+- Keep the published 2.1.0 behavior as the reference baseline; add user-facing controls only when a demonstrated turbine use requires them.
+
+### Added
+- Added worst-cycle timing and missed-deadline diagnostics to live Tools telemetry and optional session logs so intermittent ECU stalls are visible instead of being hidden by average loop rate.
+- Automatic relight now has its own independently selectable trigger source,
+  trigger confirmation, recovery confirmation and timeout. It can use different
+  evidence from the independently enabled combustion-loss shutdown monitor.
+- The supported setup matrix now explicitly qualifies monitoring-only turbines
+  with manual fuel hardware, so the UI cannot accidentally make ECU-controlled
+  fuel metering mandatory again.
+
+### Changed
+- Fuel-limit cards now use one clear Off / Simple / Predictive choice per
+  feedback source and reveal only the settings required by that mode.
+- Core actuator ownership is now explicit for every built-in output path. A
+  second independent pump, igniter, fan, valve or starter can no longer become
+  the primary device merely because its Hardware card appears first.
+- Independent oil-pressure loops retain their own pump demand during startup
+  and cooldown; the selected primary oil pump alone follows sequence-level oil
+  commands and supplies the shared cooldown tuning.
+- Normal ignition-confirmation exits now release only the ignition devices that
+  the active sequence commanded. Emergency STOP and FAULT continue to cut every
+  fuel and ignition output.
+- STOP and fault transitions now de-energize fuel, combustion and starter
+  hardware immediately, before sensor/bus work in the remainder of the control
+  loop, while preserving oil and cooling authority for safe spindown.
+- N2 telemetry, logging, rules and display capability now follow the fitted N2
+  sensor directly instead of redundantly consulting the retired two-shaft
+  master flag.
+- Start, running, fault, relight and run-summary records now include only fitted
+  sensors. Run-summary peaks ignore unhealthy samples and are omitted when no
+  valid sample was seen.
+- Current-sensor feedback loss now follows the same rule for built-in and custom
+  outputs: an actively driven physical output with a configured current trip
+  enters reduced-power protection if that safety feedback becomes unhealthy.
+- The actuator writer, OTA/reboot gates, reset recovery and current-sensor safety
+  now share one physical-output demand lookup based on applied fuel and
+  interlock-qualified starter demand.
+
+### Fixed
+- Automatic Idle now releases Main Fuel back to the operator request when its
+  feedback falls below target. Rule ownership no longer feeds the previous
+  cycle's raised idle floor back into the next control cycle.
+- Made the pinned web-server compatibility patch idempotent. Repeated local or
+  CI builds no longer wrap its retained-header statement again, so clean and
+  incremental builds produce the same firmware instead of slowly consuming
+  Classic flash with duplicate generated code.
+- Complete engine-file restores now validate settings independently of the
+  previously active hardware, then check dependencies against the uploaded
+  hardware and sequence. A valid factory or saved engine can therefore be
+  restored after a substantially different bench setup has been fitted.
+- Classic ESP32 engine-file restore now parses staged settings directly from
+  flash after lending its idle transfer workspace to ArduinoJson. This removes
+  the fragmented-heap failure reproduced after physical overspeed and STOP
+  tests without increasing steady-state memory use.
+- A same-tab page navigation now supersedes an abandoned large read response,
+  preventing the destination page from remaining at Loading while the ECU is
+  otherwise healthy. Multi-chunk configuration writes retain exclusive,
+  non-preemptible ownership.
+- Kept Developer Mode live controller tuning out of LittleFS while an engine is active. Approved values now apply as one small control-core transaction and persist automatically after the ECU returns to a safe mode.
+- Reused the oil-temperature registry ADC sample for its raw diagnostic instead of sampling the same pin twice per control cycle, keeping raw and calibrated readings coherent while reducing loop work.
+- Made Hardware and custom-controller safety descriptions match the firmware's
+  fixed immediate-cut behavior for every fuel and ignition output.
+- Kept bounded flight-recorder events valid by dropping an anomalous field at
+  its last JSON boundary when it cannot fit.
+- Output-overcurrent shutdowns now name the exact configured actuator in the
+  dashboard and event record.
+- Registered compressor bleed valves consistently as built-in outputs, so
+  native and I2C cards use the same single owner and engine demand path.
+- Removed first-input and first-output fallbacks from controller creation,
+  sequencer ownership and legacy wet-glow pilot fuel. Ambiguous configurations
+  now ask for an explicit device instead of silently depending on card order.
+
+### Removed
+- Removed the final unused in-memory two-shaft compatibility flag; fitted N2
+  feedback is the single runtime topology source.
+- Removed the unreachable duplicate controller renderer, its empty placeholder,
+  eight unreferenced browser helpers, five write-only runtime fields, and three
+  duplicate On/Off flags now derived from their actuator demands.
+- Removed the obsolete RPM-only idle-target telemetry alias; the dashboard now
+  consumes only the source-aware target value and its explicit unit.
+- Removed the unreachable old `wet_glow_fuel` registry branch. Wet-glow start
+  fuel now has one supported `pilot_fuel` purpose and one explicit owner.
 
 ## [2.1.0] — 2026-08-25
 

@@ -3,6 +3,7 @@
 #include "../../EngineData.h"
 #include "../../../system/HardwareConfig.h"
 #include "../../../system/Config.h"
+#include "../SequenceIgnition.h"
 #include <Arduino.h>
 
 // User-facing "Final Startup Checks". Every enabled and installed check must
@@ -90,9 +91,7 @@ public:
         if (turnOffStarterOnExit) ed.starterDemand = 0;
         if (turnOffStarterEnOnExit) ed.starterEnabled = false;
         if (turnOffIgniterOnExit) {
-            ed.igniterOn = false;
-            ed.igniter2On = false;
-            ed.glowPlugDemand = 0.0f;
+            clearSequenceIgnitionOutputs();
         }
     }
 

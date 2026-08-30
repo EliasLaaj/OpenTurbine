@@ -326,10 +326,12 @@ async function goto(page, route, waitSelector) {
       hwCfg.actuators.ab_sol.enabled = true;
       hwCfg.actuators.ab_pump.enabled = true;
       populateAddSelects();
+      const abPump = getEnabledActuators().find(a => a.key === 'ab_pump');
       const hiddenMaster = {
         sensors: getEnabledSensors().map(s => s.key),
         actuators: getEnabledActuators().map(a => a.key),
-        abPumpOptionCount: document.querySelectorAll('#add-afterburner-sel option[value="ABPumpOn"]').length
+        abPumpOptionCount: abPump ? Array.from(document.querySelectorAll('#add-afterburner-sel option'))
+          .filter(option => option.value === `SetOutput::${abPump.target}`).length : 0
       };
       return { fullSensors, fullActuators, hiddenMaster };
     });
@@ -377,22 +379,39 @@ async function goto(page, route, waitSelector) {
       return !help || /^(undefined|null|value|setting)$/i.test(help) ? [label] : [];
     }));
     assert.deepEqual(incompleteHelp, [], `Every Config field needs meaningful help; incomplete: ${incompleteHelp.join(', ')}`);
+    assert.ok(await page.locator('#cf-rl_oid optgroup[label="Suggested"] option').count() >= 1,
+      'Relight should suggest fitted ignition devices');
+    assert.ok(await page.locator('#cf-rl_oid optgroup[label="Other fitted outputs"] option').count() >= 1,
+      'Relight should retain deliberate access to other fitted outputs');
+    const windmillToggle = page.locator('#cf-so_en');
+    if (!await windmillToggle.isChecked()) await windmillToggle.evaluate(el => {
+      el.checked = true;
+      el.dispatchEvent(new Event('change', {bubbles:true}));
+    });
+    assert.equal(await page.locator('#cf-so_oid').isDisabled(), false,
+      'Enabling windmilling protection should reveal its output selector immediately');
+    assert.ok(await page.locator('#cf-so_oid optgroup[label="Suggested"] option').count() >= 1,
+      'Windmilling protection should suggest fitted oil pumps');
+    assert.ok(await page.locator('#cf-so_oid optgroup[label="Other fitted outputs"] option').count() >= 1,
+      'Windmilling protection should permit an explicit alternate fitted output');
     results.push('config workspace groups settings and searches field metadata without losing detailed help');
     const n2RelationshipWarnings = await page.evaluate(() => {
       const setNumber = (key, value) => { const el = document.getElementById('cf-' + key); if (el) el.value = String(value); };
       const setCheck = (key, value) => { const el = document.getElementById('cf-' + key); if (el) el.checked = value; };
+      const setSelect = (key, value) => { const el = document.getElementById('cf-' + key); if (el) el.value = String(value); };
       hwCfg.safety.n2_overspeed = true;
       hwCfg.controllers.governor = true;
       hwCfg.controllers.dynamic_idle = true;
       setNumber('n2_rpm_limit', 30000);
-      setCheck('pb_n2e', true); setNumber('pb_n2s', 30000); setNumber('pb_n2h', 32000);
+      setSelect('pb_n2e', 1); setNumber('pb_n2s', 30000); setNumber('pb_n2h', 32000);
       setNumber('gv_tr', 29000); setNumber('gv_bd', 1500);
       setNumber('rpm_limit', 50000);
-      setCheck('pb_n1e', true); setNumber('pb_n1s', 50000); setNumber('pb_n1h', 52000);
+      setSelect('pb_n1e', 1); setNumber('pb_n1s', 50000); setNumber('pb_n1h', 52000);
       setNumber('di_src', 1); setNumber('di_tr', 30000);
       hwCfg.safety.hot_start = true;
       setNumber('tot_limit', 650); setNumber('sf_hs', 700); setNumber('sf_st', 0);
       setNumber('so_src', 0);
+      setCheck('so_en', true);
       setNumber('so_rl', 500000); setNumber('so_fp', 0); setNumber('so_fb', 0);
       runValidation();
       return Array.from(document.querySelectorAll('.cfg-inline-warn')).map(el => el.textContent);
@@ -642,7 +661,7 @@ async function goto(page, route, waitSelector) {
     if (await page.locator('#ot-app-dialog.show').isVisible()) await page.locator('#ot-dialog-confirm').click();
     await page.waitForSelector('#save-recap-modal', {state:'visible'});
     await page.locator('#save-recap-confirm-btn').click();
-    await page.waitForFunction(() => /Saved|Applied live/.test(document.querySelector('#save-msg')?.textContent || ''));
+    await page.waitForFunction(() => /Saved|Applied live|Live update queued/.test(document.querySelector('#save-msg')?.textContent || ''));
     let simState = await (await page.request.get(`${base}/__sim/state`)).json();
     assert.deepEqual(simState.last_config_patch, { throttle:{ ramp_up_ms:1700 } });
     await stalePage.locator('#cf-th_rd').fill('1800');
@@ -650,7 +669,7 @@ async function goto(page, route, waitSelector) {
     if (await stalePage.locator('#ot-app-dialog.show').isVisible()) await stalePage.locator('#ot-dialog-confirm').click();
     await stalePage.waitForSelector('#save-recap-modal', {state:'visible'});
     await stalePage.locator('#save-recap-confirm-btn').click();
-    await stalePage.waitForFunction(() => /Saved|Applied live/.test(document.querySelector('#save-msg')?.textContent || ''));
+    await stalePage.waitForFunction(() => /Saved|Applied live|Live update queued/.test(document.querySelector('#save-msg')?.textContent || ''));
     simState = await (await page.request.get(`${base}/__sim/state`)).json();
     assert.deepEqual(simState.last_config_patch, { throttle:{ ramp_down_ms:1800 } });
     assert.equal(simState.settings.throttle.ramp_up_ms, 1700);

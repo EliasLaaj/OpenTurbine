@@ -443,10 +443,10 @@ function applyData(d) {
     d.di_channels = d.di_channels.map((ch, i) => Object.assign({}, _lastData.di_channels[i], ch));
   }
   if (d && Array.isArray(d.registry_inputs)) {
-    d.registry_inputs = mergeTelemetryChannels(_lastData.registry_inputs, d.registry_inputs);
+    d.registry_inputs = mergeTelemetryChannels(_lastData.registry_inputs, d.registry_inputs, !!d.labels || d._full_snapshot === true);
   }
   if (d && Array.isArray(d.registry_outputs)) {
-    d.registry_outputs = mergeTelemetryChannels(_lastData.registry_outputs, d.registry_outputs);
+    d.registry_outputs = mergeTelemetryChannels(_lastData.registry_outputs, d.registry_outputs, !!d.labels || d._full_snapshot === true);
   }
   Object.assign(_lastData, d);
   d = _lastData;
@@ -873,6 +873,16 @@ function applyData(d) {
         ('Cannot start normally: ' + (d.limited_start_sensor || 'a required sensor') +
          ' feedback is unavailable.'));
     }
+  }
+  const clearFaultButton = document.getElementById('btn-clear-fault');
+  if (clearFaultButton) {
+    clearFaultButton.style.display = d.fault_latched ? '' : 'none';
+    clearFaultButton.disabled = !d.fault_clear_allowed;
+    clearFaultButton.title = d.dry_oil_stop_active
+      ? 'Oil-pump coastdown is still active; the fault cannot be cleared yet.'
+      : (d.fault_clear_allowed
+          ? 'Acknowledge this fault and return the stopped ECU to STANDBY. Reboot also clears faults.'
+          : 'The ECU is not yet safe or ready to clear this fault.');
   }
 
   // ── Profile mismatch banner ───────────────────────────────
@@ -1801,6 +1811,21 @@ function sendCmd(url) {
     });
 }
 
+async function clearFault() {
+  if (!await OTDialog.confirm(
+      'Clear the latched ECU fault?\n\nOnly continue after the cause has been inspected. The ECU will re-check fitted hardware, sensors, interlocks, and start conditions before it can run again.',
+      {title:'Clear ECU fault', confirmLabel:'Clear fault'})) return;
+  const result = await fetch('/api/command', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({cmd:'CLEAR_FAULT'})
+  }).then(async response => {
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.ok === false) throw new Error(body.error || body.reason || `HTTP ${response.status}`);
+    return body;
+  }).catch(error => { alert('Fault could not be cleared: ' + error.message); return null; });
+  if (result) requestTelemetryNow();
+}
+
 function sendAbCmd(cmd) {
   fetch('/api/command', {
     method: 'POST',
@@ -1962,16 +1987,29 @@ function startStaleMonitor() {
   }, 500);
 }
 
-function mergeTelemetryChannels(previousRows, nextRows) {
+function mergeTelemetryChannels(previousRows, nextRows, completeSnapshot = false) {
   if (!Array.isArray(nextRows)) return nextRows;
-  const prevById = new Map((Array.isArray(previousRows) ? previousRows : [])
+  // A full snapshot is authoritative and may legitimately remove channels
+  // after a hardware save/profile reset. Only compact rotating telemetry must
+  // retain rows omitted from the current frame.
+  if (completeSnapshot) return nextRows.map(row => row ? Object.assign({}, row) : row);
+  const previous = Array.isArray(previousRows) ? previousRows : [];
+  const prevById = new Map(previous
     .filter(row => row && row.id)
     .map(row => [String(row.id), row]));
-  return nextRows.map((row, index) => {
+  const merged = new Map(previous
+    .filter(row => row && row.id)
+    .map(row => [String(row.id), Object.assign({}, row)]));
+  nextRows.forEach((row, index) => {
     if (!row) return row;
-    const prev = row.id ? prevById.get(String(row.id)) : (Array.isArray(previousRows) ? previousRows[index] : null);
-    return prev ? Object.assign({}, prev, row) : row;
+    const id = row.id ? String(row.id) : '';
+    const prev = id ? prevById.get(id) : previous[index];
+    if (id) merged.set(id, prev ? Object.assign({}, prev, row) : Object.assign({}, row));
   });
+  // Compact telemetry deliberately rotates only a few registry channels per
+  // frame. Preserve channels not present in this frame; otherwise the UI
+  // alternates between partial hardware layouts every few seconds.
+  return Array.from(merged.values());
 }
 
 const DASHBOARD_CORE_OUTPUT_PURPOSES = new Set([
@@ -2033,6 +2071,7 @@ function registryInputDisplay(ch) {
   if (role === 'speed') return {value:fmtInt(value), unit:'RPM', numeric:value};
   if (role === 'voltage') return {value:value.toFixed(2), unit:'V', numeric:value};
   if (role === 'flow') return {value:value.toFixed(2), unit:'L/min', numeric:value};
+  if (role === 'current') return {value:value.toFixed(2), unit:'A', numeric:value};
   if (role === 'torque') return {value:value.toFixed(1), unit:'Nm', numeric:value};
   if (role === 'thrust') return {value:value.toFixed(1), unit:'N', numeric:value};
   if (registryInputIsOperator(ch))
@@ -2049,6 +2088,7 @@ function registryInputRangeText(ch) {
   if (role === 'speed') return 'speed input';
   if (role === 'voltage') return 'voltage input';
   if (role === 'flow') return 'flow input';
+  if (role === 'current') return 'current input';
   if (role === 'operator' || purpose === 'throttle' || purpose === 'idle') return '0–100% command input';
   if (purpose === 'generic' || role === 'generic') return 'normalized automation input';
   return 'registry input';
@@ -2102,7 +2142,10 @@ function renderRegistryInputCards(d) {
   if (operatorRow) operatorRow.style.display = hasThrottleInput || hasIdleInput ? '' : 'none';
   if (!cardRows.length) {
     host.innerHTML = '';
-    return rows.length;
+    // Operator inputs live compactly under Main Fuel Metering and binary
+    // inputs have their own switch strip. Neither should expose an otherwise
+    // empty full-size auxiliary-sensor group.
+    return 0;
   }
   host.innerHTML = cardRows.map((ch, i) => {
     const safeId = String(ch.id || `input_${i}`).replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -2126,7 +2169,7 @@ function renderRegistryInputCards(d) {
       drawSparkline('regin-spark-' + safeId, arr, 'var(--accent)');
     }
   });
-  return rows.length;
+  return cardRows.length;
 }
 function renderSwitchInputStrip(rows) {
   const wrap = document.getElementById('di-states-wrap');
@@ -2203,3 +2246,52 @@ scheduleTelemetryBoot();
 // buffer and produced harmless but user-visible 409 errors during navigation.
 const _emptySeqBanner = document.getElementById('empty-seq-banner');
 if (_emptySeqBanner) _emptySeqBanner.style.display = 'none';
+// Save a small settings edit using the light PATCH path on S3. Classic has
+// less contiguous RAM after realistic browsing, so merge the edit in the
+// browser and send one complete validated settings object; firmware then
+// performs a planned reboot. All pages use this helper to keep the behaviour
+// consistent without weakening validation.
+window.OTSaveConfigPatch = async function(patch) {
+  const merge = (target, source) => {
+    for (const [key, value] of Object.entries(source || {})) {
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        if (!target[key] || typeof target[key] !== 'object' || Array.isArray(target[key])) target[key] = {};
+        merge(target[key], value);
+      } else target[key] = value;
+    }
+  };
+  let classic = false;
+  try {
+    const info = await fetch('/api/device_info', {cache:'no-store'}).then(r => r.ok ? r.json() : null);
+    classic = info?.target === 'esp32dev';
+  } catch (_) {}
+  if (!classic) {
+    const response = await fetch('/api/config', {
+      method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(patch)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok || ![500, 501, 503].includes(response.status)) return {response, data};
+    // Identity can be the one request lost while Classic releases a previous
+    // response. A failed lightweight save is therefore also a safe signal to
+    // use the complete-file path; S3 normally never enters this fallback.
+  }
+  const engineResponse = await fetch('/api/ecu_config', {cache:'no-store'});
+  if (!engineResponse.ok) return {response:engineResponse, data:{error:'Could not read the current engine file'}};
+  const engine = await engineResponse.json();
+  if (!engine?.settings) return {response:engineResponse, data:{ok:false,error:'Current engine file has no settings section'}};
+  merge(engine.settings, patch);
+  // Let the large stateless download finish leaving AsyncTCP before opening
+  // the upload transaction. Retry only explicit pre-commit transport/storage
+  // failures; a successful restore immediately schedules the reboot.
+  await new Promise(resolve => setTimeout(resolve, 700));
+  let response, data;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    response = await fetch('/api/ecu_config', {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(engine)
+    });
+    data = await response.json().catch(() => ({}));
+    if (response.ok || ![500, 501, 503].includes(response.status)) break;
+    await new Promise(resolve => setTimeout(resolve, 1200 + attempt * 600));
+  }
+  return {response, data};
+};

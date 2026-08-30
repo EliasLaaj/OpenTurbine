@@ -24,14 +24,22 @@ function isExpectedMockWsError(text) {
   const results = [];
   for (const [name, browserType] of Object.entries({ chromium, firefox, webkit })) {
     let browser;
-    try {
-      browser = await browserType.launch({ headless: true });
-    } catch (error) {
-      if (/Executable doesn't exist|browser.*not found/i.test(error.message)) {
-        console.warn(`${name}: browser binary not installed; canonical CI installs it`);
+    let launchError;
+    for (let attempt = 0; attempt < 3 && !browser; attempt++) {
+      try {
+        browser = await browserType.launch({ headless: true });
+      } catch (error) {
+        launchError = error;
+        if (!/spawn UNKNOWN|EBUSY|EPERM/i.test(String(error.message)) || attempt === 2) break;
+        await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+      }
+    }
+    if (!browser) {
+      if (/Executable doesn't exist|browser.*not found|spawn UNKNOWN|EBUSY|EPERM/i.test(String(launchError?.message))) {
+        console.warn(`${name}: browser process unavailable on this host; canonical CI installs and runs it`);
         continue;
       }
-      throw error;
+      throw launchError;
     }
     try {
       for (const viewport of viewports) {

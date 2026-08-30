@@ -125,7 +125,7 @@ def chan_output(id_, name, role, purpose, driver, pin, **kw):
         "pin": pin,
         "min": kw.pop("min", 0),
         "max": kw.pop("max", 1),
-        "safe_demand": kw.pop("safe_demand", 0),
+        "safe_demand": kw.pop("safe_demand", 1 if purpose == "prop_pitch" else 0),
         "min_run_demand": kw.pop("min_run_demand", 0),
         "invert": kw.pop("invert", False),
         "active_high": kw.pop("active_high", True),
@@ -828,12 +828,11 @@ class TenBuildRunner:
         idle_frames = 0
         while time.time() < deadline:
             d = self.dut.data()
+            # Use the campaign's single safety-idle definition here too. In
+            # particular, propeller pitch remains intentionally parked/coarse
+            # in STANDBY and is not an energized turbine-starting output.
             active = (
-                d.get("oil_pct", 0) > 0.5 or d.get("fuel_sol_open") or d.get("igniter_on") or
-                d.get("igniter2_on") or d.get("starter_enabled") or d.get("cool_fan_on") or
-                d.get("airstarter_open") or d.get("bleed_valve_open") or d.get("ab_sol_open") or
-                d.get("glow_plug_pct", 0) > 1 or d.get("fuel_pump2_demand", 0) > 0.01 or
-                d.get("prop_pitch_demand", 0) > 0.01 or d.get("ab_pump_demand", 0) > 0.01 or
+                not self.outputs_idle(d) or
                 any((o.get("demand", 0) or 0) > 0.01 for o in d.get("registry_outputs", []))
             )
             if not active:
@@ -925,6 +924,12 @@ class TenBuildRunner:
                 f" registry_outputs={self.dut.hardware().get('channel_registry', {}).get('outputs', [])}"
             )
         self.check(checks, f"{label} physical output", ok, detail)
+        # Propeller pitch legitimately returns straight to its nonzero parked
+        # position, so output demand alone cannot tell us when the bounded tool
+        # timer has released its maintenance interlock. Wait its configured
+        # default duration before the common idle gate.
+        if cmd == "PROP_PITCH_TEST":
+            time.sleep(3.2)
         self.wait_idle_tools()
         return ok
 

@@ -17,13 +17,15 @@ function pumpFlowInput(output) {
     ? inputs.findIndex(row => row.id === output.flow_input && registryDerivedPurpose('input', row) === purpose)
     : -1;
   if (index < 0 && !output?.flow_input) {
-    // Old single-pump configs had no explicit link. Keep that sensor attached
-    // to the first matching pump only; auxiliary pumps must never silently
-    // share its monitor and will receive their own linked input when enabled.
+    // Old single-pump configs had no explicit link. Migrate only when both the
+    // pump and its compatible flow input are unique; registry order must never
+    // decide which physical device owns a safety monitor.
     const pumps = (r.outputs || []).filter(row => pumpFlowPurpose(row) === purpose);
-    if (pumps[0] === output) {
+    if (pumps.length === 1 && pumps[0] === output) {
       const claimed = new Set(pumps.map(row => row.flow_input).filter(Boolean));
-      index = inputs.findIndex(row => registryDerivedPurpose('input', row) === purpose && !claimed.has(row.id));
+      const compatible = inputs.map((row, candidateIndex) => ({row, candidateIndex})).filter(({row}) =>
+        registryDerivedPurpose('input', row) === purpose && !claimed.has(row.id));
+      if (compatible.length === 1) index = compatible[0].candidateIndex;
     }
   }
   return {channel:index >= 0 ? inputs[index] : null, index};
@@ -171,7 +173,12 @@ function updateRegistryChannel(direction, index, key, value) {
     }
     const bindingForPurpose = {
       n1_speed:'primary_n1', n2_speed:'primary_n2', tot:'primary_egt', throttle:'operator_throttle', idle:'operator_idle',
-      main_fuel:'main_fuel_output', fuel_shutoff:'main_fuel_shutoff', starter:'main_starter'
+      main_fuel:'main_fuel_output', fuel_shutoff:'main_fuel_shutoff', starter:'main_starter',
+      starter_enable:'starter_enable_output', oil_pump:'primary_oil_pump', scavenge_pump:'primary_scavenge_pump',
+      cooling_fan:'primary_cooling_fan', bleed_valve:'primary_bleed_valve', fuel_pump:'primary_aux_fuel_pump',
+      igniter:'primary_igniter', ab_igniter:'primary_secondary_igniter', ab_valve:'primary_ab_valve',
+      glow_plug:'primary_glow_plug', ab_pump:'primary_ab_pump', prop_pitch:'primary_prop_pitch',
+      air_starter:'primary_air_starter'
     };
     const managedKeys = new Set(Object.values(bindingForPurpose));
     registryRoot().bindings = (registryRoot().bindings || []).filter(b => !(String(b.channel||'') === String(c.id) && managedKeys.has(String(b.key||''))));
@@ -186,7 +193,7 @@ function updateRegistryChannel(direction, index, key, value) {
       // create the convenience binding as before.
       if (!otherOwner) {
         if (existing) existing.channel = c.id;
-        else if (registryRoot().bindings.length < 8) registryRoot().bindings.push({key:bindingKey,channel:c.id});
+        else if (registryRoot().bindings.length < 24) registryRoot().bindings.push({key:bindingKey,channel:c.id});
       }
     }
     if ((!c.name || !String(c.name).trim()) && oldPurpose !== def.value) c.name = def.label.slice(0,23);
@@ -228,6 +235,7 @@ function updateRegistryChannel(direction, index, key, value) {
       if (c.current_mv_a === undefined || Number(c.current_mv_a) <= 0) c.current_mv_a = 100;
       if (c.current_zero_v === undefined) c.current_zero_v = 1.65;
       if (c.current_max_a === undefined) c.current_max_a = 0;
+      if (registryDerivedPurpose(direction, c) === 'glow_plug' && c.current_ready_a === undefined) c.current_ready_a = 3;
       if (c.current_trip_delay_ms === undefined) c.current_trip_delay_ms = 5000;
     } else {
       c.current_pin = -1;
@@ -276,19 +284,58 @@ function updateRegistryChannel(direction, index, key, value) {
   if (key === 'current_mv_a') value = Math.max(0.001, Number(value) || 100);
   if (key === 'current_zero_v') value = Math.max(0, Math.min(3.3, Number(value) || 0));
   if (key === 'current_max_a') value = Math.max(0, Number(value) || 0);
+  if (key === 'current_ready_a') value = Math.max(0, Number(value) || 0);
   if (key === 'current_trip_delay_ms') value = Math.max(100, Math.min(60000, Math.round(Number(value) || 5000)));
+  if (key === 'ignition_mode') value = Math.max(0, Math.min(2, Math.round(Number(value) || 0)));
+  if (key === 'ignition_dwell_ms' || key === 'ignition_rest_ms') value = Math.max(1, Math.min(200, Math.round(Number(value) || 1)));
+  if (key === 'ignition_coil_sat_a') value = Math.max(0.001, Math.min(1000, Number(value) || 8));
+  if (key === 'ignition_preheat_ms' || key === 'paired_output_delay_ms') value = Math.max(0, Math.min(3600000, Math.round(Number(value) || 0)));
+  if (key === 'ignition_hot_timeout_ms') value = Math.max(100, Math.min(3600000, Math.round(Number(value) || 30000)));
+  if (key === 'ignition_peak_demand' || key === 'ignition_hold_demand' || key === 'paired_output_demand') value = Math.max(0, Math.min(1, Number(value) || 0));
+  if (key === 'ignition_wait_hot') value = !!value;
+  if (key === 'paired_output') value = String(value || '');
   if (key === 'minimum_flow_l_min') value = Math.max(0.001, Number(value) || 0.1);
   if (key === 'safe_demand') value = Math.max(0, Math.min(1, Number(value) || 0));
   if (key === 'min_run_demand') value = Math.max(0, Math.min(1, Number(value) || 0));
   if (key === 'min' || key === 'max') value = Number.isFinite(Number(value)) ? Number(value) : 0;
   c[key] = value;
+  if (key.startsWith('ignition_') || key.startsWith('paired_output')) {
+    // Once any device-local ignition field is edited, persist the complete
+    // profile so the remaining values cannot silently fall back to globals.
+    c.ignition_mode ??= 0;
+    c.ignition_dwell_ms ??= 6;
+    c.ignition_rest_ms ??= 3;
+    c.ignition_coil_sat_a ??= 8;
+    c.ignition_preheat_ms ??= 10000;
+    c.ignition_peak_demand ??= .8;
+    c.ignition_hold_demand ??= .3;
+    c.ignition_wait_hot ??= false;
+    c.ignition_hot_timeout_ms ??= 30000;
+    c.paired_output ??= '';
+    c.paired_output_delay_ms ??= 8000;
+    c.paired_output_demand ??= 1;
+    const actKey = registryCoreActuatorKey(c);
+    if (actKey === 'igniter' || actKey === 'igniter2') {
+      const act = ensureActuatorObject(actKey);
+      act.pwm = c.ignition_mode === 1;
+      act.coil = c.ignition_mode === 2;
+      act.dwell_ms = c.ignition_dwell_ms;
+      act.rest_ms = c.ignition_rest_ms;
+      act.coil_sat_a = c.ignition_coil_sat_a;
+    } else if (actKey === 'glow_plug') {
+      const act = ensureActuatorObject(actKey);
+      act.type = c.paired_output ? 2 : 0;
+      act.fuel_delay_ms = c.paired_output_delay_ms;
+      act.fuel_demand_pct = c.paired_output_demand * 100;
+    }
+  }
   if (direction === 'input' && registryTemperatureIsSpi(c) &&
       ['spi_cs','tc_type'].includes(key)) syncSharedSpiChannels();
   if (direction === 'input' && registryDerivedPurpose(direction, c) === 'torque') syncRegistryTorqueAdapter(c);
   dirty(); updateSaveButton();
   if (['pin','current_pin','spi_clk','spi_cs','spi_miso','spi_mosi','hx711_clk',
        'pullup','pulldown','active_high','invert','ntc_pullup','has_current','has_flow_monitor',
-       'min_run_demand','force_safe_on_fault'].includes(key)) renderRegistryInventory();
+       'min_run_demand','force_safe_on_fault','ignition_mode','ignition_wait_hot','paired_output'].includes(key)) renderRegistryInventory();
 }
 function syncRegistryTorqueAdapter(c) {
   if (!cfg.sensors) cfg.sensors = {};
@@ -312,7 +359,14 @@ function registryBindingAccepts(key, direction, c) {
   const requirements = {
     primary_n1:['input',['n1_speed']], primary_n2:['input',['n2_speed']], primary_egt:['input',['tot','tit']],
     operator_throttle:['input',['throttle']], operator_idle:['input',['idle']], main_fuel_output:['output',['main_fuel']],
-    main_fuel_shutoff:['output',['fuel_shutoff']], main_starter:['output',['starter']]
+    main_fuel_shutoff:['output',['fuel_shutoff']], main_starter:['output',['starter']],
+    starter_enable_output:['output',['starter_enable']], primary_oil_pump:['output',['oil_pump']],
+    primary_scavenge_pump:['output',['scavenge_pump']], primary_cooling_fan:['output',['cooling_fan']],
+    primary_bleed_valve:['output',['bleed_valve']], primary_aux_fuel_pump:['output',['fuel_pump']],
+    primary_igniter:['output',['igniter']], primary_secondary_igniter:['output',['ab_igniter']],
+    primary_ab_valve:['output',['ab_valve']], primary_glow_plug:['output',['glow_plug']],
+    primary_ab_pump:['output',['ab_pump']], primary_prop_pitch:['output',['prop_pitch']],
+    primary_air_starter:['output',['air_starter']]
   };
   const req = requirements[String(key||'')];
   return !req || (direction === req[0] && req[1].includes(purpose));
@@ -332,6 +386,19 @@ const REGISTRY_BINDING_LABELS = {
   main_fuel_output:'Main fuel metering output',
   main_fuel_shutoff:'Fuel shutoff output',
   main_starter:'Starter output',
+  starter_enable_output:'Starter enable output',
+  primary_oil_pump:'Primary oil pump',
+  primary_scavenge_pump:'Primary scavenge pump',
+  primary_cooling_fan:'Primary cooling fan',
+  primary_bleed_valve:'Primary bleed valve',
+  primary_aux_fuel_pump:'Primary auxiliary fuel pump',
+  primary_igniter:'Primary igniter',
+  primary_secondary_igniter:'Primary secondary / afterburner igniter',
+  primary_ab_valve:'Primary afterburner fuel valve',
+  primary_glow_plug:'Primary glow plug',
+  primary_ab_pump:'Primary afterburner pump',
+  primary_prop_pitch:'Primary propeller-pitch output',
+  primary_air_starter:'Primary air-starter valve',
   operator_throttle:'Throttle input',
   operator_idle:'Idle input'
 };
@@ -645,6 +712,11 @@ function registryRemovalImpact(direction, id) {
   const handle = idx >= 0 ? (direction === 'input' ? 80 + idx : 64 + idx) : -999;
   const bindCount = r.bindings.filter(b => b.channel === id).length;
   if (bindCount) impact.push(`${bindCount} registry binding(s)`);
+  if (direction === 'output') {
+    const pairedOwners = (r.outputs || []).filter(out =>
+      String(out?.paired_output || '') === String(id || ''));
+    if (pairedOwners.length) impact.push(`${pairedOwners.length} wet-glow pilot-fuel pairing(s) will need repair`);
+  }
   const loopCount = (cfg.oil_loops || []).filter(l => l && (l.pressure_input === id || l.pump_output === id)).length;
   if (loopCount) impact.push(`${loopCount} oil loop definition(s)`);
   const seqKeys = ['startup_enter_actions','startup_exit_actions','shutdown_enter_actions','shutdown_exit_actions','ab_enter_actions','ab_exit_actions','ab_shut_enter_actions','ab_shut_exit_actions'];
@@ -694,16 +766,14 @@ function cleanupRegistryReferences(direction, id) {
   r.bindings = r.bindings.filter(b => b.channel !== id);
   if (direction === 'output') (r.outputs || []).forEach(out => {
     if (String(out?.mirror_of || '') === String(id || '')) delete out.mirror_of;
+    // Keep paired_output stable so the owning ignition card shows the missing
+    // device and can be repaired. Never silently select another fuel output.
   });
   cfg.oil_loops = (cfg.oil_loops || []).filter(l => !(l && (refMatches(l.pressure_input) || refMatches(l.pump_output))));
-  const seqKeys = ['startup_enter_actions','startup_exit_actions','shutdown_enter_actions','shutdown_exit_actions','ab_enter_actions','ab_exit_actions','ab_shut_enter_actions','ab_shut_exit_actions'];
-  seqKeys.forEach(k => { if (Array.isArray(cfg[k])) cfg[k] = cfg[k].map(slot => (slot || []).filter(a => direction !== 'output' || (!refMatches(a?.target) && Number(a?.act) !== handle))); });
-  for (const [key, block] of Object.entries(cfg.custom_blocks || {})) {
-    if (!block) continue;
-    if (direction === 'input' && (refMatches(block.condition?.source) || Number(block.condition?.sensor) === handle)) { delete cfg.custom_blocks[key]; continue; }
-    if (direction === 'output' && Array.isArray(block.steps)) block.steps = block.steps.filter(s => !refMatches(s?.target) && Number(s?.target) !== handle && Number(s?.actuator) !== handle && Number(s?.act) !== handle);
-    if (block.type === 'action' && (!block.steps || block.steps.length === 0)) delete cfg.custom_blocks[key];
-  }
+  // Sequence side actions and custom sequence blocks keep stable string IDs.
+  // Leave those references intact so the editor can show the missing device
+  // and let the user restore or deliberately replace it. Numeric legacy
+  // handles are shifted below only to preserve their historical meaning.
   const channel = idx >= 0 ? rows[idx] : null;
   if (direction === 'input' && channel) {
     const purpose = registryDerivedPurpose('input', channel);
@@ -748,7 +818,11 @@ function shiftRegistryNumericHandlesAfterRemoval(direction, removedIndex, oldCou
       if (step.target !== undefined && Number.isFinite(Number(step.target))) step.target = shift(step.target);
       if (step.actuator !== undefined) step.actuator = shift(step.actuator);
       if (step.act !== undefined) step.act = shift(step.act);
-    }));
+  }));
+  const deviceTargetKeys = ['startup_device_target','shutdown_device_target','ab_device_target','ab_shut_device_target'];
+  deviceTargetKeys.forEach(key => (cfg[key] || []).forEach(target => {
+    if (direction === 'output' && refMatches(target)) seqCount++;
+  }));
     (settingsCfg.rules || []).forEach(rule => { if (rule?.actuator !== undefined) rule.actuator = shift(rule.actuator); });
   } else {
     Object.values(cfg.custom_blocks || {}).forEach(block => {
@@ -792,6 +866,9 @@ function duplicateRegistryChannel(index) {
   copy.has_flow_monitor = false;
   copy.minimum_flow_l_min = 0;
   copy.flow_input = '';
+  // A duplicated ignition device may reuse its tuning, but it must never
+  // silently share the source device's pilot-fuel output.
+  copy.paired_output = '';
   r.outputs.push(copy);
   _registryEditOpen.add(registryEditKey('output', r.outputs.length - 1));
   renderRegistryInventory();
@@ -818,7 +895,7 @@ function removeRegistryChannel(direction, index) {
   if (title) title.textContent = `Remove ${registryDisplayName(direction, channel, channel.id || 'device')}?`;
   const body = document.getElementById('registry-remove-body');
   if (body) body.innerHTML = users.length
-    ? `<div>This channel is currently used by:</div><ul>${users.map(i => `<li>${escapeHtmlText(i)}</li>`).join('')}</ul><div>Removing it clears explicit rules, bindings and custom references. Built-in controller, safety and sequencer uses stop because the device is no longer fitted.</div>`
+    ? `<div>This channel is currently used by:</div><ul>${users.map(i => `<li>${escapeHtmlText(i)}</li>`).join('')}</ul><div>Sequence-step and custom-block bindings keep this exact device ID and remain visible as missing until repaired. Hardware bindings, oil loops, and normal controllers that cannot operate without this device are removed.</div>`
     : '<div>This channel is not currently used by controllers, safeties, sequencer blocks, rules or bindings.</div>';
   document.getElementById('registry-remove-modal').style.display = 'flex';
 }

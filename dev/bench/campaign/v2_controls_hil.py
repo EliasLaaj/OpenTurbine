@@ -185,6 +185,24 @@ class V2ControlsQualification:
         self._minimal_sequences(hw, ["TimedDelay"])
         hw["startup_delay_ms"] = [500]
 
+    @staticmethod
+    def _main_fuel_rule():
+        """Explicit schema-1 Main Fuel owner used by the real Controllers UI."""
+        return {
+            "enabled": True, "kind": 1,
+            "source": "operator_throttle", "target": "main_fuel",
+            "op": 0, "threshold": 0.5,
+            "on_value": 1.0, "off_value": 0.0, "hysteresis": 0.0,
+            "input_min": 0.0, "input_max": 1.0,
+            "output_min": 0.1, "output_max": 1.0,
+            "target_source_type": 0, "target_source": "",
+            "target_fixed": 0.0, "target_low": 0.0, "target_high": 1.0,
+            "target_input_min": 0.0, "target_input_max": 1.0,
+            "response_gain": 0.01, "integral_gain": 0.001,
+            "deadband": 0.0,
+            "mode_mask": 4, "name": "Main Fuel",
+        }
+
     def _run_pressure_source(self, source, purpose):
         label = "P1" if source == 2 else "P2"
         self.r.apply_profile({
@@ -192,6 +210,8 @@ class V2ControlsQualification:
             "build": lambda hw: self._pressure_profile(hw, purpose),
         })
         ok, response = self.dc.patch_cfg({
+            "controller_schema": 1,
+            "rules": [self._main_fuel_rule()],
             "dynamic_idle": {
                 "source": source, "target_pressure_bar": 1.5,
                 "pressure_deadband_bar": 0.05, "pressure_limit_bar": 3.0,
@@ -257,6 +277,8 @@ class V2ControlsQualification:
             "build": lambda hw: self._pressure_profile(hw, "p1_pressure"),
         })
         ok, response = self.dc.patch_cfg({
+            "controller_schema": 1,
+            "rules": [self._main_fuel_rule()],
             "dynamic_idle": {"source": 2},
             "throttle": {
                 "ramp_up_ms": 0, "ramp_down_ms": 0,
@@ -264,9 +286,9 @@ class V2ControlsQualification:
                 "pullback_p1_soft_bar": 1.0,
                 "pullback_p1_hard_bar": 2.0,
                 "pullback_min_pct": 20,
-                "pullback_strength": 1.0,
-                "rpm_limiter_mode": 0,
-                "pullback_lookahead_ms": 5000,
+                "pullback_p1_strength": 1.0,
+                "pullback_p1_mode": 0,
+                "pullback_p1_lookahead_ms": 5000,
             },
         })
         if not ok:
@@ -323,7 +345,7 @@ class V2ControlsQualification:
         if not stopped:
             raise RuntimeError("Simple limiter run did not return to STANDBY")
         ok, response = self.dc.patch_cfg({
-            "throttle": {"rpm_limiter_mode": 1, "pullback_lookahead_ms": 5000}
+            "throttle": {"pullback_p1_mode": 1, "pullback_p1_lookahead_ms": 5000}
         })
         if not ok:
             raise RuntimeError("Predictive-limiter config rejected: %r" % (response,))

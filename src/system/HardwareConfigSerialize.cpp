@@ -283,6 +283,11 @@ void HardwareConfig::_toDoc(JsonObject doc) {
         o["deadband_bar"] = l.deadbandCentiBar / 100.0f;
         o["response_gain"] = l.adjustScaleCenti / 100.0f;
         o["failsafe_delay_ms"] = l.failsafeDelayMs;
+        o["low_pressure_bar"] = l.lowPressureCentiBar / 100.0f;
+        o["low_pressure_confirm_ms"] = l.lowPressureConfirmMs;
+        o["low_pressure_response"] = l.lowPressureResponse;
+        o["feedback_loss_response"] = l.feedbackLossResponse;
+        o["immediate_pump_run_s"] = l.immediatePumpRunDeciSec / 10.0f;
         o["failsafe_demand"] = l.failsafeDemandPct / 100.0f;
         o["min_demand"] = l.minDemandPct / 100.0f;
         o["max_demand"] = l.maxDemandPct / 100.0f;
@@ -307,6 +312,8 @@ void HardwareConfig::_toDoc(JsonObject doc) {
     for (int i = 0; i < startupSeqLen; i++) ssd.add(startupDelayMs[i]);
     auto ssit = doc["startup_ignition_target"].to<JsonArray>();
     for (int i = 0; i < startupSeqLen; i++) ssit.add(startupIgnitionTarget[i]);
+    auto ssdt = doc["startup_device_target"].to<JsonArray>();
+    for (int i = 0; i < startupSeqLen; i++) ssdt.add(startupDeviceTarget[i]);
     HardwareConfigInternal::writeSequenceSideActions(doc, "startup_enter_actions", startupSeqLen, startupEnterActions);
     HardwareConfigInternal::writeSequenceSideActions(doc, "startup_exit_actions", startupSeqLen, startupExitActions);
 
@@ -316,6 +323,8 @@ void HardwareConfig::_toDoc(JsonObject doc) {
     for (int i = 0; i < shutdownSeqLen; i++) dsd.add(shutdownDelayMs[i]);
     auto dsit = doc["shutdown_ignition_target"].to<JsonArray>();
     for (int i = 0; i < shutdownSeqLen; i++) dsit.add(shutdownIgnitionTarget[i]);
+    auto dsdt = doc["shutdown_device_target"].to<JsonArray>();
+    for (int i = 0; i < shutdownSeqLen; i++) dsdt.add(shutdownDeviceTarget[i]);
     HardwareConfigInternal::writeSequenceSideActions(doc, "shutdown_enter_actions", shutdownSeqLen, shutdownEnterActions);
     HardwareConfigInternal::writeSequenceSideActions(doc, "shutdown_exit_actions", shutdownSeqLen, shutdownExitActions);
 
@@ -338,6 +347,8 @@ void HardwareConfig::_toDoc(JsonObject doc) {
     for (int i = 0; i < abSeqLen; i++) asd.add(abDelayMs[i]);
     auto asit = doc["ab_ignition_target"].to<JsonArray>();
     for (int i = 0; i < abSeqLen; i++) asit.add(abIgnitionTarget[i]);
+    auto asdt = doc["ab_device_target"].to<JsonArray>();
+    for (int i = 0; i < abSeqLen; i++) asdt.add(abDeviceTarget[i]);
     HardwareConfigInternal::writeSequenceSideActions(doc, "ab_enter_actions", abSeqLen, abEnterActions);
     HardwareConfigInternal::writeSequenceSideActions(doc, "ab_exit_actions", abSeqLen, abExitActions);
 
@@ -347,6 +358,8 @@ void HardwareConfig::_toDoc(JsonObject doc) {
     for (int i = 0; i < abShutSeqLen; i++) assd.add(abShutDelayMs[i]);
     auto assit = doc["ab_shut_ignition_target"].to<JsonArray>();
     for (int i = 0; i < abShutSeqLen; i++) assit.add(abShutIgnitionTarget[i]);
+    auto assdt = doc["ab_shut_device_target"].to<JsonArray>();
+    for (int i = 0; i < abShutSeqLen; i++) assdt.add(abShutDeviceTarget[i]);
     HardwareConfigInternal::writeSequenceSideActions(doc, "ab_shut_enter_actions", abShutSeqLen, abShutEnterActions);
     HardwareConfigInternal::writeSequenceSideActions(doc, "ab_shut_exit_actions", abShutSeqLen, abShutExitActions);
     HardwareConfigInternal::writeCustomBlocks(doc);

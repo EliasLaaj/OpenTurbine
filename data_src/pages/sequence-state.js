@@ -129,20 +129,29 @@ function ensureActionSlots(tab) {
     if (hwCfg[key].length > seq.length) hwCfg[key].length = seq.length;
     for (let i = 0; i < seq.length; i++) {
       if (!Array.isArray(hwCfg[key][i])) hwCfg[key][i] = [];
-      hwCfg[key][i] = hwCfg[key][i].filter(a => actionAllowed(a.act)).slice(0, 4);
+      hwCfg[key][i] = hwCfg[key][i].filter(a => actionAllowed(a)).slice(0, 4);
     }
   }
 }
-function actionAllowed(actVal) {
-  const key = ACT_KEY_BY_ENUM[Number(actVal)];
-  return !!key && getEnabledActuators().some(a => a.key === key);
+function sideActionMeta(action) {
+  const acts = getEnabledActuators();
+  const target = String(action?.target || '');
+  if (target) return acts.find(a => String(a.target || '') === target);
+  const key = ACT_KEY_BY_ENUM[Number(action?.act)];
+  return key ? acts.find(a => a.key === key) : undefined;
 }
-function actionDisplayValue(act, value) {
-  const meta = getEnabledActuators().find(a => a.key === ACT_KEY_BY_ENUM[Number(act)]);
+function actionAllowed(action) {
+  if (!action || typeof action !== 'object') return false;
+  const target = String(action.target || '').trim();
+  if (target) return target.length <= 64;
+  return Object.prototype.hasOwnProperty.call(ACT_KEY_BY_ENUM, Number(action.act));
+}
+function actionDisplayValue(action, value) {
+  const meta = sideActionMeta(action);
   return meta?.mode === 'pct' ? Math.round((Number(value) || 0) * 100) : ((Number(value) || 0) >= 0.5 ? 1 : 0);
 }
-function actionStoredValue(act, raw) {
-  const meta = getEnabledActuators().find(a => a.key === ACT_KEY_BY_ENUM[Number(act)]);
+function actionStoredValue(action, raw) {
+  const meta = sideActionMeta(action);
   return meta?.mode === 'pct' ? Math.max(0, Math.min(1, (Number(raw) || 0) / 100)) : (Number(raw) ? 1 : 0);
 }
 
@@ -179,6 +188,8 @@ async function loadAll() {
   try {
     hwCfg = await fetchJsonWithRetry('/api/hardware');
     cfg   = await fetchJsonWithRetry('/api/config');
+    loadedHwCfg = cloneSequenceJson(hwCfg);
+    loadedCfg = cloneSequenceJson(cfg);
     // Rebuild runtime custom block defs from raw stored defs
     customBlocks = {};
     if (hwCfg.custom_blocks) {
@@ -186,6 +197,7 @@ async function loadAll() {
         customBlocks[k] = buildRuntimeBlockDef(k, def);
       }
     }
+    migrateLegacyDeviceTargets();
     buildParamVals();
     await refreshSequenceLiveData();
     render('startup', lastIdleRaw);
@@ -200,8 +212,6 @@ async function loadAll() {
     revealSequenceDeepLink();
     // Keep the post-normalization baseline. Saving can then preserve unrelated
     // settings changed by another browser while this page was open.
-    loadedHwCfg = cloneSequenceJson(hwCfg);
-    loadedCfg = cloneSequenceJson(cfg);
     clearSequenceDirty('No unsaved changes');
   } catch(e) {
     setSaveStatus('Warning: Load failed: ' + e.message);
@@ -293,6 +303,12 @@ function ignitionTargetSeqKey(tab) {
   if (tab === 'ab-shut') return 'ab_shut_ignition_target';
   return 'ab_ignition_target';
 }
+function deviceTargetSeqKey(tab) {
+  if (tab === 'startup') return 'startup_device_target';
+  if (tab === 'shutdown') return 'shutdown_device_target';
+  if (tab === 'ab-shut') return 'ab_shut_device_target';
+  return 'ab_device_target';
+}
 function ensureDelaySlots(tab) {
   const seq = hwCfg[seqKey(tab)] || [];
   const key = delaySeqKey(tab);
@@ -305,6 +321,13 @@ function ensureIgnitionTargetSlots(tab) {
   const key = ignitionTargetSeqKey(tab);
   if (!Array.isArray(hwCfg[key])) hwCfg[key] = [];
   while (hwCfg[key].length < seq.length) hwCfg[key].push(0);
+  if (hwCfg[key].length > seq.length) hwCfg[key].length = seq.length;
+}
+function ensureDeviceTargetSlots(tab) {
+  const seq = hwCfg[seqKey(tab)] || [];
+  const key = deviceTargetSeqKey(tab);
+  if (!Array.isArray(hwCfg[key])) hwCfg[key] = [];
+  while (hwCfg[key].length < seq.length) hwCfg[key].push('');
   if (hwCfg[key].length > seq.length) hwCfg[key].length = seq.length;
 }
 function timedDelayValue(tab, idx) {
@@ -325,6 +348,7 @@ function render(tab, idleRaw, openKeys = new Set()) {
   const seq  = hwCfg[key] || [];
   ensureDelaySlots(tab);
   ensureIgnitionTargetSlots(tab);
+  ensureDeviceTargetSlots(tab);
   ensureActionSlots(tab);
   const list = document.getElementById('list-' + tab);
   list.innerHTML = '';
@@ -407,10 +431,9 @@ function setIgnitionPreviewState(state, target, on) {
   }
 }
 
-function clearIgnitionPreviewState(state) {
-  state.igniter = 'off';
-  state.igniter2 = 'off';
-  state.glow = 'off';
+function clearTrackedIgnitionPreviewState(state, trackedTargets) {
+  for (const target of trackedTargets) setIgnitionPreviewState(state, target, false);
+  trackedTargets.clear();
 }
 
 function buildFinalStateCard(tab, seq, idleRaw) {
@@ -435,19 +458,28 @@ function buildFinalStateCard(tab, seq, idleRaw) {
     abPump:    'off',
     propPitch: '0%',
   };
+  // Match the firmware's device-specific normal-exit cleanup. Emergency STOP
+  // and FAULT still clear every combustion output, but FlameConfirm and
+  // SafetyHold release only ignition devices commanded by this sequence.
+  const sequenceIgnitionTargets = new Set();
 
   if (tab === 'startup') {
     for (let i = 0; i < seq.length; i++) {
       const bname = seq[i];
       if (bname === 'OilPrime')     state.oilPump   = actuatorIsRelay('oil_pump') ? 'on' : 'on - pressure ctrl';
       if (bname === 'StarterSpin')  { state.starter = 'on'; state.starterEn = 'on'; }
-      if (bname === 'PreIgnSpark')  state.igniter   = 'on';
       if (bname === 'FuelOpen')     state.fuelSol   = 'open';
       if (bname === 'FuelPulse')    state.fuelSol   = 'closed';
-      if (bname === 'IgniterOn' || bname === 'PreHeat')
-        setIgnitionPreviewState(state, hwCfg[ignitionTargetSeqKey(tab)]?.[i] ?? 0, true);
-      if (bname === 'IgniterOff')
-        setIgnitionPreviewState(state, hwCfg[ignitionTargetSeqKey(tab)]?.[i] ?? 0, false);
+      if (bname === 'IgniterOn' || bname === 'PreHeat' || bname === 'PreIgnSpark') {
+        const target = Number(hwCfg[ignitionTargetSeqKey(tab)]?.[i] ?? 0);
+        setIgnitionPreviewState(state, target, true);
+        sequenceIgnitionTargets.add(target);
+      }
+      if (bname === 'IgniterOff') {
+        const target = Number(hwCfg[ignitionTargetSeqKey(tab)]?.[i] ?? 0);
+        setIgnitionPreviewState(state, target, false);
+        sequenceIgnitionTargets.delete(target);
+      }
       if (bname === 'FuelSolClose') state.fuelSol   = 'closed';
       if (bname === 'StarterEnOn')  state.starterEn = 'on';
       if (bname === 'StarterEnOff') state.starterEn = 'off';
@@ -464,7 +496,13 @@ function buildFinalStateCard(tab, seq, idleRaw) {
       if (bname === 'CoolFanOff')    state.coolFan = 'off';
       if (bname === 'BleedOpen')     state.bleed = 'open';
       if (bname === 'BleedClose')    state.bleed = 'closed';
-      if (bname === 'GlowPreheat')   state.glow = actuatorIsRelay('glow_plug') ? 'on during preheat' : `${paramVals['GlowPreheat.glow_hold_pct'] ?? 30}% hold`;
+      if (bname === 'GlowPreheat') {
+        const targetId = String(hwCfg[deviceTargetSeqKey(tab)]?.[i] || '');
+        const plug = (hwCfg.channel_registry?.outputs || []).find(row => String(row.id || '') === targetId);
+        const relay = plug ? [4,11].includes(Number(plug.driver)) : actuatorIsRelay('glow_plug');
+        const hold = Math.round(Number(plug?.ignition_hold_demand ?? .3) * 100);
+        state.glow = relay ? 'on during preheat' : `${hold}% hold`;
+      }
       if (bname === 'FuelPumpRamp')  state.fuelPump2 = demandText('fuel_pump2', paramVals['FuelPumpRamp.fp2_end_pct'] ?? 80);
       if (bname === 'FuelPump2Set')  state.fuelPump2 = demandText('fuel_pump2', paramVals['FuelPump2Set.fp2_demand_pct'] ?? 0);
       if (bname === 'FuelPump2On')   state.fuelPump2 = 'on';
@@ -489,12 +527,14 @@ function buildFinalStateCard(tab, seq, idleRaw) {
         if (paramVals['Spool.spool_cut_starter_en_on_exit'] ?? true)  state.starterEn = 'off';
       }
       if (bname === 'FlameConfirm') {
-        if (paramVals['FlameConfirm.flame_turn_off_igniter'] ?? true) clearIgnitionPreviewState(state);
+        if (paramVals['FlameConfirm.flame_turn_off_igniter'] ?? true)
+          clearTrackedIgnitionPreviewState(state, sequenceIgnitionTargets);
       }
       if (bname === 'SafetyHold') {
         if (paramVals['SafetyHold.safety_turn_off_starter']    ?? false) state.starter   = 'off';
         if (paramVals['SafetyHold.safety_turn_off_starter_en'] ?? false) state.starterEn = 'off';
-        if (paramVals['SafetyHold.safety_turn_off_igniter']    ?? false) clearIgnitionPreviewState(state);
+        if (paramVals['SafetyHold.safety_turn_off_igniter']    ?? false)
+          clearTrackedIgnitionPreviewState(state, sequenceIgnitionTargets);
       }
       applySideActionsToState(tab, i, 'exit', state);
     }

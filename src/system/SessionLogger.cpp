@@ -8,6 +8,7 @@
 #include <LittleFS.h>
 #include <Arduino.h>
 #include <climits>
+#include <cctype>
 #include <cstring>
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
@@ -24,11 +25,13 @@ struct SessionRow {
     float    wetGlowFuelDemand;
     float    glowCurrentAmps, igniterCurrentAmps, igniter2CurrentAmps, oilPumpCurrentAmps;
     float    abPumpDemand, abFuelOffset;
-    float    loopHz, loopExecAvgMs, loopExecMaxMs;
+    float    loopHz, loopPeriodMaxMs, loopExecAvgMs, loopExecMaxMs;
+    uint32_t loopOverrunCount;
     int      abMode;
     bool     abFlameOn;
     bool     abRequest, abPermitted, abExecuting, abEvidence;
     uint32_t abUnconfirmedFuelMs;
+    float    registryInputs[ChannelRegistry::MAX_INPUT_CHANNELS];
     uint8_t  sysMode;   // SysMode cast to byte
 };
 
@@ -62,6 +65,55 @@ static bool              _lowSpaceDropActive = false;
 static constexpr uint32_t SESSION_FLUSH_MS = 5000;
 static uint32_t          _lastFlushMs = 0;
 static constexpr uint16_t SESSION_QUEUE_ROWS = 64;
+static uint32_t          _registryCaptureMask = 0;
+
+static bool _isGeneralRegistryInput(const ChannelRegistry::Channel& channel) {
+    return channel.installed &&
+        (!strcmp(channel.purpose, "shaft_speed") ||
+         !strncmp(channel.purpose, "general_", 8));
+}
+
+static uint8_t _registryCaptureCount() {
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i)
+        if (_registryCaptureMask & (1UL << i)) ++count;
+    return count;
+}
+
+static void _prepareRegistryCaptureMask() {
+    _registryCaptureMask = 0;
+    for (uint8_t selected = 0; selected < Config::sessionRegistryInputCount; ++selected) {
+        const char* id = Config::sessionRegistryInputIds[selected];
+        if (!id[0]) continue;
+        for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i) {
+            const auto& channel = HardwareConfig::channelRegistry.inputs[i];
+            if (_isGeneralRegistryInput(channel) && !strcmp(channel.id, id)) {
+                _registryCaptureMask |= (1UL << i);
+                break;
+            }
+        }
+    }
+}
+
+static const char* _registryUnitSuffix(const ChannelRegistry::Channel& channel) {
+    if (!strcmp(channel.purpose, "shaft_speed")) return "rpm";
+    if (!strcmp(channel.purpose, "general_temperature")) return "c";
+    if (!strcmp(channel.purpose, "general_pressure")) return "bar";
+    if (!strcmp(channel.purpose, "general_flow")) return "l_min";
+    if (!strcmp(channel.purpose, "general_current")) return "a";
+    if (!strcmp(channel.purpose, "general_voltage")) return "v";
+    if (!strcmp(channel.purpose, "general_torque")) return "nm";
+    if (!strcmp(channel.purpose, "general_thrust")) return "n";
+    return "value";
+}
+
+static void _printCsvHeaderToken(const char* text) {
+    if (!text) return;
+    for (const char* p = text; *p; ++p) {
+        const char c = *p;
+        _file.print((isalnum((unsigned char)c) || c == '_') ? c : '_');
+    }
+}
 
 const char* SessionLogger::currentPath() {
     // Do not advertise a file to the async HTTP task until the STANDBY
@@ -128,10 +180,11 @@ static uint8_t _csvColumnCount(uint32_t mask) {
     if (mask & Config::SLOG_AB)         count += 9;
     if (mask & Config::SLOG_PROP)       count += 1;
     if (mask & Config::SLOG_OIL_PCT)    count += 1;
-    if (mask & Config::SLOG_LOOP)       count += 3;
+    if (mask & Config::SLOG_LOOP)       count += 5;
     if (mask & Config::SLOG_TORQUE)     count += 2;
     if (mask & Config::SLOG_THRUST)     count += 1;
     if (mask & Config::SLOG_STARTER)    count += 1;
+    count += _registryCaptureCount();
     return count;
 }
 
@@ -190,16 +243,21 @@ static void _writeRow(const SessionRow& row) {
                                                          (unsigned long)row.abUnconfirmedFuelMs);
     if (mask & Config::SLOG_PROP)       APPEND_ROW_FIELD(",%.1f",(double)(row.propPitchDemand * 100.0f));
     if (mask & Config::SLOG_OIL_PCT)    APPEND_ROW_FIELD(",%.1f",(double)row.oilPumpPct);
-    if (mask & Config::SLOG_LOOP)       APPEND_ROW_FIELD(",%.1f,%.3f,%.3f",
+    if (mask & Config::SLOG_LOOP)       APPEND_ROW_FIELD(",%.1f,%.3f,%.3f,%.3f,%lu",
                                                          (double)row.loopHz,
+                                                         (double)row.loopPeriodMaxMs,
                                                          (double)row.loopExecAvgMs,
-                                                         (double)row.loopExecMaxMs);
+                                                         (double)row.loopExecMaxMs,
+                                                         (unsigned long)row.loopOverrunCount);
     if (mask & Config::SLOG_TORQUE)     APPEND_ROW_FIELD(",%.2f,%.1f",
                                                          (double)row.torque,
                                                          (double)row.shaftPower);
     if (mask & Config::SLOG_THRUST)     APPEND_ROW_FIELD(",%.2f",(double)row.thrust);
     if (mask & Config::SLOG_STARTER)    APPEND_ROW_FIELD(",%.1f",
                                                          (double)(row.starterDemand * 100.0f));
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i)
+        if (_registryCaptureMask & (1UL << i))
+            APPEND_ROW_FIELD(",%.4f", (double)row.registryInputs[i]);
 
     #undef APPEND_ROW_FIELD
 
@@ -356,10 +414,20 @@ static void _openSession() {
     if (mask & Config::SLOG_AB)         _file.print(",ab_mode,ab_flame,ab_pump_pct,ab_offset_pct,ab_request,ab_permitted,ab_executing,ab_evidence,ab_unconfirmed_fuel_ms");
     if (mask & Config::SLOG_PROP)       _file.print(",prop_pct");
     if (mask & Config::SLOG_OIL_PCT)    _file.print(",oil_pump_pct");
-    if (mask & Config::SLOG_LOOP)       _file.print(",loop_hz,loop_exec_avg_ms,loop_exec_max_ms");
+    if (mask & Config::SLOG_LOOP)       _file.print(",loop_hz,loop_period_max_ms,loop_exec_avg_ms,loop_exec_max_ms,loop_overrun_count");
     if (mask & Config::SLOG_TORQUE)     _file.print(",torque_nm,shaft_power_w");
     if (mask & Config::SLOG_THRUST)     _file.print(",thrust_n");
     if (mask & Config::SLOG_STARTER)    _file.print(",starter_pct");
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i) {
+        if (!(_registryCaptureMask & (1UL << i))) continue;
+        const auto& channel = HardwareConfig::channelRegistry.inputs[i];
+        _file.print(",sensor_");
+        _printCsvHeaderToken(channel.name[0] ? channel.name : channel.id);
+        _file.print("__");
+        _printCsvHeaderToken(channel.id);
+        _file.print("_");
+        _file.print(_registryUnitSuffix(channel));
+    }
     if (_file.println() == 0) {
         Serial.printf("[SessionLogger] Failed to write CSV header to %s\n", _currentPath);
         _file.close();
@@ -406,11 +474,12 @@ void SessionLogger::startSession() {
         _errorCode = 1;
         return;
     }
-    // An empty field mask would otherwise create timestamp-only files and
+    _prepareRegistryCaptureMask();
+    // An empty field selection would otherwise create timestamp-only files and
     // periodically flush LittleFS during every run. Besides wasting flash,
     // those flushes can stall the ESP32 Wi-Fi task for hundreds of
     // milliseconds. Treat "no fields selected" as logging disabled.
-    if (Config::sessionLogMask == 0) {
+    if (Config::sessionLogMask == 0 && _registryCaptureMask == 0) {
         _startPending = false;
         if (_open) _endPending = true;
         return;
@@ -443,7 +512,7 @@ void SessionLogger::tick() {
     auto&    ed   = EngineData::instance();
     uint32_t mask = Config::sessionLogMask;
 
-    SessionRow row;
+    SessionRow row{};
     row.t_ms            = now;
     row.mask            = mask;
     row.n1              = ed.n1Rpm;
@@ -474,8 +543,10 @@ void SessionLogger::tick() {
     row.abPumpDemand    = ed.abPumpDemand;
     row.abFuelOffset    = ed.abFuelOffset;
     row.loopHz          = ed.loopHz;
+    row.loopPeriodMaxMs = ed.loopPeriodMaxMs;
     row.loopExecAvgMs   = ed.loopExecAvgMs;
     row.loopExecMaxMs   = ed.loopExecMaxMs;
+    row.loopOverrunCount = ed.loopOverrunCount;
     row.abMode          = (int)ed.abMode;
     row.abFlameOn       = ed.abFlameOn;
     row.abRequest       = ed.abTriggerActive;
@@ -484,6 +555,8 @@ void SessionLogger::tick() {
     row.abEvidence      = ed.abEvidenceValid;
     row.abUnconfirmedFuelMs = ed.abFirstFuelMs && !ed.abConfirmedMs ? millis() - ed.abFirstFuelMs : 0;
     row.sysMode         = (uint8_t)ed.mode;
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i)
+        if (_registryCaptureMask & (1UL << i)) row.registryInputs[i] = ed.registryInputValue[i];
 
     // Active-engine flash writes are forbidden, so retain a bounded tail in
     // RAM. If a long/high-rate run fills the queue, discard the oldest row and

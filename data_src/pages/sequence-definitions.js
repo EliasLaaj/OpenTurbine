@@ -23,6 +23,12 @@ document.addEventListener('DOMContentLoaded', function () {
 // type: 'while'=waits for condition  'action'=instant  'wait'=timer  'check'=verify+fault
 // timeout_action: 'fault'|'abort'|'continue'|null
 const BLOCKS = {
+  SetOutput: {
+    label:'Set Output', type:'action', badgeClass:'badge-action',
+    condition:null, timeout_action:null,
+    desc:'Commands one fitted output. Choose the device and set ON/OFF or a 0–100% demand according to its configured hardware driver.',
+    params:[]
+  },
   OilPrime: {
     label:'Build Oil Pressure', type:'while', badgeClass:'badge-while',
     visibleIf: hw => actuatorEnabled('oil_pump'),
@@ -116,7 +122,8 @@ const BLOCKS = {
       {key:'flame_check_interval_ms', label:'Detection interval', unit:'ms', type:'int', min:50, max:2000, step:50, def:250, configKey:'flame_check_interval_ms',
         desc:'Time window for each required flame detection. Longer is more tolerant of slow/noisy sensors but delays startup.'},
       {key:'flame_timeout_ms',       label:'Timeout',                 unit:'ms', type:'int',  min:1000, max:30000, step:500, def:5000, configKey:'flame_timeout_ms'},
-      {key:'flame_turn_off_igniter', label:'Turn off ignition outputs on exit', type:'bool', def:true, configKey:'flame_turn_off_igniter'},
+      {key:'flame_turn_off_igniter', label:'Release sequence ignition on exit', type:'bool', def:true, configKey:'flame_turn_off_igniter',
+        desc:'Turns off only ignition devices energized by dedicated ignition blocks in this sequence. Unrelated controller or subsystem outputs are not changed.'},
     ]
   },
   TempConfirm: {
@@ -219,7 +226,8 @@ const BLOCKS = {
       {key:'safety_turn_off_starter',    label:'Turn off starter on exit',             type:'bool', def:false, configKey:'safety_turn_off_starter'},
       {key:'safety_turn_off_starter_en', label:'Turn off starter enable output on exit',type:'bool', def:false, configKey:'safety_turn_off_starter_en',
         visibleIf: hw => actuatorEnabled('starter_en')},
-      {key:'safety_turn_off_igniter',    label:'Turn off ignition outputs on exit',    type:'bool', def:false, configKey:'safety_turn_off_igniter'},
+      {key:'safety_turn_off_igniter',    label:'Release sequence ignition on exit',    type:'bool', def:false, configKey:'safety_turn_off_igniter',
+        desc:'Turns off only ignition devices energized by dedicated ignition blocks in this sequence.'},
     ]
   },
   AirstarterOn: {
@@ -489,12 +497,10 @@ const BLOCKS = {
   PreHeat: {
     label:'Pre-Heat', type:'wait', badgeClass:'badge-wait',
     visibleIf: hw => hasIgnitionOutput(hw),
-    condition: hw => `ignition ${hw.preheat_ms ?? 3000}ms`,
+    condition: () => 'selected ignition device pre-heat',
     timeout_action:null,
-    desc:'Turns the selected ignition output on for a fixed duration without opening main fuel. The output remains ON when this block exits - place FuelOpen or a later Ignition Output Off block intentionally.',
-    params:[
-      {key:'preheat_ms', label:'Pre-heat time',unit:'ms', type:'int', min:500, max:30000, step:500, def:3000, configKey:'preheat_ms'},
-    ]
+    desc:'Turns the exact selected ignition output on for that device card\'s pre-heat duration without opening main fuel. The output remains ON when this block exits - place FuelOpen or a later Ignition Output Off block intentionally.',
+    params:[]
   },
   // ------ Afterburner blocks ---------------------------------------------------------------------------------------------------------------------------------------------------------
   ABPumpOn: {
@@ -593,16 +599,8 @@ const BLOCKS = {
   GlowPreheat: {
     label:'Glow Preheat', type:'action', badgeClass:'badge-action',
     condition: null, timeout_action: null,
-    desc:'Ramps glow plug power linearly from 0 to maxPct over preheatMs, then holds at holdPct. Wet glow start fuel follows the hardware delay after glow ON. If a glow current sensor is fitted and "Wait until hot" is checked, the block keeps holding at holdPct until the current drops below the ready threshold. The plug stays at holdPct when this block exits.',
-    params:[
-      {key:'glow_preheat_ms',      label:'Preheat duration',  unit:'ms', type:'int', min:0, max:3600000, step:500, def:10000, configKey:'glow_preheat_ms'},
-      {key:'glow_preheat_max_pct', label:'Peak duty',         unit:'%',  type:'float', min:0, max:100, step:5, def:80, configKey:'glow_preheat_max_pct',
-       visibleIf: hw => actuatorHasProportionalOutput('glow_plug')},
-      {key:'glow_hold_pct',        label:'Hold duty',         unit:'%',  type:'float', min:0,    max:100,   step:5,   def:30,    configKey:'glow_hold_pct',
-       visibleIf: hw => actuatorHasProportionalOutput('glow_plug')},
-      {key:'glow_wait_until_hot',  label:'Wait until hot (requires current sensor)', type:'bool', def:false, configKey:'glow_wait_until_hot',
-       visibleIf: hw => actuatorEnabled('glow_plug') && !!hw.actuators?.glow_plug?.has_current},
-    ],
+    desc:'Runs the exact selected glow plug using that device card\'s own preheat ramp, hold command, hot-current confirmation, and paired pilot-fuel settings. The plug remains at its configured hold command when this block exits.',
+    params:[],
     visibleIf: hw => actuatorEnabled('glow_plug'),
   },
   FuelPumpRamp: {
@@ -711,7 +709,6 @@ const CONFIG_SECTIONS = {
   wait_tot_target:         {sec:'sequence.startup', key:'wait_tot_target'},
   wait_tot_timeout:        {sec:'sequence.startup', key:'wait_tot_timeout'},
   throttle_set_pct:        {sec:'sequence.startup', key:'throttle_set_pct'},
-  preheat_ms:              {sec:'sequence.startup', key:'preheat_ms'},
   oil_pump_on_pct:         {sec:'sequence.startup', key:'oil_pump_on_pct'},
   fp_idle_max_pct:         {sec:'throttle',         key:'idle_max_pct'},
   // FlameConfirm / SafetyHold exit action bools
@@ -727,11 +724,7 @@ const CONFIG_SECTIONS = {
   // Oil scavenge pump sequence params
   oil_prime_use_scavenge: {sec:'sequence.startup', key:'oil_prime_use_scavenge'},
   cooldown_use_scavenge:  {sec:'sequence.shutdown', key:'cooldown_use_scavenge'},
-  // Advanced block params (stored in cfg.glow_plug.*, cfg.sequence.startup.*, cfg.governor.*)
-  glow_preheat_ms:       {sec:'glow_plug',        key:'preheat_ms'},
-  glow_preheat_max_pct:  {sec:'glow_plug',        key:'preheat_max_pct'},
-  glow_hold_pct:         {sec:'glow_plug',        key:'hold_pct'},
-  glow_wait_until_hot:   {sec:'glow_plug',        key:'wait_until_hot'},
+  // Advanced block params (stored in cfg.sequence.startup and cfg.governor)
   fp2_start_pct:         {sec:'sequence.startup', key:'fp2_start_pct'},
   fp2_end_pct:           {sec:'sequence.startup', key:'fp2_end_pct'},
   fp2_ramp_ms:           {sec:'sequence.startup', key:'fp2_ramp_ms'},
@@ -765,41 +758,21 @@ const CONFIG_SECTIONS = {
 };
 
 // Available block names per tab
-const STARTUP_BLOCKS     = [
-  // Core sequence
-  'OilPrime','StarterSpin','PreIgnSpark','FuelOpen','FlameConfirm','TempConfirm',
-  'TimedDelay','FuelPumpIdle','ModifiedIdle','Spool','SafetyHold',
-  // Extended / optional
-  'FuelPulse','PreHeat','ThrottleSet','WaitTOTCool','WaitForInput',
-  // Actuator control
-  'IgniterOn','IgniterOff','FuelSolClose',
-  'StarterEnOn','StarterEnOff','StarterOff',
-  'OilPumpOn','OilPumpOff','OilScavengeOn','OilScavengeOff','DrainValveOpen','DrainValveClose',
-  'AirstarterOn','AirstarterOff','CoolFanOn','CoolFanOff',
-  // Advanced hardware
-  'BleedOpen','BleedClose','GlowPreheat','FuelPumpRamp','FuelPump2Set','FuelPump2On','FuelPump2Off','GovernorHold',
+const STARTUP_BLOCKS = [
+  'OilPrime','StarterSpin','SetOutput','PreHeat','FlameConfirm','TempConfirm',
+  'TimedDelay','FuelPumpIdle','Spool','SafetyHold','WaitForInput'
 ];
 const SHUTDOWN_BLOCKS    = [
-  // Core sequence
-  'ImmediateCut','RPMDrop','CooldownSpin','FinalStop','TimedDelay',
-  // Extended / optional
-  'WaitTOTCool','ThrottleSet','WaitForInput','WaitForInputOff',
-  // Actuator control
-  'FuelSolClose','IgniterOff','IgniterOn',
-  'StarterOff','StarterEnOff','StarterEnOn',
-  'OilPumpOff','OilPumpOn','OilScavengeOn','OilScavengeOff','DrainValveOpen','DrainValveClose',
-  'CoolFanOn','CoolFanOff','AirstarterOn','AirstarterOff',
-  // Advanced hardware
-  'BleedOpen','BleedClose','FuelPump2Set','FuelPump2On','FuelPump2Off',
+  'ImmediateCut','RPMDrop','CooldownSpin','FinalStop','TimedDelay','SetOutput',
+  'WaitTOTCool','WaitForInput','WaitForInputOff'
 ];
 // AB ignition sequence blocks (ab_seq)
 const AFTERBURNER_BLOCKS = [
-  'ABCheckReady','ABSolOpen','ABPumpOn','ABIgnite','ABFlameConfirm','ABStabilize',
-  'ABIgnOn','ABIgnOff','TimedDelay','CoolFanOn',
+  'ABCheckReady','SetOutput','ABIgnite','ABFlameConfirm','ABStabilize','TimedDelay',
 ];
 // AB light-off sequence blocks (ab_shut_seq)
 const AB_SHUT_BLOCKS = [
-  'ABSolClose','ABPumpOff','ABIgnOff','TimedDelay','CoolFanOn','CoolFanOff',
+  'SetOutput','TimedDelay',
 ];
 
 // User-defined custom blocks (stored in hwCfg.custom_blocks or local state)
@@ -892,9 +865,7 @@ const BLOCK_INFO = {
   },
   PreHeat: {
     desc: 'Turns the selected ignition output on for a fixed duration without opening fuel.',
-    links: [
-      { label: 'Glow Plug Preheat', url: '/controllers.html#glow-cfg-section' },
-    ]
+    links: [{ label: 'Configure ignition device', url: '/hardware.html#registry-outputs' }]
   },
   ABCheckReady: {
     desc: 'Gate block: checks N1, selected EGT, and throttle conditions before proceeding with AB ignition.',
@@ -919,10 +890,8 @@ const BLOCK_INFO = {
     ]
   },
   GlowPreheat: {
-    desc: 'Ramps glow plug power, then holds. Wet glow start fuel follows the hardware fuel delay.',
-    links: [
-      { label: 'Glow Plug Preheat', url: '/controllers.html#glow-cfg-section' },
-    ]
+    desc: 'Runs the selected glow plug\'s device-local preheat profile. A wet glow plug also commands its own paired pilot-fuel output.',
+    links: [{ label: 'Configure glow-plug device', url: '/hardware.html#registry-outputs' }]
   },
   GovernorHold: {
     desc: 'Waits until N2 is within bandRpm of the governor target RPM before completing.',

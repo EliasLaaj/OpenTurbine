@@ -59,6 +59,27 @@ int main() {
     assert(!outputOwners.ownsCoreOutput(outputOwners.outputs[0]));
     assert(outputOwners.ownsCoreOutput(outputOwners.outputs[1]));
 
+    // Bleed valves use the same single built-in owner contract as other
+    // sequence/direct-command actuators; otherwise an I2C card can bypass the
+    // authoritative bleed demand and a duplicate can be driven twice.
+    ChannelRegistry bleedOwners;
+    ChannelRegistry::Channel primaryBleed;
+    primaryBleed.installed = true;
+    primaryBleed.direction = ChannelRegistry::Output;
+    primaryBleed.driver = ChannelRegistry::Relay;
+    primaryBleed.pin = 27;
+    std::strcpy(primaryBleed.id, "bleed_valve");
+    std::strcpy(primaryBleed.name, "Bleed valve");
+    std::strcpy(primaryBleed.role, "valve");
+    std::strcpy(primaryBleed.purpose, "bleed_valve");
+    assert(bleedOwners.add(primaryBleed));
+    ChannelRegistry::Channel auxiliaryBleed = primaryBleed;
+    auxiliaryBleed.pin = 14;
+    std::strcpy(auxiliaryBleed.id, "aux_bleed");
+    assert(bleedOwners.add(auxiliaryBleed));
+    assert(bleedOwners.ownsCoreOutput(bleedOwners.outputs[0]));
+    assert(!bleedOwners.ownsCoreOutput(bleedOwners.outputs[1]));
+
     // Every I2C input/output gets the same full 500 ms recovery opportunity.
     assert(!LossRecheck::expired(1499, 1000, true));
     assert(LossRecheck::expired(1500, 1000, true));

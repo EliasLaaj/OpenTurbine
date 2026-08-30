@@ -34,7 +34,7 @@ public:
         } else {
             ed.oilPumpPct = startupOilPct;        // no loop / bench — drive the pump directly
         }
-        if (HardwareConfig::hasOilScavengePump && useScavengePump) { ed.oilScavengeDemand = 1.0f; ed.oilScavengeOn = true; }
+        if (HardwareConfig::hasOilScavengePump && useScavengePump) ed.oilScavengeDemand = 1.0f;
     }
 
     BlockResult tick() override {
@@ -81,7 +81,7 @@ public:
         // Arm oil safety check — sequencer sets the real threshold in StarterSpin
         auto& ed = EngineData::instance();
         if (_completed) ed.oilMinBar = oilArmMinBar;
-        if (useScavengePump) { ed.oilScavengeDemand = 0.0f; ed.oilScavengeOn = false; }
+        if (useScavengePump) ed.oilScavengeDemand = 0.0f;
     }
 
 private:

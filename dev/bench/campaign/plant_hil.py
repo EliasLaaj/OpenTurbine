@@ -295,12 +295,25 @@ def main() -> int:
             )
 
         if soak_seconds:
+            # Roll the ECU's one-second timing window and the compact
+            # telemetry rotation past configuration/startup before scoring a
+            # steady RUNNING soak. Otherwise the first merged REST sample can
+            # retain an earlier, intentionally heavyweight save/reboot spike
+            # for the entire max() calculation even though the run is clean.
+            settle_deadline = time.monotonic() + 2.5
+            while time.monotonic() < settle_deadline:
+                bridge.tick()
+                dut.data()
+                time.sleep(0.08)
             soak_deadline = time.monotonic() + soak_seconds
             samples = 0
             transport_errors = 0
             status_errors = 0
             min_heap = None
             max_loop_ms = 0.0
+            max_loop_period_ms = 0.0
+            start_overruns = None
+            end_overruns = None
             stayed_running = True
             while time.monotonic() < soak_deadline:
                 try:
@@ -312,6 +325,14 @@ def main() -> int:
                         max_loop_ms,
                         float(data.get("loop_exec_max_ms", 0) or 0),
                     )
+                    max_loop_period_ms = max(
+                        max_loop_period_ms,
+                        float(data.get("loop_period_max_ms", 0) or 0),
+                    )
+                    current_overruns = int(data.get("loop_overrun_count", 0) or 0)
+                    if start_overruns is None:
+                        start_overruns = current_overruns
+                    end_overruns = current_overruns
                     # Heap lives on the compact status endpoint. Sample it at
                     # a low rate so the measurement does not become the load.
                     if samples == 1 or samples % 10 == 0:
@@ -331,9 +352,14 @@ def main() -> int:
                 stayed_running and samples > max(10, soak_seconds * 2) and
                 transport_errors <= max(2, samples // 1000) and status_errors <= 1 and
                 min_heap is not None and min_heap >= (16000 if target == "classic" else 24000) and
-                0 < max_loop_ms < 50.0,
+                0 < max_loop_ms < 50.0 and 0 < max_loop_period_ms < 50.0 and
+                start_overruns is not None and end_overruns is not None and
+                end_overruns - start_overruns <= max(1, soak_seconds // 300),
                 requested_s=soak_seconds, samples=samples, transport_errors=transport_errors,
                 status_errors=status_errors, min_heap=min_heap, max_loop_exec_ms=max_loop_ms,
+                max_loop_period_ms=max_loop_period_ms,
+                loop_overrun_delta=(end_overruns - start_overruns)
+                if start_overruns is not None and end_overruns is not None else None,
             )
 
         # Use the physical STOP input. The serial fixture gives a conservative

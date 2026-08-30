@@ -79,7 +79,6 @@ struct EngineData {
     volatile uint32_t p1SampleSeq      = 0;
     volatile uint32_t p2SampleSeq      = 0;
     volatile uint32_t torqueSampleSeq  = 0;
-    volatile uint32_t thrustSampleSeq  = 0;
     volatile uint32_t n1SampleMs       = 0;
     volatile uint32_t n2SampleMs       = 0;
     volatile uint32_t totSampleMs      = 0;
@@ -87,7 +86,6 @@ struct EngineData {
     volatile uint32_t p1SampleMs       = 0;
     volatile uint32_t p2SampleMs       = 0;
     volatile uint32_t torqueSampleMs   = 0;
-    volatile uint32_t thrustSampleMs   = 0;
 
     // ── Sensor health ─────────────────────────────────────────
     volatile bool     n1Healthy       = false;
@@ -108,7 +106,6 @@ struct EngineData {
     volatile bool     flameHealthy    = true;   // configured channel is available
     volatile bool     flameDetected   = false;
     volatile uint32_t flameSampleSeq  = 0;
-    volatile uint32_t flameSampleMs   = 0;
     volatile float    registryInputValue[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
     volatile bool     registryInputHealthy[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
     // Canonical sample metadata for registry-backed safety/sequence inputs.
@@ -119,6 +116,7 @@ struct EngineData {
 
     // ── Actuator demands (written by controllers/sequencer) ───
     volatile float    throttleDemand  = 0;      // 0.0–1.0  main fuel/throttle ESC
+    volatile float    dynamicIdleFloorDemand = 0; // current built-in Automatic Idle minimum
     volatile float    finalCoreFuelDemand = 0; // previous tick after rules/protection; excludes AB
     volatile float    mainFuelAppliedDemand = 0; // command last written to the physical main-fuel output
     volatile float    fuelPump2Demand = 0;      // 0.0–1.0  independent variable fuel pump
@@ -133,6 +131,10 @@ struct EngineData {
     volatile float    oilScavengeDemand = 0;   // 0.0–1.0
     volatile float    bleedValveDemand = 0;    // 0.0–1.0
     volatile float    registryOutputDemand[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
+    // Exact ignition devices energized by dedicated sequencer ignition blocks.
+    // Normal sequence completion clears only this set; STOP/FAULT still cuts
+    // the complete ignition category independently.
+    volatile uint16_t sequenceIgnitionMask = 0;
     volatile float    registryOutputCurrentAmps[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     volatile bool     registryOutputCurrentHealthy[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     volatile bool     oilFlowWarningActive = false;
@@ -140,10 +142,7 @@ struct EngineData {
     volatile bool     igniterOn       = false;
     volatile bool     igniter2On      = false;
     volatile bool     starterEnabled  = false;
-    volatile bool     coolFanOn       = false;  // compatibility/telemetry, derived from demand
     volatile bool     airstarterOpen  = false;  // airstarter solenoid open
-    volatile bool     oilScavengeOn   = false;  // compatibility/telemetry, derived from demand
-    volatile bool     bleedValveOpen  = false;  // compatibility/telemetry, derived from demand
 
     // ── Safety / diagnostics ───────────────────────────────────
     volatile bool     surgeDetected   = false;  // compressor surge detected (N1 oscillation)
@@ -173,7 +172,6 @@ struct EngineData {
     volatile int32_t  abFlameRaw      = 0;
     volatile uint32_t abFlameSampleSeq = 0;
     volatile uint32_t abFlameSampleMs = 0;
-    volatile uint8_t  abFlameAdapter  = 255;
     volatile bool     abEvidenceValid = false;
     volatile uint32_t abFirstFuelMs = 0;
     volatile uint32_t abFirstIgnitionMs = 0;
@@ -184,7 +182,6 @@ struct EngineData {
     volatile float    abEgtBaseline = 0.0f;
     volatile uint32_t abEgtBaselineSampleSeq = 0;
     volatile bool     mainFuelProtectionActive = false;
-    volatile float    protectedThrottleDemand = 0.0f;
     char              abFaultReason[96] = {};
     volatile bool     abSolOpen       = false;  // AB fuel solenoid (g_actAbSol)
     volatile int      abInputRaw      = 0;      // raw ADC/RC counts for analog/RC AB trigger
@@ -198,6 +195,11 @@ struct EngineData {
     // ── Engine state ──────────────────────────────────────────
     volatile SysMode  mode               = SysMode::STANDBY;
     volatile bool     faultShutdownActive = false; // keeps selected output overrides latched through the fault sequence
+    volatile bool     faultLatched        = false; // restart remains blocked until explicit clear or reboot
+    volatile bool     dryOilStopActive    = false; // immediate oil fault: only selected pump may remain on briefly
+    volatile uint8_t  dryOilPumpIndex     = 255;
+    volatile float    dryOilPumpDemand    = 0.0f;
+    volatile uint32_t dryOilPumpUntilMs   = 0;
     volatile bool     flameMonitorActive = false;
     volatile bool     relightArmed       = false;
     volatile bool     devMode            = false;
@@ -354,8 +356,10 @@ struct EngineData {
     volatile uint32_t loopCounter        = 0;   // main control-loop iterations since boot
     volatile float    loopHz             = 0.0f; // measured loop start-to-start rate
     volatile float    loopPeriodMs       = 0.0f; // measured loop start-to-start period
+    volatile float    loopPeriodMaxMs    = 0.0f; // worst start-to-start period in the last sample window
     volatile float    loopExecAvgMs      = 0.0f; // EWMA loop body execution time
     volatile float    loopExecMaxMs      = 0.0f; // worst loop body time in the last sample window
+    volatile uint32_t loopOverrunCount   = 0;    // body executions longer than the configured period
     // Section breakdown from the same worst loop represented by loopExecMaxMs.
     volatile float    loopSensorsMs      = 0.0f;
     volatile float    loopSequencerMs    = 0.0f;

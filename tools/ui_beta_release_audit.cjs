@@ -271,8 +271,8 @@ function enumNames(source, marker) {
     });
     await page.goto(`${base}/sequence.html`);
     await page.waitForSelector('#save-btn', { state: 'attached' });
-    await page.waitForFunction(() => [...document.querySelectorAll('#add-startup-sel option,#add-shutdown-sel option')]
-      .some(option => /N2 Speed Control|Governor/i.test(option.textContent)), null, { timeout: 5000 });
+    await page.waitForFunction(() => document.querySelectorAll('#add-startup-sel option').length > 1,
+      null, { timeout: 5000 });
     const sequencer = await page.evaluate(() => {
       const optionText = [...document.querySelectorAll('#add-startup-sel option,#add-shutdown-sel option')].map(o => o.textContent);
       const ruleText = [...document.querySelectorAll('.rule-sensor option,.rule-actuator option')].map(o => o.textContent);
@@ -284,8 +284,8 @@ function enumNames(source, marker) {
         hasPropRule: ruleText.some(t => /Prop/i.test(t))
       };
     });
-    assert.deepEqual(sequencer, { hasAbBlock: false, abTabVisible: true, hasGovernorBlock: true, hasHiddenN2Rule: false, hasPropRule: false });
-    results.push('sequencer ignores obsolete master fields and follows the fitted N2 and afterburner devices');
+    assert.deepEqual(sequencer, { hasAbBlock: true, abTabVisible: true, hasGovernorBlock: false, hasHiddenN2Rule: false, hasPropRule: false });
+    results.push('sequencer follows fitted devices and keeps retired specialist blocks out of the simple picker');
 
     const ecuCluster = fs.readFileSync(path.join('src', 'system', 'ClusterSerial.cpp'), 'utf8');
     const client = fs.readFileSync(path.join('examples', 'OTCClusterClient.h'), 'utf8');
@@ -309,30 +309,32 @@ function enumNames(source, marker) {
     assert.match(safetyMonitor, /n2RpmLimit > 0\.0f && ed\.n2Rpm > n2RpmLimit/);
     assert.match(safetyMonitor, /OVERSPEED_CONFIRM_MS[\s\S]*?_trigger\("N2_OVERSPEED"\)/);
     assert.match(safetyMonitor, /N2 over-speed: power-turbine RPM exceeded its hard shutdown limit/);
-    // Relight needs a viable N1 AND the CONFIGURED ignition target fitted
-    // (igniter / igniter2 / glow — no longer hardcoded to igniter 1).
-    assert.match(safetyMonitor, /relightIgnitionOk && n1Ok/);
-    assert.match(safetyMonitor, /case 1: relightIgnitionOk = HardwareConfig::hasIgniter2/);
+    // Relight runtime requires viable N1. Exact ignition-device availability is
+    // validated in main so a missing configured ID stays visible for repair and
+    // is never silently replaced with the first same-purpose output.
+    assert.match(safetyMonitor, /const bool n1Ok = HardwareConfig::hasN1Rpm && ed\.n1Healthy/);
+    assert.match(safetyMonitor, /!n1Ok \|\| ed\.relightAttempts >= MAX_RELIGHT_ATTEMPTS \|\| !_relight/);
     const configSource = fs.readFileSync(path.join('src', 'system', 'Config.cpp'), 'utf8') +
       fs.readFileSync(path.join('src', 'system', 'ConfigSerialize.cpp'), 'utf8');
     assert.match(configSource, /CONFIG_FIELD\(n2RpmLimit,\s*"n2_rpm_limit"\)/);
     assert.match(configSource, /readConfigFields\(eng,\s*ENGINE_FLOAT_FIELDS\)/);
     assert.match(configSource, /writeConfigFields\(eng,\s*ENGINE_FLOAT_FIELDS\)/);
-    // Relight sanitization is target-aware: disabled when N1 is missing or
-    // the SELECTED ignition output (igniter/igniter2/glow) is not fitted.
-    assert.match(configSource, /case 1: relightTargetAvailable = HardwareConfig::hasIgniter2/);
-    assert.match(configSource, /\(!HardwareConfig::hasN1Rpm \|\| !relightTargetAvailable\) && relightEnabled[\s\S]{0,80}relightEnabled = false/);
-    assert.match(configSource, /case 6:\s+return HardwareConfig::hasTwoShaft && HardwareConfig::hasN2Rpm/);
+    // N1 absence may disable relight structurally; a missing exact ignition ID
+    // remains enabled and is surfaced by startup validation instead of guessed.
+    assert.match(configSource, /!HardwareConfig::hasN1Rpm && relightEnabled[\s\S]{0,80}relightEnabled = false/);
+    assert.match(configSource, /case 6:\s+return HardwareConfig::hasN2Rpm/);
     assert.match(configSource, /case 19:\s+return HardwareConfig::hasAfterburner && HardwareConfig::hasAbFlame/);
     assert.match(configSource, /case 20:\s+return HardwareConfig::hasGlowPlug && HardwareConfig::hasGlowCurrentSensor/);
     assert.match(configSource, /case 21:\s+return HardwareConfig::hasIgniter && HardwareConfig::hasIgniterCurrentSensor/);
     assert.match(configSource, /case 22:\s+return HardwareConfig::hasIgniter2 && HardwareConfig::hasIgniter2CurrentSensor/);
     assert.match(configSource, /case 23:\s+return HardwareConfig::hasOilPump && HardwareConfig::hasOilPumpCurrentSensor/);
     const rulesEngine = fs.readFileSync(path.join('src', 'system', 'RulesEngine.h'), 'utf8');
-    assert.match(rulesEngine, /case N2_RPM:\s+return HardwareConfig::hasTwoShaft && HardwareConfig::hasN2Rpm && ed\.n2Healthy/);
+    assert.match(rulesEngine, /case N2_RPM:\s+return HardwareConfig::hasN2Rpm && ed\.n2Healthy/);
     assert.match(rulesEngine, /case AB_FLAME:\s+return HardwareConfig::hasAfterburner && HardwareConfig::hasAbFlame/);
     assert.match(rulesEngine, /case GLOW_CURRENT:\s+return HardwareConfig::hasGlowPlug && HardwareConfig::hasGlowCurrentSensor/);
     const mainSource = fs.readFileSync(path.join('src', 'main.cpp'), 'utf8');
+    assert.match(mainSource, /configuredIgnitionOutputAvailable\(Config::relightOutputId, relightTarget\)/);
+    assert.match(mainSource, /selected relight ignition output is not configured in Hardware/);
     assert.match(mainSource, /N2 overspeed safety is enabled but the hard N2 RPM limit is 0/);
     assert.match(mainSource, /N2 gradual pullback starts or reaches full authority at\/above the hard N2 shutdown limit/);
     assert.match(mainSource, /Governor target plus no-correction band reaches the hard N2 shutdown limit/);
@@ -386,7 +388,7 @@ function enumNames(source, marker) {
     const runtimeHardware = fs.readFileSync(path.join('src', 'Hardware.h'), 'utf8');
     assert.match(runtimeHardware, /if \(!ed\.faultShutdownActive\) return/);
     assert.match(runtimeHardware, /if \(!c\.installed \|\| !c\.forceSafeOnFault\) continue/);
-    assert.match(runtimeHardware, /const float safe = core \? 0\.0f : constrain\(c\.safeDemand/);
+    assert.match(runtimeHardware, /const float safe = \(core \|\| ed\.dryOilStopActive\)[\s\S]{0,50}\? 0\.0f : constrain\(c\.safeDemand/);
     assert.match(runtimeHardware, /inline void updateActuators\(\) \{[\s\S]*applyFaultSafeOutputs\(\)/);
     assert.match(runtimeHardware, /if \(expo > 0\.0f\) \{[\s\S]*norm = norm \* \(1\.0f - expo\) \+ norm \* norm \* norm \* expo/,
       'maximum Throttle Expo (1.0) must still apply the cubic response curve');
@@ -400,7 +402,7 @@ function enumNames(source, marker) {
     assert.match(mainSource, /Hardware::allOff\(\);\s*ed\.faultShutdownActive = false/);
     const webSource = fs.readFileSync(path.join('src', 'system', 'web', 'WebServer.cpp'), 'utf8');
     assert.match(webSource, /doc\["has_ab_flame"\]\s+=\s+HardwareConfig::hasAfterburner && HardwareConfig::hasAbFlame/);
-    assert.match(webSource, /doc\["has_n2"\]\s+=\s+HardwareConfig::hasTwoShaft && HardwareConfig::hasN2Rpm/);
+    assert.match(webSource, /doc\["has_n2"\]\s+=\s+HardwareConfig::hasN2Rpm/);
     assert.match(webSource, /doc\["has_glow_current"\]\s+=\s+HardwareConfig::hasGlowPlug && HardwareConfig::hasGlowCurrentSensor/);
     assert.match(webSource, /doc\["has_igniter_current"\]\s+=\s+HardwareConfig::hasIgniter && HardwareConfig::hasIgniterCurrentSensor/);
     assert.match(webSource, /doc\["has_igniter2_current"\]\s+=\s+HardwareConfig::hasIgniter2 && HardwareConfig::hasIgniter2CurrentSensor/);
@@ -435,12 +437,12 @@ function enumNames(source, marker) {
     assert.doesNotMatch(indexHtml, /20260612b|20260617b|20260619a|20260625a|20260705a|Primary thermal limit/);
     assert.doesNotMatch(indexHtml, />Not saved<|No calibration saved|No successful test recorded/);
     assert.match(indexHtml, /Run a safe actuator or dry-sequence test/);
-    assert.match(indexHtml, /20260824a/);
+    assert.match(indexHtml, /20260828c/);
     for (const pageName of ['index.html', 'hardware.html', 'controllers.html', 'system.html', 'calibration.html', 'sequence.html', 'log.html', 'tools.html']) {
       const pageSource = fs.readFileSync(path.join('data_src', pageName), 'utf8');
       const sharedRefs = [...pageSource.matchAll(/\/(?:style\.css|app\.js|theme\.js|ui_dialog\.js)\?v=([^"'&]+)/g)];
       assert.ok(sharedRefs.length > 0, `${pageName} must version its shared assets`);
-      assert.ok(sharedRefs.every(match => match[1] === '20260824a'), `${pageName} has a stale shared-asset cache key`);
+      assert.ok(sharedRefs.every(match => match[1] === '20260828c'), `${pageName} has a stale shared-asset cache key`);
     }
     assert.match(indexHtml, /<body data-page="dashboard">/);
     assert.match(indexHtml, /id="profile-mismatch-banner" style="display:none"/);

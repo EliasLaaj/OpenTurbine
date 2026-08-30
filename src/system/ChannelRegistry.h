@@ -21,7 +21,7 @@ public:
     static constexpr uint8_t MAX_INPUT_CHANNELS = 16;
 #endif
     static constexpr uint8_t MAX_OUTPUT_CHANNELS = 16;
-    static constexpr uint8_t MAX_BINDINGS = 8;
+    static constexpr uint8_t MAX_BINDINGS = 24;
     static constexpr uint8_t INPUT_SENSOR_BASE = 80;
     static constexpr uint8_t OUTPUT_ACTUATOR_BASE = 64;
     static constexpr bool isInputSensor(uint8_t handle) {
@@ -97,7 +97,40 @@ public:
     static bool isCoreOutputBindingKey(const char* key) {
         return key && (!strcmp(key, "main_fuel_output") ||
                        !strcmp(key, "main_fuel_shutoff") ||
-                       !strcmp(key, "main_starter"));
+                       !strcmp(key, "main_starter") ||
+                       !strcmp(key, "starter_enable_output") ||
+                       !strcmp(key, "primary_oil_pump") ||
+                       !strcmp(key, "primary_scavenge_pump") ||
+                       !strcmp(key, "primary_cooling_fan") ||
+                       !strcmp(key, "primary_bleed_valve") ||
+                       !strcmp(key, "primary_aux_fuel_pump") ||
+                       !strcmp(key, "primary_igniter") ||
+                       !strcmp(key, "primary_secondary_igniter") ||
+                       !strcmp(key, "primary_ab_valve") ||
+                       !strcmp(key, "primary_glow_plug") ||
+                       !strcmp(key, "primary_ab_pump") ||
+                       !strcmp(key, "primary_prop_pitch") ||
+                       !strcmp(key, "primary_air_starter"));
+    }
+    static const char* coreOutputBindingKey(const char* purpose) {
+        if (!purpose) return nullptr;
+        if (!strcmp(purpose, "main_fuel")) return "main_fuel_output";
+        if (!strcmp(purpose, "fuel_shutoff")) return "main_fuel_shutoff";
+        if (!strcmp(purpose, "starter")) return "main_starter";
+        if (!strcmp(purpose, "starter_enable")) return "starter_enable_output";
+        if (!strcmp(purpose, "oil_pump")) return "primary_oil_pump";
+        if (!strcmp(purpose, "scavenge_pump")) return "primary_scavenge_pump";
+        if (!strcmp(purpose, "cooling_fan")) return "primary_cooling_fan";
+        if (!strcmp(purpose, "bleed_valve")) return "primary_bleed_valve";
+        if (!strcmp(purpose, "fuel_pump")) return "primary_aux_fuel_pump";
+        if (!strcmp(purpose, "igniter")) return "primary_igniter";
+        if (!strcmp(purpose, "ab_igniter")) return "primary_secondary_igniter";
+        if (!strcmp(purpose, "ab_valve")) return "primary_ab_valve";
+        if (!strcmp(purpose, "glow_plug")) return "primary_glow_plug";
+        if (!strcmp(purpose, "ab_pump")) return "primary_ab_pump";
+        if (!strcmp(purpose, "prop_pitch")) return "primary_prop_pitch";
+        if (!strcmp(purpose, "air_starter")) return "primary_air_starter";
+        return nullptr;
     }
     static bool isCoreManagedOutputRole(const char* role) {
         (void)role;
@@ -109,9 +142,10 @@ public:
                            !strcmp(purpose, "starter") ||
                            !strcmp(purpose, "starter_enable") ||
                            !strcmp(purpose, "oil_pump") ||
-                           !strcmp(purpose, "scavenge_pump") ||
-                           !strcmp(purpose, "cooling_fan") ||
-                           !strcmp(purpose, "fuel_pump") ||
+                            !strcmp(purpose, "scavenge_pump") ||
+                            !strcmp(purpose, "cooling_fan") ||
+                            !strcmp(purpose, "bleed_valve") ||
+                            !strcmp(purpose, "fuel_pump") ||
                            !strcmp(purpose, "igniter") ||
                            !strcmp(purpose, "ab_igniter") ||
                            !strcmp(purpose, "ab_valve") ||
@@ -134,6 +168,7 @@ public:
                    !strcmp(role, "temperature") ||
                    !strcmp(role, "flame") ||
                    !strcmp(role, "flow") ||
+                   !strcmp(role, "current") ||
                    !strcmp(role, "torque") ||
                    !strcmp(role, "thrust") ||
                    !strcmp(role, "voltage") ||
@@ -239,7 +274,23 @@ public:
         float currentMvPerA = 100.0f;
         float currentZeroV = 1.65f;
         float currentMaxAmps = 0.0f;
+        float currentReadyAmps = 3.0f; // glow-plug hot/ready threshold; ignored by other outputs
         uint32_t currentTripDelayMs = 5000; // continuous overcurrent before shutdown
+        // Device-local ignition behavior. Legacy profiles leave this false and
+        // continue using the old shared settings until the card is edited.
+        bool ignitionProfileConfigured = false;
+        uint8_t ignitionMode = 0; // 0=simple, 1=dwell/rest PWM, 2=current-limited coil
+        uint16_t ignitionDwellMs = 6;
+        uint16_t ignitionRestMs = 3;
+        float ignitionCoilSatAmps = 8.0f;
+        uint32_t ignitionPreheatMs = 10000;
+        float ignitionPeakDemand = 0.8f;
+        float ignitionHoldDemand = 0.3f;
+        bool ignitionWaitUntilHot = false;
+        uint32_t ignitionHotTimeoutMs = 30000;
+        char pairedOutputId[20] = {}; // optional pilot-fuel output owned while this ignition device is on
+        uint32_t pairedOutputDelayMs = 8000;
+        float pairedOutputDemand = 1.0f;
         bool hasFlowMonitor = false;
         float minimumFlow = 0.0f;  // L/min; applies to oil/scavenge pump outputs
         char flowInputId[20] = {}; // optional when exactly one compatible input exists
@@ -349,7 +400,7 @@ public:
     bool validate() const {
         _validationError[0] = '\0';
         for (uint8_t i = 0; i < inputCount; ++i)
-            for (uint8_t j = i + 1; j < inputCount; ++j)
+            for (uint8_t j = i + 1; j < inputCount; ++j) {
                 if (singletonPurpose(Input, inputs[i].purpose) &&
                     !strcmp(inputs[i].purpose, inputs[j].purpose)) {
                     snprintf(_validationError, sizeof(_validationError),
@@ -357,6 +408,16 @@ public:
                              inputs[i].purpose, inputs[i].id, inputs[j].id);
                     return false;
                 }
+                const bool repeatableTyped = !strcmp(inputs[i].purpose, "shaft_speed") ||
+                    !strncmp(inputs[i].purpose, "general_", 8);
+                if (repeatableTyped && !strcmp(inputs[i].purpose, inputs[j].purpose) &&
+                    !strcmp(inputs[i].name, inputs[j].name)) {
+                    snprintf(_validationError, sizeof(_validationError),
+                             "Rename repeated %s inputs so each name is unique",
+                             inputs[i].purpose);
+                    return false;
+                }
+            }
         for (uint8_t i = 0; i < outputCount; ++i)
             for (uint8_t j = i + 1; j < outputCount; ++j)
                 if (singletonPurpose(Output, outputs[i].purpose) &&
@@ -366,6 +427,26 @@ public:
                              outputs[i].purpose, outputs[i].id, outputs[j].id);
                     return false;
                 }
+        for (uint8_t i = 0; i < outputCount; ++i) {
+            const auto& candidate = outputs[i];
+            if (!candidate.installed || candidate.mirrorOf[0] ||
+                !isCoreManagedOutputPurpose(candidate.purpose)) continue;
+            uint8_t peers = 0;
+            uint8_t owners = 0;
+            for (uint8_t j = 0; j < outputCount; ++j) {
+                const auto& output = outputs[j];
+                if (!output.installed || output.mirrorOf[0] ||
+                    strcmp(output.purpose, candidate.purpose)) continue;
+                ++peers;
+                if (ownsCoreOutput(output)) ++owners;
+            }
+            if (peers > 1 && owners != 1) {
+                snprintf(_validationError, sizeof(_validationError),
+                         "Several %s outputs are fitted; select one primary device",
+                         candidate.purpose);
+                return false;
+            }
+        }
         for (uint8_t i=0; i<inputCount; ++i) if (!validId(inputs[i].id) || !driverMatches(Input, inputs[i].driver) || !roleValid(Input, inputs[i].role) || !purposeValid(Input, inputs[i].purpose) || !semanticDriverValid(inputs[i]) || (!(inputs[i].physicalPortId[0] && inputs[i].physicalModeId[0]) && !temperatureInterfaceValid(inputs[i])) || !torqueInterfaceValid(inputs[i]) || !demandsValid(inputs[i])) return false;
         for (uint8_t i=0; i<outputCount; ++i) {
             if (!validId(outputs[i].id) || !driverMatches(Output, outputs[i].driver) ||
@@ -408,7 +489,21 @@ public:
                 else if (inputs[i].loadCellGain != nauGain || inputs[i].loadCellRate != nauRate) return false;
             }
         }
-        if (auxiliaryPcnt > 2 || registryOneWire > 4 || nauLoadCells > 2) return false;
+        if (auxiliaryPcnt > 2) {
+            snprintf(_validationError, sizeof(_validationError),
+                     "At most 2 additional pulse shaft-speed inputs are supported");
+            return false;
+        }
+        if (registryOneWire > 4) {
+            snprintf(_validationError, sizeof(_validationError),
+                     "At most 4 general OneWire temperature inputs are supported");
+            return false;
+        }
+        if (nauLoadCells > 2) {
+            snprintf(_validationError, sizeof(_validationError),
+                     "At most 2 NAU7802 load-cell inputs are supported");
+            return false;
+        }
         for (uint8_t i=0; i<inputCount; ++i) for (uint8_t j=0; j<outputCount; ++j) if (inputs[i].pin >= 0 && inputs[i].pin == outputs[j].pin) return false;
         for (uint8_t i=0; i<inputCount; ++i) {
             if (inputs[i].driver < I2cDigital) continue;
@@ -463,9 +558,7 @@ public:
         // An explicit advanced binding is the clearest statement of which
         // physical card owns the built-in adapter. It must override a migrated
         // canonical ID so duplicate-purpose outputs never acquire two owners.
-        const char* bindingKey = !strcmp(c.purpose, "main_fuel") ? "main_fuel_output" :
-                                 !strcmp(c.purpose, "fuel_shutoff") ? "main_fuel_shutoff" :
-                                 !strcmp(c.purpose, "starter") ? "main_starter" : nullptr;
+        const char* bindingKey = coreOutputBindingKey(c.purpose);
         if (bindingKey) {
             for (uint8_t i = 0; i < bindingCount; ++i) {
                 if (strcmp(bindings[i].key, bindingKey)) continue;
@@ -473,15 +566,18 @@ public:
             }
         }
         if (isCoreManagedOutputId(c.id)) return true;
-        // Prefer the migrated/canonical card when it exists. Otherwise the
-        // first card for this purpose owns the legacy controller adapter and
-        // later cards stay available to rules and sequences.
+        // A canonical legacy card remains a deterministic migration owner.
+        // For non-canonical cards, only a sole compatible output may inherit
+        // the adapter. Multiple cards require an explicit binding; registry
+        // order must never decide which physical device receives a command.
         for (uint8_t i = 0; i < outputCount; ++i)
             if (!strcmp(outputs[i].purpose, c.purpose) && isCoreManagedOutputId(outputs[i].id))
                 return &outputs[i] == &c;
+        uint8_t matches = 0;
         for (uint8_t i = 0; i < outputCount; ++i)
-            if (!strcmp(outputs[i].purpose, c.purpose)) return &outputs[i] == &c;
-        return false;
+            if (outputs[i].installed && !outputs[i].mirrorOf[0] &&
+                !strcmp(outputs[i].purpose, c.purpose)) ++matches;
+        return matches == 1;
     }
     static bool validId(const char* id) { if (!id || !id[0] || strlen(id) >= 20) return false; for (;*id;++id) if (!(isalnum(*id)||*id=='_'||*id=='-')) return false; return true; }
     static bool pwmTimingValid(uint32_t frequency, uint8_t resolution) {
@@ -494,11 +590,10 @@ public:
     }
     static bool singletonPurpose(Direction d, const char* purpose) {
         if (!purpose || !strcmp(purpose, "generic")) return false;
-        // Output hardware is not semantically single-instance. The canonical
-        // ID, or otherwise the first card for a core purpose, owns the built-in
-        // controller adapter; later cards remain independent rule/sequence
-        // targets. This supports series valves, twin pumps/fans and unusual
-        // hobby installations without giving them hidden mirrored commands.
+        // Output hardware is not semantically single-instance. One explicit
+        // binding (or a sole/canonical migration card) owns each built-in
+        // controller adapter; all other cards remain independent rule/sequence
+        // targets. Registry order never assigns physical authority.
         if (d == Output) return false;
         // Discrete switches may be repeated. Their consumers combine them as
         // any-active while retaining per-channel health and disconnect checks.
@@ -522,6 +617,13 @@ public:
                    !strcmp(purpose, "p2_pressure") || !strcmp(purpose, "coolant_pressure") ||
                    !strcmp(purpose, "oil_temperature") || !strcmp(purpose, "coolant_temp") ||
                    !strcmp(purpose, "intake_temperature") || !strcmp(purpose, "fuel_flow") ||
+                    !strcmp(purpose, "general_temperature") ||
+                    !strcmp(purpose, "general_pressure") ||
+                    !strcmp(purpose, "general_flow") ||
+                    !strcmp(purpose, "general_current") ||
+                    !strcmp(purpose, "general_voltage") ||
+                    !strcmp(purpose, "general_torque") ||
+                    !strcmp(purpose, "general_thrust") ||
                     !strcmp(purpose, "oil_flow") || !strcmp(purpose, "scavenge_flow") ||
                     !strcmp(purpose, "flame") || !strcmp(purpose, "ab_flame") || !strcmp(purpose, "torque") ||
                    !strcmp(purpose, "thrust") ||
@@ -539,7 +641,7 @@ public:
                !strcmp(purpose, "starter") || !strcmp(purpose, "starter_enable") ||
                !strcmp(purpose, "oil_pump") || !strcmp(purpose, "coolant_pump") ||
                !strcmp(purpose, "scavenge_pump") || !strcmp(purpose, "cooling_fan") ||
-               !strcmp(purpose, "valve") || !strcmp(purpose, "igniter") ||
+               !strcmp(purpose, "valve") || !strcmp(purpose, "bleed_valve") || !strcmp(purpose, "igniter") ||
                !strcmp(purpose, "ab_igniter") || !strcmp(purpose, "glow_plug") ||
                !strcmp(purpose, "fuel_pump") || !strcmp(purpose, "ab_pump") ||
                !strcmp(purpose, "ab_valve") ||
@@ -577,6 +679,7 @@ public:
                     !strcmp(role, "temperature") ? "coolant_temp" :
                     !strcmp(role, "flame") ? "flame" :
                     !strcmp(role, "flow") ? "oil_flow" :
+                    !strcmp(role, "current") ? "general_current" :
                     !strcmp(role, "torque") ? "torque" :
                     !strcmp(role, "thrust") ? "thrust" :
                     !strcmp(role, "voltage") ? "battery_voltage" :
@@ -610,21 +713,26 @@ public:
                 return !strcmp(role, "speed") && oneOf(Pulse, Analog, I2cAnalog);
             if (!strcmp(purpose, "tot") || !strcmp(purpose, "tit") ||
                 !strcmp(purpose, "oil_temperature") || !strcmp(purpose, "coolant_temp") ||
-                !strcmp(purpose, "intake_temperature"))
+                !strcmp(purpose, "intake_temperature") || !strcmp(purpose, "general_temperature"))
                 return !strcmp(role, "temperature") && oneOf(Analog, I2cAnalog);
             if (!strcmp(purpose, "oil_pressure") || !strcmp(purpose, "fuel_pressure") ||
                 !strcmp(purpose, "p1_pressure") || !strcmp(purpose, "p2_pressure") ||
-                !strcmp(purpose, "coolant_pressure"))
+                !strcmp(purpose, "coolant_pressure") || !strcmp(purpose, "general_pressure"))
                 return !strcmp(role, "pressure") && oneOf(Analog, I2cAnalog);
-            if (!strcmp(purpose, "fuel_flow") || !strcmp(purpose, "oil_flow") ||
+            if (!strcmp(purpose, "fuel_flow") || !strcmp(purpose, "general_flow") ||
+                !strcmp(purpose, "oil_flow") ||
                 !strcmp(purpose, "scavenge_flow"))
                 return !strcmp(role, "flow") && oneOf(Pulse, Analog, I2cAnalog);
+            if (!strcmp(purpose, "general_current"))
+                return !strcmp(role, "current") && oneOf(Analog, I2cAnalog);
+            if (!strcmp(purpose, "general_voltage"))
+                return !strcmp(role, "voltage") && oneOf(Analog, I2cAnalog);
             if (!strcmp(purpose, "flame") || !strcmp(purpose, "ab_flame"))
                 return !strcmp(role, "flame") &&
                        oneOf(Digital, Analog, I2cDigital, I2cAnalog);
-            if (!strcmp(purpose, "torque"))
+            if (!strcmp(purpose, "torque") || !strcmp(purpose, "general_torque"))
                 return !strcmp(role, "torque") && oneOf(Analog, I2cAnalog, I2cLoadCell);
-            if (!strcmp(purpose, "thrust"))
+            if (!strcmp(purpose, "thrust") || !strcmp(purpose, "general_thrust"))
                 return !strcmp(role, "thrust") && oneOf(Analog, I2cAnalog, I2cLoadCell);
             if (!strcmp(purpose, "battery_voltage"))
                 return !strcmp(role, "voltage") && oneOf(Analog, I2cAnalog);
@@ -677,6 +785,7 @@ public:
             !strcmp(purpose, "drain_valve"))
             return output(!strcmp(purpose, "air_starter") ? "starter" : "valve",
                           true, true, true, true);
+        if (!strcmp(purpose, "bleed_valve")) return output("valve", true, true, true, true);
         if (!strcmp(purpose, "ab_valve")) return output("valve", true, false, false, true);
         if (!strcmp(purpose, "ab_pump")) return output("ab_pump", true, true, true, true);
         if (!strcmp(purpose, "prop_pitch")) return output("prop_pitch", true, true, true, true);
@@ -700,10 +809,12 @@ private:
         const bool turbineGasPurpose = !strcmp(c.purpose, "tot") || !strcmp(c.purpose, "tit");
         const bool lowTemperaturePurpose = !strcmp(c.purpose, "oil_temperature") ||
                                            !strcmp(c.purpose, "coolant_temp") ||
-                                           !strcmp(c.purpose, "intake_temperature");
+                                           !strcmp(c.purpose, "intake_temperature") ||
+                                           !strcmp(c.purpose, "general_temperature");
         if (c.temperatureInterface >= 1 && c.temperatureInterface <= 3) {
             const bool thermocouplePurpose = turbineGasPurpose ||
-                                              !strcmp(c.purpose, "oil_temperature");
+                                              !strcmp(c.purpose, "oil_temperature") ||
+                                              !strcmp(c.purpose, "general_temperature");
             if (!thermocouplePurpose) return false;
             if (c.spiClk < 0 || c.spiCs < 0 || c.spiMiso < 0) return false;
             return c.temperatureInterface != 3 || c.spiMosi >= 0;
@@ -798,8 +909,23 @@ private:
                (!c.hasCurrent || (c.currentPin >= 0 && c.currentMvPerA > 0.0f &&
                                   c.currentZeroV >= 0.0f && c.currentZeroV <= 3.3f &&
                                   c.currentMaxAmps >= 0.0f &&
+                                  c.currentReadyAmps >= 0.0f &&
                                   c.currentTripDelayMs >= 100 &&
                                   c.currentTripDelayMs <= 60000)) &&
+               (!c.ignitionProfileConfigured ||
+                (c.direction == Output &&
+                 (!strcmp(c.purpose, "igniter") || !strcmp(c.purpose, "ab_igniter") ||
+                  !strcmp(c.purpose, "glow_plug")) &&
+                 c.ignitionMode <= 2 && c.ignitionDwellMs >= 1 && c.ignitionDwellMs <= 200 &&
+                 c.ignitionRestMs >= 1 && c.ignitionRestMs <= 200 &&
+                 isfinite(c.ignitionCoilSatAmps) && c.ignitionCoilSatAmps > 0.0f &&
+                 c.ignitionPreheatMs <= 3600000UL &&
+                 isfinite(c.ignitionPeakDemand) && c.ignitionPeakDemand >= 0.0f && c.ignitionPeakDemand <= 1.0f &&
+                 isfinite(c.ignitionHoldDemand) && c.ignitionHoldDemand >= 0.0f && c.ignitionHoldDemand <= 1.0f &&
+                 c.ignitionHotTimeoutMs >= 100UL && c.ignitionHotTimeoutMs <= 3600000UL &&
+                 (!c.pairedOutputId[0] || validId(c.pairedOutputId)) &&
+                 c.pairedOutputDelayMs <= 3600000UL &&
+                 isfinite(c.pairedOutputDemand) && c.pairedOutputDemand >= 0.0f && c.pairedOutputDemand <= 1.0f)) &&
                (!c.hasFlowMonitor ||
                 (c.direction == Output &&
                  (!strcmp(c.purpose, "oil_pump") || !strcmp(c.purpose, "scavenge_pump") ||
@@ -818,7 +944,8 @@ private:
             known = true;
         } else if (!strcmp(b.key, "main_fuel_output") ||
                    !strcmp(b.key, "main_fuel_shutoff") ||
-                   !strcmp(b.key, "main_starter")) {
+                   !strcmp(b.key, "main_starter") ||
+                   isCoreOutputBindingKey(b.key)) {
             expected = Output;
             known = true;
         }
@@ -833,6 +960,21 @@ private:
             if (!strcmp(b.key, "main_fuel_output")) return !strcmp(c->purpose, "main_fuel");
             if (!strcmp(b.key, "main_fuel_shutoff")) return !strcmp(c->purpose, "fuel_shutoff");
             if (!strcmp(b.key, "main_starter")) return !strcmp(c->purpose, "starter");
+            const char* expectedPurpose =
+                !strcmp(b.key, "starter_enable_output") ? "starter_enable" :
+                !strcmp(b.key, "primary_oil_pump") ? "oil_pump" :
+                !strcmp(b.key, "primary_scavenge_pump") ? "scavenge_pump" :
+                !strcmp(b.key, "primary_cooling_fan") ? "cooling_fan" :
+                !strcmp(b.key, "primary_bleed_valve") ? "bleed_valve" :
+                !strcmp(b.key, "primary_aux_fuel_pump") ? "fuel_pump" :
+                !strcmp(b.key, "primary_igniter") ? "igniter" :
+                !strcmp(b.key, "primary_secondary_igniter") ? "ab_igniter" :
+                !strcmp(b.key, "primary_ab_valve") ? "ab_valve" :
+                !strcmp(b.key, "primary_glow_plug") ? "glow_plug" :
+                !strcmp(b.key, "primary_ab_pump") ? "ab_pump" :
+                !strcmp(b.key, "primary_prop_pitch") ? "prop_pitch" :
+                !strcmp(b.key, "primary_air_starter") ? "air_starter" : nullptr;
+            if (expectedPurpose) return !strcmp(c->purpose, expectedPurpose);
             return true;
         }
         return find(b.channelId, Input) || find(b.channelId, Output);
@@ -852,6 +994,13 @@ private:
             if (!strcmp(id, "intake_temperature")) return "intake_temperature";
             if (!strcmp(id, "coolant_pressure")) return "coolant_pressure";
             if (!strcmp(id, "fuel_flow") || !strcmp(id, "fuel_flow_main")) return "fuel_flow";
+            if (!strcmp(id, "general_temperature")) return "general_temperature";
+            if (!strcmp(id, "general_pressure")) return "general_pressure";
+            if (!strcmp(id, "general_flow") || !strcmp(id, "general_flow_main")) return "general_flow";
+            if (!strcmp(id, "general_current") || !strcmp(id, "general_current_main")) return "general_current";
+            if (!strcmp(id, "general_voltage")) return "general_voltage";
+            if (!strcmp(id, "general_torque")) return "general_torque";
+            if (!strcmp(id, "general_thrust")) return "general_thrust";
             if (!strcmp(id, "oil_flow") || !strcmp(id, "oil_flow_main")) return "oil_flow";
             if (!strcmp(id, "scavenge_flow") || !strcmp(id, "scavenge_flow_main")) return "scavenge_flow";
             if (!strcmp(id, "flame_main")) return "flame";
@@ -867,6 +1016,13 @@ private:
                 !strcmp(role, "limp_mode")) return role;
             if (!strcmp(role, "digital_switch")) return "digital_switch";
             if (!strcmp(role, "speed")) return "shaft_speed";
+            if (!strcmp(role, "temperature")) return "general_temperature";
+            if (!strcmp(role, "pressure")) return "general_pressure";
+            if (!strcmp(role, "flow")) return "general_flow";
+            if (!strcmp(role, "current")) return "general_current";
+            if (!strcmp(role, "voltage")) return "general_voltage";
+            if (!strcmp(role, "torque")) return "general_torque";
+            if (!strcmp(role, "thrust")) return "general_thrust";
             return "generic";
         }
         if (!strcmp(id, "main_fuel") || !strcmp(id, "main_fuel_output")) return "main_fuel";
@@ -877,6 +1033,7 @@ private:
         if (!strcmp(id, "coolant_pump")) return "coolant_pump";
         if (!strcmp(id, "scavenge_pump") || !strcmp(id, "oil_scavenge_main")) return "scavenge_pump";
         if (!strcmp(id, "cooling_fan") || !strcmp(id, "cooling_fan_main")) return "cooling_fan";
+        if (!strcmp(id, "bleed_valve") || !strcmp(id, "bleed_valve_main")) return "bleed_valve";
         if (!strcmp(id, "igniter")) return "igniter";
         if (!strcmp(id, "ab_igniter") || !strcmp(id, "igniter2_main")) return "ab_igniter";
         if (!strcmp(id, "ab_solenoid")) return "ab_valve";
@@ -981,7 +1138,22 @@ private:
                 o["current_mv_a"] = c.currentMvPerA;
                 o["current_zero_v"] = c.currentZeroV;
                 o["current_max_a"] = c.currentMaxAmps;
+                if (!strcmp(c.purpose, "glow_plug")) o["current_ready_a"] = c.currentReadyAmps;
                 o["current_trip_delay_ms"] = c.currentTripDelayMs;
+            }
+            if (c.ignitionProfileConfigured) {
+                o["ignition_mode"] = c.ignitionMode;
+                o["ignition_dwell_ms"] = c.ignitionDwellMs;
+                o["ignition_rest_ms"] = c.ignitionRestMs;
+                o["ignition_coil_sat_a"] = c.ignitionCoilSatAmps;
+                o["ignition_preheat_ms"] = c.ignitionPreheatMs;
+                o["ignition_peak_demand"] = c.ignitionPeakDemand;
+                o["ignition_hold_demand"] = c.ignitionHoldDemand;
+                o["ignition_wait_hot"] = c.ignitionWaitUntilHot;
+                o["ignition_hot_timeout_ms"] = c.ignitionHotTimeoutMs;
+                if (c.pairedOutputId[0]) o["paired_output"] = c.pairedOutputId;
+                o["paired_output_delay_ms"] = c.pairedOutputDelayMs;
+                o["paired_output_demand"] = c.pairedOutputDemand;
             }
             if (c.hasFlowMonitor) {
                 o["has_flow_monitor"] = true;
@@ -1030,7 +1202,27 @@ private:
             c.temperatureInterface = o["temp_interface"] | 0; c.spiClk = o["spi_clk"] | -1; c.spiCs = o["spi_cs"] | -1; c.spiMiso = o["spi_miso"] | -1; c.spiMosi = o["spi_mosi"] | -1; strlcpy(c.tcType, o["tc_type"] | "K", sizeof(c.tcType));
             c.temperatureResolution = o["temp_resolution"] | 10; c.thermistorBeta = o["ntc_beta"] | 3950.0f; c.thermistorR0 = o["ntc_r0"] | 10000.0f; c.thermistorRFixed = o["ntc_r_fixed"] | 10000.0f; c.thermistorPullup = o["ntc_pullup"] | true;
             c.safeDemand = o["safe_demand"] | (!strcmp(c.purpose, "prop_pitch") ? 1.0f : 0.0f); c.forceSafeOnFault = o["force_safe_on_fault"] | false; c.minimumRunDemand = o["min_run_demand"] | 0.0f; c.pwmTimingConfigured = !o["pwm_freq_hz"].isNull() || !o["pwm_res_bits"].isNull(); c.pwmFrequency = o["pwm_freq_hz"] | 5000; c.pwmResolution = o["pwm_res_bits"] | 10;
-            c.inverted = o["invert"] | false; c.activeHigh = o["active_high"] | true; c.pullup = o["pullup"] | false; c.pulldown = o["pulldown"] | false; c.hasCurrent = o["has_current"] | false; c.currentPin = o["current_pin"] | -1; c.currentMvPerA = o["current_mv_a"] | 100.0f; c.currentZeroV = o["current_zero_v"] | 1.65f; c.currentMaxAmps = o["current_max_a"] | 0.0f; c.currentTripDelayMs = o["current_trip_delay_ms"] | 5000UL;
+            c.inverted = o["invert"] | false; c.activeHigh = o["active_high"] | true; c.pullup = o["pullup"] | false; c.pulldown = o["pulldown"] | false; c.hasCurrent = o["has_current"] | false; c.currentPin = o["current_pin"] | -1; c.currentMvPerA = o["current_mv_a"] | 100.0f; c.currentZeroV = o["current_zero_v"] | 1.65f; c.currentMaxAmps = o["current_max_a"] | 0.0f; c.currentReadyAmps = o["current_ready_a"] | 3.0f; c.currentTripDelayMs = o["current_trip_delay_ms"] | 5000UL;
+            c.ignitionProfileConfigured = !o["ignition_mode"].isNull() ||
+                !o["ignition_dwell_ms"].isNull() || !o["ignition_rest_ms"].isNull() ||
+                !o["ignition_coil_sat_a"].isNull() || !o["ignition_preheat_ms"].isNull() ||
+                !o["ignition_peak_demand"].isNull() || !o["ignition_hold_demand"].isNull() ||
+                !o["ignition_wait_hot"].isNull() || !o["ignition_hot_timeout_ms"].isNull() ||
+                !o["paired_output"].isNull() || !o["paired_output_delay_ms"].isNull() ||
+                !o["paired_output_demand"].isNull();
+            c.ignitionMode = o["ignition_mode"] | 0;
+            if (c.driver == Relay || c.driver == I2cRelay) c.ignitionMode = 0;
+            c.ignitionDwellMs = constrain(o["ignition_dwell_ms"] | 6, 1, 200);
+            c.ignitionRestMs = constrain(o["ignition_rest_ms"] | 3, 1, 200);
+            c.ignitionCoilSatAmps = o["ignition_coil_sat_a"] | 8.0f;
+            c.ignitionPreheatMs = constrain((uint32_t)(o["ignition_preheat_ms"] | 10000UL), (uint32_t)0, (uint32_t)3600000);
+            c.ignitionPeakDemand = constrain(o["ignition_peak_demand"] | 0.8f, 0.0f, 1.0f);
+            c.ignitionHoldDemand = constrain(o["ignition_hold_demand"] | 0.3f, 0.0f, 1.0f);
+            c.ignitionWaitUntilHot = o["ignition_wait_hot"] | false;
+            c.ignitionHotTimeoutMs = constrain((uint32_t)(o["ignition_hot_timeout_ms"] | 30000UL), (uint32_t)100, (uint32_t)3600000);
+            strlcpy(c.pairedOutputId, o["paired_output"] | "", sizeof(c.pairedOutputId));
+            c.pairedOutputDelayMs = constrain((uint32_t)(o["paired_output_delay_ms"] | 8000UL), (uint32_t)0, (uint32_t)3600000);
+            c.pairedOutputDemand = constrain(o["paired_output_demand"] | 1.0f, 0.0f, 1.0f);
             c.hasFlowMonitor = o["has_flow_monitor"] | false; c.minimumFlow = o["minimum_flow_l_min"] | 0.0f;
             strlcpy(c.flowInputId, o["flow_input"] | "", sizeof(c.flowInputId));
             if (c.pullup) c.pulldown = false;

@@ -24,17 +24,57 @@ class DUT:
         self._data_base = None
         self._last_wifi_reconnect = 0.0
 
-    def _reconnect_wifi(self):
+    def _reconnect_wifi(self, force=False):
         if os.name != "nt":
             return
         # A netsh connect issued while Windows is already associating tears
         # down that attempt and starts over. Throttle recovery requests so API
         # retry loops cannot keep the adapter permanently disconnected.
         now = time.monotonic()
-        if now - self._last_wifi_reconnect < 60.0:
+        if not force and now - self._last_wifi_reconnect < 5.0:
             return
+        connected_to_dut = False
+        try:
+            state = subprocess.run(
+                ["netsh", "wlan", "show", "interfaces"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=5,
+                check=False,
+            ).stdout
+            connected_to_dut = (
+                "State" in state and "connected" in state and
+                "SSID" in state and "OpenTurbine" in state
+            )
+            addresses = subprocess.run(
+                ["ipconfig"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=5,
+                check=False,
+            ).stdout
+            # Association alone is not enough: Windows can remain associated
+            # after losing the ECU DHCP lease and fall back to 169.254/16.
+            if connected_to_dut and "192.168.4." in addresses:
+                return
+            # Do not restart an association that Windows already has underway.
+            if "connecting" in state or "disconnecting" in state:
+                return
+        except Exception:
+            pass
         self._last_wifi_reconnect = now
         try:
+            if connected_to_dut:
+                subprocess.run(
+                    ["netsh", "wlan", "disconnect", "interface=Wi-Fi"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                )
+                time.sleep(0.5)
             subprocess.run(
                 ["netsh", "wlan", "connect", "name=OpenTurbine", "ssid=OpenTurbine", "interface=Wi-Fi"],
                 stdout=subprocess.DEVNULL,
@@ -73,9 +113,9 @@ class DUT:
                 time.sleep(0.35)
             except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as e:
                 last = e
-                # A transport retry must not tear down a healthy/associating
-                # WLAN link. Reboot-aware campaign guards explicitly request
-                # host reconnection after they have observed the AP outage.
+                # This is a no-op for a healthy 192.168.4.x association, but
+                # repairs a disconnected or APIPA-stuck Windows client.
+                self._reconnect_wifi()
                 time.sleep(0.4)
         raise last
 
@@ -192,6 +232,10 @@ class DUT:
     def stop(self):
         return self._post("/api/stop")
 
+    def clear_fault(self):
+        """Acknowledge a latched run fault after its stimulus and outputs are safe."""
+        return self.command("CLEAR_FAULT")
+
     # ── convenience ──────────────────────────────────────────
     def mode(self):
         return self.data().get("mode")
@@ -231,6 +275,10 @@ class DUT:
             self.stop()
             ok, d = self.poll_until(lambda x: x.get("mode") == "STANDBY", timeout=timeout)
             return ok, d
+        if d.get("mode") == "FAULT" and d.get("fault_latched"):
+            code, _ = self.clear_fault()
+            if code == 200:
+                return self.poll_until(lambda x: x.get("mode") == "STANDBY", timeout=min(timeout, 8.0))
         return d.get("mode") == "STANDBY", d
 
     def _ensure_toggle(self, key, cmd, want, settle=0.4):

@@ -1,5 +1,6 @@
 #pragma once
 #include "../IBlock.h"
+#include "../SequenceIgnition.h"
 #include "../../EngineData.h"
 #include "../../../system/Config.h"
 #include <Arduino.h>
@@ -151,8 +152,8 @@ public:
 
     void onExit() override {
         clearWaitReason();
-        // Cut AB igniter regardless of mode
-        EngineData::instance().igniter2On = false;
+        // Release the exact ignition device(s) used by this sequence.
+        clearSequenceIgnitionOutputs();
     }
 
 private:

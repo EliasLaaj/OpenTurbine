@@ -18,6 +18,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -3716,9 +3717,21 @@ func backupConfig() (string, error) {
 }
 
 func postMultipartFilesWithProgress(url string, paths []string, timeout time.Duration, progress func(done, total int64)) error {
-	var body bytes.Buffer
-	mw := multipart.NewWriter(&body)
+	if strings.HasSuffix(url, "/api/web_assets") {
+		return postWebAssetChunks(strings.TrimSuffix(url, "/api/web_assets")+"/api/web_asset_chunk", paths, timeout, progress)
+	}
+	if strings.HasSuffix(url, "/update") && len(paths) == 1 {
+		return postFirmwareChunks(strings.TrimSuffix(url, "/update")+"/api/firmware_chunk", paths[0], timeout, progress)
+	}
+	type uploadPart struct {
+		body        []byte
+		contentType string
+	}
+	parts := make([]uploadPart, 0, len(paths))
+	var total int64
 	for _, path := range paths {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
 		f, err := os.Open(path)
 		if err != nil {
 			return err
@@ -3733,26 +3746,128 @@ func postMultipartFilesWithProgress(url string, paths []string, timeout time.Dur
 		if copyErr != nil {
 			return copyErr
 		}
+		if err := mw.Close(); err != nil {
+			return err
+		}
+		payload := append([]byte(nil), body.Bytes()...)
+		parts = append(parts, uploadPart{body: payload, contentType: mw.FormDataContentType()})
+		total += int64(len(payload))
 	}
-	if err := mw.Close(); err != nil {
+	client := &http.Client{Timeout: timeout}
+	var completed int64
+	for _, part := range parts {
+		base := completed
+		reader := &uploadProgressReader{r: bytes.NewReader(part.body), total: int64(len(part.body)), progress: func(done, _ int64) {
+			if progress != nil {
+				progress(base+done, total)
+			}
+		}, last: time.Now().Add(-time.Second)}
+		req, err := http.NewRequest("POST", url, reader)
+		if err != nil {
+			return err
+		}
+		req.ContentLength = int64(len(part.body))
+		req.Header.Set("Content-Type", part.contentType)
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("board returned %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
+		}
+		completed += int64(len(part.body))
+	}
+	return nil
+}
+
+func postFirmwareChunks(endpoint, path string, timeout time.Duration, progress func(done, total int64)) error {
+	payload, err := os.ReadFile(path)
+	if err != nil {
 		return err
 	}
 	client := &http.Client{Timeout: timeout}
-	reader := &uploadProgressReader{r: bytes.NewReader(body.Bytes()), total: int64(body.Len()), progress: progress, last: time.Now().Add(-time.Second)}
-	req, err := http.NewRequest("POST", url, reader)
-	if err != nil {
-		return err
+	const chunkSize = 8 * 1024
+	for offset := 0; offset < len(payload); offset += chunkSize {
+		end := offset + chunkSize
+		if end > len(payload) {
+			end = len(payload)
+		}
+		final := "0"
+		if end == len(payload) {
+			final = "1"
+		}
+		u := endpoint + "?offset=" + strconv.Itoa(offset) + "&final=" + final
+		req, err := http.NewRequest("POST", u, bytes.NewReader(payload[offset:end]))
+		if err != nil {
+			return err
+		}
+		req.ContentLength = int64(end - offset)
+		req.Header.Set("Content-Type", "application/octet-stream")
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("board returned %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
+		}
+		if progress != nil {
+			progress(int64(end), int64(len(payload)))
+		}
 	}
-	req.ContentLength = int64(body.Len())
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
+	return nil
+}
+
+func postWebAssetChunks(endpoint string, paths []string, timeout time.Duration, progress func(done, total int64)) error {
+	const chunkSize = 8 * 1024
+	var total int64
+	for _, path := range paths {
+		st, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		total += st.Size()
 	}
-	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("board returned %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
+	client := &http.Client{Timeout: timeout}
+	var completed int64
+	for _, path := range paths {
+		payload, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for offset := 0; offset < len(payload); offset += chunkSize {
+			end := offset + chunkSize
+			if end > len(payload) {
+				end = len(payload)
+			}
+			final := "0"
+			if end == len(payload) {
+				final = "1"
+			}
+			u := endpoint + "?name=" + url.QueryEscape(filepath.Base(path)) + "&offset=" + strconv.Itoa(offset) + "&final=" + final
+			req, err := http.NewRequest("POST", u, bytes.NewReader(payload[offset:end]))
+			if err != nil {
+				return err
+			}
+			req.ContentLength = int64(end - offset)
+			req.Header.Set("Content-Type", "application/octet-stream")
+			resp, err := client.Do(req)
+			if err != nil {
+				return err
+			}
+			respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+			resp.Body.Close()
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				return fmt.Errorf("board returned %s: %s", resp.Status, strings.TrimSpace(string(respBody)))
+			}
+			completed += int64(end - offset)
+			if progress != nil {
+				progress(completed, total)
+			}
+		}
 	}
 	return nil
 }

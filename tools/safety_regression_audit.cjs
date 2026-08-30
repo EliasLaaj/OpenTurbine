@@ -46,12 +46,22 @@ const lossRecheck = read('src/hal/i2c/LossRecheck.h');
 const ntc = read('src/hal/sensors/NTCSensor.h');
 const sequenceHtml = read('data_src/sequence.html');
 const sequenceRules = read('data_src/pages/sequence-editor.js');
+const sequenceState = read('data_src/pages/sequence-state.js');
+const sequenceIgnition = read('src/engine/sequencer/SequenceIgnition.h');
+const abIgnite = read('src/engine/sequencer/blocks/ABIgnite.h');
 const hardwareHtml = read('data_src/hardware.html');
 const hardwareCatalog = read('data_src/pages/hardware-registry-catalog.js');
 const hardwareSave = read('data_src/pages/hardware-save.js');
 const hardwareState = read('data_src/pages/hardware-state.js');
 const hardwareRegistryView = read('data_src/pages/hardware-registry-view.js');
 const hardwareRegistryActions = read('data_src/pages/hardware-registry-actions.js');
+const configRender = read('data_src/pages/config-render.js');
+const registryFaultSafeEditor = hardwareHtml.match(
+  /function registryFaultSafeEditor[\s\S]*?function registryPwmTimingEditor/
+)?.[0] || '';
+const customControllerRenderer = configRender.match(
+  /function renderSimpleControls[\s\S]*?\/\/ ── Render form/
+)?.[0] || '';
 const calibrationHtml = read('data_src/calibration.html');
 const sequenceEngine = read('src/engine/sequencer/SequenceEngine.h');
 const toolsHtml = read('data_src/tools.html');
@@ -70,6 +80,7 @@ const changelog = read('CHANGELOG.md');
 const phase2Hil = read('dev/bench/campaign/phase2_safety_hil.py');
 const commandQueue = read('src/system/CommandQueue.h');
 const platformio = read('platformio.ini');
+const buildPatches = read('tools/pio_s3_dynconfig.py');
 
 const commandEnumBody = commandQueue.match(
   /enum class OTCommand[^{]*\{([\s\S]*?)\};/
@@ -118,12 +129,21 @@ expect('relay propeller pitch remains an explicit midpoint two-position command'
 expect('oil-pressure mapping is explicit',
   !hwConfig.includes('"oil_pressure_main", "pressure"'));
 expect('legacy oil loop binds explicit oil-pressure purpose',
-  hwConfig.includes('channelRegistry.inputs[i].purpose, "oil_pressure"') &&
-  !hwConfig.includes('channelRegistry.inputs[i].role, "pressure"'));
+  hwConfig.includes('strcmp(candidate.purpose, "oil_pressure")') &&
+  hwConfig.includes('if (matches != 1) pressure = nullptr') &&
+  !hwConfig.includes('strcmp(candidate.role, "pressure")'));
 expect('battery mapping is explicit',
   !hwConfig.includes('"battery_voltage", "voltage"'));
+expect('all operational N2 paths follow the fitted sensor rather than the retired master flag',
+  main.includes('case 6:  return hw.hasN2Rpm;') &&
+  configCpp.includes('case 6:  return HardwareConfig::hasN2Rpm;') &&
+  rulesEngine.includes('case N2_RPM:          return HardwareConfig::hasN2Rpm && ed.n2Healthy;') &&
+  web.includes('doc["has_n2"]                = HardwareConfig::hasN2Rpm;') &&
+  !flightRecorder.includes('hasTwoShaft &&'));
 expect('OTA and START share the canonical output-demand scan',
-  (web.match(/OutputActivity::anyPhysicalDemand/g) || []).length === 2);
+  (web.match(/OutputActivity::anyPhysicalDemand/g) || []).length >= 2 &&
+  web.includes('OutputActivity::anyPhysicalDemand(false)') &&
+  web.includes('OutputActivity::anyPhysicalDemand(true)'));
 expect('configuration writes and START share an atomic gate',
   web.includes('ConfigApplyGate::tryBeginWebWrite') &&
   web.includes('Config::persistJsonCandidateReleasing') &&
@@ -161,8 +181,9 @@ expect('starting and ignition I2C loss is noncritical after pre-start readiness'
   main.includes('unavailableEngineI2cOutput()'));
 expect('binary oil pumps use the same enum and endpoint semantics outside RUNNING',
   hardware.includes('g_blkCooldownSpin.oilPumpBinary = hw.hasOilPump && hw.oilPumpType == 2') &&
-  main.includes('bool binaryPump = hw.oilPumpType == 2') &&
-  main.includes('ed.oilPumpPct = ed.oilPumpPct > 0.0f ? 100.0f : 0.0f'));
+  main.includes('ChannelRegistry::driverIsOnOffOutput(selected->driver)') &&
+  main.includes('loopPct = 100.0f') && main.includes('loopPct = 0.0f') &&
+  main.includes('RulesEngine::applyActuatorDemand((uint8_t)selectedActuator'));
 expect('TLA threshold switches and torque use valid firmware contracts',
   channelRegistry.includes('oneOf(Digital, Analog, I2cDigital, I2cAnalog)') &&
   channelRegistry.includes('oneOf(Analog, I2cAnalog, I2cLoadCell)') &&
@@ -211,8 +232,9 @@ expect('successful I2C input and output transactions fully reset the 500 ms loss
   !i2cManager.includes('if (d) { d->present = true; d->lastSeenMs = _sampleMs[i]; }'));
 expect('relay-style igniters expose and retain only simple on-off behavior',
   hwConfig.includes('if (!igniterPwm) igniterCoil = false') &&
-  hwConfig.includes('c->driver == ChannelRegistry::Relay || c->driver == ChannelRegistry::I2cRelay') &&
-  hardwareCatalog.includes('Relay-style outputs use Simple on/off') &&
+  channelRegistry.includes('c.driver == Relay || c.driver == I2cRelay') &&
+  hardwareCatalog.includes('This relay-style output is a simple on/off igniter') &&
+  hardwareSave.includes('c.ignition_mode = 0') &&
   hardwareSave.includes('Simple on/off (relay capability)'));
 expect('wet-glow registry fuel replaces rather than duplicates the nested GPIO',
   hwConfig.includes('wetGlowFuelPin = -1') && hwConfig.includes('strcmp(c.purpose, "pilot_fuel")') &&
@@ -281,6 +303,12 @@ expect('transient feedback faults freeze fuel before latching reduced power',
   safety.includes('FEEDBACK_LOSS_CONFIRM_MS = 500') &&
   safety.includes('_confirmed(feedbackBlind') &&
   !governor.includes('ed.limpMode = true'));
+expect('current-trip feedback loss follows canonical demand for every physical output',
+  safety.includes('#include "../system/OutputActivity.h"') &&
+  safety.includes('OutputActivity::hasPhysicalEndpoint(c)') &&
+  safety.includes('OutputActivity::logicalDemand(c, i, ed)') &&
+  !safety.includes('!reg.ownsCoreOutput(c) && RelayDemand::requested(ed.registryOutputDemand[i])') &&
+  !safety.includes('HardwareConfig::hasOilPumpCurrentSensor && HardwareConfig::oilPumpCurrentMaxAmps'));
 expect('fuel response protection follows fitted main-fuel hardware',
   hardware.includes('if (hw.hasThrottle)') &&
   main.includes('HardwareConfig::hasThrottle') &&
@@ -320,6 +348,24 @@ expect('main and scavenge pumps have independent flow feedback purposes',
   channelRegistry.includes('"scavenge_flow"') &&
   channelRegistry.includes('hasFlowMonitor') &&
   safety.includes('c.minimumFlow'));
+expect('repeatable general typed sensors remain first-class registry inputs',
+  ['general_temperature','general_pressure','general_flow','general_current',
+   'general_voltage','general_torque','general_thrust'].every(purpose =>
+    channelRegistry.includes(`"${purpose}"`)) &&
+  hardwareHtml.includes('General temperature') &&
+  hardwareHtml.includes('General pressure') &&
+  hardwareHtml.includes('General flow') &&
+  hardwareHtml.includes('General current'));
+expect('each glow plug owns the behavior used by its exact sequence target',
+  main.includes('output->ignitionHoldDemand') &&
+  main.includes('const float demand = on ? _onDemand : 0.0f') &&
+  hardwareCatalog.includes('Ignition behavior for this glow plug') &&
+  hardwareCatalog.includes('Paired start-fuel output') &&
+  !configHtml.includes('Shared preheat profile used by Glow Preheat sequence blocks'));
+expect('windmilling oil protection is explicit opt-in and cannot drive a pump while disabled',
+  configCpp.includes('standbyOilEnabled   = false') &&
+  main.includes('!Config::standbyOilEnabled || !selectedUsable') &&
+  configHtml.includes('Enable Windmilling Oil Protection'));
 expect('scavenge flow remains observable during shutdown without retriggering shutdown',
   safety.includes('m == SysMode::SHUTDOWN) _checkOilFlow') &&
   safety.includes('(mode == SysMode::STARTUP || mode == SysMode::RUNNING)'));
@@ -347,7 +393,9 @@ expect('gradual limiters share the physical fuel floor but tune each feedback re
   throttleSlew.includes('(unrestrictedTarget - floor) * over * sourceStrength') &&
   throttleSlew.includes('n1LookaheadMs') && throttleSlew.includes('egtLookaheadMs') &&
   !throttleSlew.includes('float authority') &&
-  configHtml.includes('N1 Reduction Method') && configHtml.includes('Temperature Reduction Method'));
+  configHtml.includes('N1 Fuel-Limiting Mode') && configHtml.includes('Temperature Fuel-Limiting Mode') &&
+  configHtml.includes('Simple — measured value') && configHtml.includes('Advanced — predictive') &&
+  !configHtml.includes('N1 Reduction Method'));
 expect('afterburner EGT confirmation enforces its configured rise window',
   abFlameConfirm.includes('totRiseWindowMs > 0') &&
   abFlameConfirm.includes('elapsed >= (unsigned long)totRiseWindowMs') &&
@@ -393,7 +441,7 @@ expect('dedicated temperature interfaces ignore irrelevant analog range fields',
 expect('low-temperature interfaces cannot masquerade as turbine-gas feedback',
   channelRegistry.includes('const bool lowTemperaturePurpose') &&
   channelRegistry.includes('if (!lowTemperaturePurpose || turbineGasPurpose) return false') &&
-  hardwareHtml.includes('NTC and DS18B20 interfaces are only for oil, coolant, intake or ambient temperature'));
+  hardwareHtml.includes('NTC and DS18B20 interfaces require a low-range or general temperature purpose'));
 expect('GlowPreheat help redirects missing hardware to the installed-output editor',
   sequenceHtml.includes("bname === 'GlowPreheat' && !actuatorEnabled('glow_plug')") &&
   sequenceHtml.includes("/hardware.html#registry-outputs"));
@@ -426,7 +474,20 @@ expect('standby control-rule masks survive validation and both load paths',
   !configCpp.includes('r.modeMask &= 0x0E') &&
   !configCpp.includes('rules[i].modeMask &= 0x0E'));
 expect('full restore publishes its reboot guard before releasing maintenance ownership',
-  /_scheduleRestart\("engine config restore"\);\s*_finishConfigRestore\(\);/.test(web));
+  (() => {
+    const route = web.slice(web.indexOf('POST /api/ecu_config'), web.indexOf('// 404'));
+    const reply = route.lastIndexOf('req->send(200, "application/json"');
+    const guard = route.lastIndexOf('_scheduleRestart("engine config restore")');
+    const release = route.lastIndexOf('_finishConfigRestore()');
+    return reply >= 0 && reply < guard && guard < release;
+  })());
+expect('Classic full restore streams the exact validated settings and borrows fixed web workspaces safely',
+  web.includes('static constexpr const char* SETTINGS_STAGE = "/config_apply.tmp"') &&
+  web.includes('static constexpr const char* HARDWARE_STAGE = "/ecu_config.hardware.tmp"') &&
+  web.includes('heap_caps_free(g_webRxStorage)') &&
+  web.includes('heap_caps_free(g_webTxStorage)') &&
+  web.includes('Config::saveStagedJsonCandidate(uploadedSettingsLen, true)') &&
+  configCpp.includes('bool Config::saveStagedJsonCandidate(size_t settingsLen'));
 expect('registry import enforces the browser purpose-role-driver contract',
   channelRegistry.includes('purposeRoleDriverValid(c.direction, c.purpose, c.role, c.driver)') &&
   channelRegistry.includes('if (!strcmp(purpose, "main_fuel")) return output("fuel", false, true, true, false)') &&
@@ -508,8 +569,19 @@ expect('N1 feedback-loss limp is independent of the optional underspeed limit',
   safety.includes('if (minRpm > 0.0f && ed.n1Healthy && ed.n1Rpm < minRpm)') &&
   safety.includes('LIMP: N1 feedback lost'));
 expect('empty session-log selection does not write timestamp-only run files',
-  sessionLogger.includes('if (Config::sessionLogMask == 0)') &&
+  sessionLogger.includes('if (Config::sessionLogMask == 0 && _registryCaptureMask == 0)') &&
   sessionLogger.includes('_startPending = false;'));
+expect('general sensor session logging persists and resolves stable selected channel IDs',
+  configSerialize.includes('sl["registry_inputs"].as<JsonArrayConst>()') &&
+  configSerialize.includes('sl["registry_inputs"].to<JsonArray>()') &&
+  sessionLogger.includes('_prepareRegistryCaptureMask()') &&
+  sessionLogger.includes('Config::sessionRegistryInputIds[selected]') &&
+  sessionLogger.includes('row.registryInputs[i] = ed.registryInputValue[i]'));
+expect('logging UI offers each fitted general sensor independently',
+  logHtml.includes('data-registry-log-id') &&
+  logHtml.includes("purpose.startsWith('general_')") &&
+  logHtml.includes('patch.session_log.registry_inputs') &&
+  !logHtml.includes('data-bit="general_inputs"'));
 expect('flash persistence is prohibited while engine control is active',
   web.includes('const bool storageWritesSafe = mode == SysMode::STANDBY || mode == SysMode::FAULT') &&
   web.includes('if (storageWriteWindow) FlightRecorder::runEviction()') &&
@@ -517,10 +589,12 @@ expect('flash persistence is prohibited while engine control is active',
   web.includes('if (storageWriteWindow && !_hwRebootPending) Config::flushPendingSave()') &&
   web.includes('if (storageWriteWindow) Config::flushPendingRuntimeStats()'));
 expect('flash-backed asset responses lease LittleFS against concurrent writes',
-  web.includes('class LeasedAssetResponse final : public AsyncFileResponse') &&
+  web.includes('class LeasedCallbackResponse final : public AsyncCallbackResponse') &&
   web.includes('++s_activeAssetResponses') &&
   web.includes('if (s_activeAssetResponses) --s_activeAssetResponses') &&
-  web.includes('new (std::nothrow) LeasedAssetResponse(path, contentType)') &&
+  web.includes('new (std::nothrow) LeasedCallbackResponse(') &&
+  web.includes("File source = LittleFS.open(path, \"r\")") &&
+  web.includes("if (count && index + count >= fileSize && !leaseReleased->exchange(true))") &&
   web.includes('s_storageWriteActive = true') &&
   web.includes('if (storageWriteWindow) _endStorageWriteWindow()'));
 expect('config UI PATCH sends only recap-listed changed fields',
@@ -528,7 +602,7 @@ expect('config UI PATCH sends only recap-listed changed fields',
   configHtml.includes('if (!changedKeys.has(field.key)) return') &&
   !configHtml.includes('let payload = cfg'));
 expect('config UI does not race a full settings reread after minimal PATCH',
-  configHtml.includes('Keep the exact values just sent as the new baseline') &&
+  configHtml.includes('Developer-Mode live tuning is deliberately kept') &&
   !configHtml.includes('cfg = await fetchAppliedConfig()'));
 const pioHook = fs.readFileSync(path.join(root, 'tools', 'pio_s3_dynconfig.py'), 'utf8');
 expect('Tools polls compact live telemetry after loading its configuration and hardware documents',
@@ -544,22 +618,29 @@ expect('runtime configuration heap pressure fails without rebooting the ECU',
   !main.includes('rebooting safely into persisted settings'));
 expect('mirrored outputs use an explicit stable source and retain independent electrical protection',
   hardware.includes('if (c.mirrorOf[0])') &&
-  hardware.includes('sourceDemand(*source') &&
+  hardware.includes('OutputActivity::logicalDemand(*source, sourceIndex, ed)') &&
   channelRegistry.includes('char mirrorOf[20]') &&
   channelRegistry.includes('currentTripDelayMs'));
+expect('one canonical output activity lookup follows applied fuel and qualified starter demand',
+  outputActivity.includes('ed.mainFuelAppliedDemand') &&
+  outputActivity.includes('ed.effectiveStarterDemand') &&
+  hardware.includes('OutputActivity::logicalDemand(c, i, ed)') &&
+  !hardware.includes('auto sourceDemand ='));
+expect('bleed valve has one built-in owner across native and I2C output paths',
+  channelRegistry.includes('!strcmp(purpose, "bleed_valve")') &&
+  outputActivity.includes('return constrain(ed.bleedValveDemand, 0.0f, 1.0f)') &&
+  hardware.includes('case REG_OUTPUT_BLEED_VALVE: if (coreOwner)'));
 expect('HTTP TIME_WAIT diagnostics never mutate live lwIP PCB state',
   web.includes('if (pcb->local_port == 80) ++count;') &&
   web.includes('s_httpTimeWaitPcbs = count') &&
   !web.includes('tcp_abort(oldest)') &&
   !web.includes('MIN_REAP_AGE_TICKS'));
-expect('HTTP completion gracefully closes after queued response bytes are acknowledged',
-  pioHook.includes('AsyncTCP retains the PCB and retries') &&
-  pioHook.includes('_client->close();') &&
-  !pioHook.includes('_client->abort();'));
-expect('graceful HTTP close is retried from poll when the final ACK cannot close lwIP yet',
-  pioHook.includes('No further ACK callback is guaranteed') &&
-  pioHook.includes('retry graceful close from the normal poll') &&
-  pioHook.includes('if (!_response->_finished())'));
+expect('HTTP completion leaves advertised close ownership with the peer',
+  pioHook.includes('Let the HTTP peer retire completed') &&
+  pioHook.includes('a short page tour exhausts Classic. Waiting') &&
+  pioHook.includes('for the peer FIN moves TIME_WAIT') &&
+  pioHook.includes('if (!_response->_finished())') &&
+  !pioHook.includes('AsyncTCP retains the PCB and retries'));
 expect('AsyncTCP retries graceful close instead of aborting queued response bytes',
   pioHook.includes('patch_asynctcp_graceful_close') &&
   pioHook.includes('_bind_tcp_callbacks(pcb, msg->close)') &&
@@ -603,6 +684,14 @@ expect('maintenance transactions release disposable compact telemetry state',
   web.includes('s_restTelemetryDoc.shrinkToFit();'));
 expect('config PATCH releases its large temporary JSON tree before allocating the response',
   /ConfigApplyGate::publishCandidate\([\s\S]{0,700}current\.clear\(\);[\s\S]{0,200}current\.shrinkToFit\(\);[\s\S]{0,200}req->send\(200, "application\/json", active/.test(web));
+expect('Developer live tuning avoids flash and defers persistence until outputs are safe',
+  web.includes('Live tuning must never program or read flash while the ECU') &&
+  /publishCandidate\(candidateJson, candidateLen,\s*activePatch \? 100 : 1000,\s*activePatch\)/.test(web) &&
+  web.includes('persist\\\":\\\"deferred_until_safe') &&
+  main.includes('Config::applyJsonLivePatch(candidate)') &&
+  main.includes('if (!livePatchCandidate && hasCandidate && !retryForHeap)') &&
+  main.includes('if (livePatchCandidate) Config::requestSave();') &&
+  configCpp.includes('bool Config::applyJsonLivePatch(const JsonDocument& patch)'));
 expect('settings saves retire disposable live telemetry before constructing full validation trees',
   (web.match(/_releaseLiveTelemetryWorkspace\(\);/g) || []).length >= 4 &&
   web.includes('handoff live instead of rebooting into the persisted file'));
@@ -664,10 +753,30 @@ expect('every enabled oil loop makes its pressure feedback operationally require
 expect('start fuel and registry starter channels join the immediate shutdown cut',
   hardware.includes('!strcmp(purpose, "pilot_fuel")') &&
   hardware.includes('registryStarterPurpose') && main.includes('cutRegistryHazardousDemands'));
+expect('fuel and ignition safety descriptions cover every firmware immediate-cut purpose',
+  ['main_fuel','fuel_shutoff','fuel_pump','pilot_fuel','igniter','ab_igniter',
+   'ab_valve','ab_pump','glow_plug'].every(purpose =>
+    registryFaultSafeEditor.includes(`'${purpose}'`) &&
+    customControllerRenderer.includes(`'${purpose}'`)));
+expect('generic output overcurrent shutdown preserves the configured actuator name',
+  safety.includes('_trigger("OUTPUT_OVERCURRENT", c.name[0] ? c.name : c.id);') &&
+  safety.includes('strcmp(code, "OUTPUT_OVERCURRENT") == 0') &&
+  safety.includes('detail && detail[0] ? detail : "An output"'));
+expect('accepted STOP and fault transitions cut hazardous hardware before sensor work',
+  hardware.includes('inline void cutHazardousOutputsNow(bool includeStarter = true)') &&
+  hardware.includes('Oil, scavenge and cooling outputs are deliberately left') &&
+  main.includes('if (writePhysical) Hardware::cutHazardousOutputsNow();') &&
+  main.indexOf('checkStopSwitch();') < main.indexOf('Hardware::updateSensors();'));
 expect('standalone start fuel is not overwritten by wet-glow ownership',
   hardware.includes('const bool wetGlowOwned') &&
   hardware.includes('hw.hasGlowPlug && hw.glowPlugType == 2') &&
   !hardware.includes('if (!strcmp(c.purpose, "pilot_fuel") ||\n                !strcmp(c.purpose, "wet_glow_fuel"))'));
+expect('wet-glow registry fuel has one supported pilot-fuel purpose and owner',
+  !hardware.includes('REG_OUTPUT_WET_GLOW_FUEL') &&
+  !hardware.includes('g_registryOutputPlan.wetGlowFuel') &&
+  !outputActivity.includes('wet_glow_fuel') &&
+  !registryFaultSafeEditor.includes("'wet_glow_fuel'") &&
+  !customControllerRenderer.includes("'wet_glow_fuel'"));
 expect('critical safety capability checks reject generic temperature and voltage roles',
   !capabilities.includes('hasInputRole("temperature")') && !capabilities.includes('hasInputRole("voltage")'));
 expect('cooldown defaults agree at sixty seconds',
@@ -684,7 +793,8 @@ expect('custom feedback control has target-source choices, bumpless handover, an
   configHtml.includes('Hold a feedback target') &&
   configHtml.includes('Two-state switch') && configHtml.includes('Variable input mapping') &&
   rulesEngine.includes('FeedbackControlMath::step') &&
-  rulesEngine.includes('Automatic idle is a floor'));
+  rulesEngine.includes('Automatic Idle is a floor') &&
+  rulesEngine.includes('ed.dynamicIdleFloorDemand'));
 expect('custom controllers expose normal operating states but never FAULT ownership',
   configHtml.includes('When this controller is active') &&
   configHtml.includes('Standby') && configHtml.includes('Startup') &&
@@ -709,6 +819,21 @@ expect('multiple oil systems use explicit pressure and pump bindings',
   hwConfig.includes('strcmp(pressureCh->purpose, "oil_pressure") != 0') &&
   hardwareHtml.includes("input: new Set(['n1_speed','n2_speed','tot','tit','oil_temperature'") &&
   hardwareHtml.includes('output: new Set()'));
+expect('auxiliary actuator limits follow the explicit primary owner instead of registry order',
+  hardware.includes('if (reg.ownsCoreOutput(c))') &&
+  hardware.includes('Use the explicit core owner, never the') &&
+  !hardware.includes('kind == REG_OUTPUT_COOLING_FAN && g_registryOutputPlan.coolingFan < 0') &&
+  channelRegistry.includes('Several %s outputs are fitted; select one primary device'));
+expect('shared wet-glow pilot fuel is used only when exactly one candidate exists',
+  hardware.includes('if (pilotFuelCount == 1) g_registryOutputPlan.pilotFuel = solePilotFuel') &&
+  hardware.includes('Device-local wet-glow pairing is preferred'));
+expect('normal sequence ignition cleanup is exact while emergency cuts remain category-wide',
+  sequenceIgnition.includes('sequenceIgnitionMask') &&
+  sequenceIgnition.includes('RulesEngine::applyActuatorDemand') &&
+  sequenceIgnition.includes('ed.igniter2On = false') &&
+  abIgnite.includes('setSequenceIgnitionTracked(outputIndex, true)') &&
+  sequenceState.includes('clearTrackedIgnitionPreviewState') &&
+  main.includes('cutCombustionAndStarterNow()'));
 expect('FinalStop waits for its timeout when N1 is missing or unhealthy',
   finalStop.includes('bool stopped = HardwareConfig::hasN1Rpm') &&
   finalStop.includes('&& ed.n1Healthy') &&
@@ -894,12 +1019,17 @@ expect('calibration PATCH uses the actual persisted channel id after purpose-bas
   calibrationHtml.includes("registryCalibrationPatch('torque',") &&
   !calibrationHtml.includes("registryCalibrationPatch('torque_main',"));
 expect('calibration settings save only changed fields and cannot overwrite a stale full snapshot',
-  calibrationHtml.includes("fetch('/api/config', {method:'PATCH'") &&
+  calibrationHtml.includes('window.OTSaveConfigPatch(patch)') &&
+  webApp.includes("fetch('/api/config', {") &&
+  webApp.includes("method:'PATCH'") &&
+  webApp.includes("const engineResponse = await fetch('/api/ecu_config', {cache:'no-store'});") &&
+  webApp.includes('merge(engine.settings, patch);') &&
   !calibrationHtml.includes("fetch('/api/config').then"));
 expect('session logging settings patch only their owned fields',
-  logHtml.includes("method: 'PATCH'") &&
-  logHtml.includes('body: JSON.stringify(patch)') &&
-  !logHtml.includes("method: 'POST',\n      body: JSON.stringify(cfg)"));
+  logHtml.includes('const patch = {') &&
+  logHtml.includes('session_log:{interval_ms:Math.round(sessionInterval)}') &&
+  logHtml.includes('patch.session_log.registry_inputs =') &&
+  logHtml.includes('window.OTSaveConfigPatch(patch)'));
 expect('coolant pressure offers the same local and shared-I2C analog adapters as other pressure sensors',
   hardwareCatalog.includes("{value:'coolant_pressure',label:'Coolant pressure',role:'pressure',drivers:[1,9]"));
 expect('atomic sequence saves preserve unrelated settings changed after the page was loaded',
@@ -912,7 +1042,7 @@ expect('atomic sequence saves preserve unrelated settings changed after the page
 expect('generic shared-I2C channels are first-class custom-block and simple-control channels',
   sequenceHtml.includes('if (!registryChannelInstalled(c)) return;') &&
   sequenceHtml.includes('if (registryInputCoreBound(c)) return;') &&
-  sequenceHtml.includes('if (!registryChannelInstalled(c) || registryOutputCoreBound(c)) return;') &&
+  sequenceHtml.includes("if (!registryChannelInstalled(c) || String(c.mirror_of || '') || registryOutputCoreBound(c)) return;") &&
   configHtml.includes('function simpleControlInputs()') &&
   configHtml.includes('function simpleControlOutputs()'));
 expect('configured I2C drain and purge valves participate in device-loss guards',
@@ -947,7 +1077,8 @@ expect('registry-owned proportional starter gates use one writer and pass readin
   hardware.includes('if (!output || output->driver == ChannelRegistry::Relay)'));
 expect('physical-output activity follows the real core owner and accepts neutral parked pitch',
   outputActivity.includes('const bool core = reg.ownsCoreOutput(c) || reg.boundToCoreOutput(c)') &&
-  outputActivity.includes('!strcmp(p, "bleed_valve") || !strcmp(c.id, "bleed_valve")') &&
+  outputActivity.includes('if (!strcmp(p, "bleed_valve"))') &&
+  hwConfig.includes('strlcpy(output.purpose, "bleed_valve", sizeof(output.purpose))') &&
   outputActivity.includes('demand >= parked - 0.001f && demand <= parked + 0.001f') &&
   outputActivity.includes('return index < ChannelRegistry::MAX_OUTPUT_CHANNELS'));
 expect('pitch park zero survives serialization and hardware-save restart handoff',
@@ -1019,11 +1150,19 @@ expect('engine run accounting uses explicit lifecycle state instead of timestamp
   main.includes('_runTimingActive   = true;') &&
   main.includes('if (_runTimingActive) {') &&
   web.includes('ed.mode == SysMode::RUNNING && !ed.benchMode && !ed.devMode'));
-expect('automatic relight window and extra cooldown use explicit idempotent state',
-  safety.includes('if (!_relightWindowActive) {') &&
-  safety.includes('_relightWindowActive = true;') &&
+expect('automatic relight trigger and extra cooldown use explicit idempotent state',
+  safety.includes('if (!_relightLatched &&') &&
+  safety.includes('_relightLatched = true;') &&
   main.includes('if (pkt.iParam > 0 && !ed.extraCooldownActive)') &&
   main.includes('} else if (pkt.iParam <= 0) {'));
+expect('combustion-loss shutdown and automatic relight are independent monitors',
+  safety.includes('Independent combustion-loss protection') &&
+  safety.includes('Config::relightEnabled') &&
+  safety.includes('_relightTriggerLost(ed)') &&
+  safety.includes('_trigger("FLAMEOUT")') &&
+  main.includes('g_safety.setExternalFault("RELIGHT_FAILED")') &&
+  configHtml.includes('How Relight Is Triggered') &&
+  configHtml.includes('does not enable, disable, or delay the separate combustion-loss shutdown protection'));
 expect('I2C loss recheck treats millis zero as a valid failure timestamp',
   i2cManager.includes('bool lossActive;') &&
   i2cManager.includes('d->lossActive = true;') &&
@@ -1035,6 +1174,19 @@ expect('flight recorder run summary uses explicit run lifecycle state',
   flightRecorder.includes('_runActive = true;') &&
   flightRecorder.includes('if (!_runActive) return;') &&
   flightRecorder.includes('_runActive = false;'));
+expect('flight recorder event snapshots and run summaries omit unfitted sensors',
+  flightRecorder.includes('if (hw.hasN1Rpm)') &&
+  flightRecorder.includes('if (hw.hasTot)') &&
+  flightRecorder.includes('if (HardwareConfig::hasN1Rpm && s_runN1Seen)') &&
+  flightRecorder.includes('if (HardwareConfig::hasTot && s_runTotSeen)') &&
+  (flightRecorder.match(/appendFittedSensorFields\(buf, sizeof\(buf\), n\)/g) || []).length === 4);
+expect('flight recorder run peaks reject unhealthy samples and omit never-valid fields',
+  flightRecorder.includes('hw.hasN1Rpm && ed.n1Healthy') &&
+  flightRecorder.includes('hw.hasN2Rpm && ed.n2Healthy') &&
+  flightRecorder.includes('hw.hasTot && ed.totHealthy') &&
+  flightRecorder.includes('hw.hasTit && ed.titHealthy') &&
+  flightRecorder.includes('hw.hasOilPress && ed.oilHealthy') &&
+  flightRecorder.includes('if (s_runOilSeen)'));
 expect('governor handoff and ownership labels reset across non-operating modes',
   hardware.includes('if (mode != SysMode::RUNNING && mode != SysMode::STARTUP) {\n            governorHandoffWasActive = false;') &&
   main.includes('const bool controllersMayOwn = ownerEd.mode == SysMode::STARTUP ||') &&
@@ -1066,8 +1218,9 @@ expect('PWM timing is constrained by real timer capability in firmware and Hardw
   hardwareCatalog.includes('const maxFreq = Math.min(100000, Math.floor(80000000 /') &&
   hardwareRegistryView.includes('PWM timing is not achievable'));
 expect('glow PWM has one canonical timing authority while wet-glow fuel keeps its independent timer',
-  hardwareCatalog.includes('Glow PWM carrier and resolution are configured once under Advanced output settings below.') &&
-  hardwareCatalog.includes("setAct('glow_plug','fuel_freq_hz'") &&
+  hardwareCatalog.includes('PWM carrier frequency (Hz)') &&
+  hardwareCatalog.includes('paired_output_delay_ms') &&
+  hardwareCatalog.includes('Pilot-fuel delay (ms)') &&
   !hardwareCatalog.includes("setAct('glow_plug','freq_hz'"));
 expect('web START timeout cancels unclaimed work and the ECU discards every canceled request',
   commandQueue.includes('claimPendingResult(uint32_t requestId)') &&
@@ -1088,8 +1241,18 @@ expect('output re-purpose and removal preserve explicit ownership and stable num
   hardwareRegistryActions.includes('function shiftRegistryNumericHandlesAfterRemoval(') &&
   hardwareRegistryActions.includes('shiftRegistryNumericHandlesAfterRemoval(item.direction, item.index, rows.length);') &&
   hardwareRegistryActions.includes("shiftRegistryNumericHandlesAfterRemoval(direction, index, r[direction + 's'].length);"));
-expect('STOP cleanup explicitly clears both bleed-valve state representations',
-  main.includes('ed.bleedValveDemand = 0.0f;\n    ed.bleedValveOpen = false;'));
+expect('bleed, fan and scavenge On/Off telemetry derives from canonical demand',
+  web.includes('RelayDemand::requested(ed.bleedValveDemand)') &&
+  web.includes('RelayDemand::requested(ed.coolFanDemand)') &&
+  web.includes('RelayDemand::requested(ed.oilScavengeDemand)') &&
+  !engineData.includes('bleedValveOpen') &&
+  !engineData.includes('coolFanOn') &&
+  !engineData.includes('oilScavengeOn'));
+expect('central runtime data has no write-only AB adapter or protected-throttle mirrors',
+  !engineData.includes('abFlameAdapter') &&
+  !engineData.includes('protectedThrottleDemand') &&
+  !hardware.includes('abFlameAdapter') &&
+  !read('src/engine/controllers/ThrottleSlew.h').includes('protectedThrottleDemand'));
 expect('full telemetry defers without a conflict when the bounded response workspace is busy',
   web.includes('bool allowDeferredSnapshot = false') &&
   web.includes('{\\"_snapshot_deferred\\":true}') &&
@@ -1105,6 +1268,9 @@ expect('low-heap request rejection uses the framework-safe abort path only on Cl
   (web.match(/request->abort\(\)/g) || []).length >= 1 &&
   web.includes('if (req->client()) req->abort();') &&
   !web.includes('req->client()->close()'));
+expect('dependency header-retention patch is idempotent across repeated builds',
+  buildPatches.includes('if retain_needed in text:') &&
+  buildPatches.includes('pass\n    elif retain_all in text:'));
 expect('both targets use the bounded transfer workspace for large config reads',
   web.includes('Settings can exceed 7 KB') &&
   web.includes('_sendLargeReadJson(req, g_webTxBuf, n);') &&
@@ -1112,6 +1278,19 @@ expect('both targets use the bounded transfer workspace for large config reads',
 expect('completed bounded log views release their read gate before TCP keep-alive teardown',
   web.includes('The LittleFS read and response construction are complete.') &&
   (web.match(/_releaseLogRead\(req\);/g) || []).length >= 3);
+expect('complete engine restores separate portable value checks from uploaded-hardware dependencies',
+  configCpp.includes('return validateSettingsDoc(doc, false);') &&
+  configCpp.includes('bool Config::validateRuntimeHardwareDependencies()') &&
+  web.includes('HardwareConfig::applyValidatedJsonRuntimeOnly(*hwDoc);') &&
+  web.includes('if (!Config::validateRuntimeHardwareDependencies())'));
+expect('Classic engine restore parses staged settings after releasing the receive workspace',
+  web.includes('Parse directly from the staged file') &&
+  web.includes('heap_caps_free(g_webRxStorage);') &&
+  web.includes('deserializeJson(*uploadedSettings, stagedSettings)'));
+expect('abandoned large read responses cannot strand same-tab page navigation',
+  web.includes('A new same-tab read must supersede that response') &&
+  web.includes('if (g_webRxOwner && !g_webRxResponseLease &&') &&
+  web.includes('g_webRxOwner = req;'));
 expect('session logging keeps usable target-aware filesystem headroom',
   sessionLogger.includes('LittleFS.totalBytes() / 8U') &&
   sessionLogger.includes('SESSION_MIN_RESERVE_BYTES = 32 * 1024') &&
@@ -1139,21 +1318,49 @@ expect('normal dashboard and calibration telemetry use a uniform 2 Hz compact HT
   webApp.includes('return 500;') &&
   webApp.includes('const period = Math.max(500, desiredPullPeriodMs());') &&
   webApp.includes('setInterval(restTelemetryFallbackNow, period);'));
-expect('web assets and JSON replies reuse bounded HTTP connections',
-  (web.match(/addHeader\("Connection", "keep-alive"\)/g) || []).length >= 3 &&
-  web.includes('addHeader("Keep-Alive", "timeout=15, max=64")') &&
-  web.includes('addHeader("Keep-Alive", "timeout=3, max=32")') &&
-  web.includes('resp->addHeader("Keep-Alive", "timeout=5, max=16")') &&
-  web.includes('TIME_WAIT PCB per page change'));
+expect('web assets and JSON replies declare the server one-response lifecycle',
+  (web.match(/addHeader\("Connection", "close"\)/g) || []).length >= 3 &&
+  !web.includes('addHeader("Connection", "keep-alive")') &&
+  web.includes('do not invite') &&
+  web.includes('State the actual one-response lifecycle') &&
+  buildPatches.includes('Let the HTTP peer retire completed'));
 expect('Hardware uses its sufficient one-hertz REST status path without competing websocket ownership',
   hardwareState.includes("fetch('/api/telemetry'") &&
   hardwareState.includes('setInterval(refreshHardwareStatus, 1000)') &&
+  hardwareState.includes('setTimeout(() => controller.abort(), 8000)') &&
+  hardwareHtml.includes('const loaded = await loadHardware();') &&
+  hardwareHtml.includes('if (loaded) startStatusPoll();') &&
   !hardwareState.includes('new WebSocket('));
+expect('sequence device selectors group purpose matches and auto-select only a sole suggested output',
+  sequenceRules.includes("group('Suggested', suggested)") &&
+  sequenceRules.includes("group('Other fitted outputs', other)") &&
+  sequenceRules.includes('if (!target && suggested.length === 1)') &&
+  sequenceRules.includes('hwCfg[deviceTargetSeqKey(tab)][idx] = target;') &&
+  sequenceRules.includes("return suggested.length === 1 ? String(suggested[0].id || '') : '';"));
+expect('ignition sequence targets remain limited to fitted ignition devices',
+  sequenceRules.includes("(!isIgnitionBlock(bname) || purposes.includes(String(channel.purpose || '')))") &&
+  main.includes('!ignitionOutputPurpose(output->purpose)') &&
+  main.includes('isIgnitionTargetBlock(names[i]) &&'));
 expect('Sequence and Tools use compact REST telemetry without page-local websocket ownership',
   sequenceRules !== undefined &&
   read('data_src/pages/sequence-runtime.js').includes("fetch('/api/telemetry'") &&
   !read('data_src/pages/sequence-runtime.js').includes('new WebSocket(') &&
   toolsHtml.includes("fetchJsonWithTimeout('/api/telemetry', 3000)") &&
   !toolsHtml.includes('new WebSocket('));
+expect('factory auxiliary-output bindings use the fitted registry IDs',
+  hwConfig.includes('"primary_scavenge_pump", "scavenge_pump"') &&
+  hwConfig.includes('"primary_cooling_fan", "cooling_fan"') &&
+  hwConfig.includes('"primary_bleed_valve", "bleed_valve"') &&
+  !hwConfig.includes('"primary_scavenge_pump", "oil_scavenge_main"') &&
+  !hwConfig.includes('"primary_cooling_fan", "cooling_fan_main"') &&
+  !hwConfig.includes('"primary_bleed_valve", "bleed_valve_main"'));
+expect('fresh factory sequences expose simple device commands as editable Set Output blocks',
+  hwConfig.includes('auto modernizeDefaultActions =') &&
+  hwConfig.includes('strlcpy(names[i], "SetOutput"') &&
+  hwConfig.includes('strlcpy(enter[i][0].targetId, outputId') &&
+  hwConfig.includes('modernizeDefaultActions(startupSeq, startupSeqLen, startupEnterActions);') &&
+  hwConfig.includes('modernizeDefaultActions(shutdownSeq, shutdownSeqLen, shutdownEnterActions);') &&
+  hwConfig.includes('modernizeDefaultActions(abSeq, abSeqLen, abEnterActions);') &&
+  hwConfig.includes('modernizeDefaultActions(abShutSeq, abShutSeqLen, abShutEnterActions);'));
 
 console.log(`Safety regression audit passed (${checks.length} checks).`);

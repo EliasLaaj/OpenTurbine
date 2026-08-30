@@ -31,6 +31,11 @@ namespace OutputActivity {
             if (!strcmp(c.purpose, "prop_pitch")) {
                 const float parked = constrain(c.safeDemand, 0.0f, 1.0f);
                 if (demand >= parked - 0.001f && demand <= parked + 0.001f) continue;
+                // Fault shutdown deliberately commands full coarse pitch even
+                // when the ordinary STANDBY park position is different. That
+                // load-reducing position is safe and must not make Clear fault,
+                // restore, or recovery impossible forever.
+                if (ed.faultLatched && demand >= 0.999f) continue;
             }
             if (allowStandbyOilFeed && ed.standbyOilFeedActive && !strcmp(c.purpose, "oil_pump") &&
                 demand <= constrain(Config::standbyOilFeedPct / 100.0f + 0.005f, 0.0f, 1.0f)) continue;
@@ -55,26 +60,26 @@ namespace OutputActivity {
         const auto& reg = HardwareConfig::channelRegistry;
         const bool core = reg.ownsCoreOutput(c) || reg.boundToCoreOutput(c);
         if (core) {
-            if (!strcmp(p, "main_fuel"))       return ed.throttleDemand;
+            if (!strcmp(p, "main_fuel"))       return constrain(ed.mainFuelAppliedDemand, 0.0f, 1.0f);
             if (!strcmp(p, "fuel_shutoff"))    return ed.fuelSolOpen ? 1.0f : 0.0f;
-            if (!strcmp(p, "starter"))         return ed.starterDemand;
+            if (!strcmp(p, "starter"))         return constrain(ed.effectiveStarterDemand, 0.0f, 1.0f);
             if (!strcmp(p, "starter_enable"))  return ed.starterEnabled ? 1.0f : 0.0f;
-            if (!strcmp(p, "oil_pump"))        return ed.oilPumpPct / 100.0f;
-            if (!strcmp(p, "scavenge_pump"))   return ed.oilScavengeDemand;
-            if (!strcmp(p, "cooling_fan"))     return ed.coolFanDemand;
-            if (!strcmp(p, "fuel_pump"))       return ed.fuelPump2Demand;
+            if (!strcmp(p, "oil_pump"))        return constrain(ed.oilPumpPct / 100.0f, 0.0f, 1.0f);
+            if (!strcmp(p, "scavenge_pump"))   return constrain(ed.oilScavengeDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "cooling_fan"))     return constrain(ed.coolFanDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "fuel_pump"))       return constrain(ed.fuelPump2Demand, 0.0f, 1.0f);
             if (!strcmp(p, "igniter"))         return ed.igniterOn ? 1.0f : 0.0f;
             if (!strcmp(p, "ab_igniter"))      return ed.igniter2On ? 1.0f : 0.0f;
             if (!strcmp(p, "ab_valve"))        return ed.abSolOpen ? 1.0f : 0.0f;
-            if (!strcmp(p, "ab_pump"))         return ed.abPumpDemand;
-            if (!strcmp(p, "prop_pitch"))      return ed.propPitchDemand;
+            if (!strcmp(p, "ab_pump"))         return constrain(ed.abPumpDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "prop_pitch"))      return constrain(ed.propPitchDemand, 0.0f, 1.0f);
             if (!strcmp(p, "air_starter"))     return ed.airstarterOpen ? 1.0f : 0.0f;
-            if (!strcmp(p, "bleed_valve") || !strcmp(c.id, "bleed_valve"))
-                return ed.bleedValveDemand;
-            if (!strcmp(p, "glow_plug"))       return ed.glowPlugDemand;
+            if (!strcmp(p, "bleed_valve"))
+                return constrain(ed.bleedValveDemand, 0.0f, 1.0f);
+            if (!strcmp(p, "glow_plug"))       return constrain(ed.glowPlugDemand, 0.0f, 1.0f);
         }
-        if (!strcmp(p, "wet_glow_fuel"))   return ed.wetGlowFuelDemand;
-        return index < ChannelRegistry::MAX_OUTPUT_CHANNELS ? ed.registryOutputDemand[index] : 0.0f;
+        return index < ChannelRegistry::MAX_OUTPUT_CHANNELS
+            ? constrain(ed.registryOutputDemand[index], 0.0f, 1.0f) : 0.0f;
     }
 
     inline bool anyPhysicalDemand(bool allowStandbyOilFeed = false) {

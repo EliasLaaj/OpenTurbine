@@ -163,9 +163,14 @@ public:
     static uint32_t battLowConfirmMs;
 
     // ── Relight ───────────────────────────────────────────────
-    static bool     relightEnabled;      // opt-in; false = flameout → immediate fault
+    static bool     relightEnabled;      // independent automatic relight subsystem
+    static int      relightTriggerSource; // 0=auto, 1=flame, 2=N1, 3=selected EGT
+    static int      relightTriggerConfirmMs;
+    static float    relightTriggerEgtBelowC;
+    static float    relightTriggerEgtFallRateCPerSec;
     static float    relightMinRpm;       // min N1 to attempt relight (falls below → fault)
     static int      relightIgnitionTarget; // 0=Igniter 1, 1=Secondary Igniter, 2=Glow/Wet Glow
+    static char     relightOutputId[20]; // stable registry ID; empty uses legacy target migration
     static int      relightConfirmSource; // 0=auto, 1=flame, 2=N1 recovered, 3=selected EGT rise
     static float    relightConfirmRpm;
     static float    relightTotRiseC;
@@ -221,10 +226,12 @@ public:
     static bool shutdownOnOilUnderflow;        // false = warn only; true = fault shutdown
 
     // ── Standby oil feed (windmill protection) ────────────────
+    static bool  standbyOilEnabled;      // explicit opt-in; false leaves standby outputs untouched
     static int   standbyOilSource;       // 0=N1, 1=N2, 2=either shaft
     static float standbyOilRpmLimit;     // selected shaft above this in STANDBY → activate oil feed
     static float standbyOilFeedPct;      // oil pump % to run during standby feed (fixed mode, and the floor in pressure mode)
     static float standbyOilFeedBar;      // >0 with an oil sensor: regulate standby feed to this pressure (bar) instead of a fixed %; 0 = fixed % mode
+    static char  standbyOilOutputId[20]; // exact oil-pump device; empty migrates the sole/legacy pump
 
     // ── Limp mode ─────────────────────────────────────────────
     static float limpMaxThrottlePct;     // throttle cap (%) when limp mode is active
@@ -232,6 +239,7 @@ public:
     // ── Misc ──────────────────────────────────────────────────
     static bool  igniterOnStart;         // fire igniter while START held during RUNNING
     static int   manualRelightIgnitionTarget; // 0=Igniter 1, 1=Secondary Igniter, 2=Glow/Wet Glow
+    static char  manualRelightOutputId[20]; // stable registry ID; empty uses legacy target migration
 
     // ── Cooldown hardware selection ───────────────────────────
     static bool  cooldownUseStarter;          // spin starter motor during CooldownSpin block
@@ -398,8 +406,13 @@ public:
     static constexpr uint32_t SLOG_STARTER      = 1u << 25; // starter demand %
     static constexpr uint32_t SLOG_THRUST       = 1u << 26; // calibrated thrust N
     static constexpr uint32_t SLOG_DEFAULT = SLOG_N1 | SLOG_TOT | SLOG_OIL;
+    static constexpr uint8_t MAX_SESSION_REGISTRY_INPUTS = 24;
     static uint32_t sessionLogMask;
     static uint32_t sessionLogIntervalMs;  // session CSV row interval (default 1000 = 1 Hz)
+    // Stable ChannelRegistry IDs selected as additional session CSV columns.
+    // IDs, rather than array positions, survive hardware-card reordering.
+    static uint8_t sessionRegistryInputCount;
+    static char sessionRegistryInputIds[MAX_SESSION_REGISTRY_INPUTS][20];
 
     // ── Calibration ───────────────────────────────────────────
     static int   throttleMinRaw;
@@ -523,6 +536,10 @@ public:
     // resident. This checks schema/ranges only; dependency cleanup is run
     // after that uploaded hardware has been applied.
     static bool validateJsonValues(const JsonDocument& doc);
+    // Validate the already-applied settings against the already-applied
+    // hardware without allocating another JSON document. Used by complete
+    // engine-file restore on memory-constrained Classic ESP32.
+    static bool validateRuntimeHardwareDependencies();
     static bool fromJson(const char* json, size_t len);
     static bool fromJson(const JsonDocument& doc);  // PATCH merge variant
     // Applies a validated settings document, releases its heap before the
@@ -534,12 +551,20 @@ public:
                                               size_t scratchLen = 0);
     static bool applyJsonRuntimeOnly(const JsonDocument& doc, bool allowActiveLive = false,
                                      bool validateHardwareDependencies = true); // no flash write
+    // Apply only the narrow Developer-Mode controller tuning surface. The web
+    // gate validates this patch against the complete configuration first.
+    static bool applyJsonLivePatch(const JsonDocument& patch);
     // Classic ESP32 can become too fragmented to hold the serialized transfer
     // buffer and a second complete JSON tree at once. Settings persistence also
     // stages the exact validated candidate so Core 1 can retry from a stream
     // after releasing that buffer. Other targets implement these as no-ops.
     static DeserializationError loadStagedJsonCandidate(JsonDocument& doc);
     static void clearStagedJsonCandidate();
+    // Full-engine restore has already range-validated the exact settings
+    // object staged at /config_apply.tmp. Stream that object into the atomic
+    // unified writer so Classic never has to rebuild a large JSON tree.
+    static bool saveStagedJsonCandidate(size_t settingsLen,
+                                        bool writeRuntimeHardware = false);
 
 private:
     static void _applyDefaults();

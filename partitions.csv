@@ -1,7 +1,7 @@
 # OpenTurbine partition table — OTA-capable, 4 MB flash
 # 1.625 MiB OTA slots leave 576 KiB for LittleFS after the PCB-profile and
 # coredump partitions. The release gate measures the generated payload and
-# preserves at least 160 KiB for configuration, logs, and compaction. A
+# preserves roughly 140 KiB for configuration, logs, and compaction. A
 # partition-table change requires a USB clean install, not OTA.
 # Name,   Type, SubType, Offset,   Size,     Flags
 nvs,      data, nvs,     0x9000,   0x5000,

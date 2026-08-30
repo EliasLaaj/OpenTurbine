@@ -51,6 +51,13 @@ function registryStatus(c) {
   if (!registryPurposeDefinitions(direction).some(p=>p.value===purpose)) return {kind:'error', text:'Unknown device purpose'};
   if (registryPurposeIsSingleton(direction, purpose) && (registryRoot()[direction+'s']||[]).filter(row=>registryDerivedPurpose(direction,row)===purpose).length > 1)
     return {kind:'error', text:`${registryPurposeLabel(direction,c)} is already assigned`};
+  if (direction === 'input' && (purpose === 'shaft_speed' || purpose.startsWith('general_')) &&
+      (registryRoot().inputs || []).some(row => row !== c && registryDerivedPurpose('input',row) === purpose &&
+        String(row.name || '').trim() === String(c.name || '').trim()))
+    return {kind:'error', text:'Rename repeated general sensors so every channel is identifiable'};
+  if (direction === 'input' && purpose === 'shaft_speed' && Number(c.driver) === 2 &&
+      (registryRoot().inputs || []).filter(row => registryDerivedPurpose('input',row) === 'shaft_speed' && Number(row.driver) === 2).length > 2)
+    return {kind:'error', text:'Only two additional pulse shaft-speed counters are available; use analog/I2C or remove one'};
   const profileBacked = pcbProfileActive();
   if (profileBacked) {
     if (registryFixedProfileFunction(direction,c)) return {kind:'ok', text:'Built in'};
@@ -62,8 +69,8 @@ function registryStatus(c) {
     if (mode.available === false)
       return {kind:'error', text:mode.status || 'Fitted PCB device is not responding'};
   }
-  if (Number(c.temp_interface || 0) >= 1 && Number(c.temp_interface || 0) <= 3 && !['tot','tit','oil_temperature'].includes(purpose)) return {kind:'error', text:'Thermocouple interface requires TOT, TIT, or Oil temperature purpose'};
-  if ([4,5].includes(Number(c.temp_interface || 0)) && !['oil_temperature','coolant_temp','intake_temperature'].includes(purpose)) return {kind:'error', text:'NTC and DS18B20 interfaces are only for oil, coolant, intake or ambient temperature'};
+  if (Number(c.temp_interface || 0) >= 1 && Number(c.temp_interface || 0) <= 3 && !['tot','tit','oil_temperature','general_temperature'].includes(purpose)) return {kind:'error', text:'Thermocouple interface requires a turbine, oil, or general temperature purpose'};
+  if ([4,5].includes(Number(c.temp_interface || 0)) && !['oil_temperature','coolant_temp','intake_temperature','general_temperature'].includes(purpose)) return {kind:'error', text:'NTC and DS18B20 interfaces require a low-range or general temperature purpose'};
   const remote = Number(c.driver) >= 8;
   const thermocouple = registryTemperatureIsSpi(c);
   if (remote && !profileBacked) {
@@ -127,6 +134,17 @@ function registryStatus(c) {
     if (!registryPinIsAdc(currentPin)) return {kind:'error', text:'Current pin must be ADC'};
     if (Number(currentMvA ?? 0) <= 0) return {kind:'error', text:'Current mV/A invalid'};
     if (Number(currentZeroV ?? 0) < 0 || Number(currentZeroV ?? 0) > 3.3) return {kind:'error', text:'Current zero invalid'};
+  }
+  if (direction === 'output' && c.paired_output) {
+    const paired = (registryRoot().outputs || []).find(row =>
+      String(row?.id || '') === String(c.paired_output) &&
+      !String(row?.mirror_of || '') && registryDerivedPurpose('output', row) === 'pilot_fuel');
+    if (!['igniter','ab_igniter','glow_plug'].includes(purpose))
+      return {kind:'error', text:'Only an ignition device may own a paired start-fuel output'};
+    if (!paired) return {kind:'error', text:'Paired start-fuel output is missing or incompatible'};
+    const otherOwner = (registryRoot().outputs || []).find(row => row !== c &&
+      String(row?.paired_output || '') === String(c.paired_output));
+    if (otherOwner) return {kind:'error', text:`Start-fuel output is already paired with ${registryDisplayName('output',otherOwner,otherOwner.id)}`};
   }
   if (direction === 'output' && c.has_flow_monitor) {
     const inputPurpose = purpose === 'oil_pump' ? 'oil_flow' : purpose === 'scavenge_pump' ? 'scavenge_flow' : '';
@@ -749,7 +767,7 @@ function ensureOilLoops() {
   if (!cfg.oil_loops.length) {
     const pressure = oilLoopChannels('input', 'oil_pressure')[0];
     const pump = oilLoopChannels('output', 'oil_pump')[0];
-    if (pressure && pump) cfg.oil_loops.push({enabled:true,id:'main',pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1});
+    if (pressure && pump) cfg.oil_loops.push({enabled:true,id:'main',pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1,low_pressure_bar:1,low_pressure_confirm_ms:500,low_pressure_response:2,feedback_loss_response:2,immediate_pump_run_s:10});
   }
   return cfg.oil_loops;
 }
@@ -768,7 +786,7 @@ function addOilLoop() {
   const pressure = oilLoopChannels('input', 'oil_pressure')[0];
   const pump = oilLoopChannels('output', 'oil_pump').find(c => !used.has(c.id));
   if (!pressure || !pump) return;
-  loops.push({enabled:true,id:`oil${loops.length+1}`,pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1});
+  loops.push({enabled:true,id:`oil${loops.length+1}`,pressure_input:pressure.id,pump_output:pump.id,target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1,low_pressure_bar:1,low_pressure_confirm_ms:500,low_pressure_response:2,feedback_loss_response:2,immediate_pump_run_s:10});
   dirty();
   renderHardwareWorkflowSummaries();
 }
@@ -787,6 +805,9 @@ function oilLoopInlineEditor() {
   const num = (i,key,label,value,step,min=0,max='') => `<label class="hw-field"><span class="hw-label">${label}</span><input type="number" min="${min}" ${max!==''?`max="${max}"`:''} step="${step}" value="${Number(value)}" onchange="updateOilLoop(${i},'${key}',+this.value)"></label>`;
   const cards = loops.map((loop,i) => {
     const source = Number(loop.target_source || 0);
+    const lowResponse = Number(loop.low_pressure_response ?? 2);
+    const feedbackResponse = Number(loop.feedback_loss_response ?? 2);
+    const responseOptions = selected => `<option value="0"${selected===0?' selected':''}>Disabled</option><option value="1"${selected===1?' selected':''}>Warning only</option><option value="2"${selected===2?' selected':''}>Normal fault shutdown</option><option value="3"${selected===3?' selected':''}>Immediate dry-oil stop</option>`;
     const pump = pumps.find(c => c.id === loop.pump_output);
     const binary = pump && outputDriverIsOnOff(pump.driver);
     const loopWarnings = [];
@@ -810,6 +831,11 @@ function oilLoopInlineEditor() {
       ${binary?'':`<label class="hw-field"><span class="hw-label">Maximum pump output (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.max_demand??1)*100)}" onchange="updateOilLoop(${i},'max_demand',+this.value/100)"></label>`}
       ${num(i,'failsafe_delay_ms','Feedback-loss delay (ms)',loop.failsafe_delay_ms??1500,100)}
       <label class="hw-field"><span class="hw-label">Feedback-loss pump output (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.failsafe_demand??.6)*100)}" onchange="updateOilLoop(${i},'failsafe_demand',+this.value/100)"></label>
+      <label class="hw-field"><span class="hw-label">Feedback-loss response</span><select onchange="updateOilLoop(${i},'feedback_loss_response',+this.value)">${responseOptions(feedbackResponse)}</select></label>
+      ${num(i,'low_pressure_bar','Low-pressure threshold (bar)',loop.low_pressure_bar??1,.01,0,20)}
+      ${num(i,'low_pressure_confirm_ms','Low-pressure confirmation (ms)',loop.low_pressure_confirm_ms??500,50,0,60000)}
+      <label class="hw-field"><span class="hw-label">Low-pressure response</span><select onchange="updateOilLoop(${i},'low_pressure_response',+this.value)">${responseOptions(lowResponse)}</select></label>
+      ${lowResponse===3||feedbackResponse===3?num(i,'immediate_pump_run_s','Pump-only time after immediate stop (s)',loop.immediate_pump_run_s??10,.5,0,120):''}
       ${loopWarnings.length?`<div class="workflow-prerequisite" style="grid-column:1/-1">Warning: ${escapeHtmlText(loopWarnings.join(' '))}</div>`:''}
     </div></div>`;
   }).join('');
@@ -1115,16 +1141,15 @@ function registryContextLinks(direction, c) {
       add('/sequence.html#tab-startup', 'Open startup sequence');
     } else if (purpose === 'oil_pump') {
       add('/controllers.html#cf-oil_mm', 'Set oil-pressure control');
-      add('/controllers.html#cf-so_rl', 'Set windmilling oil protection');
+      add('/controllers.html#cf-so_en', 'Set windmilling oil protection');
       add('/sequence.html#tab-startup', 'Open startup oil steps');
     } else if (purpose === 'scavenge_pump') {
       add('/controllers.html#cf-oil_ufd', 'Set flow-fault behavior');
       add('/sequence.html#tab-shutdown', 'Open shutdown sequence');
     } else if (purpose === 'igniter') {
-      add('/controllers.html#cf-rl_it', 'Set relight behavior');
+      add('/controllers.html#cf-rl_oid', 'Set relight behavior');
       add('/sequence.html#tab-startup', 'Open ignition sequence');
     } else if (purpose === 'glow_plug') {
-      add('/controllers.html#cf-gl_ms', 'Set glow preheat');
       add('/sequence.html#tab-startup', 'Place the preheat block');
     } else if (purpose === 'ab_igniter') {
       add('/controllers.html#cf-ab_ui', 'Set AB ignition method');

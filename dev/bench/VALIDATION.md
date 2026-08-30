@@ -18,7 +18,7 @@ either target to a build-only-by-a-few-bytes state.
 
 Systematic hardware-in-the-loop validation of the OpenTurbine firmware on the
 bench rig, aimed at finding defects **before** they reach a real turbine engine.
-The current release candidate is OpenTurbine 2.1.0. DUT and tester roles may be
+The current release candidate is OpenTurbine 2.2.0. DUT and tester roles may be
 swapped between the ESP32-S3 and Classic ESP32 as a campaign requires. Tests
 drive physical ADC/PCNT/SPI/digital paths where wired and use explicit simulator
 coverage for unavailable I²C devices.
@@ -29,6 +29,44 @@ the **v2.0.0 release-candidate HIL** section as the baseline and the newer
 superseded EGT-rate and old configuration behavior are not v2 requirements.
 
 Legend: ✅ pass · ⚠️ anomaly/concern · ❌ bug · ⏭️ not physically testable
+
+## v2.2.0 Classic shipping qualification — 2026-08-30
+
+- ✅ A final cross-target controller campaign exposed and fixed stale Automatic
+  Idle floor ownership. The corrected S3 candidate then passed controls 8/8,
+  safety 10/10, interactions 13/13, I²C 13/13, afterburner 3/3, shutdown
+  ownership 4/4, live configuration 5/5, and session logging 2/2. Its realistic
+  browser session completed eight connected navigations, two persisted saves,
+  and an engine-file download/upload/restore round trip
+  (`s3_v220_final_4a4c6cda_soak`).
+- ✅ A repeated-build audit found and removed cumulative wrapping in the
+  pinned web-server header-retention patch. Consecutive Classic and S3 builds
+  are now byte-identical. The clean images pass their linker/filesystem gates:
+  Classic firmware is 1,653,904 bytes with 50,032 bytes of OTA-slot headroom;
+  S3 firmware is 1,639,216 bytes with 1,506,512 bytes of headroom.
+- ✅ ESP32 Classic DUT with ESP32-S3 tester passed all 11 reachable physical
+  pin/function cases: PWM oil demand, fuel solenoid, ignition, starter enable,
+  servo pulse, N1 PCNT, ADC, digital input, starter-assist stop, repeated
+  StarterSpin pulses, and physical STOP cut
+  (`classic_pinfunc_hil_20260830_111007.json`).
+- ✅ The same candidate passed both independent physical fuel-isolation cases.
+  N1 overspeed removed fuel, ignition, and metering demand in 0.565–0.667 s;
+  physical STOP removed them in 0.383–0.400 s
+  (`classic_safety_hil_20260830_111009.json`).
+- ✅ The final Classic image also passed 9/9 digital-sensor cases: MAX6675,
+  MAX31855 and MAX31856 conversion/open-circuit behavior plus HX711 positive,
+  signed-negative and missing-data behavior
+  (`reversed_digital_sensor_hil_20260830_111556.json`).
+- ✅ The safety campaign then restored the saved engine file successfully on
+  the fragmented Classic heap. The exact final build then completed a realistic
+  one-tab browser session with seven connected page navigations, two persisted
+  settings saves, a complete engine-file download/restore, and original-value
+  restoration (`classic_v220_final_cb0debb0_soak`). Earlier sustained telemetry
+  completed 60/60 consecutive 300 ms requests without reboot or transport
+  error.
+- ⚠️ This remains dry-bench qualification. It does not replace installation
+  wiring, driver-power, EMI, plumbing, combustion, or controlled first-run
+  validation on the user's actual turbine.
 
 ## v2.1.0 qualification — 2026-08-25
 

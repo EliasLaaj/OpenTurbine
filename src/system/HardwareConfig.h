@@ -41,7 +41,6 @@ public:
 
     // ── System features ───────────────────────────────────────
     static bool  hasAfterburner;     // shows afterburner-specific hardware sections
-    static bool  hasTwoShaft;        // shows N2 RPM sensor
 
     // ── Physical controls ─────────────────────────────────────
     static int  stopPin;
@@ -371,6 +370,12 @@ public:
     // the bound deterministic for the embedded target without imposing the
     // old two-system UI limitation.
     static constexpr int MAX_OIL_LOOPS = 6;
+    enum OilFaultResponse : uint8_t {
+        OilFaultDisabled = 0,
+        OilFaultWarning = 1,
+        OilFaultShutdown = 2,
+        OilFaultImmediateStop = 3
+    };
     struct OilLoopDef {
         bool  enabled = false;
         char  id[16] = {};
@@ -384,9 +389,14 @@ public:
         uint16_t deadbandCentiBar = 20;
         uint16_t adjustScaleCenti = 180;
         uint16_t failsafeDelayMs = 1500;
+        uint16_t lowPressureCentiBar = 100;
+        uint16_t lowPressureConfirmMs = 500;
+        uint16_t immediatePumpRunDeciSec = 100; // 10.0 s
         uint8_t failsafeDemandPct = 60;
         uint8_t minDemandPct = 18;
         uint8_t maxDemandPct = 100;
+        uint8_t lowPressureResponse = OilFaultShutdown;
+        uint8_t feedbackLossResponse = OilFaultShutdown;
     };
     static OilLoopDef oilLoops[MAX_OIL_LOOPS];
     static uint8_t oilLoopCount;
@@ -459,13 +469,16 @@ public:
     static constexpr int MAX_CUSTOM_STEPS = 8;
     struct SeqSideAction {
         bool    enabled = false;
-        uint8_t actuator = 0;
+        uint8_t actuator = 255;
+        char    targetId[20] = {}; // stable output identity; survives a temporarily missing device
         float   value = 0.0f;  // 0.0-1.0 demand; relays use any intentional nonzero as ON
     };
     struct CustomBlockStep {
         uint8_t type = 0;      // 0 = set actuator, 1 = delay
-        uint8_t actuator = 0;  // RulesEngine::Actuator when type == 0
+        uint8_t actuator = 255;  // RulesEngine::Actuator when type == 0; 255 = unresolved
+        char    targetId[20] = {}; // stable output identity; never silently retargeted
         float   value = 0.0f;  // 0.0-1.0 actuator demand
+        bool    valueIsPercent = false; // preserves unresolved variable-output display values
         uint32_t delayMs = 0;  // when type == 1
     };
     struct CustomBlockDef {
@@ -478,6 +491,7 @@ public:
         uint32_t timeoutMs = 10000;  // while type; runtime always applies a finite fallback
         uint8_t  timeoutAction = 0;  // 0 = abort, 1 = fault, 2 = continue
         uint8_t  sensor = 255;
+        char     sensorId[20] = {}; // stable input identity for conditional blocks
         uint8_t  op = 0;
         float    threshold = 0.0f;
         uint32_t stableMs = 0;       // condition must remain true continuously
@@ -491,24 +505,28 @@ public:
     static int   startupSeqLen;
     static int   startupDelayMs[MAX_SEQ_BLOCKS];
     static uint8_t startupIgnitionTarget[MAX_SEQ_BLOCKS]; // 0=igniter1, 1=igniter2, 2=glow plug
+    static char  startupDeviceTarget[MAX_SEQ_BLOCKS][20]; // stable registry output ID; empty = migrate/default
     static SeqSideAction startupEnterActions[MAX_SEQ_BLOCKS][MAX_SEQ_SIDE_ACTIONS];
     static SeqSideAction startupExitActions[MAX_SEQ_BLOCKS][MAX_SEQ_SIDE_ACTIONS];
     static char  shutdownSeq[MAX_SEQ_BLOCKS][24];
     static int   shutdownSeqLen;
     static int   shutdownDelayMs[MAX_SEQ_BLOCKS];
     static uint8_t shutdownIgnitionTarget[MAX_SEQ_BLOCKS];
+    static char  shutdownDeviceTarget[MAX_SEQ_BLOCKS][20];
     static SeqSideAction shutdownEnterActions[MAX_SEQ_BLOCKS][MAX_SEQ_SIDE_ACTIONS];
     static SeqSideAction shutdownExitActions[MAX_SEQ_BLOCKS][MAX_SEQ_SIDE_ACTIONS];
     static char  abSeq[MAX_SEQ_BLOCKS][24];     // AB ignition sequence
     static int   abSeqLen;
     static int   abDelayMs[MAX_SEQ_BLOCKS];
     static uint8_t abIgnitionTarget[MAX_SEQ_BLOCKS];
+    static char  abDeviceTarget[MAX_SEQ_BLOCKS][20];
     static SeqSideAction abEnterActions[MAX_SEQ_BLOCKS][MAX_SEQ_SIDE_ACTIONS];
     static SeqSideAction abExitActions[MAX_SEQ_BLOCKS][MAX_SEQ_SIDE_ACTIONS];
     static char  abShutSeq[MAX_SEQ_BLOCKS][24]; // AB shutdown sequence
     static int   abShutSeqLen;
     static int   abShutDelayMs[MAX_SEQ_BLOCKS];
     static uint8_t abShutIgnitionTarget[MAX_SEQ_BLOCKS];
+    static char  abShutDeviceTarget[MAX_SEQ_BLOCKS][20];
     static SeqSideAction abShutEnterActions[MAX_SEQ_BLOCKS][MAX_SEQ_SIDE_ACTIONS];
     static SeqSideAction abShutExitActions[MAX_SEQ_BLOCKS][MAX_SEQ_SIDE_ACTIONS];
 
@@ -527,6 +545,10 @@ public:
     // Atomically write current Hardware and Settings while holding only one
     // large JSON section in heap at a time.
     static bool saveUnified();
+    // Resolve a stable registry output ID to the runtime actuator adapter.
+    // Core-owned and fully generic outputs use the same caller-facing model.
+    static int8_t outputActuatorForId(const char* id);
+    static const char* defaultOutputIdForPurpose(const char* purpose);
     static void applyDefaults();             // restore defaults (mirrors hardware_profile.h)
 
     // Serialize to / from JSON

@@ -58,6 +58,18 @@ class I2cQualification:
         if not self.t.ping().startswith("OK OTBench 0.9"):
             raise RuntimeError("OTBench did not return after I2C emulator reset")
 
+    def start_tca(self, input_value: int):
+        """Start the synthetic TCA and prove the tester actually enabled it."""
+        replies = []
+        for _ in range(5):
+            reply = self.t.raw(f"I2CEMU TCA9554 {input_value}")
+            status = self.t.raw("I2CEMU STATUS")
+            replies.append({"reply": reply, "status": status})
+            if reply == "OK" and "mode=1" in status:
+                return True, replies
+            time.sleep(0.25)
+        return False, replies
+
     def bus_profile(self, hw):
         profile = hw.get("_pcb_profile", {})
         if profile.get("state") == "valid":
@@ -182,9 +194,10 @@ class I2cQualification:
 
         # TCA9554: discovery, binary input, generic output test and heartbeat loss.
         self.reset_i2c_tester()
-        self.t.raw("I2CEMU TCA9554 1")
+        started, start_replies = self.start_tca(1)
         found, detail = self.wait_device(0x20, "TCA9554")
-        self.record("TCA9554_DISCOVERED", found, discovery=detail)
+        self.record("TCA9554_DISCOVERED", started and found,
+                    emulator=start_replies, discovery=detail)
         tca_in = chan_input("i2c_switch", "I2C Switch", "digital_switch",
                             "digital_switch", 8, -1, min=0, max=1,
                             i2c_address=0x20, device_channel=0)
@@ -217,13 +230,24 @@ class I2cQualification:
         self.record("TCA9554_DISCONNECT_FAILS_INPUT_AND_BLOCKS_OUTPUT",
                     missing and code != 200, input=self.registry_value(data, "i2c_switch"),
                     tool_code=code, response=response)
-        self.t.raw("I2CEMU TCA9554 0")
-        found, _ = self.wait_device(0x20, "TCA9554", timeout=12)
+        # Classic Arduino Wire cannot reliably tear down and recreate an I2C
+        # slave peripheral in-place. Reset the synthetic peripheral just as a
+        # real disconnected module would power-cycle; START/STOP were moved off
+        # these fixture pins above, so this cannot command the DUT.
+        self.reset_i2c_tester()
+        restarted, reconnect_replies = self.start_tca(0)
+        found, reconnect_discovery = self.wait_device(0x20, "TCA9554", timeout=12)
         ok, data = self.dut.poll_until(
             lambda d: (r := self.registry_value(d, "i2c_switch")).get("healthy") and
                       r.get("value") == 0, timeout=5, interval=0.1)
-        self.record("TCA9554_RECONNECT_AND_LOW_INPUT", found and ok,
-                    input=self.registry_value(data, "i2c_switch"))
+        self.record("TCA9554_RECONNECT_AND_LOW_INPUT", restarted and found and ok,
+                    input=self.registry_value(data, "i2c_switch"),
+                    discovery=reconnect_discovery,
+                    emulator_start=reconnect_replies,
+                    emulator=self.t.raw("I2CEMU STATUS"))
+
+        if os.environ.get("I2C_ONLY_TCA") == "1":
+            return
 
         # Hardware must remain the truth: an absent new NAU7802 cannot be assigned.
         self.t.raw("I2CEMU OFF 0")
@@ -337,9 +361,10 @@ def main():
     passed = sum(1 for row in q.rows if row["ok"])
     print(f"RESULT: {passed}/{len(q.rows)} I2C checks passed; restored={restored}; error={error}")
     print("Results:", os.path.abspath(path))
-    # The full campaign has thirteen independently recorded checks. Keep this
-    # exact so adding/removing a check requires intentionally updating the gate.
-    return 0 if len(q.rows) == 13 and passed == len(q.rows) and restored and not error else 1
+    # Keep focused diagnostics useful as real gates too; the full campaign has
+    # thirteen checks and the TCA-only reconnect campaign has six.
+    expected = 6 if os.environ.get("I2C_ONLY_TCA") == "1" else 13
+    return 0 if len(q.rows) == expected and passed == len(q.rows) and restored and not error else 1
 
 
 if __name__ == "__main__":

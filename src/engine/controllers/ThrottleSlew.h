@@ -187,7 +187,6 @@ public:
                              0.0f, 1.0f);
 
         ed.throttleDemand = _current;
-        ed.protectedThrottleDemand = _current;
         ed.mainFuelProtectionActive = protectionActive;
     }
 
@@ -200,7 +199,6 @@ public:
         _p1LastMs = _p2LastMs = _torqueLastMs = 0;
         auto& ed = EngineData::instance();
         ed.mainFuelProtectionActive = false;
-        ed.protectedThrottleDemand = 0.0f;
     }
 
     // Returns the slew-limited output before any external offset (e.g. AB fuel offset)

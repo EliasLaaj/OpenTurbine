@@ -34,6 +34,7 @@ enum class OTCommand : uint8_t {
     EXTRA_COOLDOWN,       // toggle: run configured cooldown actuators in standby until timeout
     PULSED_STARTER_ASSIST_TEST, // one configured ON pulse; STANDBY only
     CLEAR_LOG,
+    CLEAR_FAULT,           // acknowledge a latched fault after every output is safely off
     AB_FIRE,              // manual afterburner ignition (from web UI)
     AB_STOP,              // manual afterburner shutdown (from web UI)
     APPLY_CONFIG,         // re-apply block params from config (safe in STANDBY only)

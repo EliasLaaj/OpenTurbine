@@ -1,0 +1,17 @@
+S3 v2.2 final 4a4c6cda ESP32-S3 build=4a4c6cda7a23aeff; original ramp=0 ms; duration=120s
+S3 v2.2 final 4a4c6cda navigation 1: /controllers.html connected heap=49768/17396 ws=0 tw=0 boot=undefined reset=undefined
+S3 v2.2 final 4a4c6cda config PATCH response HTTP 200
+S3 v2.2 final 4a4c6cda edit: throttle ramp 50 ms save acknowledged
+S3 v2.2 final 4a4c6cda navigation 2: /tools.html connected heap=49764/17396 ws=0 tw=0 boot=undefined reset=undefined
+S3 v2.2 final 4a4c6cda complete engine-file download + same-file restore passed
+S3 v2.2 final 4a4c6cda navigation 3: / connected heap=49908/19444 ws=0 tw=0 boot=undefined reset=undefined
+S3 v2.2 final 4a4c6cda navigation 4: /hardware.html connected heap=50356/31732 ws=0 tw=0 boot=undefined reset=undefined
+S3 v2.2 final 4a4c6cda navigation 5: /system.html connected heap=50316/31732 ws=0 tw=0 boot=undefined reset=undefined
+S3 v2.2 final 4a4c6cda navigation 6: /calibration.html connected heap=50356/31732 ws=0 tw=0 boot=undefined reset=undefined
+S3 v2.2 final 4a4c6cda navigation 7: /controllers.html connected heap=50356/31732 ws=0 tw=0 boot=undefined reset=undefined
+S3 v2.2 final 4a4c6cda config PATCH response HTTP 200
+S3 v2.2 final 4a4c6cda restore: throttle ramp 0 ms save acknowledged
+S3 v2.2 final 4a4c6cda navigation 8: / connected heap=49776/31732 ws=0 tw=0 boot=undefined reset=undefined
+S3 v2.2 final 4a4c6cda recovered 2 top-level document retry/retries; every resulting page reached CONNECTED.
+S3 v2.2 final 4a4c6cda recovered 2 transient API GET reset(s) during page handoff.
+S3 v2.2 final 4a4c6cda realistic session PASSED: 91s, 8 navigations, 2 persisted config saves, original config restored.

@@ -55,7 +55,7 @@ public:
             ed.oilPumpPct = oilPumpBinary ? (oilCoolPct > 0.0f ? 100.0f : 0.0f)
                                           : constrain(oilCoolPct, oilMinPct, oilMaxPct);
         }
-        if (HardwareConfig::hasOilScavengePump && useScavengePump) { ed.oilScavengeDemand = 1.0f; ed.oilScavengeOn = true; }
+        if (HardwareConfig::hasOilScavengePump && useScavengePump) ed.oilScavengeDemand = 1.0f;
         ed.clusterCode = 11;    // ClCode::CooldownRunning
     }
 
@@ -117,7 +117,7 @@ public:
         ed.starterDemand  = 0;
         ed.starterEnabled = false;
         ed.oilPumpPct   = 0;
-        ed.oilScavengeDemand = 0.0f; ed.oilScavengeOn  = false;
+        ed.oilScavengeDemand = 0.0f;
     }
 
 private:

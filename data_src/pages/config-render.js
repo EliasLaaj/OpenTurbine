@@ -11,6 +11,58 @@ function setPath(obj, path, val) {
   cur[path[path.length - 1]] = val;
 }
 
+function _independentFittedOutputs() {
+  return (hwCfg?.channel_registry?.outputs || []).filter(row =>
+    registryChannelInstalled(row) && !String(row?.mirror_of || ''));
+}
+
+function _suggestedOutputOptions(path, purposes, chooseLabel) {
+  const current = String(getPath(cfg, path) || '');
+  const wanted = new Set((Array.isArray(purposes) ? purposes : [purposes]).map(String));
+  const outputs = _independentFittedOutputs();
+  const suggested = outputs.filter(row => wanted.has(String(row?.purpose || '')));
+  const other = outputs.filter(row => !wanted.has(String(row?.purpose || '')));
+  const options = [];
+  if (current && !outputs.some(row => String(row.id || '') === current))
+    options.push({v:current, l:`Missing device: ${current}`});
+  if (!current) options.push({v:'', l:chooseLabel || 'Choose output'});
+  suggested.forEach(row => options.push({v:String(row.id || ''), l:controllerChannelName(row), group:'Suggested'}));
+  other.forEach(row => options.push({v:String(row.id || ''), l:controllerChannelName(row), group:'Other fitted outputs'}));
+  return options;
+}
+
+function _installedIgnitionOutputs() {
+  const wanted = new Set(['igniter','ab_igniter','glow_plug']);
+  return _independentFittedOutputs().filter(row => wanted.has(String(row?.purpose || '')));
+}
+
+function ignitionOutputOptions(path) {
+  return _suggestedOutputOptions(path, ['igniter','ab_igniter','glow_plug'], 'Choose ignition output');
+}
+
+function outputOptionsForPurpose(path, purpose, chooseLabel) {
+  return _suggestedOutputOptions(path, [purpose], chooseLabel);
+}
+
+function migrateBuiltInOutputIds() {
+  const migrate = (path, legacyPath) => {
+    if (getPath(cfg, path)) return;
+    const outputs = _installedIgnitionOutputs();
+    if (!outputs.length) return;
+    const legacy = Number(getPath(cfg, legacyPath) || 0);
+    const purpose = legacy === 1 ? 'ab_igniter' : legacy === 2 ? 'glow_plug' : 'igniter';
+    const matching = outputs.filter(row => String(row.purpose || '') === purpose);
+    const choice = matching.length === 1 ? matching[0] : null;
+    if (choice) setPath(cfg, path, String(choice.id || ''));
+  };
+  migrate(['relight','output_id'], ['relight','ignition_target']);
+  migrate(['misc','igniter_on_start_output_id'], ['misc','igniter_on_start_target']);
+  const oilOutputs = (hwCfg?.channel_registry?.outputs || []).filter(row => row?.installed !== false &&
+    !String(row?.mirror_of || '') && String(row?.purpose || '') === 'oil_pump');
+  if (!getPath(cfg, ['standby_oil','output_id']) && oilOutputs.length === 1)
+    setPath(cfg, ['standby_oil','output_id'], String(oilOutputs[0].id || ''));
+}
+
 function controllerChannelName(row) {
   if (!row) return '';
   const purposeNames = {
@@ -32,55 +84,28 @@ function _resolveControllerChannelId(value, rows, kind, numericValue) {
   const outputAliases = {cool_fan:'cooling_fan',bleed_valve:'bleed_valve',fuel_pump2:'fuel_pump',oil_scavenge:'oil_scavenge',throttle:'main_fuel',main_fuel:'main_fuel',starter:'starter',starter_enable:'starter_enable',oil_pump:'oil_pump',fuel_sol:'fuel_shutoff',igniter:'igniter',igniter2:'ab_igniter',ab_sol:'ab_fuel',ab_pump:'ab_pump',air_starter:'air_starter',glow_plug:'glow_plug',prop_pitch:'prop_pitch'};
   const aliases = kind === 'input' ? inputAliases : outputAliases;
   const purpose = aliases[raw] || raw;
-  const byPurpose = rows.find(row => String(row.purpose) === purpose || String(row.role) === purpose);
-  if (byPurpose) return byPurpose.id;
+  const purposeMatches = rows.filter(row => String(row.purpose) === purpose || String(row.role) === purpose);
+  if (purposeMatches.length === 1) return purposeMatches[0].id;
   const n = Number(numericValue);
   if (Number.isFinite(n)) {
     if (n >= 64 && rows[n - 64]) return rows[n - 64].id;
     const legacy = kind === 'input'
       ? ['oil_temperature','tot','n1_speed','oil_pressure','tit','battery_voltage','n2_speed','di0','di1','di2','di3','fuel_pressure','fuel_flow','p1','p2','torque','flame','throttle','idle','ab_flame','glow_current','igniter_current','igniter2_current','oil_pump_current','ab_input','start_switch','stop_switch','thrust'][n]
       : ['cooling_fan','bleed_valve','fuel_pump','oil_scavenge','main_fuel','starter','starter_enable','oil_pump','fuel_shutoff','igniter','ab_igniter','ab_fuel','ab_pump','','','air_starter','glow_plug','prop_pitch'][n];
-    const found = rows.find(row => String(row.purpose) === legacy || String(row.role) === legacy);
-    if (found) return found.id;
+    const legacyMatches = rows.filter(row => String(row.purpose) === legacy || String(row.role) === legacy);
+    if (legacyMatches.length === 1) return legacyMatches[0].id;
   }
   return raw;
-}
-
-function openControllerSection(anchor) {
-  setWorkspaceFilter('configured');
-  requestAnimationFrame(() => {
-    const target = document.getElementById(anchor);
-    if (!target) return;
-    const group = target.closest('.config-group, .control-definition-card');
-    if (group && 'open' in group) group.open = true;
-    history.replaceState(null, '', `#${anchor}`);
-    target.scrollIntoView({behavior:'smooth', block:'start'});
-    target.classList.add('search-hit');
-    setTimeout(() => target.classList.remove('search-hit'), 1800);
-  });
-}
-
-function _controllerRuleForOutput(channel, index) {
-  return (cfg.rules || []).find((rule) => {
-    const target = String(rule.target || rule.actuator_id || '');
-    return target === String(channel.id || '') || Number(rule.actuator) === 64 + index;
-  });
-}
-
-function _removeControllerRuleForOutput(channel, index) {
-  const before = (cfg.rules || []).length;
-  cfg.rules = (cfg.rules || []).filter(rule => {
-    const target = String(rule.target || rule.actuator_id || '');
-    return target !== String(channel.id || '') && Number(rule.actuator) !== 64 + index;
-  });
-  if (cfg.rules.length !== before) _controllerRulesDirty = true;
 }
 
 function _defaultRuleForOutput(channel) {
   const inputs = simpleControlInputs();
   const relay = [4,11].includes(Number(channel.driver));
-  const throttle = inputs.find(row => String(row.purpose) === 'throttle');
-  const source = throttle || inputs[0];
+  // Main fuel naturally follows the sole throttle input. Every other new
+  // controller starts as an explicit fixed command so merely creating it can
+  // never make an unrelated first registry input control physical hardware.
+  const source = String(channel.purpose) === 'main_fuel'
+    ? inputs.find(row => String(row.purpose) === 'throttle') : null;
   const minFuel = String(channel.purpose) === 'main_fuel'
     ? Math.max(0, Math.min(1, Number(cfg?.throttle?.fuel_pump_min_pct || 0) / 100)) : 0;
   return {enabled:true,kind:source?(relay?0:1):3,op:0,threshold:0,hysteresis:0,on_value:source?1:0,off_value:0,
@@ -119,10 +144,14 @@ function migrateLegacyControllerDefinitions() {
   cfg.rules ||= [];
   const owns = output => cfg.rules.some(rule =>
     _resolveControllerChannelId(rule.target, outputs, 'output', rule.actuator) === output.id);
-  const mainFuel = outputs.find(row => String(row.purpose) === 'main_fuel');
-  const propPitch = outputs.find(row => String(row.purpose) === 'prop_pitch');
-  const throttle = inputs.find(row => String(row.purpose) === 'throttle');
-  const n2 = inputs.find(row => String(row.purpose) === 'n2_speed');
+  const uniquePurpose = (rows, purpose) => {
+    const matches = rows.filter(row => String(row.purpose) === purpose);
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const mainFuel = uniquePurpose(outputs, 'main_fuel');
+  const propPitch = uniquePurpose(outputs, 'prop_pitch');
+  const throttle = uniquePurpose(inputs, 'throttle');
+  const n2 = uniquePurpose(inputs, 'n2_speed');
   let hardwareChanged = false;
 
   if (hwCfg.controllers?.governor && n2) {
@@ -163,7 +192,8 @@ function migrateLegacyControllerDefinitions() {
 function renderControllerOverview() {
   const root = document.getElementById('controller-overview');
   if (!root || CONFIG_SURFACE !== 'controllers') return;
-  const outputs = (hwCfg?.channel_registry?.outputs || []).filter(row => row && row.installed !== false);
+  const outputs = (hwCfg?.channel_registry?.outputs || []).filter(row =>
+    row && row.installed !== false && !String(row.mirror_of || ''));
   const rules = cfg.rules || [];
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const configuredCards = [...document.querySelectorAll('#simple-controls [data-controller-card]')];
@@ -180,15 +210,16 @@ function renderControllerOverview() {
   const available = outputs.filter(channel => !configuredIds.has(String(channel.id)) && !unavailableToRules.has(String(channel.id)));
   const freeOilPumps = outputs.filter(channel => String(channel.purpose) === 'oil_pump' &&
     !configuredIds.has(String(channel.id)) && !oilLoopOutputs.has(String(channel.id)));
-  const canAddOilLoop = freeOilPumps.length && controllerInputs('oil_pressure').length;
-  const availableHtml = (available.length || canAddOilLoop) ? `<div class="controller-create-card" data-always-visible="1"><div class="controller-create-title">+ Create controller</div><div class="controller-create-body">${available.length?`<label class="cfg-field"><span class="cfg-label">What do you want to control?</span><select id="new-controller-output">${available.map(row=>`<option value="${esc(row.id)}">${esc(controllerChannelName(row))}</option>`).join('')}</select><span class="cfg-desc">Create a threshold, mapping, feedback-target, or fixed-state controller.</span></label><button type="button" class="primary" onclick="createControllerForOutput(document.getElementById('new-controller-output').value)">Create controller</button>`:''}${canAddOilLoop?`<button type="button" onclick="addControllerOilLoop('${esc(freeOilPumps[0].id)}')">Create oil-pressure controller</button>`:''}</div></div>` : '<div class="control-empty">Every fitted normal-operation output already has an owner.</div>';
+  const oilPressureInputs = controllerInputs('oil_pressure');
+  const canAddOilLoop = freeOilPumps.length && oilPressureInputs.length;
+  const oilLoopCreator = canAddOilLoop ? `<div class="cfg-grid"><label class="cfg-field"><span class="cfg-label">Oil pump</span><select id="new-oil-loop-output">${freeOilPumps.length>1?'<option value="">Choose pump</option>':''}${freeOilPumps.map(row=>`<option value="${esc(row.id)}">${esc(controllerChannelName(row))}</option>`).join('')}</select></label><label class="cfg-field"><span class="cfg-label">Pressure feedback</span><select id="new-oil-loop-pressure">${oilPressureInputs.length>1?'<option value="">Choose pressure input</option>':''}${oilPressureInputs.map(row=>`<option value="${esc(row.id)}">${esc(controllerChannelName(row))}</option>`).join('')}</select></label></div><button type="button" onclick="addControllerOilLoop(document.getElementById('new-oil-loop-output').value,document.getElementById('new-oil-loop-pressure').value)">Create oil-pressure controller</button>` : '';
+  const availableHtml = (available.length || canAddOilLoop) ? `<div class="controller-create-card" data-always-visible="1"><div class="controller-create-title">+ Create controller</div><div class="controller-create-body">${available.length?`<label class="cfg-field"><span class="cfg-label">What do you want to control?</span><select id="new-controller-output">${available.map(row=>`<option value="${esc(row.id)}">${esc(controllerChannelName(row))}</option>`).join('')}</select><span class="cfg-desc">Create a threshold, mapping, feedback-target, or fixed-state controller.</span></label><button type="button" class="primary" onclick="createControllerForOutput(document.getElementById('new-controller-output').value)">Create controller</button>`:''}${oilLoopCreator}</div></div>` : '<div class="control-empty">Every fitted normal-operation output already has an owner.</div>';
   const purposes = new Set(outputs.map(channel => String(channel.purpose || '')));
   const builtIn = (id, title, desc) => `<details class="control-definition-card config-group built-in-subsystem" data-built-in="${id}"><summary><span class="group-heading"><span class="group-title">${title}</span><span class="group-desc">${desc}</span></span><span class="group-chevron">›</span></summary><div class="controller-card-body" data-built-in-settings="${id}"></div></details>`;
   const builtIns = [
     purposes.has('main_fuel') ? builtIn('fuel-support','Fuel-metering support','Throttle shaping, automatic idle, and reduced-power behavior') : '',
     purposes.has('starter') ? builtIn('starter-support','Starter support','Optional pulsed engagement behavior used by startup blocks') : '',
     (purposes.has('igniter') || purposes.has('ab_igniter') || purposes.has('glow_plug')) ? builtIn('relight','Ignition and relight','Automatic and operator-requested relight behavior during RUNNING') : '',
-    purposes.has('glow_plug') ? builtIn('glow-preheat','Glow preheat','Shared preheat profile used by Glow Preheat sequence blocks') : '',
     purposes.has('oil_pump') ? builtIn('windmilling-oil','Windmilling oil protection','Protective oil flow while a fitted shaft rotates outside normal running') : '',
     (purposes.has('ab_pump') || purposes.has('ab_igniter') || purposes.has('ab_fuel') || purposes.has('ab_fuel_shutoff')) ? builtIn('afterburner','Afterburner subsystem','Light-up method, flame confirmation, and lit-running fuel behavior') : ''
   ].join('');
@@ -204,7 +235,6 @@ function _mountControllerLocalSettings(outputs) {
     'fuel-support':['throttle','idle-control-cfg-section','reduced-power-section'],
     'starter-support':['starter-support-section'],
     relight:['relight-section','manual-relight-section'],
-    'glow-preheat':['glow-cfg-section'],
     'windmilling-oil':['windmilling-oil-section'],
     afterburner:['ab-ign-section','ab-flame-section','ab-run-section']
   };
@@ -237,6 +267,9 @@ function _mountControllerLocalSettings(outputs) {
     const loop = hwCfg.oil_loops[loopIndex];
     const binary = [4,11].includes(Number(channel.driver));
     const source = Number(loop.target_source || 0);
+    const lowResponse = Number(loop.low_pressure_response ?? 2);
+    const feedbackResponse = Number(loop.feedback_loss_response ?? 2);
+    const responseOptions = selected => `<option value="0"${selected===0?' selected':''}>Disabled</option><option value="1"${selected===1?' selected':''}>Warning only</option><option value="2"${selected===2?' selected':''}>Normal fault shutdown</option><option value="3"${selected===3?' selected':''}>Immediate dry-oil stop</option>`;
     const options = (rows, selected) => rows.map(row => `<option value="${_escHtml(row.id)}"${String(row.id)===String(selected)?' selected':''}>${_escHtml(controllerChannelName(row))}</option>`).join('');
     const number = (key,label,value,step,min=0,max='',percent=false) => `<label class="cfg-field"><span class="cfg-label">${_escHtml(label)}${percent?' (%)':''}</span><input type="number" min="${min}"${max!==''?` max="${max}"`:''} step="${step}" value="${Number(value)}" onchange="updateControllerOilLoop(${loopIndex},'${key}',+this.value${percent?'/100':''})"></label>`;
     const pressure = (key,label,value,step,max=20) => `<label class="cfg-field"><span class="cfg-label">${_escHtml(label)} (${dispPressUnit()})</span><input type="number" min="0" max="${toDispPress(max)}" step="${toDispPress(step)}" value="${Math.round(toDispPress(Number(value))*1000)/1000}" onchange="updateControllerOilLoop(${loopIndex},'${key}',fromDispPress(+this.value))"></label>`;
@@ -257,6 +290,12 @@ function _mountControllerLocalSettings(outputs) {
       ${binary?'':number('max_demand','Maximum pump command',Math.round(Number(loop.max_demand??1)*100),1,0,100,true)}
       ${number('failsafe_delay_ms','Feedback-loss delay (ms)',loop.failsafe_delay_ms??1500,100,0,60000)}
       ${number('failsafe_demand','Feedback-loss pump command',Math.round(Number(loop.failsafe_demand??.6)*100),1,0,100,true)}
+      <label class="cfg-field"><span class="cfg-label">If pressure feedback is lost</span><select onchange="updateControllerOilLoop(${loopIndex},'feedback_loss_response',+this.value)">${responseOptions(feedbackResponse)}</select><span class="cfg-desc">The fixed feedback-loss pump command above remains active for Warning or Normal shutdown. Immediate mode cuts every hazardous output first.</span></label>
+      ${pressure('low_pressure_bar','Low-pressure threshold',loop.low_pressure_bar??1,.01)}
+      ${number('low_pressure_confirm_ms','Low-pressure confirmation (ms)',loop.low_pressure_confirm_ms??500,50,0,60000)}
+      <label class="cfg-field"><span class="cfg-label">If running pressure stays low</span><select onchange="updateControllerOilLoop(${loopIndex},'low_pressure_response',+this.value)">${responseOptions(lowResponse)}</select><span class="cfg-desc">Warning reports only. Normal shutdown cuts combustion and runs the configured shutdown sequence. Immediate mode skips that sequence to protect dry bearings.</span></label>
+      ${lowResponse===3||feedbackResponse===3?number('immediate_pump_run_s','Pump-only time after immediate stop (s)',loop.immediate_pump_run_s??10,.5,0,120):''}
+      ${lowResponse===3||feedbackResponse===3?'<div class="cfg-field"><span class="cfg-label">Immediate dry-oil behavior</span><span class="cfg-desc">Fuel, ignition, starter, afterburner, cooling and scavenge outputs turn off immediately. Only this selected oil pump keeps its feedback-loss command for the bounded time above. Restart stays locked until the fault is cleared; reboot also clears faults.</span></div>':''}
       <div class="cfg-field"><button type="button" class="danger" onclick="removeControllerOilLoop(${loopIndex})">Remove pressure controller</button></div>
     </div></div>`;
     host.appendChild(card);
@@ -301,8 +340,6 @@ function _mountControllerLocalSettings(outputs) {
   document.querySelectorAll('#cfg-form .config-group').forEach(group => {
     if (!group.querySelector('.cfg-section')) group.remove();
   });
-  const assignment = document.getElementById('controller-hardware-setup');
-  if (assignment && !assignment.textContent.trim()) assignment.remove();
 }
 
 function simpleControlInputs() {
@@ -310,8 +347,7 @@ function simpleControlInputs() {
 }
 function simpleControlOutputs() {
   return (hwCfg?.channel_registry?.outputs || []).filter(row =>
-    row && row.installed !== false &&
-    String(row.purpose || '') !== 'ab_pump');
+    row && row.installed !== false && !String(row.mirror_of || ''));
 }
 function feedbackDefaultsForInput(id) {
   const row = simpleControlInputs().find(input => String(input.id) === String(id));
@@ -361,7 +397,7 @@ function updateSimpleControl(index, key, value) {
   if (key === 'source' && Number(rule.kind) === 2)
     Object.assign(rule, feedbackDefaultsForInput(value));
   if (key === 'target_source_type' && Number(value) !== 0 && !rule.target_source)
-    rule.target_source = simpleControlInputs()[0]?.id || '';
+    rule.target_source = '';
   if (key === 'target') {
     const target = simpleControlOutputs().find(row => String(row.id) === String(value));
     if (target && [4,11].includes(Number(target.driver)) && [1,2].includes(Number(rule.kind)))
@@ -380,25 +416,6 @@ function toggleSimpleControlMode(index, bit, checked) {
   rule.mode_mask = checked ? (current | bit) : (current & ~bit);
   _controllerRulesDirty = true;
   _markDirty();
-}
-function addSimpleControl() {
-  const inputs = simpleControlInputs();
-  const outputs = simpleControlOutputs();
-  const used = new Set((cfg.rules || []).map(rule => String(rule.target || '')));
-  const output = outputs.find(row => !used.has(String(row.id || '')));
-  if (!output || (cfg.rules || []).length >= 16) return;
-  cfg.rules ||= [];
-  cfg.rules.push({enabled:true,kind:inputs.length?0:3,op:0,threshold:0,hysteresis:0,on_value:inputs.length?1:0,off_value:0,
-    input_min:0,input_max:1,output_min:0,output_max:1,mode_mask:4,
-    target_source_type:0,target_source:'',target_fixed:0,target_low:0,target_high:1,
-    target_input_min:0,target_input_max:1,response_gain:.02,integral_gain:.005,deadband:.01,
-    name:`${output.name || output.id} control`.slice(0,31),source:inputs[0]?.id || '',target:output.id});
-  _controllerRulesDirty = true;
-  _markDirty();
-  renderForm(true);
-  _applyAllVisibility();
-  applyView();
-  runValidation();
 }
 function removeSimpleControl(index) {
   const rule = cfg.rules?.[index];
@@ -422,7 +439,8 @@ function controllerInputs(purpose) {
   return (hwCfg?.channel_registry?.inputs || []).filter(row => row && row.installed !== false && String(row.purpose || '') === purpose);
 }
 function controllerOutputs(purpose) {
-  return (hwCfg?.channel_registry?.outputs || []).filter(row => row && row.installed !== false && String(row.purpose || '') === purpose);
+  return (hwCfg?.channel_registry?.outputs || []).filter(row => row && row.installed !== false &&
+    !String(row.mirror_of || '') && String(row.purpose || '') === purpose);
 }
 function markControllerHardwareDirty() {
   _controllerHardwareDirty = true;
@@ -456,17 +474,20 @@ function updateControllerOilLoop(index, key, value) {
   loop[key] = value;
   markControllerHardwareDirty();
 }
-function addControllerOilLoop(pumpOutputId = '') {
+function addControllerOilLoop(pumpOutputId = '', pressureInputId = '') {
   hwCfg.oil_loops ||= [];
   const used = new Set(hwCfg.oil_loops.map(loop => String(loop.pump_output || '')));
-  const pressure = controllerInputs('oil_pressure')[0];
+  const pressures = controllerInputs('oil_pressure');
+  const pressure = pressures.find(row => String(row.id) === String(pressureInputId)) ||
+    (pressures.length === 1 ? pressures[0] : null);
   const pump = controllerOutputs('oil_pump').find(row =>
     !used.has(String(row.id || '')) && (!pumpOutputId || String(row.id) === String(pumpOutputId)));
   const maxLoops = Math.max(1, Number(hwCfg?._capabilities?.max_oil_loops || 6));
   if (!pressure || !pump || hwCfg.oil_loops.length >= maxLoops) return;
   hwCfg.oil_loops.push({enabled:true,id:`oil${hwCfg.oil_loops.length + 1}`,pressure_input:pressure.id,pump_output:pump.id,
     target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,
-    deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1});
+    deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1,
+    low_pressure_bar:1,low_pressure_confirm_ms:500,low_pressure_response:2,feedback_loss_response:2,immediate_pump_run_s:10});
   hwCfg.controllers ||= {};
   hwCfg.controllers.oil_loop = true;
   markControllerHardwareDirty();
@@ -477,54 +498,6 @@ function removeControllerOilLoop(index) {
   hwCfg.controllers.oil_loop = !!hwCfg.oil_loops?.some(loop => loop.enabled !== false);
   markControllerHardwareDirty();
 }
-function renderControllerHardwareSetup() {
-  const root = document.getElementById('controller-hardware-setup');
-  if (!root || CONFIG_SURFACE !== 'controllers') return;
-  // Dedicated owner toggles and oil-loop cards used to form a second control
-  // system above the editable definitions. The output-first controller cards
-  // now own this workflow; keep this mount empty while older runtime helpers
-  // remain available during the targeted migration.
-  root.innerHTML = '';
-  return;
-  // Legacy renderer retained below until the runtime migration is complete.
-  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const optionRows = (rows, selected) => rows.map(row => `<option value="${esc(row.id)}"${String(row.id)===String(selected)?' selected':''}>${esc(row.name || row.id)}</option>`).join('');
-  const n1 = controllerInputs('n1_speed').length > 0;
-  const n2 = controllerInputs('n2_speed').length > 0;
-  const fuel = controllerOutputs('main_fuel').length > 0;
-  const pressures = controllerInputs('oil_pressure');
-  const pumps = controllerOutputs('oil_pump');
-  const num = (i,key,label,value,step,min=0,max='') => `<label class="cfg-field"><span class="cfg-label">${label}</span><input type="number" min="${min}"${max!==''?` max="${max}"`:''} step="${step}" value="${Number(value)}" onchange="updateControllerOilLoop(${i},'${key}',+this.value)"></label>`;
-  const loops = hwCfg.oil_loops || [];
-  const loopCards = loops.map((loop,i) => {
-    const pump = pumps.find(row => row.id === loop.pump_output);
-    const binary = pump && [4,11].includes(Number(pump.driver));
-    const source = Number(loop.target_source || 0);
-    return `<details class="protection-card"><summary><span><span class="protection-card-title">${esc(pump?.name || `Oil system ${i+1}`)}</span><span class="protection-card-desc">${binary?'On/off pressure control':'Proportional pressure control'}</span></span><span class="protection-card-chevron">›</span></summary><div class="cfg-grid">
-      <label class="cfg-field"><span class="cfg-label">Pressure input</span><select onchange="updateControllerOilLoop(${i},'pressure_input',this.value)">${optionRows(pressures,loop.pressure_input)}</select></label>
-      <label class="cfg-field"><span class="cfg-label">Pump output</span><select onchange="updateControllerOilLoop(${i},'pump_output',this.value)">${optionRows(pumps,loop.pump_output)}</select></label>
-      <label class="cfg-field"><span class="cfg-label">Pressure target set by</span><select onchange="updateControllerOilLoop(${i},'target_source',+this.value)"><option value="0"${source===0?' selected':''}>Fixed pressure</option><option value="1"${source===1?' selected':''}>Main fuel demand</option>${n1?`<option value="2"${source===2?' selected':''}>N1 speed</option>`:''}${n2?`<option value="3"${source===3?' selected':''}>N2 speed</option>`:''}</select></label>
-      ${num(i,'target_bar',source===0?'Pressure target (bar)':'Low pressure target (bar)',loop.target_bar??2.5,.01)}
-      ${source!==0?num(i,'target_high_bar','High pressure target (bar)',loop.target_high_bar??2.5,.01):''}
-      ${source>=2?num(i,'speed_min_rpm','Low shaft speed (RPM)',loop.speed_min_rpm??0,100):''}
-      ${source>=2?num(i,'speed_max_rpm','High shaft speed (RPM)',loop.speed_max_rpm??20000,100):''}
-      ${num(i,'deadband_bar','Pressure deadband (bar)',loop.deadband_bar??.2,.01)}
-      ${binary?'':num(i,'response_gain','Response gain',loop.response_gain??1.8,.05)}
-      ${binary?'':`<label class="cfg-field"><span class="cfg-label">Minimum pump command (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.min_demand??.18)*100)}" onchange="updateControllerOilLoop(${i},'min_demand',+this.value/100)"></label>`}
-      ${binary?'':`<label class="cfg-field"><span class="cfg-label">Maximum pump command (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.max_demand??1)*100)}" onchange="updateControllerOilLoop(${i},'max_demand',+this.value/100)"></label>`}
-      ${num(i,'failsafe_delay_ms','Feedback-loss delay (ms)',loop.failsafe_delay_ms??1500,100,0,60000)}
-      <label class="cfg-field"><span class="cfg-label">Feedback-loss pump command (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.failsafe_demand??.6)*100)}" onchange="updateControllerOilLoop(${i},'failsafe_demand',+this.value/100)"></label>
-      <div class="cfg-field"><button type="button" class="danger" onclick="removeControllerOilLoop(${i})">Remove this oil controller</button></div>
-    </div></details>`;
-  }).join('');
-  const maxLoops = Math.max(1, Number(hwCfg?._capabilities?.max_oil_loops || 6));
-  const canAddOil = pressures.length && pumps.some(p => !loops.some(loop => loop.pump_output === p.id)) && loops.length < maxLoops;
-  root.innerHTML = `<div class="cfg-title">Controller assignments</div><div class="cfg-desc">Hardware defines what exists. Enable the normal controllers that should own those outputs; their tuning stays with the controller below.</div>
-    <div class="control-overview-grid" style="margin-top:.7rem"><article class="control-summary-card"><h3>Automatic idle</h3><label><input type="checkbox" ${hwCfg.controllers?.dynamic_idle?'checked':''} ${fuel&&(n1||n2)?'':'disabled'} onchange="setControllerEnabled('dynamic_idle',this.checked)"> Enabled</label><div class="control-summary-meta">${fuel&&(n1||n2)?'Maintains the minimum normal-running fuel authority':'Requires Main Fuel and N1 or N2'}</div></article>
-    <article class="control-summary-card"><h3>Automatic N2 control</h3><label><input type="checkbox" ${hwCfg.controllers?.governor?'checked':''} ${fuel&&n2?'':'disabled'} onchange="setControllerEnabled('governor',this.checked)"> Enabled</label><div class="control-summary-meta">${fuel&&n2?'Uses fuel or fitted propeller pitch to hold N2':'Requires Main Fuel and N2'}</div></article></div>
-    <div class="cfg-title" style="margin-top:1rem">Oil pressure controllers</div>${loopCards || '<div class="control-empty">No oil pressure controller configured. Fit an oil-pressure input and oil-pump output to add one.</div>'}<button type="button" style="margin-top:.6rem" ${canAddOil?'':'disabled'} onclick="addControllerOilLoop()">+ Add oil pressure controller</button>`;
-}
-
 function setSystemHardware(path, value) {
   setPath(hwCfg, path.split('.'), value);
   _controllerHardwareDirty = true;
@@ -546,7 +519,7 @@ function renderSystemSetup() {
       <div class="cfg-field"><span class="cfg-label">Wi-Fi access</span><button type="button" class="danger" onclick="setSystemHardware('wifi_password','')">Use open network</button><span class="cfg-desc">An open network remains allowed, but anyone nearby who joins it can access ECU controls.</span></div>
       <label class="cfg-field"><span class="cfg-label">Wi-Fi transmit power (dBm)</span><span class="cfg-desc">Use only as much radio power as the installation needs.</span><input id="system-wifi-tx-power" type="number" min="2" max="20" step="1" value="${Number(hwCfg.wifi_tx_power_dbm ?? 8)}" onchange="setSystemHardware('wifi_tx_power_dbm',+this.value)"></label>`;
   const clusterFields = `
-      <div class="cfg-field"><span class="cfg-label">Instrument-cluster link</span><label><input type="checkbox" ${cluster.enabled?'checked':''} onchange="setSystemHardware('cluster_serial.enabled',this.checked)"> Enabled</label><span class="cfg-desc">${(cluster.tx_pin??-1)>=0?`TX GPIO ${cluster.tx_pin}${(cluster.rx_pin??-1)>=0?` / RX GPIO ${cluster.rx_pin}`:' / one-way'}`:'Assign its serial GPIO on Hardware first.'}</span></div>
+      <div class="cfg-field"><span class="cfg-label">Instrument-cluster link</span><label><input type="checkbox" ${cluster.enabled?'checked':''} onchange="setSystemHardware('cluster_serial.enabled',this.checked)"> Enabled</label><span class="cfg-desc">${(cluster.tx_pin??-1)>=0?`TX GPIO ${cluster.tx_pin}${(cluster.rx_pin??-1)>=0?` / RX GPIO ${cluster.rx_pin}`:' / one-way'}`:'Assign its serial GPIO on Hardware first.'}</span><span class="cfg-desc">The default stream is chosen automatically from fitted primary sensors and actuators: N1 plus any configured N2, EGT/TIT, oil, fuel, electrical, torque/thrust and output data. With RX connected, a compatible cluster may request all or a named subset at runtime; field selection is therefore not duplicated in this ECU page.</span></div>
       ${cluster.enabled?`<label class="cfg-field"><span class="cfg-label">Baud rate</span><select onchange="setSystemHardware('cluster_serial.baud',+this.value)">${[9600,19200,38400,57600,115200,230400,460800,921600].map(v=>`<option value="${v}"${Number(cluster.baud||115200)===v?' selected':''}>${v}</option>`).join('')}</select></label>
       <label class="cfg-field"><span class="cfg-label">Update interval (ms)</span><input type="number" min="10" max="5000" value="${Number(cluster.interval_ms??200)}" onchange="setSystemHardware('cluster_serial.interval_ms',+this.value)"></label>`:''}
       <div class="cfg-field"><span class="cfg-label">Physical connection</span><a href="/hardware.html#hardware-comms-panel">Configure serial GPIO on Hardware &rarr;</a><span class="cfg-desc">Hardware owns pins and electrical capabilities.</span></div>`;
@@ -564,8 +537,9 @@ function renderSimpleControls() {
   const inputs = simpleControlInputs();
   const outputs = simpleControlOutputs();
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const optionRows = (rows, selected, disabled = new Set()) => rows.map(row =>
-    `<option value="${esc(row.id)}"${String(row.id)===String(selected)?' selected':''}${disabled.has(String(row.id))&&String(row.id)!==String(selected)?' disabled':''}>${esc(controllerChannelName(row))}</option>`).join('');
+  const optionRows = (rows, selected, disabled = new Set()) =>
+    (!String(selected || '') ? '<option value="" selected>Choose device</option>' : '') + rows.map(row =>
+      `<option value="${esc(row.id)}"${String(row.id)===String(selected)?' selected':''}${disabled.has(String(row.id))&&String(row.id)!==String(selected)?' disabled':''}>${esc(controllerChannelName(row))}</option>`).join('');
   const numberField = (index, key, label, value, attrs='step="any"') => `<label class="cfg-field"><span class="cfg-label">${label}</span><input type="number" ${attrs} value="${Number(value)}" onchange="updateSimpleControl(${index},'${key}',+this.value)"></label>`;
   const rules = cfg.rules || [];
   rules.forEach(rule => {
@@ -579,7 +553,9 @@ function renderSimpleControls() {
     const usedByOthers = new Set(rules.filter((_, i) => i !== index).map(row => String(row.target || '')));
     const target = outputs.find(row => row.id === rule.target);
     const relay = target && [4,11].includes(Number(target.driver));
-    const dangerous = ['fuel_shutoff','igniter','ab_igniter','starter','starter_enable','air_starter'].includes(String(target?.purpose || ''));
+    const dangerous = ['main_fuel','fuel_shutoff','fuel_pump','pilot_fuel','igniter',
+      'ab_igniter','ab_valve','ab_pump','glow_plug',
+      'starter','starter_enable','air_starter'].includes(String(target?.purpose || ''));
     const targetSourceType = Number(rule.target_source_type || 0);
     const modeMask = Number(rule.mode_mask ?? 4) & 0x0f;
     const inputChoice = `<label class="cfg-field"><span class="cfg-label">${kind===2?'Feedback signal':'Controlled by'}</span><select onchange="updateSimpleControl(${index},'source',this.value)">${optionRows(inputs,rule.source)}</select></label>`;
@@ -625,7 +601,7 @@ const ALL_WORKSPACE_GROUPS = [
   { id:'fuel', title:'Main Fuel & Idle', desc:'Normal fuel demand, idle authority, and reduced-power behavior', sections:['Throttle Response','Idle','Reduced-Power Mode'] },
   { id:'power', title:'Power Turbine & Afterburner', desc:'N2 control and afterburner ignition/running behavior', sections:['Afterburner — Ignition Method','Afterburner — Flame Confirmation','Afterburner — Running'] },
   { id:'oil', title:'Oil & Lubrication Controllers', desc:'Normal pressure response and windmilling oil behavior', sections:['Oil Pressure Control','Windmilling Oil Protection'] },
-  { id:'recovery', title:'Start & Recovery Controllers', desc:'Relight, starter assist, and glow behavior', sections:['Automatic Flameout Relight','Manual Relight','Pulsed Starter Assist','Glow Plug Preheat'] },
+  { id:'recovery', title:'Start & Recovery Controllers', desc:'Relight and starter-assist behavior', sections:['Automatic Relight','Manual Relight','Pulsed Starter Assist'] },
   { id:'safety', title:'Shutdown & Protection', desc:'Gradual fuel pullbacks, reactive or predictive limiting, hard shutdowns, and input-loss actions', sections:['Engine Protection Limits','Gradual Fuel Limit Protection','Oil Pressure Safety','Combustion & Startup Protection','Auxiliary Protection','RPM Sensor Fault Detection','RC / Servo Signal Loss Detection'] },
   { id:'runtime', title:'ECU Runtime', desc:'Control-loop scheduling and device-wide execution', sections:['ECU Runtime'] },
   { id:'display', title:'External Display Thresholds', desc:'Display-only warning zones for the optional instrument cluster', sections:['External Instrument Cluster Display'] },
@@ -1020,34 +996,42 @@ function renderForm(preserveControllerOpenState = false) {
   const workspaceTitle = document.querySelector('.cfg-workspace-title');
   if (workspaceTitle) workspaceTitle.textContent = CONFIG_SURFACE === 'system' ? 'System' : 'Controllers';
   const configuredOilPumps = (hwCfg?.channel_registry?.outputs || []).filter(channel =>
-    channel?.installed !== false && String(channel.purpose || channel.role || '') === 'oil_pump');
+    channel?.installed !== false && !String(channel?.mirror_of || '') &&
+    String(channel.purpose || channel.role || '') === 'oil_pump');
   const oilPumpIsBinary = channel => [4, 11].includes(Number(channel?.driver));
   const allOilPumpsBinary = configuredOilPumps.length > 0 && configuredOilPumps.every(oilPumpIsBinary);
   const mixedOilPumpDrivers = configuredOilPumps.some(oilPumpIsBinary) && configuredOilPumps.some(channel => !oilPumpIsBinary(channel));
   const protectionGroups = [
-    {id:'n1', title:'N1 core speed', desc:'Gradual fuel reduction, overspeed shutdown, and minimum running speed.',
-      keys:['pb_n1e','pb_n1s','pb_n1h','rpm_limit','min_rpm'], advanced:['pb_n1m','pb_n1l','pb_n1str','rl_ramp','rl_zone']},
+    {id:'n1', title:'N1 core speed', desc:'Fuel pullback before the limit, hard overspeed shutdown at the maximum, and minimum running speed.',
+      keys:['pb_n1e','pb_n1s','pb_n1h','rpm_limit','min_rpm'], advanced:['pb_n1l','pb_n1str','rl_ramp','rl_zone','rl_acc']},
     {id:'n2', title:'N2 output-shaft speed', desc:'Gradual fuel reduction and independent power-turbine overspeed shutdown.',
-      keys:['pb_n2e','pb_n2s','pb_n2h','n2_rpm_limit'], advanced:['pb_n2m','pb_n2l','pb_n2str']},
+      keys:['pb_n2e','pb_n2s','pb_n2h','n2_rpm_limit'], advanced:['pb_n2l','pb_n2str']},
     {id:'egt', title:'Turbine temperature', desc:'Select TOT/TIT, reduce fuel near the limit, then shut down at the hard limit.',
-      keys:['eg_src','pb_egte','pb_egts','pb_egth','tot_limit','sf_tit','tot_safe_margin'], advanced:['pb_egtm','pb_egtl','pb_egtstr']},
+      keys:['eg_src','pb_egte','pb_egts','pb_egth','tot_limit','sf_tit','tot_safe_margin'], advanced:['pb_egtl','pb_egtstr']},
     {id:'p1', title:`${controllerChannelName(controllerInputs('p1_pressure')[0]) || 'Pressure 1'} protection`, desc:'User-named pressure input: gradual fuel reduction followed by an optional high-pressure shutdown.',
-      keys:['pb_p1e','pb_p1s','pb_p1h','sf_p1t','sf_p1d'], advanced:['pb_p1m','pb_p1l','pb_p1str']},
+      keys:['pb_p1e','pb_p1s','pb_p1h','sf_p1t','sf_p1d'], advanced:['pb_p1l','pb_p1str']},
     {id:'p2', title:`${controllerChannelName(controllerInputs('p2_pressure')[0]) || 'Pressure 2'} protection`, desc:'User-named pressure input: gradual fuel reduction followed by an optional high-pressure shutdown.',
-      keys:['pb_p2e','pb_p2s','pb_p2h','sf_p2t','sf_p2d'], advanced:['pb_p2m','pb_p2l','pb_p2str']},
+      keys:['pb_p2e','pb_p2s','pb_p2h','sf_p2t','sf_p2d'], advanced:['pb_p2l','pb_p2str']},
     {id:'torque', title:'Shaft torque', desc:'Gradual fuel reduction followed by an optional over-torque shutdown.',
-      keys:['pb_tqe','pb_tqs','pb_tqh','sf_tqt','sf_tqd'], advanced:['pb_tqm','pb_tql','pb_tqstr']},
+      keys:['pb_tqe','pb_tqs','pb_tqh','sf_tqt','sf_tqd'], advanced:['pb_tql','pb_tqstr']},
   ];
   const gradualSection = SCHEMA.find(section => section.title === 'Gradual Fuel Limit Protection');
 
   const renderField = (f, sec, group) => {
     let val = getPath(cfg, f.path);
+    if (f.type === 'pullback_mode') {
+      const enabled = !!val;
+      const predictive = Number(getPath(cfg, f.modePath) || 0) === 1;
+      val = enabled ? (predictive ? 2 : 1) : 0;
+    }
     const isCb  = f.type === 'checkbox';
     const binaryOilFallback = f.key === 'oil_fp' && allOilPumpsBinary;
-    const isSel = f.type === 'select' || binaryOilFallback;
+    const isSel = f.type === 'select' || f.type === 'pullback_mode' || binaryOilFallback;
     const runtimeOptions = binaryOilFallback
       ? [{v:0,l:'Off'},{v:100,l:'On'}]
-      : (f.options || []);
+      : f.type === 'pullback_mode'
+      ? [{v:0,l:'Off — hard shutdown only'},{v:1,l:'Simple — measured value'},{v:2,l:'Advanced — predictive'}]
+      : (typeof f.options === 'function' ? f.options() : (f.options || []));
     if (binaryOilFallback) val = Number(val) > 0 ? 100 : 0;
     const fieldLabel = binaryOilFallback ? 'Pump State After Pressure-Sensor Failure' : f.label;
     const fieldDesc = f.key === 'oil_fp' && mixedOilPumpDrivers
@@ -1067,10 +1051,25 @@ function renderForm(preserveControllerOpenState = false) {
     const max = (!isCb && !isSel && f.max !== undefined) ? ` max="${_roundedDisplay(_fieldToDisplay(f, f.max))}"` : '';
     const step = (!isCb && !isSel) ? _roundedDisplay(_fieldStepToDisplay(f, f.step || 1)) : null;
     const aria = ` aria-label="${_escHtml(fieldLabel)}"`;
+    const renderOptions = options => {
+      let html = '';
+      let group = '';
+      options.forEach(o => {
+        const nextGroup = String(o.group || '');
+        if (nextGroup !== group) {
+          if (group) html += '</optgroup>';
+          group = nextGroup;
+          if (group) html += `<optgroup label="${_escHtml(group)}">`;
+        }
+        html += `<option value="${_escHtml(o.v)}"${val == o.v ? ' selected' : ''}>${_escHtml(o.l)}</option>`;
+      });
+      if (group) html += '</optgroup>';
+      return html;
+    };
     const inp = isCb
       ? `<input type="checkbox" id="cf-${f.key}"${aria}${val ? ' checked' : ''}${isLocked ? ' disabled' : ''}>`
       : isSel
-      ? `<select id="cf-${f.key}"${aria}${isLocked ? ' disabled' : ''}>${runtimeOptions.map(o => `<option value="${o.v}"${val == o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select>`
+      ? `<select id="cf-${f.key}"${aria}${isLocked ? ' disabled' : ''}>${renderOptions(runtimeOptions)}</select>`
       : `<input type="number" id="cf-${f.key}"${aria} value="${val !== undefined ? val : ''}"
         step="${step}"${min}${max}${isLocked ? ' disabled' : ''}>`;
     const wid = f.wrapId ? ` id="${f.wrapId}"` : '';
@@ -1099,7 +1098,7 @@ function renderForm(preserveControllerOpenState = false) {
         {label:'Low oil flow',available:true,keys:['oil_ufd','oil_ufs'],desc:'Flow-fault confirmation and optional shutdown'}
       ],
       'Combustion & Startup Protection': [
-        {key:'flameout',label:'Combustion loss',available:controllerInputs('flame').length||controllerInputs('n1_speed').length||controllerInputs('tot').length||controllerInputs('tit').length,requirement:'Fit flame, N1, TOT, or TIT feedback',keys:['sf_fo','sf_fs','sf_fn','sf_eb','sf_ef'],desc:'Detection source, thresholds, and confirmation'},
+        {key:'flameout',label:'Combustion loss',available:controllerInputs('flame').length||controllerInputs('n1_speed').length||controllerInputs('tot').length||controllerInputs('tit').length,requirement:'Fit flame, N1, TOT, or TIT feedback',keys:['sf_fo','sf_fs','sf_fn','sf_eb','sf_ef'],desc:'Independent confirmed-loss timer; expiry cuts fuel and fault-shuts down'},
         {key:'hot_start',label:'Hot-start protection',available:controllerInputs('tot').length||controllerInputs('tit').length,requirement:'Fit a TOT or TIT input',keys:['sf_hs','sf_st'],desc:'Pre-start and startup temperature limits'},
         {label:'Safety evaluation timing',available:true,keys:['sf_ci'],desc:'General protection check interval'}
       ],
@@ -1141,7 +1140,7 @@ function renderForm(preserveControllerOpenState = false) {
           return `<details class="protection-card" data-protection="${card.id}">
             <summary><span><span class="protection-card-title">${card.title}</span><span class="protection-card-desc">${card.desc}</span></span>${summaryState}<span class="protection-card-chevron">›</span></summary>
             ${safety}<div class="cfg-grid">${fields.map(field => renderField(field, sec, group)).join('')}</div>
-            ${advancedFields.length ? `<details class="protection-card protection-advanced"><summary><span><span class="protection-card-title">Advanced response</span><span class="protection-card-desc">Optional source-specific prediction and reduction tuning</span></span><span class="protection-card-chevron">›</span></summary><div class="cfg-grid">${advancedFields.map(field => renderField(field, sec, group)).join('')}</div></details>` : ''}
+            ${advancedFields.length ? `<div class="cfg-grid protection-predictive-fields" data-predictive-for="${card.id}">${advancedFields.map(field => renderField(field, sec, group)).join('')}</div>` : ''}
           </details>`;
         }).join('')}</div>`
       : localSafety.length ? localSafetyHtml : `<div class="cfg-grid">${sec.fields.map(field => renderField(field, sec, group)).join('')}</div>`;
@@ -1179,13 +1178,11 @@ function renderForm(preserveControllerOpenState = false) {
   const normalGroupsHtml = renderGroups(WORKSPACE_GROUPS.filter(group => group.id !== 'safety'));
   const safetyGroupsHtml = renderGroups(WORKSPACE_GROUPS.filter(group => group.id === 'safety'));
   document.getElementById('cfg-form').innerHTML =
-    (CONFIG_SURFACE === 'controllers' ? '<section id="controller-hardware-setup" class="cfg-section" data-always-visible="1" data-section="Controller assignments"></section>' : '') +
     (CONFIG_SURFACE === 'system' ? '<section id="system-device-setup" class="cfg-section" data-always-visible="1" data-section="Device and communications"></section>' : '') +
     normalGroupsHtml +
     (CONFIG_SURFACE === 'controllers' ? '<section id="simple-controls" class="cfg-section" data-always-visible="1" data-section="Custom controllers"></section>' : '') +
     safetyGroupsHtml +
     '<div id="cfg-empty" class="cfg-empty" hidden>No settings match this search and filter.</div>';
-  renderControllerHardwareSetup();
   renderSystemSetup();
   renderSimpleControls();
   // Controller cards are the workspace itself. Build them only after the
@@ -1217,8 +1214,10 @@ function renderForm(preserveControllerOpenState = false) {
     runValidation();
   });
   const _flSrcEl = document.getElementById('cf-sf_fs');
+  const _rlTriggerEl = document.getElementById('cf-rl_ts');
   const _rlSrcEl = document.getElementById('cf-rl_cs');
   if (_flSrcEl) _flSrcEl.addEventListener('change', applyFlameoutRelightVisibility);
+  if (_rlTriggerEl) _rlTriggerEl.addEventListener('change', applyFlameoutRelightVisibility);
   if (_rlSrcEl) _rlSrcEl.addEventListener('change', applyFlameoutRelightVisibility);
   applyFlameoutRelightVisibility();
 
@@ -1232,6 +1231,10 @@ function renderForm(preserveControllerOpenState = false) {
   if (_rlModeEl) _rlModeEl.addEventListener('change', () => { updateRpmLimiterFields(); applyView(); });
   if (_diModeEl) _diModeEl.addEventListener('change', () => { updateIdleModeFields(); applyView(); });
   if (_diSourceEl) _diSourceEl.addEventListener('change', () => { updateIdleSourceFields(); applyHwConditions(); applyView(); runValidation(); });
+  ['pb_n1e','pb_n2e','pb_egte','pb_p1e','pb_p2e','pb_tqe'].forEach(key => {
+    const el = document.getElementById('cf-' + key);
+    if (el) el.addEventListener('change', () => { applyHwConditions(); applyView(); runValidation(); });
+  });
 
   // Controller cards and their local settings are mounted beside cfg-form,
   // so both workspace surfaces own dirty tracking. Property handlers avoid
@@ -1239,7 +1242,14 @@ function renderForm(preserveControllerOpenState = false) {
   [document.getElementById('cfg-form'), document.getElementById('controller-overview')]
     .filter(Boolean).forEach(surface => {
       surface.oninput = _markDirty;
-      surface.onchange = _markDirty;
+      surface.onchange = () => {
+        _markDirty();
+        // Dependency-controlled subcards must react immediately. In
+        // particular, enabling windmilling oil protection reveals its output
+        // selector without requiring a reload or view-filter change.
+        _applyAllVisibility();
+        runValidation();
+      };
     });
 
   // Apply current view filter

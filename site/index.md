@@ -5,13 +5,13 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
 ---
 
 <section class="hero"><div class="shell hero-grid"><div>
-<p class="eyebrow">OpenTurbine 2.1 · open-source ESP32 turbine ECU</p>
+<p class="eyebrow">OpenTurbine 2.2 · open-source ESP32 turbine ECU</p>
 <h1>A configurable ECU for experimental turbine engines</h1>
 <p class="lede"><strong>OpenTurbine turns a supported Classic ESP32 or ESP32-S3 board into a browser-configured engine control unit.</strong> It can manage starting, fuel, oil, ignition, shutdown, protection and logging for hobby and development turbines.</p>
 <p>Describe the sensors and actuators actually fitted, then build the operating sequence around your engine instead of adapting the engine to one fixed ECU layout.</p>
 {% include download-cta.html %}
 <p class="quiet">For turbojets, APUs, generators, turboshafts, turboprops and turbine test rigs.</p>
-</div><div><img class="screenshot" src="{{ '/assets/images/hero-dashboard.png' | relative_url }}?v=20260825a" width="1800" height="1050" alt="OpenTurbine dashboard during a representative simulated single-shaft turbine run, showing N1, shaft acceleration, turbine temperature, oil pressure, oil temperature, battery voltage and actuator demand"></div></div></section>
+</div><div><img class="screenshot" src="{{ '/assets/images/hero-dashboard.png' | relative_url }}?v=20260830a" width="1800" height="1050" alt="OpenTurbine dashboard during a representative simulated single-shaft turbine run, showing N1, shaft acceleration, turbine temperature, oil pressure, oil temperature, battery voltage and actuator demand"></div></div></section>
 
 <section class="section"><div class="shell">
 <p class="eyebrow">Plan a complete system</p>
@@ -30,12 +30,12 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
 <h2>One interface, from wiring to a completed run</h2>
 <p class="lede">The ECU hosts its own browser interface. These are real OpenTurbine pages; no internet connection is needed while configuring or operating the ECU.</p>
 <div class="ui-gallery">
-  <figure><img class="screenshot" src="{{ '/assets/images/hardware-page.png' | relative_url }}?v=20260825b" width="1800" height="1050" loading="lazy" alt="OpenTurbine Hardware page with fitted inputs and outputs"><figcaption><strong>Hardware</strong> — describe the fitted sensors, actuators and channels.</figcaption></figure>
-  <figure><img class="screenshot" src="{{ '/assets/images/controllers-page.png' | relative_url }}?v=20260825b" width="1800" height="1050" loading="lazy" alt="OpenTurbine Controllers page with configurable turbine controls"><figcaption><strong>Controllers</strong> — choose how each output is commanded and protected.</figcaption></figure>
-  <figure><img class="screenshot" src="{{ '/assets/images/calibration-page.png' | relative_url }}?v=20260825b" width="1800" height="1050" loading="lazy" alt="OpenTurbine Calibration page with guided sensor and actuator tools"><figcaption><strong>Calibration</strong> — verify real signals and usable output ranges safely.</figcaption></figure>
-  <figure><img class="screenshot" src="{{ '/assets/images/sequence-page.png' | relative_url }}?v=20260825b" width="1800" height="1050" loading="lazy" alt="OpenTurbine Sequence page with editable startup blocks"><figcaption><strong>Sequence</strong> — build startup and shutdown around the engine.</figcaption></figure>
-  <figure><img class="screenshot" src="{{ '/assets/images/system-page.png' | relative_url }}?v=20260825b" width="1800" height="1050" loading="lazy" alt="OpenTurbine System page with device and interface settings"><figcaption><strong>System</strong> — manage the device, interface and configuration backup.</figcaption></figure>
-  <figure><img class="screenshot" src="{{ '/assets/images/tools-page.png' | relative_url }}?v=20260825b" width="1800" height="1050" loading="lazy" alt="OpenTurbine Tools page with diagnostics and bench controls"><figcaption><strong>Tools</strong> — diagnose, dry-test and understand the ECU state.</figcaption></figure>
+  <figure><img class="screenshot" src="{{ '/assets/images/hardware-page.png' | relative_url }}?v=20260830a" width="1800" height="1050" loading="lazy" alt="OpenTurbine Hardware page with fitted inputs and outputs"><figcaption><strong>Hardware</strong> — describe the fitted sensors, actuators and channels.</figcaption></figure>
+  <figure><img class="screenshot" src="{{ '/assets/images/controllers-page.png' | relative_url }}?v=20260830a" width="1800" height="1050" loading="lazy" alt="OpenTurbine Controllers page with configurable turbine controls"><figcaption><strong>Controllers</strong> — choose how each output is commanded and protected.</figcaption></figure>
+  <figure><img class="screenshot" src="{{ '/assets/images/calibration-page.png' | relative_url }}?v=20260830a" width="1800" height="1050" loading="lazy" alt="OpenTurbine Calibration page with guided sensor and actuator tools"><figcaption><strong>Calibration</strong> — verify real signals and usable output ranges safely.</figcaption></figure>
+  <figure><img class="screenshot" src="{{ '/assets/images/sequence-page.png' | relative_url }}?v=20260830a" width="1800" height="1050" loading="lazy" alt="OpenTurbine Sequence page with editable startup blocks"><figcaption><strong>Sequence</strong> — build startup and shutdown around the engine.</figcaption></figure>
+  <figure><img class="screenshot" src="{{ '/assets/images/system-page.png' | relative_url }}?v=20260830a" width="1800" height="1050" loading="lazy" alt="OpenTurbine System page with device and interface settings"><figcaption><strong>System</strong> — manage the device, interface and configuration backup.</figcaption></figure>
+  <figure><img class="screenshot" src="{{ '/assets/images/tools-page.png' | relative_url }}?v=20260830a" width="1800" height="1050" loading="lazy" alt="OpenTurbine Tools page with diagnostics and bench controls"><figcaption><strong>Tools</strong> — diagnose, dry-test and understand the ECU state.</figcaption></figure>
 </div>
 </div></section>
 
@@ -59,7 +59,7 @@ description: OpenTurbine is open-source ESP32 turbine ECU software with guided W
   <li>Simple threshold and input-to-output controls</li>
   <li>Browser monitoring, backups, event logs and run logs</li>
 </ul>
-</div><figure><img class="screenshot" src="{{ '/assets/images/hardware-page.png' | relative_url }}?v=20260825a" width="1800" height="1050" loading="lazy" alt="OpenTurbine Hardware page showing a conflict-free example turbine channel inventory"><figcaption>Hardware contains only the sensors and actuators fitted to this example. Values shown throughout the documentation are examples, not settings to copy.</figcaption></figure></div></section>
+</div><figure><img class="screenshot" src="{{ '/assets/images/hardware-page.png' | relative_url }}?v=20260830a" width="1800" height="1050" loading="lazy" alt="OpenTurbine Hardware page showing a conflict-free example turbine channel inventory"><figcaption>Hardware contains only the sensors and actuators fitted to this example. Values shown throughout the documentation are examples, not settings to copy.</figcaption></figure></div></section>
 
 <section class="section alt"><div class="shell"><div class="compact-callout"><div><h2>Check compatibility before installing</h2><p>Normal setup supports Classic ESP32 boards with at least 4 MB flash and ESP32-S3 DevKitC-1-compatible boards with at least 8 MB flash. The universal S3 image also runs on 16 MB modules and does not require PSRAM. The guided installer currently requires Windows.</p></div><a class="button secondary" href="{{ '/hardware/' | relative_url }}">Read hardware requirements</a></div></div></section>
 

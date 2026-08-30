@@ -15,6 +15,7 @@ input-only pins 34/35 can't be an SPI master on the TOT jumpers) and a full anal
 (the S3 tester has no DAC, so ADC is proven at range extremes only).
 """
 import atexit, datetime, json, sys, time, os
+os.environ.setdefault("OTBENCH_TARGET", "classic")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "harness"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from otbench.dut import DUT
@@ -25,6 +26,7 @@ from ten_build_webui_hil import chan_input, chan_output
 
 dut = DUT(); dc = DutConfig(dut); t = Tester(os.environ.get("OTBENCH_PORT", "COM4")).open()
 original_hw = dut.hardware()
+original_ecu = dut._get("/api/ecu_config")
 cleaned = False
 restore_verified = False
 results = []
@@ -54,9 +56,19 @@ def cleanup():
         if not standby:
             print("[RESTORE] DUT did not reach verified STANDBY")
             return False
-        ok, detail = dc.restore(original_hw)
+        try:
+            previous_boot = dut.data().get("boot_count")
+        except Exception:
+            previous_boot = None
+        code, detail = dut._post("/api/ecu_config", original_ecu)
+        ok = code == 200 and dc._wait_reboot(previous_boot)
+        if ok:
+            try:
+                ok = dut._get("/api/ecu_config") == original_ecu
+            except Exception:
+                ok = False
         restore_verified = bool(ok)
-        print("[RESTORE] hardware profile:", "OK" if ok else detail)
+        print("[RESTORE] complete engine file:", "OK" if ok else detail)
         try:
             dut.ensure_dev_mode(False)
         except Exception:
@@ -172,8 +184,26 @@ def cfg_v2_starter(hw):
     hw["startup_seq"] = ["StarterSpin", "TimedDelay"]
     hw["startup_delay_ms"] = [0, 1000]
     hw["startup_ignition_target"] = [0, 0]
+    hw["startup_device_target"] = ["", ""]
     hw["startup_enter_actions"] = [[], []]
     hw["startup_exit_actions"] = [[], []]
+    # This focused profile deliberately removes every non-starter output.
+    # Replace inherited shutdown/afterburner actions too, otherwise the ECU
+    # correctly blocks START because those stale actions reference hardware
+    # that this test intentionally removed.
+    hw["shutdown_seq"] = ["TimedDelay"]
+    hw["shutdown_delay_ms"] = [100]
+    hw["shutdown_ignition_target"] = [0]
+    hw["shutdown_device_target"] = [""]
+    hw["shutdown_enter_actions"] = [[]]
+    hw["shutdown_exit_actions"] = [[]]
+    for prefix in ("ab", "ab_shut"):
+        hw[prefix + "_seq"] = []
+        hw[prefix + "_delay_ms"] = []
+        hw[prefix + "_ignition_target"] = []
+        hw[prefix + "_device_target"] = []
+        hw[prefix + "_enter_actions"] = []
+        hw[prefix + "_exit_actions"] = []
 apply_profile(cfg_v2_starter, check=lambda hw: (
     hw["actuators"]["starter"].get("pin") == 17 and
     hw["sensors"]["n1_rpm"].get("pin") == 4))
@@ -193,6 +223,10 @@ time.sleep(0.8)
 safe_us = t.get("THROTTLE_OUT").get("us", 0) or 0
 rec("v2 assist Tools pulse auto-stops", a and p >= 1150 and safe_us <= 1050,
     "peak=%dus final=%dus" % (p, safe_us))
+# The physical pulse can already be parked while the bounded Tools action is
+# still releasing its internal ownership flag.  Wait past that release before
+# testing START; otherwise the correct overlap guard returns HTTP 409.
+time.sleep(1.0)
 
 t.set("N1", round(300/60.0, 1)); time.sleep(1.0)
 code, response = dut.start()
@@ -205,7 +239,7 @@ while code == 200 and time.time() < end:
 states = [1 if value >= 1150 else 0 for value in samples if value > 0]
 transitions = sum(a != b for a, b in zip(states, states[1:]))
 rec("v2 StarterSpin repeats pulses", code == 200 and 1 in states and 0 in states and transitions >= 2,
-    "HTTP=%s transitions=%d" % (code, transitions))
+    "HTTP=%s response=%r transitions=%d" % (code, response, transitions))
 dut.stop(); time.sleep(0.5)
 stopped_us = t.get("THROTTLE_OUT").get("us", 0) or 0
 rec("v2 StarterSpin STOP cut", stopped_us <= 1050 and not dut.data().get("starter_enabled"),

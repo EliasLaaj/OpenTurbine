@@ -228,9 +228,9 @@ async function optionDisabled(page, selector, value) {
       const relay = registryIgniterSubcards({driver:11}, 0, 'igniter');
       const pwm = registryIgniterSubcards({driver:5}, 0, 'igniter');
       return {
-        relaySimple: relay.includes('Relay-style outputs use Simple on/off') &&
-          !relay.includes('value="coil"') && !relay.includes('value="pwm"'),
-        pwmAdvanced: pwm.includes('value="coil"') && pwm.includes('value="pwm"')
+        relaySimple: relay.includes('simple on/off igniter') &&
+          !relay.includes('value="1"') && !relay.includes('value="2"'),
+        pwmAdvanced: pwm.includes('value="1"') && pwm.includes('value="2"')
       };
     });
     assert.deepEqual(igniterCapabilityUx, {relaySimple:true, pwmAdvanced:true});
@@ -276,7 +276,7 @@ async function optionDisabled(page, selector, value) {
     assert.match(sensorInterfaceUx.torqueSignalEditor, /NAU7802 load cell/);
     assert.match(sensorInterfaceUx.torquePins, /DOUT GPIO5 \/ SCK GPIO6/);
     assert.equal(sensorInterfaceUx.digitalRangeProblem, '');
-    assert.match(sensorInterfaceUx.unsafeTotInterface, /only for oil, coolant, intake or ambient/i);
+    assert.match(sensorInterfaceUx.unsafeTotInterface, /low-range or general temperature/i);
     assert.equal(sensorInterfaceUx.mv.min, 'Minimum valid signal (mV)');
     assert.equal(sensorInterfaceUx.mv.max, 'Maximum valid signal (mV)');
     assert.ok(Math.abs(sensorInterfaceUx.mv.scale - 3300/4095) < 0.000001);
@@ -461,6 +461,9 @@ async function optionDisabled(page, selector, value) {
       sensors: { n1_rpm: { enabled: false }, n2_rpm: { enabled: true } },
       actuators: { oil_pump: { enabled: true } }
     });
+    assert.equal((await page.request.patch(`${base}/api/config`, {
+      data: { standby_oil: { enabled: true } }
+    })).ok(), true);
     await patchData(page, { mode:'STANDBY', config_locked:false });
     await goto(page, 'controllers.html', '#cf-so_src');
     assert.equal(await disabled(page, '#cf-so_src'), false);
@@ -482,8 +485,9 @@ async function optionDisabled(page, selector, value) {
     assert.equal(await disabled(page, '#cf-so_rl'), true);
     assert.equal(await disabled(page, '#cf-so_fp'), true);
     assert.equal(await disabled(page, '#cf-pb_min'), null);
-    assert.equal(await disabled(page, '#cf-pb_n1m'), true);
-    assert.equal(await disabled(page, '#cf-pb_n2m'), true);
+    assert.equal(await disabled(page, '#cf-pb_n1e'), true);
+    assert.equal(await disabled(page, '#cf-pb_n2e'), true);
+    assert.equal(await disabled(page, '#cf-pb_n1m'), null);
     results.push('standby oil feed requires oil pump plus a fitted N1 or N2 source and ghosts invalid shaft options');
 
     await reset(page);
@@ -841,14 +845,23 @@ async function optionDisabled(page, selector, value) {
       shutdown: Array.from(document.querySelectorAll('#add-shutdown-sel option:not([disabled])')).map(o => o.value).filter(Boolean),
       afterburner: Array.from(document.querySelectorAll('#add-afterburner-sel option:not([disabled])')).map(o => o.value).filter(Boolean),
       sensors: getEnabledSensors().map(s => s.key),
-      actuators: getEnabledActuators().map(a => a.key)
+      actuators: getEnabledActuators().map(a => ({key:a.key, target:a.target}))
     }));
-    for (const key of ['FuelPulse', 'PreHeat', 'ThrottleSet', 'WaitForInput', 'OilScavengeOn', 'AirstarterOn', 'CoolFanOn', 'BleedOpen', 'GlowPreheat', 'FuelPumpRamp', 'FuelPump2Set', 'GovernorHold']) {
+    for (const key of ['OilPrime', 'StarterSpin', 'PreHeat', 'TimedDelay', 'FuelPumpIdle']) {
       assert.ok(sequenceFull.startup.includes(key), `full startup should include ${key}`);
     }
-    for (const key of ['ABSolOpen', 'ABPumpOn', 'ABIgnOn', 'ABFlameConfirm', 'ABStabilize']) {
+    for (const key of ['ABCheckReady', 'ABIgnite', 'ABFlameConfirm', 'ABStabilize', 'TimedDelay']) {
       assert.ok(sequenceFull.afterburner.includes(key), `full AB should include ${key}`);
     }
+    for (const actuator of sequenceFull.actuators) {
+      assert.ok(sequenceFull.startup.includes(`SetOutput::${actuator.target}`),
+        `startup should offer one Set Output action for ${actuator.key}`);
+      assert.ok(sequenceFull.afterburner.includes(`SetOutput::${actuator.target}`),
+        `afterburner should offer one Set Output action for ${actuator.key}`);
+    }
+    for (const legacy of ['FuelPulse','ThrottleSet','OilScavengeOn','AirstarterOn','CoolFanOn','BleedOpen','GlowPreheat','FuelPumpRamp','FuelPump2Set','GovernorHold','ABSolOpen','ABPumpOn','ABIgnOn'])
+      assert.equal(sequenceFull.startup.includes(legacy) || sequenceFull.afterburner.includes(legacy), false,
+        `${legacy} should not clutter the concise add menu`);
     const sequenceHw = await (await page.request.get(`${base}/api/hardware`)).json();
     await patchHardware(page, {
       channel_registry: {
@@ -872,19 +885,20 @@ async function optionDisabled(page, selector, value) {
     await page.waitForSelector('#add-startup-sel');
     const sequenceHidden = await page.evaluate(() => ({
       startup: Array.from(document.querySelectorAll('#add-startup-sel option')).map(o => ({ value: o.value, disabled: o.disabled })).filter(o => o.value),
-      afterburnerCount: document.querySelectorAll('#add-afterburner-sel option[value="ABPumpOn"],#add-afterburner-sel option[value="ABSolOpen"],#add-afterburner-sel option[value="ABIgnOn"]').length,
+      afterburnerValues: Array.from(document.querySelectorAll('#add-afterburner-sel option')).map(o => o.value).filter(Boolean),
       sensors: getEnabledSensors().map(s => s.key),
-      actuators: getEnabledActuators().map(a => a.key)
+      actuators: getEnabledActuators().map(a => ({key:a.key, target:a.target}))
     }));
     assert.ok(sequenceHidden.startup.some(o => o.value === 'PreHeat' && !o.disabled), 'PreHeat should remain available when Igniter 2 is fitted');
-    for (const absent of ['FuelPulse', 'WaitForInput', 'OilScavengeOn', 'AirstarterOn', 'CoolFanOn', 'BleedOpen', 'GlowPreheat', 'FuelPumpRamp', 'FuelPump2Set']) {
-      const opt = sequenceHidden.startup.find(o => o.value === absent);
-      assert.ok(!opt || opt.disabled, `${absent} should be absent/disabled`);
+    for (const actuator of sequenceHidden.actuators) {
+      assert.ok(sequenceHidden.startup.some(o => o.value === `SetOutput::${actuator.target}` && !o.disabled),
+        `startup should keep the fitted ${actuator.key} output selectable`);
+      assert.ok(sequenceHidden.afterburnerValues.includes(`SetOutput::${actuator.target}`),
+        `afterburner should keep the fitted ${actuator.key} output selectable`);
     }
-    assert.ok(sequenceHidden.startup.some(o => o.value === 'GovernorHold' && !o.disabled));
-    assert.equal(sequenceHidden.afterburnerCount, 3);
+    assert.equal(sequenceHidden.startup.some(o => ['FuelPulse','OilScavengeOn','AirstarterOn','CoolFanOn','BleedOpen','FuelPumpRamp','FuelPump2Set','GovernorHold'].includes(o.value)), false);
     assert.equal(sequenceHidden.sensors.includes('n2_rpm'), true);
-    assert.equal(sequenceHidden.actuators.some(a => a.startsWith('ab_')), true);
+    assert.equal(sequenceHidden.actuators.some(a => a.key.startsWith('ab_')), true);
     results.push('sequence editor derives N2 and afterburner options from fitted devices, not obsolete master fields');
 
     await reset(page);

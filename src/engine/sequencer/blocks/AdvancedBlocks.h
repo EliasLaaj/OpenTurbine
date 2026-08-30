@@ -35,7 +35,7 @@
 class BleedOpen : public IBlock {
 public:
     const char* name() override { return "BleedOpen"; }
-    void onEnter() override { auto& ed = EngineData::instance(); ed.bleedValveDemand = 1.0f; ed.bleedValveOpen = true; }
+    void onEnter() override { EngineData::instance().bleedValveDemand = 1.0f; }
     BlockResult tick() override { return BlockResult::Complete; }
     void onExit() override {}
 };
@@ -43,78 +43,12 @@ public:
 class BleedClose : public IBlock {
 public:
     const char* name() override { return "BleedClose"; }
-    void onEnter() override { auto& ed = EngineData::instance(); ed.bleedValveDemand = 0.0f; ed.bleedValveOpen = false; }
+    void onEnter() override { EngineData::instance().bleedValveDemand = 0.0f; }
     BlockResult tick() override { return BlockResult::Complete; }
     void onExit() override {}
 };
 
 // ── Glow plug preheat ramp ────────────────────────────────────
-
-class GlowPreheat : public IBlock {
-public:
-    unsigned long preheatMs      = 10000;  // total ramp duration (ms)
-    float         maxPct         = 80.0f;  // peak duty during ramp
-    float         holdPct        = 30.0f;  // duty to hold after ramp
-    bool          waitUntilHot   = false;  // hold at holdPct until current sensor confirms plug is hot
-    unsigned long waitHotTimeout = 30000;  // max extra wait after ramp (ms); prevents infinite hang if sensor broken
-
-    const char* name() override { return "GlowPreheat"; }
-
-    void onEnter() override {
-        _startMs = millis();
-        // Always pull from Config so changes take effect without a reboot.
-        // (applyConfig() copies these too, but onEnter is the authoritative source
-        //  for blocks that aren't wired into Hardware::applyConfig.)
-        preheatMs    = (unsigned long)Config::glowPreheatMs;
-        const bool relayOutput = HardwareConfig::glowPlugOutputType == 1;
-        maxPct       = relayOutput ? 100.0f : Config::glowPreheatMaxPct;
-        holdPct      = relayOutput ? 100.0f : Config::glowHoldPct;
-        waitUntilHot = Config::glowWaitUntilHot;
-    }
-
-    BlockResult tick() override {
-        auto& ed = EngineData::instance();
-        unsigned long elapsed = millis() - _startMs;
-        if (elapsed < preheatMs) {
-            // Linear ramp 0 → maxPct
-            float frac = (float)elapsed / (float)preheatMs;
-            ed.glowPlugDemand = (frac * maxPct) / 100.0f;
-            return BlockResult::Running;
-        }
-        // Preheat done — hold at hold duty
-        ed.glowPlugDemand = holdPct / 100.0f;
-        // waitUntilHot requires the current sensor to confirm temperature.
-        // In bench mode (or if sensor is not fitted), skip the wait.
-        // waitHotTimeout prevents an infinite hang if the sensor is broken or
-        // misconfigured — proceed after the deadline rather than stalling the
-        // entire startup sequence permanently.
-        if (waitUntilHot && !ed.benchMode) {
-            if (!HardwareConfig::hasGlowCurrentSensor || !ed.glowCurrentHealthy)
-                setWaitReason("Glow current feedback unavailable");
-            else if (!ed.glowPlugHot)
-                setWaitReason("Waiting for glow plug temperature");
-            else {
-                clearWaitReason();
-                return BlockResult::Complete;
-            }
-            if ((millis() - _startMs) < preheatMs + waitHotTimeout) {
-                return BlockResult::Running;
-            }
-            Serial.println("[GlowPreheat] waitUntilHot timeout - aborting startup");
-            ed.glowPlugDemand = 0.0f;
-            return BlockResult::Abort;
-        }
-        clearWaitReason();
-        return BlockResult::Complete;
-    }
-
-    void onExit() override {
-        // Leave glowPlugDemand at holdPct — engine needs heat during ignition
-    }
-
-private:
-    unsigned long _startMs = 0;
-};
 
 // ── Fuel pump 2 ramp ──────────────────────────────────────────
 

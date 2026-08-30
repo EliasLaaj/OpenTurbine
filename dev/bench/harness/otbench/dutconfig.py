@@ -101,6 +101,14 @@ class DutConfig:
                     saw_outage = True
                     break
             time.sleep(0.5)
+        # The ESP32 access point disappearing causes Windows to leave the
+        # saved open-network profile disconnected.  Reconnect once, only after
+        # a sustained ECU outage proves this was the expected reboot.  The
+        # forced call is per reboot; it avoids both the old 60-second throttle
+        # blocking closely spaced profile tests and repeated connect commands
+        # tearing down an association already in progress.
+        if saw_outage:
+            self.dut._reconnect_wifi(force=True)
         # Phase 2: wait for the AP to return, then settle so the reboot-pending
         # preflight flag has cleared before the caller re-reads config.
         while time.time() < deadline:
@@ -113,6 +121,7 @@ class DutConfig:
                 self.dut._data_base = None
                 return saw_outage
             except Exception:
+                self.dut._reconnect_wifi()
                 time.sleep(1.0)
         return False
 
@@ -155,9 +164,32 @@ class DutConfig:
         if callable(self.before_patch):
             self.before_patch(partial)
         for _ in range(tries):
-            code, resp = self.dut.patch("/api/config", partial)
+            try:
+                previous_boot_count = self.dut.data().get("boot_count")
+            except Exception:
+                previous_boot_count = None
+            if os.environ.get("OTBENCH_TARGET", "s3").strip().lower() == "classic":
+                engine = self.dut._get("/api/ecu_config")
+                complete = engine["settings"]
+                def merge(target, patch):
+                    for key, value in patch.items():
+                        if isinstance(value, dict) and isinstance(target.get(key), dict):
+                            merge(target[key], value)
+                        else:
+                            target[key] = value
+                merge(complete, partial)
+                code, resp = self.dut._post("/api/ecu_config", engine)
+            else:
+                code, resp = self.dut.patch("/api/config", partial)
             if code != 200:
                 time.sleep(1); continue
+            if isinstance(resp, dict) and resp.get("reboot"):
+                # Classic standby saves deliberately reboot after the exact
+                # validated settings file is committed. Do not mistake the
+                # pre-restart runtime for a rejected patch; wait for a new
+                # boot generation before reading the authoritative values.
+                if not self._wait_reboot(previous_boot_count):
+                    continue
             if not verify:
                 # The API has persisted the generation but deliberately frees
                 # its HTTP buffers before ECU-core apply. Give that bounded
@@ -165,15 +197,20 @@ class DutConfig:
                 self._wait_config_apply()
                 return True, resp
             # Firmware releases the HTTP buffers before copying the complete
-            # settings generation on the ECU core. Verify that short bounded
-            # transaction instead of racing it with an immediate duplicate.
-            time.sleep(0.6)
+            # settings generation on the ECU core. Wait for that transaction
+            # before comparing runtime values; otherwise a healthy Classic can
+            # be mistaken for a rejected patch and receive duplicate writes.
+            if not self._wait_config_apply():
+                # Do not hammer a Classic that is still recovering the large
+                # contiguous workspace needed to apply the staged generation.
+                # A later outer attempt may retry once the gate has cleared.
+                time.sleep(1.0)
+                continue
             deadline = time.time() + 4.0
             while time.time() < deadline:
                 try:
                     if _nested_matches(self.dut.config(), partial):
-                        if self._wait_config_apply():
-                            return True, resp
+                        return True, resp
                 except Exception:
                     pass
                 time.sleep(0.2)
@@ -191,10 +228,15 @@ class DutConfig:
             # Do not keep allocating HTTP request headers while the Classic is
             # deliberately trying to recover one large contiguous heap block.
             time.sleep(3.0)
-            try:
-                return not self.dut.status().get("config_apply_busy", False)
-            except Exception:
-                return False
+            deadline = time.time() + max(timeout, 20.0)
+            while time.time() < deadline:
+                try:
+                    if not self.dut.status().get("config_apply_busy", False):
+                        return True
+                except Exception:
+                    pass
+                time.sleep(2.0)
+            return False
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:

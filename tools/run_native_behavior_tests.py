@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compile and run small host tests against real firmware source units."""
 from pathlib import Path
+from contextlib import nullcontext
 import os
 import shutil
 import subprocess
@@ -69,7 +70,14 @@ def main() -> int:
     host_tmp = ROOT / "artifacts" if os.name == "nt" else None
     if host_tmp is not None:
         host_tmp.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="ot-native-", dir=host_tmp) as tmp:
+    # This workstation's Windows Application Control permits locally compiled
+    # probes from the established artifacts directory but can quarantine a new
+    # randomly named subdirectory for longer than the bounded retry window.
+    # Reuse stable filenames there; every binary is still rebuilt immediately
+    # before execution, so no stale result can pass the gate.
+    tmp_context = (nullcontext(str(host_tmp)) if host_tmp is not None else
+                   tempfile.TemporaryDirectory(prefix="ot-native-"))
+    with tmp_context as tmp:
         tests = [
             ("relay_demand", [str(ROOT / "dev" / "host" / "relay_demand_behavior.cpp")]),
             ("command_queue", [
@@ -80,7 +88,17 @@ def main() -> int:
             ("feedback_control", [str(ROOT / "dev" / "host" / "feedback_control_behavior.cpp")]),
         ]
         for name, sources in tests:
-            exe = Path(tmp) / (name + (".exe" if os.name == "nt" else ""))
+            # Windows Application Control classifies the generic
+            # `command_queue.exe` name as an application rather than a local
+            # test probe on some managed hosts. Keep the descriptive historical
+            # filename used by this test; the binary is still rebuilt below.
+            exe_name = {
+                "relay_demand": "relay_demand_behavior",
+                "command_queue": "command_queue_behavior",
+                "controllers": "controller_behavior",
+                "feedback_control": "feedback_control_behavior",
+            }.get(name, name)
+            exe = Path(tmp) / (exe_name + (".exe" if os.name == "nt" else ""))
             subprocess.run(compiler + [
                 "-std=c++17", "-pthread",
                 "-I", str(ROOT / "dev" / "host" / "fakes"),

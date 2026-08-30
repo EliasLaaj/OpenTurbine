@@ -2,6 +2,7 @@
 #include "../IBlock.h"
 #include "../../EngineData.h"
 #include "../../../system/FlightRecorder.h"
+#include "../SequenceIgnition.h"
 #include <Arduino.h>
 
 // Wait for sustained flame detection before allowing spool.
@@ -63,11 +64,10 @@ public:
     void onExit() override {
         clearWaitReason();
         if (turnOffIgniterOnExit) {
-            // Flame is confirmed self-sustaining — cut igniter
-            auto& ed = EngineData::instance();
-            ed.igniterOn = false;
-            ed.igniter2On = false;
-            ed.glowPlugDemand = 0.0f;
+            // Flame is confirmed self-sustaining. Release only ignition
+            // devices energized by this sequence; unrelated RUNNING/custom
+            // ignition control remains independent.
+            clearSequenceIgnitionOutputs();
         }
     }
 

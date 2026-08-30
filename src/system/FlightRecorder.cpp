@@ -6,6 +6,7 @@
 #include <esp_attr.h>
 #include <Arduino.h>
 #include <esp_efuse.h>
+#include <cstdarg>
 
 SemaphoreHandle_t FlightRecorder::_mutex          = nullptr;
 static volatile bool s_clearPending = false;
@@ -21,6 +22,8 @@ float             FlightRecorder::_runMaxTit       = 0.0f;
 float             FlightRecorder::_runMinOil       = 9999.0f;
 uint32_t          FlightRecorder::_runStartSec     = 0;
 bool              FlightRecorder::_runActive       = false;
+static bool       s_runN1Seen = false, s_runN2Seen = false;
+static bool       s_runTotSeen = false, s_runTitSeen = false, s_runOilSeen = false;
 
 // Tracked in-memory line count so we don't re-count the file on every append.
 // -1 means not yet initialised (counted on first drain after boot).
@@ -69,6 +72,35 @@ static void jsonSafeCopy(char* dst, size_t len, const char* src) {
     dst[out] = '\0';
 }
 
+static int appendFormat(char* dst, size_t len, int used, const char* format, ...) {
+    if (!dst || used < 0 || (size_t)used >= len) return (int)len - 1;
+    va_list args;
+    va_start(args, format);
+    const int wrote = vsnprintf(dst + used, len - (size_t)used, format, args);
+    va_end(args);
+    if (wrote < 0 || (size_t)wrote >= len - (size_t)used) {
+        // vsnprintf may have written a partial field. Roll back to the last
+        // complete JSON boundary so the closing brace and later small fields
+        // can still be recorded instead of persisting a malformed event.
+        dst[used] = '\0';
+        return used;
+    }
+    return used + wrote;
+}
+
+static int appendFittedSensorFields(char* dst, size_t len, int used) {
+    const auto& ed = EngineData::instance();
+    if (HardwareConfig::hasN1Rpm) used = appendFormat(dst, len, used, ",\"n1Rpm\":%.0f", ed.n1Rpm);
+    if (HardwareConfig::hasN2Rpm) used = appendFormat(dst, len, used, ",\"n2Rpm\":%.0f", ed.n2Rpm);
+    if (HardwareConfig::hasTot) used = appendFormat(dst, len, used, ",\"totDegC\":%.1f", ed.tot);
+    if (HardwareConfig::hasTit) used = appendFormat(dst, len, used, ",\"titDegC\":%.1f", ed.tit);
+    if (HardwareConfig::hasOilPress) used = appendFormat(dst, len, used, ",\"oilBar\":%.2f", ed.oilPressure);
+    if (HardwareConfig::hasOilTemp) used = appendFormat(dst, len, used, ",\"oilTempC\":%.1f", ed.oilTemp);
+    if (HardwareConfig::hasFuelPress) used = appendFormat(dst, len, used, ",\"fuelBar\":%.2f", ed.fuelPressure);
+    if (HardwareConfig::hasBattVoltage) used = appendFormat(dst, len, used, ",\"battV\":%.2f", ed.battVoltage);
+    return used;
+}
+
 void FlightRecorder::begin() {
     if (!LittleFS.exists(PATH) && LittleFS.exists("/logs/events.bak")) {
         LittleFS.rename("/logs/events.bak", PATH);
@@ -91,11 +123,26 @@ void FlightRecorder::tick() {
     // Run summaries describe the run, not values observed while configuring,
     // faulted, or cooling in another mode.
     if (ed.mode == SysMode::RUNNING) {
-        if (hw.hasN1Rpm && ed.n1Rpm > _runMaxN1) _runMaxN1 = ed.n1Rpm;
-        if (hw.hasTwoShaft && hw.hasN2Rpm && ed.n2Rpm > s_runMaxN2) s_runMaxN2 = ed.n2Rpm;
-        if (hw.hasTot && ed.tot > _runMaxTot) _runMaxTot = ed.tot;
-        if (hw.hasTit && ed.tit > _runMaxTit) _runMaxTit = ed.tit;
-        if (hw.hasOilPress && ed.oilPressure < _runMinOil) _runMinOil = ed.oilPressure;
+        if (hw.hasN1Rpm && ed.n1Healthy) {
+            s_runN1Seen = true;
+            if (ed.n1Rpm > _runMaxN1) _runMaxN1 = ed.n1Rpm;
+        }
+        if (hw.hasN2Rpm && ed.n2Healthy) {
+            s_runN2Seen = true;
+            if (ed.n2Rpm > s_runMaxN2) s_runMaxN2 = ed.n2Rpm;
+        }
+        if (hw.hasTot && ed.totHealthy) {
+            s_runTotSeen = true;
+            if (ed.tot > _runMaxTot) _runMaxTot = ed.tot;
+        }
+        if (hw.hasTit && ed.titHealthy) {
+            s_runTitSeen = true;
+            if (ed.tit > _runMaxTit) _runMaxTit = ed.tit;
+        }
+        if (hw.hasOilPress && ed.oilHealthy) {
+            s_runOilSeen = true;
+            if (ed.oilPressure < _runMinOil) _runMinOil = ed.oilPressure;
+        }
     }
 
     // Compact 10-second SNAP: essential sensors only
@@ -108,37 +155,24 @@ void FlightRecorder::tick() {
     int n = snprintf(buf, sizeof(buf),
         "{\"t\":%lu,\"ev\":\"SNAP\"", _uptimeSec());
 
-    #define APPEND_EVENT_FIELD(...) do { \
-        if (n >= 0 && n < (int)sizeof(buf)) { \
-            int wrote = snprintf(buf + n, sizeof(buf) - (size_t)n, __VA_ARGS__); \
-            if (wrote < 0) { \
-                n = (int)sizeof(buf) - 1; \
-            } else { \
-                n += wrote; \
-                if (n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1; \
-            } \
-        } \
-    } while (0)
-
     if (hw.hasN1Rpm)
-        APPEND_EVENT_FIELD(",\"n1\":%.0f", ed.n1Rpm);
+        n = appendFormat(buf, sizeof(buf), n, ",\"n1\":%.0f", ed.n1Rpm);
     if (hw.hasTot)
-        APPEND_EVENT_FIELD(",\"tot\":%.0f", ed.tot);
+        n = appendFormat(buf, sizeof(buf), n, ",\"tot\":%.0f", ed.tot);
     if (hw.hasThrottle)
-        APPEND_EVENT_FIELD(",\"thr\":%d", (int)(ed.throttleDemand * 100.0f + 0.5f));
+        n = appendFormat(buf, sizeof(buf), n, ",\"thr\":%d", (int)(ed.throttleDemand * 100.0f + 0.5f));
     if (hw.hasOilPress)
-        APPEND_EVENT_FIELD(",\"oil\":%.2f,\"oilP\":%d", ed.oilPressure, (int)ed.oilPumpPct);
-    if (hw.hasTwoShaft && hw.hasN2Rpm)
-        APPEND_EVENT_FIELD(",\"n2\":%.0f", ed.n2Rpm);
+        n = appendFormat(buf, sizeof(buf), n, ",\"oil\":%.2f,\"oilP\":%d", ed.oilPressure, (int)ed.oilPumpPct);
+    if (hw.hasN2Rpm)
+        n = appendFormat(buf, sizeof(buf), n, ",\"n2\":%.0f", ed.n2Rpm);
     if (hw.hasTit)
-        APPEND_EVENT_FIELD(",\"tit\":%.0f", ed.tit);
+        n = appendFormat(buf, sizeof(buf), n, ",\"tit\":%.0f", ed.tit);
     if (hw.hasPropPitch)
-        APPEND_EVENT_FIELD(",\"prop\":%d", (int)(ed.propPitchDemand * 100.0f + 0.5f));
+        n = appendFormat(buf, sizeof(buf), n, ",\"prop\":%d", (int)(ed.propPitchDemand * 100.0f + 0.5f));
     if (hw.hasAfterburner)
-        APPEND_EVENT_FIELD(",\"ab\":%d,\"abP\":%d", (int)ed.abMode, (int)(ed.abPumpDemand * 100.0f + 0.5f));
+        n = appendFormat(buf, sizeof(buf), n, ",\"ab\":%d,\"abP\":%d", (int)ed.abMode, (int)(ed.abPumpDemand * 100.0f + 0.5f));
 
-    APPEND_EVENT_FIELD("}");
-    #undef APPEND_EVENT_FIELD
+    appendFormat(buf, sizeof(buf), n, "}");
     _append(buf);
 }
 
@@ -160,11 +194,10 @@ void FlightRecorder::logBoot() {
 }
 
 void FlightRecorder::logStartAttempt() {
-    auto& ed = EngineData::instance();
-    char buf[128];
-    snprintf(buf, sizeof(buf),
-        "{\"t\":%lu,\"ev\":\"START_ATTEMPT\",\"n1Rpm\":%.0f,\"oilBar\":%.2f,\"totDegC\":%.1f}",
-        _uptimeSec(), ed.n1Rpm, ed.oilPressure, ed.tot);
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "{\"t\":%lu,\"ev\":\"START_ATTEMPT\"", _uptimeSec());
+    n = appendFittedSensorFields(buf, sizeof(buf), n);
+    appendFormat(buf, sizeof(buf), n, "}");
     _append(buf);
 }
 
@@ -195,14 +228,14 @@ void FlightRecorder::logRunningEntry() {
     _runMaxTot   = 0.0f;
     _runMaxTit   = 0.0f;
     _runMinOil   = 9999.0f;
+    s_runN1Seen = s_runN2Seen = s_runTotSeen = s_runTitSeen = s_runOilSeen = false;
     _runStartSec = _uptimeSec();
     _runActive = true;
 
-    auto& ed = EngineData::instance();
-    char buf[128];
-    snprintf(buf, sizeof(buf),
-        "{\"t\":%lu,\"ev\":\"RUNNING_ENTRY\",\"n1Rpm\":%.0f,\"oilBar\":%.2f,\"totDegC\":%.1f}",
-        _uptimeSec(), ed.n1Rpm, ed.oilPressure, ed.tot);
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf), "{\"t\":%lu,\"ev\":\"RUNNING_ENTRY\"", _uptimeSec());
+    n = appendFittedSensorFields(buf, sizeof(buf), n);
+    appendFormat(buf, sizeof(buf), n, "}");
     _append(buf);
 }
 
@@ -215,15 +248,10 @@ void FlightRecorder::logFault(const char* code) {
     char safeCode[48];
     jsonSafeCopy(safeCode, sizeof(safeCode), code);
     char buf[500];
-    snprintf(buf, sizeof(buf),
-        "{\"t\":%lu,\"ev\":\"FAULT\",\"code\":\"%s\","
-        "\"n1Rpm\":%.0f,\"totDegC\":%.1f,\"titDegC\":%.1f,"
-        "\"oilBar\":%.2f,\"oilTempC\":%.1f,\"fuelBar\":%.2f,\"battV\":%.2f,"
-        "\"desc\":\"%s\"}",
-        _uptimeSec(), safeCode,
-        ed.n1Rpm, ed.tot, ed.tit,
-        ed.oilPressure, ed.oilTemp, ed.fuelPressure, ed.battVoltage,
-        desc);
+    int n = snprintf(buf, sizeof(buf),
+        "{\"t\":%lu,\"ev\":\"FAULT\",\"code\":\"%s\"", _uptimeSec(), safeCode);
+    n = appendFittedSensorFields(buf, sizeof(buf), n);
+    appendFormat(buf, sizeof(buf), n, ",\"desc\":\"%s\"}", desc);
     _append(buf);
 }
 
@@ -234,29 +262,20 @@ void FlightRecorder::logRunSummary() {
     uint32_t runS = _uptimeSec() - _runStartSec;
     char buf[220];
     int n = snprintf(buf, sizeof(buf),
-        "{\"t\":%lu,\"ev\":\"RUN_SUMMARY\",\"runS\":%lu,\"maxN1\":%.0f,\"maxTot\":%.0f",
-        _uptimeSec(), (unsigned long)runS, _runMaxN1, _runMaxTot);
+        "{\"t\":%lu,\"ev\":\"RUN_SUMMARY\",\"runS\":%lu",
+        _uptimeSec(), (unsigned long)runS);
 
-    #define APPEND_SUMMARY_FIELD(...) do { \
-        if (n >= 0 && n < (int)sizeof(buf)) { \
-            int wrote = snprintf(buf + n, sizeof(buf) - (size_t)n, __VA_ARGS__); \
-            if (wrote < 0) { \
-                n = (int)sizeof(buf) - 1; \
-            } else { \
-                n += wrote; \
-                if (n >= (int)sizeof(buf)) n = (int)sizeof(buf) - 1; \
-            } \
-        } \
-    } while (0)
-
-    if (HardwareConfig::hasTit)
-        APPEND_SUMMARY_FIELD(",\"maxTit\":%.0f", _runMaxTit);
-    if (HardwareConfig::hasTwoShaft && HardwareConfig::hasN2Rpm)
-        APPEND_SUMMARY_FIELD(",\"maxN2\":%.0f", s_runMaxN2);
-    if (_runMinOil < 9000.0f)
-        APPEND_SUMMARY_FIELD(",\"minOil\":%.2f", _runMinOil);
-    APPEND_SUMMARY_FIELD("}");
-    #undef APPEND_SUMMARY_FIELD
+    if (HardwareConfig::hasN1Rpm && s_runN1Seen)
+        n = appendFormat(buf, sizeof(buf), n, ",\"maxN1\":%.0f", _runMaxN1);
+    if (HardwareConfig::hasTot && s_runTotSeen)
+        n = appendFormat(buf, sizeof(buf), n, ",\"maxTot\":%.0f", _runMaxTot);
+    if (HardwareConfig::hasTit && s_runTitSeen)
+        n = appendFormat(buf, sizeof(buf), n, ",\"maxTit\":%.0f", _runMaxTit);
+    if (HardwareConfig::hasN2Rpm && s_runN2Seen)
+        n = appendFormat(buf, sizeof(buf), n, ",\"maxN2\":%.0f", s_runMaxN2);
+    if (s_runOilSeen)
+        n = appendFormat(buf, sizeof(buf), n, ",\"minOil\":%.2f", _runMinOil);
+    appendFormat(buf, sizeof(buf), n, "}");
     _append(buf);
     _runStartSec = 0;   // prevent duplicate summary if shutdown handlers chain
     _runActive = false;
@@ -301,12 +320,12 @@ void FlightRecorder::logConfigChange(const char* field, float oldVal, float newV
 }
 
 void FlightRecorder::logRelight(uint8_t attemptNum) {
-    auto& ed = EngineData::instance();
-    char buf[160];
-    snprintf(buf, sizeof(buf),
-        "{\"t\":%lu,\"ev\":\"RELIGHT_ATTEMPT\",\"attempt\":%u,"
-        "\"n1Rpm\":%.0f,\"totDegC\":%.1f,\"oilBar\":%.2f}",
-        _uptimeSec(), (unsigned)attemptNum, ed.n1Rpm, ed.tot, ed.oilPressure);
+    char buf[256];
+    int n = snprintf(buf, sizeof(buf),
+        "{\"t\":%lu,\"ev\":\"RELIGHT_ATTEMPT\",\"attempt\":%u",
+        _uptimeSec(), (unsigned)attemptNum);
+    n = appendFittedSensorFields(buf, sizeof(buf), n);
+    appendFormat(buf, sizeof(buf), n, "}");
     _append(buf);
 }
 

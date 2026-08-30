@@ -252,7 +252,7 @@ async function sectionVisible(page, title) {
     await gotoConfig(page);
     await page.locator('#btn-view-expert').click();
     assert.equal(await shown(page, '#starter-support-section'), false, 'starter support section should hide without starter hardware');
-    assert.equal(await shown(page, '#glow-cfg-section'), false, 'glow section should hide without glow plug hardware');
+    assert.equal(await page.locator('#glow-cfg-section').count(), 0, 'shared glow settings were replaced by each device card');
     assert.equal(await shown(page, '#rc-pwm-section'), false, 'RC PWM section should hide without servo PWM inputs');
     await page.locator('#btn-view-explore').click();
     assert.equal(await page.locator('#starter-support-section').count(), 0,
@@ -278,7 +278,7 @@ async function sectionVisible(page, title) {
     await gotoConfig(page);
     await page.locator('#btn-view-expert').click();
     assert.equal(await shown(page, '#starter-support-section'), true, 'starter support settings should show when support and N1 are available');
-    assert.equal(await shown(page, '#glow-cfg-section'), true, 'glow section should show with glow plug hardware');
+    assert.equal(await page.locator('#glow-cfg-section').count(), 0, 'glow behavior belongs to the exact Hardware device card');
     assert.equal(await shown(page, '#rc-pwm-section'), true, 'RC PWM section should show with servo PWM throttle input');
     await patchHardware(page, {
       sensors: { n1_rpm: { enabled: false } }

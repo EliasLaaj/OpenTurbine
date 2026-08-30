@@ -60,8 +60,13 @@ async function installPublicExample(page) {
   });
   hardware.controllers = { oil_loop: true, dynamic_idle: true, governor: false };
   hardware.safety = { overspeed: true, n2_overspeed: false, overtemp: true, low_oil: true, oil_zero: true, flameout: true, hot_start: true, oil_temp_high: true, fuel_press_low: false, batt_low: true, surge: false };
-  hardware.startup_seq = ['OilPrime', 'StarterSpin', 'IgniterOn', 'FuelOpen', 'TempConfirm', 'IgniterOff', 'Spool', 'SafetyHold'];
+  hardware.startup_seq = ['OilPrime', 'StarterSpin', 'SetOutput', 'SetOutput', 'TempConfirm', 'SetOutput', 'Spool', 'SafetyHold'];
   hardware.startup_delay_ms = [0, 0, 0, 0, 0, 0, 0, 0];
+  hardware.startup_enter_actions = [
+    [], [], [{act:9,target:'igniter',value:1}], [{act:8,target:'fuel_shutoff',value:1}], [],
+    [{act:9,target:'igniter',value:0}], [], []
+  ];
+  hardware.startup_exit_actions = [[], [], [], [], [], [], [], []];
   hardware.shutdown_seq = ['ImmediateCut', 'RPMDrop', 'CooldownSpin', 'FinalStop'];
   hardware.shutdown_delay_ms = [0, 0, 0, 0];
   hardware.cluster_serial.enabled = false;
@@ -97,7 +102,8 @@ async function setRunState(page, patch = {}) {
     throttle_demand: 0.36, throttle_input_us: 1360, throttle_input_norm: 0.36, rc_throttle_norm: 0.36,
     oil_demand: 2.3, oil_pct: 41, flame: true, max_n1: 61400, max_tot: 628, max_oil_temp: 76,
     rpm_limit: 100000, tot_limit: 720, egt_limit: 720, oil_running_min: 1.4, oil_temp_limit: 110,
-    idle_target_rpm: 58000, dynamic_idle_enabled: true, relight_enabled: false, relight_armed: false,
+    idle_target: 58000, idle_target_unit: 'rpm', idle_source: 'N1',
+    dynamic_idle_enabled: true, relight_enabled: false, relight_armed: false,
     has_n1: true, has_n2: false, has_tot: true, has_tit: false, has_oil_press: true, has_oil_temp: true,
     has_batt_voltage: true, has_throttle: true, has_oil_pump: true, has_oil_loop: true, has_dynamic_idle: true,
     has_starter: false, has_starter_en: false, has_fuel_sol: false, has_igniter: false, has_igniter2: false,

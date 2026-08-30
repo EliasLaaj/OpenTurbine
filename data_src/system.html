@@ -6,7 +6,7 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — System</title>
-<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}@keyframes otFailsafeReveal{to{visibility:visible}}html:not(.ot-theme-ready) body{visibility:hidden;animation:otFailsafeReveal 0s 8s forwards}</style>
 <style>
 :root{--bg:#101012;--surface:#17171a;--surface-2:#1d1d20;--surface-3:#262629;--border:#313135;--border-light:#42424a;--text:#f5f5f7;--text-2:#cecdd4;--dim:#a0a0a8;--green:#33cf7a;--red:#ff4d5f;--yellow:#ffcf4d;--blue:#5ab8ca;--accent:#ee7620;--font-ui:system-ui,-apple-system,'Segoe UI',sans-serif;--font-mono:'SF Mono','Menlo','Consolas',monospace}
 *,*::before,*::after{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:14px;line-height:1.5}nav{height:48px;display:flex;align-items:center;padding:0 1.25rem;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}nav a{height:48px;line-height:48px;padding:0 .9rem;color:var(--dim);text-decoration:none;text-transform:uppercase;letter-spacing:.06em;font-size:.75rem;font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}nav a.active{color:var(--text);border-bottom-color:var(--accent)}.conn-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-left:auto}.conn-dot.connected{background:var(--green);box-shadow:0 0 6px var(--green)}.conn-dot.disconnected{background:var(--red)}.conn-label{font-size:.63rem;color:var(--dim);margin-left:.4rem;text-transform:uppercase;letter-spacing:.05em}main{padding:1.5rem;max-width:920px;margin:0 auto}button{font-family:var(--font-ui);font-size:.78rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;min-height:44px;padding:.42rem 1.1rem;border-radius:6px;border:1px solid var(--border-light);background:var(--surface-3);color:var(--text-2);cursor:pointer}button:hover{color:var(--text);background:var(--surface-2)}button:disabled{opacity:.3;cursor:default}button.primary{background:var(--accent);border-color:var(--accent);color:#2b1405}.view-toggle{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface-2)}.view-toggle button{border:0;border-radius:0;background:transparent}.view-toggle button.active{background:var(--accent);color:#2b1405}select,input{font-family:var(--font-mono);font-size:.82rem;padding:.32rem .55rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)}input[type=checkbox]{width:auto;accent-color:var(--accent)}.cfg-section{background:var(--surface-2);border:1px solid var(--border);border-radius:9px;padding:1rem 1.2rem;margin-bottom:.85rem}.cfg-title{font-size:.68rem;font-weight:800;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.7rem}.cfg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:.75rem}.cfg-field{display:flex;flex-direction:column;gap:.22rem;min-width:0}.cfg-label{font-size:.65rem;color:var(--dim);text-transform:uppercase;letter-spacing:.07em;font-weight:700}.cfg-desc{font-size:.72rem;color:var(--dim);line-height:1.45}.cfg-field input,.cfg-field select{width:100%;max-width:100%}.cfg-field input:focus,.cfg-field select:focus{outline:none;border-color:var(--accent)}.cfg-field input:disabled,.cfg-field select:disabled{opacity:.45}.error-banner{border-radius:9px;padding:.7rem 1rem;margin-bottom:.85rem;font-size:.82rem;background:color-mix(in srgb,var(--red) 8%,transparent);border:1px solid color-mix(in srgb,var(--red) 40%,transparent);color:var(--red)}.save-bar{position:sticky;bottom:0;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:1rem;display:flex;align-items:center;gap:.75rem;margin-top:1rem}.save-bar a{color:var(--dim)}.save-msg{font-size:.78rem;color:var(--dim)}.live-val{font-size:.72rem;color:var(--accent);margin-left:.5rem}.field-changed{border-color:var(--yellow)!important;box-shadow:0 0 0 1px var(--yellow)}.save-recap-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:999}.save-recap-card{width:min(720px,92vw);max-height:82vh;background:var(--surface);border:1px solid var(--border-light);border-radius:9px;overflow:hidden}.save-recap-header,.save-recap-footer{display:flex;align-items:center;gap:.7rem;padding:.85rem 1rem;border-bottom:1px solid var(--border)}.save-recap-footer{border-top:1px solid var(--border);border-bottom:0;justify-content:flex-end}.save-recap-body{padding:1rem;overflow:auto;max-height:55vh}.save-recap-subtitle{padding:.75rem 1rem;color:var(--dim);font-size:.78rem;border-bottom:1px solid var(--border)}@media(max-width:700px){main{padding:1rem}.cfg-grid{grid-template-columns:minmax(0,1fr)}.save-bar{position:static;flex-wrap:wrap}nav{overflow-x:auto}.conn-dot{margin-left:.75rem}}
@@ -39,7 +39,7 @@ main{max-width:1380px;padding:1.1rem 1.5rem 5.5rem}
 @media(max-width:700px){main{padding:.85rem .75rem 7.6rem}.cfg-workspace{position:relative;top:auto;margin:-.85rem 0 .75rem;padding:.75rem 0 .55rem;background:var(--bg)}.cfg-workspace-card{padding:.75rem;border-radius:11px}.cfg-workspace-head{margin-bottom:.6rem}.cfg-header-actions{margin-left:0;width:100%}.cfg-search{height:44px}.cfg-toolbar{flex-wrap:wrap}.cfg-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;overflow:visible}.cfg-filter{width:100%;padding:.28rem .4rem}.cfg-result-count{display:none}.config-group>summary{min-height:68px;padding:.7rem}.control-definition-card>summary{min-height:84px}.group-desc{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.group-meta{display:none}.group-content{padding:0 .55rem .55rem}.cfg-grid{grid-template-columns:minmax(0,1fr)}.controller-card-body{padding:.7rem}.controller-card-actions,.controller-create-body,.controller-option-row{align-items:stretch;flex-direction:column}.controller-card-actions button,.controller-create-body button{width:100%}body>.save-bar{position:fixed;left:.5rem;right:.5rem;width:auto;transform:none;bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.45rem;overflow:hidden}body>.save-bar:not(.is-dirty){display:none}.save-bar .save-change-count{grid-column:1/-1;min-width:0;white-space:normal}.save-bar .save-spacer,.save-bar a,.save-msg{display:none}.save-bar button{min-width:0;padding:.42rem .7rem}.save-recap-card{width:calc(100vw - 1rem);max-height:92vh}.save-recap-header,.save-recap-footer{flex-wrap:wrap}.save-recap-body{padding:.65rem;max-height:62vh;overflow-x:auto}}
 </style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260824a',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260824a');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260828c',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260828c');s.setAttribute('data-ot-app','true');s.text=c;document.head.appendChild(s);},{once:true});</script>
 </head>
 <body>
 <nav>
@@ -161,40 +161,34 @@ const ALL_CONFIG_SCHEMA = [
     { key:'pb_min', path:['throttle','pullback_min_pct'], label:'Minimum Fuel During Gradual Protection (%)', desc:'Common physical fuel floor for non-emergency gradual limiting. It prevents an enabled limiter from pulling the main engine below the user-tested stable minimum; STOP and hard shutdowns still cut fuel.', step:1, min:0, max:100 },
   ]},
   { title: 'Gradual Fuel Limit Protection', id: 'gradual-protection', sectionNote:'Optional non-emergency fuel reduction as a measured value approaches its configured boundary. Independent hard shutdown limits remain active and separate.', fields: [
-    { key:'pb_n1e', path:['throttle','pullback_n1'], label:'Gradual N1 Limit Protection', type:'checkbox', desc:'Automatically reduce fuel as N1 approaches its configured limit.' },
+    { key:'pb_n1e', path:['throttle','pullback_n1'], modePath:['throttle','pullback_n1_mode'], label:'N1 Fuel-Limiting Mode', type:'pullback_mode', desc:'Off disables anticipatory fuel limiting but does not disable the independent hard overspeed shutdown. Simple reduces fuel using measured N1. Predictive uses N1 acceleration to act earlier; crossing Maximum N1 Speed still causes immediate fault shutdown.' },
     { key:'pb_n1s', path:['throttle','pullback_n1_soft_rpm'], label:'Begin N1 Throttle Reduction', unit:'RPM', desc:'N1 speed where gradual fuel reduction begins.', step:500, min:0, max:1000000000 },
     { key:'pb_n1h', path:['throttle','pullback_n1_hard_rpm'], label:'Full N1 Throttle Reduction', unit:'RPM', desc:'N1 speed where the gradual reduction reaches full authority. Hard shutdown protection remains separate.', step:500, min:0, max:1000000000 },
-    { key:'pb_n1m', path:['throttle','pullback_n1_mode'], label:'N1 Reduction Method', type:'select', options:[{v:0,l:'Reactive — use current shaft speed'},{v:1,l:'Predictive — anticipate rising shaft speed'}], desc:'Predictive mode estimates where N1 will be after the selected look-ahead time and can reduce fuel before a rapidly accelerating shaft reaches the boundary.' },
     { key:'pb_n1l', path:['throttle','pullback_n1_lookahead_ms'], label:'N1 Prediction Time (ms)', desc:'How far into the future predictive N1 limiting projects the measured shaft acceleration.', step:100, min:0, max:5000 },
     { key:'pb_n1str', path:['throttle','pullback_n1_strength'], label:'N1 Reduction Strength', desc:'1.0 reaches the configured fuel floor at the full-reduction speed. Lower is gentler; higher reaches the floor sooner.', step:0.1, min:0, max:5 },
-    { key:'pb_n2e', path:['throttle','pullback_n2'], label:'Gradual N2 Limit Protection', type:'checkbox', desc:'Automatically reduce fuel as the power-turbine/output shaft approaches its speed limit.' },
+    { key:'pb_n2e', path:['throttle','pullback_n2'], modePath:['throttle','pullback_n2_mode'], label:'N2 Fuel-Limiting Mode', type:'pullback_mode', desc:'Off disables anticipatory fuel limiting but does not disable the independent hard N2 shutdown. Simple uses measured N2; Predictive uses N2 acceleration to act earlier.' },
     { key:'pb_n2s', path:['throttle','pullback_n2_soft_rpm'], label:'Begin N2 Throttle Reduction', unit:'RPM', desc:'N2 speed where gradual fuel reduction begins.', step:500, min:0, max:1000000000 },
     { key:'pb_n2h', path:['throttle','pullback_n2_hard_rpm'], label:'Full N2 Throttle Reduction', unit:'RPM', desc:'N2 speed where gradual reduction reaches full authority.', step:500, min:0, max:1000000000 },
-    { key:'pb_n2m', path:['throttle','pullback_n2_mode'], label:'N2 Reduction Method', type:'select', options:[{v:0,l:'Reactive — use current shaft speed'},{v:1,l:'Predictive — anticipate rising shaft speed'}], desc:'Predictive mode projects the power-turbine/output-shaft speed from its own acceleration and timing; it is independent of N1 tuning.' },
     { key:'pb_n2l', path:['throttle','pullback_n2_lookahead_ms'], label:'N2 Prediction Time (ms)', desc:'How far into the future predictive N2 limiting projects measured shaft acceleration.', step:100, min:0, max:5000 },
     { key:'pb_n2str', path:['throttle','pullback_n2_strength'], label:'N2 Reduction Strength', desc:'Strength of N2 fuel reduction within its configured band.', step:0.1, min:0, max:5 },
-    { key:'pb_egte', path:['throttle','pullback_egt'], label:'Gradual Temperature Protection', type:'checkbox', desc:'Automatically reduce fuel as the selected engine temperature approaches its limit.' },
+    { key:'pb_egte', path:['throttle','pullback_egt'], modePath:['throttle','pullback_egt_mode'], label:'Temperature Fuel-Limiting Mode', type:'pullback_mode', desc:'Off disables anticipatory fuel limiting but not the independent hard overtemperature shutdown. Simple uses measured temperature; Predictive also uses its rate of rise.' },
     { key:'pb_egts', path:['throttle','pullback_egt_soft_c'], label:'Begin Temperature Reduction', unitType:'temp', desc:'Temperature where gradual fuel reduction begins.', step:10, min:0, max:100000 },
     { key:'pb_egth', path:['throttle','pullback_egt_hard_c'], label:'Full Temperature Reduction', unitType:'temp', desc:'Temperature where gradual reduction reaches full authority.', step:10, min:0, max:100000 },
-    { key:'pb_egtm', path:['throttle','pullback_egt_mode'], label:'Temperature Reduction Method', type:'select', options:[{v:0,l:'Reactive — use current temperature'},{v:1,l:'Predictive — anticipate temperature rise'}], desc:'Predictive mode uses the measured temperature rise rate. Temperature sensors are often slower than shaft sensors, so this timing is intentionally separate.' },
     { key:'pb_egtl', path:['throttle','pullback_egt_lookahead_ms'], label:'Temperature Prediction Time (ms)', desc:'How far ahead predictive temperature limiting projects the current rise rate.', step:100, min:0, max:5000 },
     { key:'pb_egtstr', path:['throttle','pullback_egt_strength'], label:'Temperature Reduction Strength', desc:'Strength of temperature-based fuel reduction within its configured band.', step:0.1, min:0, max:5 },
-    { key:'pb_p1e', path:['throttle','pullback_p1'], label:'Gradual P1 Pressure Protection', type:'checkbox', desc:'Reduce fuel as P1 approaches its configured full-reduction value.' },
+    { key:'pb_p1e', path:['throttle','pullback_p1'], modePath:['throttle','pullback_p1_mode'], label:'Pressure 1 Fuel-Limiting Mode', type:'pullback_mode', desc:'Off disables anticipatory fuel limiting. Simple uses measured pressure; Predictive also uses its rate of rise. The separate hard-pressure shutdown remains independent.' },
     { key:'pb_p1s', path:['throttle','pullback_p1_soft_bar'], label:'Begin P1 Fuel Reduction', unitType:'press', desc:'P1 pressure where gradual fuel reduction begins. Set it below the full-reduction pressure and below any independent P1 hard shutdown.', step:0.1, min:0, max:1000 },
     { key:'pb_p1h', path:['throttle','pullback_p1_hard_bar'], label:'Full P1 Fuel Reduction', unitType:'press', desc:'P1 pressure where gradual protection reaches its configured maximum fuel reduction. The independent P1 shutdown limit can still cut fuel completely.', step:0.1, min:0, max:1000 },
-    { key:'pb_p1m', path:['throttle','pullback_p1_mode'], label:'Pressure 1 Reduction Method', type:'select', options:[{v:0,l:'Reactive — use current pressure'},{v:1,l:'Predictive — anticipate pressure rise'}], desc:'Predictive mode projects this user-named pressure input from its measured rate of rise.' },
     { key:'pb_p1l', path:['throttle','pullback_p1_lookahead_ms'], label:'Pressure 1 Prediction Time (ms)', desc:'Look-ahead used only for this pressure input.', step:100, min:0, max:5000 },
     { key:'pb_p1str', path:['throttle','pullback_p1_strength'], label:'Pressure 1 Reduction Strength', desc:'Strength of this pressure input’s fuel reduction.', step:0.1, min:0, max:5 },
-    { key:'pb_p2e', path:['throttle','pullback_p2'], label:'Gradual P2 Pressure Protection', type:'checkbox', desc:'Reduce fuel as P2 approaches its configured full-reduction value.' },
+    { key:'pb_p2e', path:['throttle','pullback_p2'], modePath:['throttle','pullback_p2_mode'], label:'Pressure 2 Fuel-Limiting Mode', type:'pullback_mode', desc:'Off disables anticipatory fuel limiting. Simple uses measured pressure; Predictive also uses its rate of rise. The separate hard-pressure shutdown remains independent.' },
     { key:'pb_p2s', path:['throttle','pullback_p2_soft_bar'], label:'Begin P2 Fuel Reduction', unitType:'press', desc:'P2 pressure where gradual fuel reduction begins. Set it below the full-reduction pressure and below any independent P2 hard shutdown.', step:0.1, min:0, max:1000 },
     { key:'pb_p2h', path:['throttle','pullback_p2_hard_bar'], label:'Full P2 Fuel Reduction', unitType:'press', desc:'P2 pressure where gradual protection reaches its configured maximum fuel reduction. The independent P2 shutdown limit can still cut fuel completely.', step:0.1, min:0, max:1000 },
-    { key:'pb_p2m', path:['throttle','pullback_p2_mode'], label:'Pressure 2 Reduction Method', type:'select', options:[{v:0,l:'Reactive — use current pressure'},{v:1,l:'Predictive — anticipate pressure rise'}], desc:'Predictive mode projects this user-named pressure input independently from Pressure 1.' },
     { key:'pb_p2l', path:['throttle','pullback_p2_lookahead_ms'], label:'Pressure 2 Prediction Time (ms)', desc:'Look-ahead used only for this pressure input.', step:100, min:0, max:5000 },
     { key:'pb_p2str', path:['throttle','pullback_p2_strength'], label:'Pressure 2 Reduction Strength', desc:'Strength of this pressure input’s fuel reduction.', step:0.1, min:0, max:5 },
-    { key:'pb_tqe', path:['throttle','pullback_torque'], label:'Gradual Shaft-Torque Protection', type:'checkbox', desc:'Reduce fuel as measured shaft torque approaches its configured full-reduction value.' },
+    { key:'pb_tqe', path:['throttle','pullback_torque'], modePath:['throttle','pullback_torque_mode'], label:'Shaft-Torque Fuel-Limiting Mode', type:'pullback_mode', desc:'Off disables anticipatory fuel limiting. Simple uses measured torque; Predictive also uses its rate of rise. The separate hard over-torque shutdown remains independent.' },
     { key:'pb_tqs', path:['throttle','pullback_torque_soft_nm'], label:'Begin Torque Fuel Reduction', unit:'Nm', desc:'Measured shaft torque where gradual fuel reduction begins. Set it below the full-reduction torque and below any independent torque hard shutdown.', step:1, min:0, max:1000000 },
     { key:'pb_tqh', path:['throttle','pullback_torque_hard_nm'], label:'Full Torque Fuel Reduction', unit:'Nm', desc:'Measured shaft torque where gradual protection reaches its configured maximum fuel reduction. The independent torque shutdown can still cut fuel completely.', step:1, min:0, max:1000000 },
-    { key:'pb_tqm', path:['throttle','pullback_torque_mode'], label:'Torque Reduction Method', type:'select', options:[{v:0,l:'Reactive — use current torque'},{v:1,l:'Predictive — anticipate torque rise'}], desc:'Predictive mode projects measured shaft torque from its own rate of rise.' },
     { key:'pb_tql', path:['throttle','pullback_torque_lookahead_ms'], label:'Torque Prediction Time (ms)', desc:'Look-ahead used only for measured shaft torque.', step:100, min:0, max:5000 },
     { key:'pb_tqstr', path:['throttle','pullback_torque_strength'], label:'Torque Reduction Strength', desc:'Strength of torque-based fuel reduction within its band.', step:0.1, min:0, max:5 },
     { key:'rl_ramp', path:['throttle','pullback_near_limit_rampup_ms'], label:'Near-Limit Full Opening Time (ms)', desc:'Slower full-opening time used near the predicted speed limit. Larger values make the approach gentler.', step:100, min:0 },
@@ -233,9 +227,9 @@ const ALL_CONFIG_SCHEMA = [
     { key:'di_pfr', path:['dynamic_idle','pressure_full_response_bar'], label:'Pressure Error for Full Correction', unit:'bar', desc:'Pressure error where predictive idle reaches its configured correction rate.', step:0.01, min:0 },
     { key:'di_plr', path:['dynamic_idle','pressure_learn_rate_max_bar_s'], label:'Maximum Pressure Change While Learning', unit:'bar/s', desc:'Learning pauses while pressure changes faster than this value.', step:0.01, min:0 },
   ]},
-  { title: 'Combustion & Startup Protection', id: 'safety-monitor', sectionNote:'Combustion-loss handling and temperature protection specifically for starting and running. Test sensor behavior before relying on automatic shutdowns.', fields: [
+  { title: 'Combustion & Startup Protection', id: 'safety-monitor', sectionNote:'Independent shutdown monitoring for starting and running. A confirmed combustion loss cuts fuel and begins fault shutdown when this protection is enabled; automatic relight is configured separately and does not change this timer.', fields: [
     { key:'sf_ci', path:['safety','check_interval_ms'],    label:'Safety Check Interval (ms)', desc:'How often general safety conditions are evaluated. Hard overspeed and current-delay timing run independently. Restricted to 10-250 ms so protection cannot be delayed by configuration.', step:10, min:10, max:250 },
-    { key:'sf_fo', path:['safety','flameout_shutdown_ms'], label:'Combustion-Loss Confirmation Time (ms)', desc:'How long the selected signal must indicate flameout before the ECU declares a fault.', step:200, min:100, basic:true },
+    { key:'sf_fo', path:['safety','flameout_shutdown_ms'], label:'Combustion-Loss Shutdown Delay (ms)', desc:'How long this independent protection source must continuously report combustion loss. When the timer expires, the ECU immediately cuts fuel and begins fault shutdown, regardless of automatic-relight settings.', step:200, min:100, basic:true },
     { key:'sf_fs', path:['safety','flameout_source'],      label:'How Combustion Loss Is Detected', type:'select', options:[{v:0,l:'Best available: flame, then N1, then EGT'},{v:1,l:'Flame sensor reports no flame'},{v:2,l:'N1 speed falls too low'},{v:3,l:'Engine temperature falls'}], desc:'Signal used to decide that combustion has been lost while RUNNING. A flame sensor is the most direct evidence; N1 is the preferred fallback. EGT-only detection is available when neither is fitted.', basic:true },
     { key:'sf_fn', path:['safety','flameout_n1_min_rpm'],  label:'N1 Flameout RPM', desc:'For N1-source flameout: declare flameout if N1 stays below this RPM. 0 uses Min RPM. This is delayed by Flameout Delay.', step:1000, min:0, basic:true },
     { key:'sf_eb', path:['safety','flameout_egt_below_c'],  label:'Low EGT for Flameout', unitType:'temp', zeroOff:true, desc:'For EGT-source flameout: combustion loss is suspected when selected EGT is below this value and still falling while RUNNING. The condition must persist for the Combustion-Loss Confirmation Time. 0 disables this low-temperature condition.', step:10, min:0, basic:true },
@@ -243,21 +237,25 @@ const ALL_CONFIG_SCHEMA = [
     { key:'sf_hs', path:['sequence','startup','pre_start_egt_limit_c'], label:'Pre-Start EGT Maximum', unitType:'temp', zeroOff:true, desc:'Blocks START when selected EGT is already above this value. This check occurs before fuel or ignition is commanded; it does not trip on the normal ignition temperature rise. 0 disables the hot-engine start interlock.', step:10, min:0, basic:true },
     { key:'sf_st', path:['sequence','startup','startup_egt_limit_c'], label:'Maximum EGT During Startup', unitType:'temp', zeroOff:true, desc:'Hard selected-EGT shutdown limit while the startup sequence is active. 0 uses the normal TOT/TIT hard limit, so startup remains protected. Set a separate value only when the engine manufacturer permits a different transient startup limit.', step:10, min:0, basic:true },
   ]},
-  { title: 'Automatic Flameout Relight', id:'relight-section', sectionNote:'A flame sensor, N1, or the configured EGT conditions can trigger combustion-loss handling. Automatic relight additionally requires healthy N1 feedback and will never energize ignition below the minimum relight speed.', fields: [
-    { key:'rl_en', path:['relight','enabled'],      label:'Attempt Automatic Relight', desc:'After combustion loss, try to restore flame before committing to shutdown.', type:'checkbox', basic:true },
-    { key:'rl_it', path:['relight','ignition_target'], label:'Ignition Output to Use', type:'select', options:[{v:0,l:'Primary igniter'},{v:1,l:'Afterburner / secondary igniter'},{v:2,l:'Glow plug / wet glow'}], desc:'Output energized during the relight attempt.' },
-    { key:'rl_cs', path:['relight','confirm_source'], label:'How Successful Relight Is Confirmed', type:'select', options:[{v:0,l:'Match the combustion-loss sensor'},{v:1,l:'Flame sensor detects flame'},{v:2,l:'N1 speed recovers'},{v:3,l:'Engine temperature rises'}], desc:'Signal that confirms combustion has returned and allows ignition to turn off.' },
+  { title: 'Automatic Relight', id:'relight-section', sectionNote:'An independently enabled subsystem with its own trigger, confirmation, ignition output, and timers. Once its trigger is confirmed it fires automatically without user action. Failure to recover within the relight timeout cuts fuel and causes fault shutdown.', fields: [
+    { key:'rl_en', path:['relight','enabled'],      label:'Enable Automatic Relight', desc:'Monitor the selected relight trigger independently and automatically fire the selected ignition output. This does not enable, disable, or delay the separate combustion-loss shutdown protection.', type:'checkbox', basic:true },
+    { key:'rl_oid', path:['relight','output_id'], label:'Ignition Output to Use', type:'select', string:true, options:()=>ignitionOutputOptions(['relight','output_id']), desc:'Exact fitted ignition device energized during the relight attempt. Removing it leaves this subsystem visibly unresolved; another output is never selected silently.' },
+    { key:'rl_ts', path:['relight','trigger_source'], label:'How Relight Is Triggered', type:'select', options:[{v:0,l:'Best available: flame, then N1, then EGT'},{v:1,l:'Flame sensor reports no flame'},{v:2,l:'N1 speed falls below recovery speed'},{v:3,l:'Engine temperature falls'}], desc:'Independent source that starts the automatic relight timer. It may be different from the source used by Combustion Loss protection.' },
+    { key:'rl_td', path:['relight','trigger_confirm_ms'], label:'Relight Trigger Confirmation (ms)', desc:'How long the relight trigger must remain continuously true before ignition starts automatically. Use a short nonzero value to reject one noisy sample.', step:50, min:0, max:60000 },
+    { key:'rl_tb', path:['relight','trigger_egt_below_c'], label:'Low EGT to Trigger Relight', unitType:'temp', zeroOff:true, desc:'For an EGT relight trigger: start the confirmation timer when selected EGT is at or below this value and still falling. 0 disables this condition.', step:10, min:0 },
+    { key:'rl_tf', path:['relight','trigger_egt_fall_rate_c_s'], label:'Rapid EGT Fall to Trigger Relight', unitType:'temp_rate', zeroOff:true, desc:'For an EGT relight trigger: start the confirmation timer when temperature falls at least this quickly. 0 disables this condition.', step:5, min:0 },
+    { key:'rl_cs', path:['relight','confirm_source'], label:'How Successful Relight Is Confirmed', type:'select', options:[{v:0,l:'Match the relight trigger sensor'},{v:1,l:'Flame sensor detects flame'},{v:2,l:'N1 speed recovers'},{v:3,l:'Engine temperature rises'}], desc:'Independent signal that confirms combustion has returned and allows ignition to turn off.' },
     { key:'rl_mr', path:['relight','min_rpm'],            label:'Minimum N1 to Fire Relight Ignition', unit:'RPM', desc:'The ECU will not energize automatic relight below this healthy N1 speed or below Minimum Running N1, whichever is higher. If N1 falls below the effective floor during an attempt, ignition is cut and the engine shuts down. Choose a speed that proves adequate self-sustaining airflow.', step:1000, min:1, basic:true },
-    { key:'rl_cr', path:['relight','confirm_rpm'],         label:'N1 Recovery Confirmation', unit:'RPM', desc:'For N1 relight confirmation: ignition stays on until healthy N1 reaches this explicit speed. Normally set this at or above the minimum firing speed and above the N1 flameout trigger.', step:1000, min:1, basic:true },
+    { key:'rl_cr', path:['relight','confirm_rpm'],         label:'N1 Relight Trigger / Recovery Speed', unit:'RPM', desc:'With N1 triggering, relight starts after speed falls below this value but remains above Minimum N1 to Fire. With N1 confirmation, ignition stays on until speed recovers above it.', step:1000, min:1, basic:true },
     { key:'rl_tr', path:['relight','tot_rise_c'],          label:'EGT Recovery Rise', unitType:'temp_delta', desc:'For EGT relight confirmation: igniter stays on until selected EGT rises this much above the temperature at relight start. 0 prevents EGT-rise confirmation. Set too low and EGT noise/throttle changes can false-confirm; too high can reject a real relight. Verify on a real start.', step:5, min:0, basic:true },
     { key:'rl_to', path:['relight','relight_timeout_ms'], label:'Relight Timeout (ms)',      desc:'Maximum relight time after a flameout. If combustion is not restored, ignition is cut and the engine shuts down. 0 uses the hard 30-second maximum; shorter configured values win.', step:100, min:0, max:30000 },
   ]},
   { title: 'ECU Runtime', sectionNote:'Advanced control-loop scheduling. Logging frequency and channel selection are configured on the Log page.', fields: [
     { key:'tm_lh', path:['telemetry','control_loop_hz'], label:'ECU Loop Target Hz', desc:'Main control-loop target frequency. Default 400 Hz. Lower values reduce CPU use; higher values improve control granularity but increase load. Recommended range: 200-500 Hz. Takes effect after a reboot.', step:50, min:50, max:1000, basic:true },
   ]},
-  { title: 'External Instrument Cluster Display', sectionNote:'Enable the OT Cluster link above. These optional display-only thresholds change gauge warning colours and status messages; they do not trigger ECU shutdowns.', fields: [
-    { key:'cl_n1', path:['cluster','n1_warn_rpm'],  label:'N1 Warn RPM',   desc:'N1 warning zone start on cluster gauge (yellow). 0 = auto (RPM Limit × 0.9). N1_MAX comes from Engine Limits → RPM Limit', step:500, min:0 },
-    { key:'cl_n2', path:['cluster','n2_warn_rpm'],  label:'N2 Warn RPM',   desc:'N2 RPM warning threshold for cluster display', step:500, min:0 },
+  { title: 'External Instrument Cluster Display', sectionNote:'These are display-only warning thresholds, not a list of transmitted values. The OT Cluster link automatically streams supported fitted primary sensors and actuators; a cluster connected with RX can request a different field subset. Only thresholds relevant to currently configured hardware are shown here, and none trigger an ECU shutdown.', fields: [
+    { key:'cl_n1', path:['cluster','n1_warn_rpm'],  label:'N1 Warn RPM',   desc:'N1 warning-zone start on the external cluster. 0 selects an automatic value at 90% of the configured N1 hard limit. This changes only cluster presentation.', step:500, min:0 },
+    { key:'cl_n2', path:['cluster','n2_warn_rpm'],  label:'N2 Warn RPM',   desc:'N2 warning-zone start on the external cluster. This field appears only when N2 feedback is fitted and changes only cluster presentation.', step:500, min:0 },
     { key:'cl_tw', path:['cluster','tot_warn_c'],   label:'EGT Warn',   unitType:'temp',  zeroOff:true, desc:'Selected engine-temperature warning threshold for cluster status. 0 = auto (selected EGT limit minus safety margin).', step:10, min:0 },
     { key:'cl_ow', path:['cluster','oil_warn_bar'], label:'Oil Warn',   unitType:'press', desc:'Oil pressure warning status code threshold. 0 = auto (running minimum)', step:0.1, min:0 },
   ]},
@@ -268,14 +266,16 @@ const ALL_CONFIG_SCHEMA = [
     { key:'sa_on', path:['starter_control','pulsed_assist_on_ms'], label:'Pulse ON Time', unit:'ms', desc:'How long the starter remains energized during each assist pulse.', step:10, min:1, max:60000 },
     { key:'sa_off', path:['starter_control','pulsed_assist_off_ms'], label:'Pulse OFF Time', unit:'ms', desc:'Rest time between assist pulses.', step:10, min:1, max:60000 },
   ]},
-  { title: 'Windmilling Oil Protection', id:'windmilling-oil-section', sectionNote:'Runs the oil pump while a shaft is still turning in standby, for example from airflow, vehicle movement, or residual momentum after shutdown. It uses the fixed/floor output below when no pressure target is selected. With a pressure target, it uses the normal oil-pressure regulator and never commands less than that floor. For a 100,000 RPM core shaft, 1,000 RPM is a conservative starting threshold; raise it only above verified sensor noise.', fields: [
+  { title: 'Windmilling Oil Protection', id:'windmilling-oil-section', sectionNote:'Optional bearing protection while a shaft is still turning in standby, for example from airflow, vehicle movement, or residual momentum after shutdown. Off by default. When enabled, it uses a fixed/floor pump output or the matching oil-pressure controller.', fields: [
+    { key:'so_en', path:['standby_oil','enabled'], label:'Enable Windmilling Oil Protection', type:'checkbox', desc:'Allow the selected oil pump to run automatically in STANDBY or FAULT while the selected healthy shaft is above the threshold. Leave this off when the engine does not need pressure lubrication while windmilling.' },
+    { key:'so_oid', path:['standby_oil','output_id'], label:'Oil Pump to Protect', type:'select', string:true, options:()=>outputOptionsForPurpose(['standby_oil','output_id'],'oil_pump','Choose oil pump'), desc:'Exact fitted oil-pump device commanded by windmilling protection. With one pump it is selected automatically; with several, choose the pump feeding the windmilling shaft.' },
     { key:'so_src', path:['standby_oil','source'], label:'Shaft to Monitor', type:'select', options:[{v:0,l:'Core shaft (N1)'},{v:1,l:'Power/output shaft (N2)'},{v:2,l:'Either fitted shaft'}], desc:'Choose which shaft can automatically request protective oil flow.' },
     { key:'so_rl', path:['standby_oil','rpm_limit'], label:'Start Oil Pump Above', unit:'RPM', desc:'Oil protection starts when the selected shaft exceeds this speed while the ECU is in standby. Keep it below that shaft\'s maximum speed or the protection can never activate.', step:10, min:0 },
     { key:'so_fp', path:['standby_oil','feed_pct'],  label:'Windmilling Fixed / Minimum Pump Output (%)', desc:'Used as the fixed windmilling output when the pressure target is 0, or as the minimum pump output while pressure is regulated.', step:5, min:0, max:100 },
     { key:'so_fb', path:['standby_oil','feed_bar'],  label:'Optional Windmilling Oil Pressure Target', unitType:'press', desc:'Above 0: use the normal automatic oil-pressure regulator to hold this target, with the fixed/minimum output as its floor. At 0: command only the fixed output. Pressure mode requires a fitted oil-pressure sensor and Oil pressure loop enabled in Hardware.', step:0.1, min:0, max:20 },
   ]},
   { title: 'Manual Relight', id:'manual-relight-section', fields: [
-    { key:'ms_it', path:['misc','igniter_on_start_target'], label:'START Relight Output', type:'select', options:[{v:0,l:'Igniter 1'},{v:1,l:'Secondary Igniter'},{v:2,l:'Glow / Wet Glow'}], desc:'Which configured ignition output is held on while START is held during RUNNING.' },
+    { key:'ms_oid', path:['misc','igniter_on_start_output_id'], label:'START Relight Output', type:'select', string:true, options:()=>ignitionOutputOptions(['misc','igniter_on_start_output_id']), desc:'Exact fitted ignition device held on while START is held during RUNNING. This may be different from the automatic-relight output.' },
     { key:'ms_is', path:['misc','igniter_on_start'],      label:'Igniter on START (running)', desc:'Fire igniter while START button is held during RUNNING — manual relight aid. Disable if accidental button presses are a concern.', type:'checkbox' },
   ]},
   { title: 'RPM Sensor Fault Detection', fields: [
@@ -322,11 +322,6 @@ const ALL_CONFIG_SCHEMA = [
     { key:'gv_kp', path:['governor','kp'], label:'Fuel Change at 1,000 RPM Error (%/s)', scale:100000, desc:'Fuel correction rate produced by a 1,000 RPM error outside the no-correction band. Example: 25 means fuel changes 25 percentage points per second at that error. Start around 10-25 and increase only while checking for hunting.', step:5, min:0, max:0.01 },
     { key:'gv_pk', path:['governor','pitch_kp'], label:'Pitch Change at 1,000 RPM Error (%/s)', scale:100000, desc:'Requested propeller-pitch correction rate at a 1,000 RPM error. A nonzero value selects pitch-primary control when a proportional pitch actuator is fitted. Actual movement is also limited by Full Propeller-Pitch Travel Time.', step:5, min:0, max:0.01 },
     { key:'gv_pr', path:['governor','pitch_ramp_sec'], label:'Full Propeller-Pitch Travel Time (s)', desc:'Shortest allowed time for the pitch actuator to travel through its full range. This prevents abrupt load changes. 0 allows immediate movement. Typical: 1–5 s.', step:0.5, min:0 },
-  ]},
-  { title: 'Glow Plug Preheat', id: 'glow-cfg-section', sectionNote:'Hardware installs and calibrates the glow output. Sequence decides where the Glow Preheat block runs. These settings define what that block does, so different startup sequences share one clearly tuned preheat profile.', fields: [
-    { key:'gl_ms', path:['glow_plug','preheat_ms'],      label:'Preheat Duration (ms)', desc:'Time to ramp the glow plug from 0 to maximum duty before ignition. Longer = more heat soak. Typical: 8,000–15,000 ms.',                  step:500, min:0, max:3600000, basic:true },
-    { key:'gl_mx', path:['glow_plug','preheat_max_pct'], label:'Preheat Peak Command (%)',  desc:'Peak glow command during the preheat ramp. PWM glow uses this as duty percent; relay glow turns ON for any nonzero command. Typical PWM value: 60–90%.', step:5, min:0, max:100 },
-    { key:'gl_hd', path:['glow_plug','hold_pct'],        label:'Hold Command (%)',          desc:'Glow command held after preheat completes. PWM glow uses this as duty percent; relay glow stays ON for any nonzero hold command. Typical PWM value: 20–40%.', step:5, min:0, max:100 },
   ]},
   { title: 'RC / Servo Signal Loss Detection', id: 'rc-pwm-section', sectionNote:'Receiver-pulse endpoints are calibrated independently on the Calibration page; this timeout also protects registry PWM-duty inputs.', fields: [
     { key:'rc_fs', path:['rc_input','failsafe_ms'], label:'Signal-Loss Timeout (ms)', desc:'Marks a receiver input invalid when no valid pulse arrives in time. A lost operator-throttle signal returns main fuel toward the calibrated minimum output; STOP still performs the immediate fuel cut.', step:50, min:100 },
@@ -492,6 +487,58 @@ function setPath(obj, path, val) {
   cur[path[path.length - 1]] = val;
 }
 
+function _independentFittedOutputs() {
+  return (hwCfg?.channel_registry?.outputs || []).filter(row =>
+    registryChannelInstalled(row) && !String(row?.mirror_of || ''));
+}
+
+function _suggestedOutputOptions(path, purposes, chooseLabel) {
+  const current = String(getPath(cfg, path) || '');
+  const wanted = new Set((Array.isArray(purposes) ? purposes : [purposes]).map(String));
+  const outputs = _independentFittedOutputs();
+  const suggested = outputs.filter(row => wanted.has(String(row?.purpose || '')));
+  const other = outputs.filter(row => !wanted.has(String(row?.purpose || '')));
+  const options = [];
+  if (current && !outputs.some(row => String(row.id || '') === current))
+    options.push({v:current, l:`Missing device: ${current}`});
+  if (!current) options.push({v:'', l:chooseLabel || 'Choose output'});
+  suggested.forEach(row => options.push({v:String(row.id || ''), l:controllerChannelName(row), group:'Suggested'}));
+  other.forEach(row => options.push({v:String(row.id || ''), l:controllerChannelName(row), group:'Other fitted outputs'}));
+  return options;
+}
+
+function _installedIgnitionOutputs() {
+  const wanted = new Set(['igniter','ab_igniter','glow_plug']);
+  return _independentFittedOutputs().filter(row => wanted.has(String(row?.purpose || '')));
+}
+
+function ignitionOutputOptions(path) {
+  return _suggestedOutputOptions(path, ['igniter','ab_igniter','glow_plug'], 'Choose ignition output');
+}
+
+function outputOptionsForPurpose(path, purpose, chooseLabel) {
+  return _suggestedOutputOptions(path, [purpose], chooseLabel);
+}
+
+function migrateBuiltInOutputIds() {
+  const migrate = (path, legacyPath) => {
+    if (getPath(cfg, path)) return;
+    const outputs = _installedIgnitionOutputs();
+    if (!outputs.length) return;
+    const legacy = Number(getPath(cfg, legacyPath) || 0);
+    const purpose = legacy === 1 ? 'ab_igniter' : legacy === 2 ? 'glow_plug' : 'igniter';
+    const matching = outputs.filter(row => String(row.purpose || '') === purpose);
+    const choice = matching.length === 1 ? matching[0] : null;
+    if (choice) setPath(cfg, path, String(choice.id || ''));
+  };
+  migrate(['relight','output_id'], ['relight','ignition_target']);
+  migrate(['misc','igniter_on_start_output_id'], ['misc','igniter_on_start_target']);
+  const oilOutputs = (hwCfg?.channel_registry?.outputs || []).filter(row => row?.installed !== false &&
+    !String(row?.mirror_of || '') && String(row?.purpose || '') === 'oil_pump');
+  if (!getPath(cfg, ['standby_oil','output_id']) && oilOutputs.length === 1)
+    setPath(cfg, ['standby_oil','output_id'], String(oilOutputs[0].id || ''));
+}
+
 function controllerChannelName(row) {
   if (!row) return '';
   const purposeNames = {
@@ -513,55 +560,28 @@ function _resolveControllerChannelId(value, rows, kind, numericValue) {
   const outputAliases = {cool_fan:'cooling_fan',bleed_valve:'bleed_valve',fuel_pump2:'fuel_pump',oil_scavenge:'oil_scavenge',throttle:'main_fuel',main_fuel:'main_fuel',starter:'starter',starter_enable:'starter_enable',oil_pump:'oil_pump',fuel_sol:'fuel_shutoff',igniter:'igniter',igniter2:'ab_igniter',ab_sol:'ab_fuel',ab_pump:'ab_pump',air_starter:'air_starter',glow_plug:'glow_plug',prop_pitch:'prop_pitch'};
   const aliases = kind === 'input' ? inputAliases : outputAliases;
   const purpose = aliases[raw] || raw;
-  const byPurpose = rows.find(row => String(row.purpose) === purpose || String(row.role) === purpose);
-  if (byPurpose) return byPurpose.id;
+  const purposeMatches = rows.filter(row => String(row.purpose) === purpose || String(row.role) === purpose);
+  if (purposeMatches.length === 1) return purposeMatches[0].id;
   const n = Number(numericValue);
   if (Number.isFinite(n)) {
     if (n >= 64 && rows[n - 64]) return rows[n - 64].id;
     const legacy = kind === 'input'
       ? ['oil_temperature','tot','n1_speed','oil_pressure','tit','battery_voltage','n2_speed','di0','di1','di2','di3','fuel_pressure','fuel_flow','p1','p2','torque','flame','throttle','idle','ab_flame','glow_current','igniter_current','igniter2_current','oil_pump_current','ab_input','start_switch','stop_switch','thrust'][n]
       : ['cooling_fan','bleed_valve','fuel_pump','oil_scavenge','main_fuel','starter','starter_enable','oil_pump','fuel_shutoff','igniter','ab_igniter','ab_fuel','ab_pump','','','air_starter','glow_plug','prop_pitch'][n];
-    const found = rows.find(row => String(row.purpose) === legacy || String(row.role) === legacy);
-    if (found) return found.id;
+    const legacyMatches = rows.filter(row => String(row.purpose) === legacy || String(row.role) === legacy);
+    if (legacyMatches.length === 1) return legacyMatches[0].id;
   }
   return raw;
-}
-
-function openControllerSection(anchor) {
-  setWorkspaceFilter('configured');
-  requestAnimationFrame(() => {
-    const target = document.getElementById(anchor);
-    if (!target) return;
-    const group = target.closest('.config-group, .control-definition-card');
-    if (group && 'open' in group) group.open = true;
-    history.replaceState(null, '', `#${anchor}`);
-    target.scrollIntoView({behavior:'smooth', block:'start'});
-    target.classList.add('search-hit');
-    setTimeout(() => target.classList.remove('search-hit'), 1800);
-  });
-}
-
-function _controllerRuleForOutput(channel, index) {
-  return (cfg.rules || []).find((rule) => {
-    const target = String(rule.target || rule.actuator_id || '');
-    return target === String(channel.id || '') || Number(rule.actuator) === 64 + index;
-  });
-}
-
-function _removeControllerRuleForOutput(channel, index) {
-  const before = (cfg.rules || []).length;
-  cfg.rules = (cfg.rules || []).filter(rule => {
-    const target = String(rule.target || rule.actuator_id || '');
-    return target !== String(channel.id || '') && Number(rule.actuator) !== 64 + index;
-  });
-  if (cfg.rules.length !== before) _controllerRulesDirty = true;
 }
 
 function _defaultRuleForOutput(channel) {
   const inputs = simpleControlInputs();
   const relay = [4,11].includes(Number(channel.driver));
-  const throttle = inputs.find(row => String(row.purpose) === 'throttle');
-  const source = throttle || inputs[0];
+  // Main fuel naturally follows the sole throttle input. Every other new
+  // controller starts as an explicit fixed command so merely creating it can
+  // never make an unrelated first registry input control physical hardware.
+  const source = String(channel.purpose) === 'main_fuel'
+    ? inputs.find(row => String(row.purpose) === 'throttle') : null;
   const minFuel = String(channel.purpose) === 'main_fuel'
     ? Math.max(0, Math.min(1, Number(cfg?.throttle?.fuel_pump_min_pct || 0) / 100)) : 0;
   return {enabled:true,kind:source?(relay?0:1):3,op:0,threshold:0,hysteresis:0,on_value:source?1:0,off_value:0,
@@ -600,10 +620,14 @@ function migrateLegacyControllerDefinitions() {
   cfg.rules ||= [];
   const owns = output => cfg.rules.some(rule =>
     _resolveControllerChannelId(rule.target, outputs, 'output', rule.actuator) === output.id);
-  const mainFuel = outputs.find(row => String(row.purpose) === 'main_fuel');
-  const propPitch = outputs.find(row => String(row.purpose) === 'prop_pitch');
-  const throttle = inputs.find(row => String(row.purpose) === 'throttle');
-  const n2 = inputs.find(row => String(row.purpose) === 'n2_speed');
+  const uniquePurpose = (rows, purpose) => {
+    const matches = rows.filter(row => String(row.purpose) === purpose);
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const mainFuel = uniquePurpose(outputs, 'main_fuel');
+  const propPitch = uniquePurpose(outputs, 'prop_pitch');
+  const throttle = uniquePurpose(inputs, 'throttle');
+  const n2 = uniquePurpose(inputs, 'n2_speed');
   let hardwareChanged = false;
 
   if (hwCfg.controllers?.governor && n2) {
@@ -644,7 +668,8 @@ function migrateLegacyControllerDefinitions() {
 function renderControllerOverview() {
   const root = document.getElementById('controller-overview');
   if (!root || CONFIG_SURFACE !== 'controllers') return;
-  const outputs = (hwCfg?.channel_registry?.outputs || []).filter(row => row && row.installed !== false);
+  const outputs = (hwCfg?.channel_registry?.outputs || []).filter(row =>
+    row && row.installed !== false && !String(row.mirror_of || ''));
   const rules = cfg.rules || [];
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const configuredCards = [...document.querySelectorAll('#simple-controls [data-controller-card]')];
@@ -661,15 +686,16 @@ function renderControllerOverview() {
   const available = outputs.filter(channel => !configuredIds.has(String(channel.id)) && !unavailableToRules.has(String(channel.id)));
   const freeOilPumps = outputs.filter(channel => String(channel.purpose) === 'oil_pump' &&
     !configuredIds.has(String(channel.id)) && !oilLoopOutputs.has(String(channel.id)));
-  const canAddOilLoop = freeOilPumps.length && controllerInputs('oil_pressure').length;
-  const availableHtml = (available.length || canAddOilLoop) ? `<div class="controller-create-card" data-always-visible="1"><div class="controller-create-title">+ Create controller</div><div class="controller-create-body">${available.length?`<label class="cfg-field"><span class="cfg-label">What do you want to control?</span><select id="new-controller-output">${available.map(row=>`<option value="${esc(row.id)}">${esc(controllerChannelName(row))}</option>`).join('')}</select><span class="cfg-desc">Create a threshold, mapping, feedback-target, or fixed-state controller.</span></label><button type="button" class="primary" onclick="createControllerForOutput(document.getElementById('new-controller-output').value)">Create controller</button>`:''}${canAddOilLoop?`<button type="button" onclick="addControllerOilLoop('${esc(freeOilPumps[0].id)}')">Create oil-pressure controller</button>`:''}</div></div>` : '<div class="control-empty">Every fitted normal-operation output already has an owner.</div>';
+  const oilPressureInputs = controllerInputs('oil_pressure');
+  const canAddOilLoop = freeOilPumps.length && oilPressureInputs.length;
+  const oilLoopCreator = canAddOilLoop ? `<div class="cfg-grid"><label class="cfg-field"><span class="cfg-label">Oil pump</span><select id="new-oil-loop-output">${freeOilPumps.length>1?'<option value="">Choose pump</option>':''}${freeOilPumps.map(row=>`<option value="${esc(row.id)}">${esc(controllerChannelName(row))}</option>`).join('')}</select></label><label class="cfg-field"><span class="cfg-label">Pressure feedback</span><select id="new-oil-loop-pressure">${oilPressureInputs.length>1?'<option value="">Choose pressure input</option>':''}${oilPressureInputs.map(row=>`<option value="${esc(row.id)}">${esc(controllerChannelName(row))}</option>`).join('')}</select></label></div><button type="button" onclick="addControllerOilLoop(document.getElementById('new-oil-loop-output').value,document.getElementById('new-oil-loop-pressure').value)">Create oil-pressure controller</button>` : '';
+  const availableHtml = (available.length || canAddOilLoop) ? `<div class="controller-create-card" data-always-visible="1"><div class="controller-create-title">+ Create controller</div><div class="controller-create-body">${available.length?`<label class="cfg-field"><span class="cfg-label">What do you want to control?</span><select id="new-controller-output">${available.map(row=>`<option value="${esc(row.id)}">${esc(controllerChannelName(row))}</option>`).join('')}</select><span class="cfg-desc">Create a threshold, mapping, feedback-target, or fixed-state controller.</span></label><button type="button" class="primary" onclick="createControllerForOutput(document.getElementById('new-controller-output').value)">Create controller</button>`:''}${oilLoopCreator}</div></div>` : '<div class="control-empty">Every fitted normal-operation output already has an owner.</div>';
   const purposes = new Set(outputs.map(channel => String(channel.purpose || '')));
   const builtIn = (id, title, desc) => `<details class="control-definition-card config-group built-in-subsystem" data-built-in="${id}"><summary><span class="group-heading"><span class="group-title">${title}</span><span class="group-desc">${desc}</span></span><span class="group-chevron">›</span></summary><div class="controller-card-body" data-built-in-settings="${id}"></div></details>`;
   const builtIns = [
     purposes.has('main_fuel') ? builtIn('fuel-support','Fuel-metering support','Throttle shaping, automatic idle, and reduced-power behavior') : '',
     purposes.has('starter') ? builtIn('starter-support','Starter support','Optional pulsed engagement behavior used by startup blocks') : '',
     (purposes.has('igniter') || purposes.has('ab_igniter') || purposes.has('glow_plug')) ? builtIn('relight','Ignition and relight','Automatic and operator-requested relight behavior during RUNNING') : '',
-    purposes.has('glow_plug') ? builtIn('glow-preheat','Glow preheat','Shared preheat profile used by Glow Preheat sequence blocks') : '',
     purposes.has('oil_pump') ? builtIn('windmilling-oil','Windmilling oil protection','Protective oil flow while a fitted shaft rotates outside normal running') : '',
     (purposes.has('ab_pump') || purposes.has('ab_igniter') || purposes.has('ab_fuel') || purposes.has('ab_fuel_shutoff')) ? builtIn('afterburner','Afterburner subsystem','Light-up method, flame confirmation, and lit-running fuel behavior') : ''
   ].join('');
@@ -685,7 +711,6 @@ function _mountControllerLocalSettings(outputs) {
     'fuel-support':['throttle','idle-control-cfg-section','reduced-power-section'],
     'starter-support':['starter-support-section'],
     relight:['relight-section','manual-relight-section'],
-    'glow-preheat':['glow-cfg-section'],
     'windmilling-oil':['windmilling-oil-section'],
     afterburner:['ab-ign-section','ab-flame-section','ab-run-section']
   };
@@ -718,6 +743,9 @@ function _mountControllerLocalSettings(outputs) {
     const loop = hwCfg.oil_loops[loopIndex];
     const binary = [4,11].includes(Number(channel.driver));
     const source = Number(loop.target_source || 0);
+    const lowResponse = Number(loop.low_pressure_response ?? 2);
+    const feedbackResponse = Number(loop.feedback_loss_response ?? 2);
+    const responseOptions = selected => `<option value="0"${selected===0?' selected':''}>Disabled</option><option value="1"${selected===1?' selected':''}>Warning only</option><option value="2"${selected===2?' selected':''}>Normal fault shutdown</option><option value="3"${selected===3?' selected':''}>Immediate dry-oil stop</option>`;
     const options = (rows, selected) => rows.map(row => `<option value="${_escHtml(row.id)}"${String(row.id)===String(selected)?' selected':''}>${_escHtml(controllerChannelName(row))}</option>`).join('');
     const number = (key,label,value,step,min=0,max='',percent=false) => `<label class="cfg-field"><span class="cfg-label">${_escHtml(label)}${percent?' (%)':''}</span><input type="number" min="${min}"${max!==''?` max="${max}"`:''} step="${step}" value="${Number(value)}" onchange="updateControllerOilLoop(${loopIndex},'${key}',+this.value${percent?'/100':''})"></label>`;
     const pressure = (key,label,value,step,max=20) => `<label class="cfg-field"><span class="cfg-label">${_escHtml(label)} (${dispPressUnit()})</span><input type="number" min="0" max="${toDispPress(max)}" step="${toDispPress(step)}" value="${Math.round(toDispPress(Number(value))*1000)/1000}" onchange="updateControllerOilLoop(${loopIndex},'${key}',fromDispPress(+this.value))"></label>`;
@@ -738,6 +766,12 @@ function _mountControllerLocalSettings(outputs) {
       ${binary?'':number('max_demand','Maximum pump command',Math.round(Number(loop.max_demand??1)*100),1,0,100,true)}
       ${number('failsafe_delay_ms','Feedback-loss delay (ms)',loop.failsafe_delay_ms??1500,100,0,60000)}
       ${number('failsafe_demand','Feedback-loss pump command',Math.round(Number(loop.failsafe_demand??.6)*100),1,0,100,true)}
+      <label class="cfg-field"><span class="cfg-label">If pressure feedback is lost</span><select onchange="updateControllerOilLoop(${loopIndex},'feedback_loss_response',+this.value)">${responseOptions(feedbackResponse)}</select><span class="cfg-desc">The fixed feedback-loss pump command above remains active for Warning or Normal shutdown. Immediate mode cuts every hazardous output first.</span></label>
+      ${pressure('low_pressure_bar','Low-pressure threshold',loop.low_pressure_bar??1,.01)}
+      ${number('low_pressure_confirm_ms','Low-pressure confirmation (ms)',loop.low_pressure_confirm_ms??500,50,0,60000)}
+      <label class="cfg-field"><span class="cfg-label">If running pressure stays low</span><select onchange="updateControllerOilLoop(${loopIndex},'low_pressure_response',+this.value)">${responseOptions(lowResponse)}</select><span class="cfg-desc">Warning reports only. Normal shutdown cuts combustion and runs the configured shutdown sequence. Immediate mode skips that sequence to protect dry bearings.</span></label>
+      ${lowResponse===3||feedbackResponse===3?number('immediate_pump_run_s','Pump-only time after immediate stop (s)',loop.immediate_pump_run_s??10,.5,0,120):''}
+      ${lowResponse===3||feedbackResponse===3?'<div class="cfg-field"><span class="cfg-label">Immediate dry-oil behavior</span><span class="cfg-desc">Fuel, ignition, starter, afterburner, cooling and scavenge outputs turn off immediately. Only this selected oil pump keeps its feedback-loss command for the bounded time above. Restart stays locked until the fault is cleared; reboot also clears faults.</span></div>':''}
       <div class="cfg-field"><button type="button" class="danger" onclick="removeControllerOilLoop(${loopIndex})">Remove pressure controller</button></div>
     </div></div>`;
     host.appendChild(card);
@@ -782,8 +816,6 @@ function _mountControllerLocalSettings(outputs) {
   document.querySelectorAll('#cfg-form .config-group').forEach(group => {
     if (!group.querySelector('.cfg-section')) group.remove();
   });
-  const assignment = document.getElementById('controller-hardware-setup');
-  if (assignment && !assignment.textContent.trim()) assignment.remove();
 }
 
 function simpleControlInputs() {
@@ -791,8 +823,7 @@ function simpleControlInputs() {
 }
 function simpleControlOutputs() {
   return (hwCfg?.channel_registry?.outputs || []).filter(row =>
-    row && row.installed !== false &&
-    String(row.purpose || '') !== 'ab_pump');
+    row && row.installed !== false && !String(row.mirror_of || ''));
 }
 function feedbackDefaultsForInput(id) {
   const row = simpleControlInputs().find(input => String(input.id) === String(id));
@@ -842,7 +873,7 @@ function updateSimpleControl(index, key, value) {
   if (key === 'source' && Number(rule.kind) === 2)
     Object.assign(rule, feedbackDefaultsForInput(value));
   if (key === 'target_source_type' && Number(value) !== 0 && !rule.target_source)
-    rule.target_source = simpleControlInputs()[0]?.id || '';
+    rule.target_source = '';
   if (key === 'target') {
     const target = simpleControlOutputs().find(row => String(row.id) === String(value));
     if (target && [4,11].includes(Number(target.driver)) && [1,2].includes(Number(rule.kind)))
@@ -861,25 +892,6 @@ function toggleSimpleControlMode(index, bit, checked) {
   rule.mode_mask = checked ? (current | bit) : (current & ~bit);
   _controllerRulesDirty = true;
   _markDirty();
-}
-function addSimpleControl() {
-  const inputs = simpleControlInputs();
-  const outputs = simpleControlOutputs();
-  const used = new Set((cfg.rules || []).map(rule => String(rule.target || '')));
-  const output = outputs.find(row => !used.has(String(row.id || '')));
-  if (!output || (cfg.rules || []).length >= 16) return;
-  cfg.rules ||= [];
-  cfg.rules.push({enabled:true,kind:inputs.length?0:3,op:0,threshold:0,hysteresis:0,on_value:inputs.length?1:0,off_value:0,
-    input_min:0,input_max:1,output_min:0,output_max:1,mode_mask:4,
-    target_source_type:0,target_source:'',target_fixed:0,target_low:0,target_high:1,
-    target_input_min:0,target_input_max:1,response_gain:.02,integral_gain:.005,deadband:.01,
-    name:`${output.name || output.id} control`.slice(0,31),source:inputs[0]?.id || '',target:output.id});
-  _controllerRulesDirty = true;
-  _markDirty();
-  renderForm(true);
-  _applyAllVisibility();
-  applyView();
-  runValidation();
 }
 function removeSimpleControl(index) {
   const rule = cfg.rules?.[index];
@@ -903,7 +915,8 @@ function controllerInputs(purpose) {
   return (hwCfg?.channel_registry?.inputs || []).filter(row => row && row.installed !== false && String(row.purpose || '') === purpose);
 }
 function controllerOutputs(purpose) {
-  return (hwCfg?.channel_registry?.outputs || []).filter(row => row && row.installed !== false && String(row.purpose || '') === purpose);
+  return (hwCfg?.channel_registry?.outputs || []).filter(row => row && row.installed !== false &&
+    !String(row.mirror_of || '') && String(row.purpose || '') === purpose);
 }
 function markControllerHardwareDirty() {
   _controllerHardwareDirty = true;
@@ -937,17 +950,20 @@ function updateControllerOilLoop(index, key, value) {
   loop[key] = value;
   markControllerHardwareDirty();
 }
-function addControllerOilLoop(pumpOutputId = '') {
+function addControllerOilLoop(pumpOutputId = '', pressureInputId = '') {
   hwCfg.oil_loops ||= [];
   const used = new Set(hwCfg.oil_loops.map(loop => String(loop.pump_output || '')));
-  const pressure = controllerInputs('oil_pressure')[0];
+  const pressures = controllerInputs('oil_pressure');
+  const pressure = pressures.find(row => String(row.id) === String(pressureInputId)) ||
+    (pressures.length === 1 ? pressures[0] : null);
   const pump = controllerOutputs('oil_pump').find(row =>
     !used.has(String(row.id || '')) && (!pumpOutputId || String(row.id) === String(pumpOutputId)));
   const maxLoops = Math.max(1, Number(hwCfg?._capabilities?.max_oil_loops || 6));
   if (!pressure || !pump || hwCfg.oil_loops.length >= maxLoops) return;
   hwCfg.oil_loops.push({enabled:true,id:`oil${hwCfg.oil_loops.length + 1}`,pressure_input:pressure.id,pump_output:pump.id,
     target_source:0,target_bar:2.5,target_high_bar:2.5,speed_min_rpm:0,speed_max_rpm:20000,
-    deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1});
+    deadband_bar:.2,response_gain:1.8,failsafe_delay_ms:1500,failsafe_demand:.6,min_demand:.18,max_demand:1,
+    low_pressure_bar:1,low_pressure_confirm_ms:500,low_pressure_response:2,feedback_loss_response:2,immediate_pump_run_s:10});
   hwCfg.controllers ||= {};
   hwCfg.controllers.oil_loop = true;
   markControllerHardwareDirty();
@@ -958,54 +974,6 @@ function removeControllerOilLoop(index) {
   hwCfg.controllers.oil_loop = !!hwCfg.oil_loops?.some(loop => loop.enabled !== false);
   markControllerHardwareDirty();
 }
-function renderControllerHardwareSetup() {
-  const root = document.getElementById('controller-hardware-setup');
-  if (!root || CONFIG_SURFACE !== 'controllers') return;
-  // Dedicated owner toggles and oil-loop cards used to form a second control
-  // system above the editable definitions. The output-first controller cards
-  // now own this workflow; keep this mount empty while older runtime helpers
-  // remain available during the targeted migration.
-  root.innerHTML = '';
-  return;
-  // Legacy renderer retained below until the runtime migration is complete.
-  const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const optionRows = (rows, selected) => rows.map(row => `<option value="${esc(row.id)}"${String(row.id)===String(selected)?' selected':''}>${esc(row.name || row.id)}</option>`).join('');
-  const n1 = controllerInputs('n1_speed').length > 0;
-  const n2 = controllerInputs('n2_speed').length > 0;
-  const fuel = controllerOutputs('main_fuel').length > 0;
-  const pressures = controllerInputs('oil_pressure');
-  const pumps = controllerOutputs('oil_pump');
-  const num = (i,key,label,value,step,min=0,max='') => `<label class="cfg-field"><span class="cfg-label">${label}</span><input type="number" min="${min}"${max!==''?` max="${max}"`:''} step="${step}" value="${Number(value)}" onchange="updateControllerOilLoop(${i},'${key}',+this.value)"></label>`;
-  const loops = hwCfg.oil_loops || [];
-  const loopCards = loops.map((loop,i) => {
-    const pump = pumps.find(row => row.id === loop.pump_output);
-    const binary = pump && [4,11].includes(Number(pump.driver));
-    const source = Number(loop.target_source || 0);
-    return `<details class="protection-card"><summary><span><span class="protection-card-title">${esc(pump?.name || `Oil system ${i+1}`)}</span><span class="protection-card-desc">${binary?'On/off pressure control':'Proportional pressure control'}</span></span><span class="protection-card-chevron">›</span></summary><div class="cfg-grid">
-      <label class="cfg-field"><span class="cfg-label">Pressure input</span><select onchange="updateControllerOilLoop(${i},'pressure_input',this.value)">${optionRows(pressures,loop.pressure_input)}</select></label>
-      <label class="cfg-field"><span class="cfg-label">Pump output</span><select onchange="updateControllerOilLoop(${i},'pump_output',this.value)">${optionRows(pumps,loop.pump_output)}</select></label>
-      <label class="cfg-field"><span class="cfg-label">Pressure target set by</span><select onchange="updateControllerOilLoop(${i},'target_source',+this.value)"><option value="0"${source===0?' selected':''}>Fixed pressure</option><option value="1"${source===1?' selected':''}>Main fuel demand</option>${n1?`<option value="2"${source===2?' selected':''}>N1 speed</option>`:''}${n2?`<option value="3"${source===3?' selected':''}>N2 speed</option>`:''}</select></label>
-      ${num(i,'target_bar',source===0?'Pressure target (bar)':'Low pressure target (bar)',loop.target_bar??2.5,.01)}
-      ${source!==0?num(i,'target_high_bar','High pressure target (bar)',loop.target_high_bar??2.5,.01):''}
-      ${source>=2?num(i,'speed_min_rpm','Low shaft speed (RPM)',loop.speed_min_rpm??0,100):''}
-      ${source>=2?num(i,'speed_max_rpm','High shaft speed (RPM)',loop.speed_max_rpm??20000,100):''}
-      ${num(i,'deadband_bar','Pressure deadband (bar)',loop.deadband_bar??.2,.01)}
-      ${binary?'':num(i,'response_gain','Response gain',loop.response_gain??1.8,.05)}
-      ${binary?'':`<label class="cfg-field"><span class="cfg-label">Minimum pump command (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.min_demand??.18)*100)}" onchange="updateControllerOilLoop(${i},'min_demand',+this.value/100)"></label>`}
-      ${binary?'':`<label class="cfg-field"><span class="cfg-label">Maximum pump command (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.max_demand??1)*100)}" onchange="updateControllerOilLoop(${i},'max_demand',+this.value/100)"></label>`}
-      ${num(i,'failsafe_delay_ms','Feedback-loss delay (ms)',loop.failsafe_delay_ms??1500,100,0,60000)}
-      <label class="cfg-field"><span class="cfg-label">Feedback-loss pump command (%)</span><input type="number" min="0" max="100" step="1" value="${Math.round(Number(loop.failsafe_demand??.6)*100)}" onchange="updateControllerOilLoop(${i},'failsafe_demand',+this.value/100)"></label>
-      <div class="cfg-field"><button type="button" class="danger" onclick="removeControllerOilLoop(${i})">Remove this oil controller</button></div>
-    </div></details>`;
-  }).join('');
-  const maxLoops = Math.max(1, Number(hwCfg?._capabilities?.max_oil_loops || 6));
-  const canAddOil = pressures.length && pumps.some(p => !loops.some(loop => loop.pump_output === p.id)) && loops.length < maxLoops;
-  root.innerHTML = `<div class="cfg-title">Controller assignments</div><div class="cfg-desc">Hardware defines what exists. Enable the normal controllers that should own those outputs; their tuning stays with the controller below.</div>
-    <div class="control-overview-grid" style="margin-top:.7rem"><article class="control-summary-card"><h3>Automatic idle</h3><label><input type="checkbox" ${hwCfg.controllers?.dynamic_idle?'checked':''} ${fuel&&(n1||n2)?'':'disabled'} onchange="setControllerEnabled('dynamic_idle',this.checked)"> Enabled</label><div class="control-summary-meta">${fuel&&(n1||n2)?'Maintains the minimum normal-running fuel authority':'Requires Main Fuel and N1 or N2'}</div></article>
-    <article class="control-summary-card"><h3>Automatic N2 control</h3><label><input type="checkbox" ${hwCfg.controllers?.governor?'checked':''} ${fuel&&n2?'':'disabled'} onchange="setControllerEnabled('governor',this.checked)"> Enabled</label><div class="control-summary-meta">${fuel&&n2?'Uses fuel or fitted propeller pitch to hold N2':'Requires Main Fuel and N2'}</div></article></div>
-    <div class="cfg-title" style="margin-top:1rem">Oil pressure controllers</div>${loopCards || '<div class="control-empty">No oil pressure controller configured. Fit an oil-pressure input and oil-pump output to add one.</div>'}<button type="button" style="margin-top:.6rem" ${canAddOil?'':'disabled'} onclick="addControllerOilLoop()">+ Add oil pressure controller</button>`;
-}
-
 function setSystemHardware(path, value) {
   setPath(hwCfg, path.split('.'), value);
   _controllerHardwareDirty = true;
@@ -1027,7 +995,7 @@ function renderSystemSetup() {
       <div class="cfg-field"><span class="cfg-label">Wi-Fi access</span><button type="button" class="danger" onclick="setSystemHardware('wifi_password','')">Use open network</button><span class="cfg-desc">An open network remains allowed, but anyone nearby who joins it can access ECU controls.</span></div>
       <label class="cfg-field"><span class="cfg-label">Wi-Fi transmit power (dBm)</span><span class="cfg-desc">Use only as much radio power as the installation needs.</span><input id="system-wifi-tx-power" type="number" min="2" max="20" step="1" value="${Number(hwCfg.wifi_tx_power_dbm ?? 8)}" onchange="setSystemHardware('wifi_tx_power_dbm',+this.value)"></label>`;
   const clusterFields = `
-      <div class="cfg-field"><span class="cfg-label">Instrument-cluster link</span><label><input type="checkbox" ${cluster.enabled?'checked':''} onchange="setSystemHardware('cluster_serial.enabled',this.checked)"> Enabled</label><span class="cfg-desc">${(cluster.tx_pin??-1)>=0?`TX GPIO ${cluster.tx_pin}${(cluster.rx_pin??-1)>=0?` / RX GPIO ${cluster.rx_pin}`:' / one-way'}`:'Assign its serial GPIO on Hardware first.'}</span></div>
+      <div class="cfg-field"><span class="cfg-label">Instrument-cluster link</span><label><input type="checkbox" ${cluster.enabled?'checked':''} onchange="setSystemHardware('cluster_serial.enabled',this.checked)"> Enabled</label><span class="cfg-desc">${(cluster.tx_pin??-1)>=0?`TX GPIO ${cluster.tx_pin}${(cluster.rx_pin??-1)>=0?` / RX GPIO ${cluster.rx_pin}`:' / one-way'}`:'Assign its serial GPIO on Hardware first.'}</span><span class="cfg-desc">The default stream is chosen automatically from fitted primary sensors and actuators: N1 plus any configured N2, EGT/TIT, oil, fuel, electrical, torque/thrust and output data. With RX connected, a compatible cluster may request all or a named subset at runtime; field selection is therefore not duplicated in this ECU page.</span></div>
       ${cluster.enabled?`<label class="cfg-field"><span class="cfg-label">Baud rate</span><select onchange="setSystemHardware('cluster_serial.baud',+this.value)">${[9600,19200,38400,57600,115200,230400,460800,921600].map(v=>`<option value="${v}"${Number(cluster.baud||115200)===v?' selected':''}>${v}</option>`).join('')}</select></label>
       <label class="cfg-field"><span class="cfg-label">Update interval (ms)</span><input type="number" min="10" max="5000" value="${Number(cluster.interval_ms??200)}" onchange="setSystemHardware('cluster_serial.interval_ms',+this.value)"></label>`:''}
       <div class="cfg-field"><span class="cfg-label">Physical connection</span><a href="/hardware.html#hardware-comms-panel">Configure serial GPIO on Hardware &rarr;</a><span class="cfg-desc">Hardware owns pins and electrical capabilities.</span></div>`;
@@ -1045,8 +1013,9 @@ function renderSimpleControls() {
   const inputs = simpleControlInputs();
   const outputs = simpleControlOutputs();
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const optionRows = (rows, selected, disabled = new Set()) => rows.map(row =>
-    `<option value="${esc(row.id)}"${String(row.id)===String(selected)?' selected':''}${disabled.has(String(row.id))&&String(row.id)!==String(selected)?' disabled':''}>${esc(controllerChannelName(row))}</option>`).join('');
+  const optionRows = (rows, selected, disabled = new Set()) =>
+    (!String(selected || '') ? '<option value="" selected>Choose device</option>' : '') + rows.map(row =>
+      `<option value="${esc(row.id)}"${String(row.id)===String(selected)?' selected':''}${disabled.has(String(row.id))&&String(row.id)!==String(selected)?' disabled':''}>${esc(controllerChannelName(row))}</option>`).join('');
   const numberField = (index, key, label, value, attrs='step="any"') => `<label class="cfg-field"><span class="cfg-label">${label}</span><input type="number" ${attrs} value="${Number(value)}" onchange="updateSimpleControl(${index},'${key}',+this.value)"></label>`;
   const rules = cfg.rules || [];
   rules.forEach(rule => {
@@ -1060,7 +1029,9 @@ function renderSimpleControls() {
     const usedByOthers = new Set(rules.filter((_, i) => i !== index).map(row => String(row.target || '')));
     const target = outputs.find(row => row.id === rule.target);
     const relay = target && [4,11].includes(Number(target.driver));
-    const dangerous = ['fuel_shutoff','igniter','ab_igniter','starter','starter_enable','air_starter'].includes(String(target?.purpose || ''));
+    const dangerous = ['main_fuel','fuel_shutoff','fuel_pump','pilot_fuel','igniter',
+      'ab_igniter','ab_valve','ab_pump','glow_plug',
+      'starter','starter_enable','air_starter'].includes(String(target?.purpose || ''));
     const targetSourceType = Number(rule.target_source_type || 0);
     const modeMask = Number(rule.mode_mask ?? 4) & 0x0f;
     const inputChoice = `<label class="cfg-field"><span class="cfg-label">${kind===2?'Feedback signal':'Controlled by'}</span><select onchange="updateSimpleControl(${index},'source',this.value)">${optionRows(inputs,rule.source)}</select></label>`;
@@ -1106,7 +1077,7 @@ const ALL_WORKSPACE_GROUPS = [
   { id:'fuel', title:'Main Fuel & Idle', desc:'Normal fuel demand, idle authority, and reduced-power behavior', sections:['Throttle Response','Idle','Reduced-Power Mode'] },
   { id:'power', title:'Power Turbine & Afterburner', desc:'N2 control and afterburner ignition/running behavior', sections:['Afterburner — Ignition Method','Afterburner — Flame Confirmation','Afterburner — Running'] },
   { id:'oil', title:'Oil & Lubrication Controllers', desc:'Normal pressure response and windmilling oil behavior', sections:['Oil Pressure Control','Windmilling Oil Protection'] },
-  { id:'recovery', title:'Start & Recovery Controllers', desc:'Relight, starter assist, and glow behavior', sections:['Automatic Flameout Relight','Manual Relight','Pulsed Starter Assist','Glow Plug Preheat'] },
+  { id:'recovery', title:'Start & Recovery Controllers', desc:'Relight and starter-assist behavior', sections:['Automatic Relight','Manual Relight','Pulsed Starter Assist'] },
   { id:'safety', title:'Shutdown & Protection', desc:'Gradual fuel pullbacks, reactive or predictive limiting, hard shutdowns, and input-loss actions', sections:['Engine Protection Limits','Gradual Fuel Limit Protection','Oil Pressure Safety','Combustion & Startup Protection','Auxiliary Protection','RPM Sensor Fault Detection','RC / Servo Signal Loss Detection'] },
   { id:'runtime', title:'ECU Runtime', desc:'Control-loop scheduling and device-wide execution', sections:['ECU Runtime'] },
   { id:'display', title:'External Display Thresholds', desc:'Display-only warning zones for the optional instrument cluster', sections:['External Instrument Cluster Display'] },
@@ -1501,34 +1472,42 @@ function renderForm(preserveControllerOpenState = false) {
   const workspaceTitle = document.querySelector('.cfg-workspace-title');
   if (workspaceTitle) workspaceTitle.textContent = CONFIG_SURFACE === 'system' ? 'System' : 'Controllers';
   const configuredOilPumps = (hwCfg?.channel_registry?.outputs || []).filter(channel =>
-    channel?.installed !== false && String(channel.purpose || channel.role || '') === 'oil_pump');
+    channel?.installed !== false && !String(channel?.mirror_of || '') &&
+    String(channel.purpose || channel.role || '') === 'oil_pump');
   const oilPumpIsBinary = channel => [4, 11].includes(Number(channel?.driver));
   const allOilPumpsBinary = configuredOilPumps.length > 0 && configuredOilPumps.every(oilPumpIsBinary);
   const mixedOilPumpDrivers = configuredOilPumps.some(oilPumpIsBinary) && configuredOilPumps.some(channel => !oilPumpIsBinary(channel));
   const protectionGroups = [
-    {id:'n1', title:'N1 core speed', desc:'Gradual fuel reduction, overspeed shutdown, and minimum running speed.',
-      keys:['pb_n1e','pb_n1s','pb_n1h','rpm_limit','min_rpm'], advanced:['pb_n1m','pb_n1l','pb_n1str','rl_ramp','rl_zone']},
+    {id:'n1', title:'N1 core speed', desc:'Fuel pullback before the limit, hard overspeed shutdown at the maximum, and minimum running speed.',
+      keys:['pb_n1e','pb_n1s','pb_n1h','rpm_limit','min_rpm'], advanced:['pb_n1l','pb_n1str','rl_ramp','rl_zone','rl_acc']},
     {id:'n2', title:'N2 output-shaft speed', desc:'Gradual fuel reduction and independent power-turbine overspeed shutdown.',
-      keys:['pb_n2e','pb_n2s','pb_n2h','n2_rpm_limit'], advanced:['pb_n2m','pb_n2l','pb_n2str']},
+      keys:['pb_n2e','pb_n2s','pb_n2h','n2_rpm_limit'], advanced:['pb_n2l','pb_n2str']},
     {id:'egt', title:'Turbine temperature', desc:'Select TOT/TIT, reduce fuel near the limit, then shut down at the hard limit.',
-      keys:['eg_src','pb_egte','pb_egts','pb_egth','tot_limit','sf_tit','tot_safe_margin'], advanced:['pb_egtm','pb_egtl','pb_egtstr']},
+      keys:['eg_src','pb_egte','pb_egts','pb_egth','tot_limit','sf_tit','tot_safe_margin'], advanced:['pb_egtl','pb_egtstr']},
     {id:'p1', title:`${controllerChannelName(controllerInputs('p1_pressure')[0]) || 'Pressure 1'} protection`, desc:'User-named pressure input: gradual fuel reduction followed by an optional high-pressure shutdown.',
-      keys:['pb_p1e','pb_p1s','pb_p1h','sf_p1t','sf_p1d'], advanced:['pb_p1m','pb_p1l','pb_p1str']},
+      keys:['pb_p1e','pb_p1s','pb_p1h','sf_p1t','sf_p1d'], advanced:['pb_p1l','pb_p1str']},
     {id:'p2', title:`${controllerChannelName(controllerInputs('p2_pressure')[0]) || 'Pressure 2'} protection`, desc:'User-named pressure input: gradual fuel reduction followed by an optional high-pressure shutdown.',
-      keys:['pb_p2e','pb_p2s','pb_p2h','sf_p2t','sf_p2d'], advanced:['pb_p2m','pb_p2l','pb_p2str']},
+      keys:['pb_p2e','pb_p2s','pb_p2h','sf_p2t','sf_p2d'], advanced:['pb_p2l','pb_p2str']},
     {id:'torque', title:'Shaft torque', desc:'Gradual fuel reduction followed by an optional over-torque shutdown.',
-      keys:['pb_tqe','pb_tqs','pb_tqh','sf_tqt','sf_tqd'], advanced:['pb_tqm','pb_tql','pb_tqstr']},
+      keys:['pb_tqe','pb_tqs','pb_tqh','sf_tqt','sf_tqd'], advanced:['pb_tql','pb_tqstr']},
   ];
   const gradualSection = SCHEMA.find(section => section.title === 'Gradual Fuel Limit Protection');
 
   const renderField = (f, sec, group) => {
     let val = getPath(cfg, f.path);
+    if (f.type === 'pullback_mode') {
+      const enabled = !!val;
+      const predictive = Number(getPath(cfg, f.modePath) || 0) === 1;
+      val = enabled ? (predictive ? 2 : 1) : 0;
+    }
     const isCb  = f.type === 'checkbox';
     const binaryOilFallback = f.key === 'oil_fp' && allOilPumpsBinary;
-    const isSel = f.type === 'select' || binaryOilFallback;
+    const isSel = f.type === 'select' || f.type === 'pullback_mode' || binaryOilFallback;
     const runtimeOptions = binaryOilFallback
       ? [{v:0,l:'Off'},{v:100,l:'On'}]
-      : (f.options || []);
+      : f.type === 'pullback_mode'
+      ? [{v:0,l:'Off — hard shutdown only'},{v:1,l:'Simple — measured value'},{v:2,l:'Advanced — predictive'}]
+      : (typeof f.options === 'function' ? f.options() : (f.options || []));
     if (binaryOilFallback) val = Number(val) > 0 ? 100 : 0;
     const fieldLabel = binaryOilFallback ? 'Pump State After Pressure-Sensor Failure' : f.label;
     const fieldDesc = f.key === 'oil_fp' && mixedOilPumpDrivers
@@ -1548,10 +1527,25 @@ function renderForm(preserveControllerOpenState = false) {
     const max = (!isCb && !isSel && f.max !== undefined) ? ` max="${_roundedDisplay(_fieldToDisplay(f, f.max))}"` : '';
     const step = (!isCb && !isSel) ? _roundedDisplay(_fieldStepToDisplay(f, f.step || 1)) : null;
     const aria = ` aria-label="${_escHtml(fieldLabel)}"`;
+    const renderOptions = options => {
+      let html = '';
+      let group = '';
+      options.forEach(o => {
+        const nextGroup = String(o.group || '');
+        if (nextGroup !== group) {
+          if (group) html += '</optgroup>';
+          group = nextGroup;
+          if (group) html += `<optgroup label="${_escHtml(group)}">`;
+        }
+        html += `<option value="${_escHtml(o.v)}"${val == o.v ? ' selected' : ''}>${_escHtml(o.l)}</option>`;
+      });
+      if (group) html += '</optgroup>';
+      return html;
+    };
     const inp = isCb
       ? `<input type="checkbox" id="cf-${f.key}"${aria}${val ? ' checked' : ''}${isLocked ? ' disabled' : ''}>`
       : isSel
-      ? `<select id="cf-${f.key}"${aria}${isLocked ? ' disabled' : ''}>${runtimeOptions.map(o => `<option value="${o.v}"${val == o.v ? ' selected' : ''}>${o.l}</option>`).join('')}</select>`
+      ? `<select id="cf-${f.key}"${aria}${isLocked ? ' disabled' : ''}>${renderOptions(runtimeOptions)}</select>`
       : `<input type="number" id="cf-${f.key}"${aria} value="${val !== undefined ? val : ''}"
         step="${step}"${min}${max}${isLocked ? ' disabled' : ''}>`;
     const wid = f.wrapId ? ` id="${f.wrapId}"` : '';
@@ -1580,7 +1574,7 @@ function renderForm(preserveControllerOpenState = false) {
         {label:'Low oil flow',available:true,keys:['oil_ufd','oil_ufs'],desc:'Flow-fault confirmation and optional shutdown'}
       ],
       'Combustion & Startup Protection': [
-        {key:'flameout',label:'Combustion loss',available:controllerInputs('flame').length||controllerInputs('n1_speed').length||controllerInputs('tot').length||controllerInputs('tit').length,requirement:'Fit flame, N1, TOT, or TIT feedback',keys:['sf_fo','sf_fs','sf_fn','sf_eb','sf_ef'],desc:'Detection source, thresholds, and confirmation'},
+        {key:'flameout',label:'Combustion loss',available:controllerInputs('flame').length||controllerInputs('n1_speed').length||controllerInputs('tot').length||controllerInputs('tit').length,requirement:'Fit flame, N1, TOT, or TIT feedback',keys:['sf_fo','sf_fs','sf_fn','sf_eb','sf_ef'],desc:'Independent confirmed-loss timer; expiry cuts fuel and fault-shuts down'},
         {key:'hot_start',label:'Hot-start protection',available:controllerInputs('tot').length||controllerInputs('tit').length,requirement:'Fit a TOT or TIT input',keys:['sf_hs','sf_st'],desc:'Pre-start and startup temperature limits'},
         {label:'Safety evaluation timing',available:true,keys:['sf_ci'],desc:'General protection check interval'}
       ],
@@ -1622,7 +1616,7 @@ function renderForm(preserveControllerOpenState = false) {
           return `<details class="protection-card" data-protection="${card.id}">
             <summary><span><span class="protection-card-title">${card.title}</span><span class="protection-card-desc">${card.desc}</span></span>${summaryState}<span class="protection-card-chevron">›</span></summary>
             ${safety}<div class="cfg-grid">${fields.map(field => renderField(field, sec, group)).join('')}</div>
-            ${advancedFields.length ? `<details class="protection-card protection-advanced"><summary><span><span class="protection-card-title">Advanced response</span><span class="protection-card-desc">Optional source-specific prediction and reduction tuning</span></span><span class="protection-card-chevron">›</span></summary><div class="cfg-grid">${advancedFields.map(field => renderField(field, sec, group)).join('')}</div></details>` : ''}
+            ${advancedFields.length ? `<div class="cfg-grid protection-predictive-fields" data-predictive-for="${card.id}">${advancedFields.map(field => renderField(field, sec, group)).join('')}</div>` : ''}
           </details>`;
         }).join('')}</div>`
       : localSafety.length ? localSafetyHtml : `<div class="cfg-grid">${sec.fields.map(field => renderField(field, sec, group)).join('')}</div>`;
@@ -1660,13 +1654,11 @@ function renderForm(preserveControllerOpenState = false) {
   const normalGroupsHtml = renderGroups(WORKSPACE_GROUPS.filter(group => group.id !== 'safety'));
   const safetyGroupsHtml = renderGroups(WORKSPACE_GROUPS.filter(group => group.id === 'safety'));
   document.getElementById('cfg-form').innerHTML =
-    (CONFIG_SURFACE === 'controllers' ? '<section id="controller-hardware-setup" class="cfg-section" data-always-visible="1" data-section="Controller assignments"></section>' : '') +
     (CONFIG_SURFACE === 'system' ? '<section id="system-device-setup" class="cfg-section" data-always-visible="1" data-section="Device and communications"></section>' : '') +
     normalGroupsHtml +
     (CONFIG_SURFACE === 'controllers' ? '<section id="simple-controls" class="cfg-section" data-always-visible="1" data-section="Custom controllers"></section>' : '') +
     safetyGroupsHtml +
     '<div id="cfg-empty" class="cfg-empty" hidden>No settings match this search and filter.</div>';
-  renderControllerHardwareSetup();
   renderSystemSetup();
   renderSimpleControls();
   // Controller cards are the workspace itself. Build them only after the
@@ -1698,8 +1690,10 @@ function renderForm(preserveControllerOpenState = false) {
     runValidation();
   });
   const _flSrcEl = document.getElementById('cf-sf_fs');
+  const _rlTriggerEl = document.getElementById('cf-rl_ts');
   const _rlSrcEl = document.getElementById('cf-rl_cs');
   if (_flSrcEl) _flSrcEl.addEventListener('change', applyFlameoutRelightVisibility);
+  if (_rlTriggerEl) _rlTriggerEl.addEventListener('change', applyFlameoutRelightVisibility);
   if (_rlSrcEl) _rlSrcEl.addEventListener('change', applyFlameoutRelightVisibility);
   applyFlameoutRelightVisibility();
 
@@ -1713,6 +1707,10 @@ function renderForm(preserveControllerOpenState = false) {
   if (_rlModeEl) _rlModeEl.addEventListener('change', () => { updateRpmLimiterFields(); applyView(); });
   if (_diModeEl) _diModeEl.addEventListener('change', () => { updateIdleModeFields(); applyView(); });
   if (_diSourceEl) _diSourceEl.addEventListener('change', () => { updateIdleSourceFields(); applyHwConditions(); applyView(); runValidation(); });
+  ['pb_n1e','pb_n2e','pb_egte','pb_p1e','pb_p2e','pb_tqe'].forEach(key => {
+    const el = document.getElementById('cf-' + key);
+    if (el) el.addEventListener('change', () => { applyHwConditions(); applyView(); runValidation(); });
+  });
 
   // Controller cards and their local settings are mounted beside cfg-form,
   // so both workspace surfaces own dirty tracking. Property handlers avoid
@@ -1720,7 +1718,14 @@ function renderForm(preserveControllerOpenState = false) {
   [document.getElementById('cfg-form'), document.getElementById('controller-overview')]
     .filter(Boolean).forEach(surface => {
       surface.oninput = _markDirty;
-      surface.onchange = _markDirty;
+      surface.onchange = () => {
+        _markDirty();
+        // Dependency-controlled subcards must react immediately. In
+        // particular, enabling windmilling oil protection reveals its output
+        // selector without requiring a reload or view-filter change.
+        _applyAllVisibility();
+        runValidation();
+      };
     });
 
   // Apply current view filter
@@ -1778,7 +1783,7 @@ function runValidation() {
     });
   }
 
-  const n1PullbackEnabled = !!document.getElementById('cf-pb_n1e')?.checked;
+  const n1PullbackEnabled = Number(document.getElementById('cf-pb_n1e')?.value || 0) > 0;
   const n1PullbackSoft = fv('pb_n1s'), n1PullbackFull = fv('pb_n1h');
   if (n1PullbackEnabled && rpmLimit > 0 &&
       ((n1PullbackSoft > 0 && n1PullbackSoft >= rpmLimit) ||
@@ -1797,19 +1802,38 @@ function runValidation() {
       msg:'⚠ Automatic N2 speed control is enabled in Hardware, but Target N2 RPM is 0. The controller remains inactive until a rated target is entered.'});
   }
 
+  const standbyOilEnabledNow = !!document.getElementById('cf-so_en')?.checked;
   const standbySourceNow = Number(document.getElementById('cf-so_src')?.value || 0);
   const standbyRpmNow = fv('so_rl') || 0;
   const standbyLimitsNow = standbySourceNow === 0 ? [rpmLimit || 0] :
                            standbySourceNow === 1 ? [n2RpmLimit || 0] :
                            [rpmLimit || 0, n2RpmLimit || 0];
   const usableStandbyLimitsNow = standbyLimitsNow.filter(v => v > 0);
-  if (usableStandbyLimitsNow.length && usableStandbyLimitsNow.every(limit => standbyRpmNow >= limit)) {
+  if (standbyOilEnabledNow && usableStandbyLimitsNow.length && usableStandbyLimitsNow.every(limit => standbyRpmNow >= limit)) {
     warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-rpm',
       msg:'⚠ Start threshold is at/above every selected shaft limit, so windmilling oil protection can never activate.'});
   }
-  if ((fv('so_fp') || 0) <= 0 && (fv('so_fb') || 0) <= 0) {
+  if (standbyOilEnabledNow && (fv('so_fp') || 0) <= 0 && (fv('so_fb') || 0) <= 0) {
     warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-output',
       msg:'⚠ Pump output and pressure target are both zero; this protection would command no oil.'});
+  }
+  const standbyPumpId = String(document.getElementById('cf-so_oid')?.value || '');
+  const standbyPumps = (hwCfg?.channel_registry?.outputs || []).filter(row =>
+    row?.installed !== false && !String(row?.mirror_of || '') &&
+    String(row?.purpose || '') === 'oil_pump');
+  const standbyPump = standbyPumps.find(row => String(row.id || '') === standbyPumpId);
+  if (standbyOilEnabledNow && !standbyPump) {
+    warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-device',
+      msg:standbyPumps.length > 1
+        ? '⚠ Choose which exact oil pump windmilling protection controls.'
+        : standbyPumps.length === 1
+          ? '⚠ The selected oil pump is missing or incompatible.'
+          : '⚠ Fit an oil pump before enabling windmilling oil protection.'});
+  } else if (standbyOilEnabledNow && standbyPump && (fv('so_fb') || 0) > 0) {
+    const matchingLoop = (hwCfg?.oil_loops || []).some(loop => loop?.enabled !== false &&
+      String(loop?.pump_output || '') === standbyPumpId && String(loop?.pressure_input || ''));
+    if (!matchingLoop) warnings.push({section:'Windmilling Oil Protection', key:'warn-standby-oil-loop',
+      msg:'⚠ This pressure target needs an enabled oil-pressure controller using the same pump. Otherwise use a fixed output.'});
   }
 
   const abMainOffsetNow = fv('ab_mo') || 0;
@@ -1822,7 +1846,7 @@ function runValidation() {
 
   // N2 control targets should leave operating margin below the independent trip.
   if (hwCfg.safety?.n2_overspeed && n2RpmLimit > 0) {
-    const pbEnabled = !!document.getElementById('cf-pb_n2e')?.checked;
+    const pbEnabled = Number(document.getElementById('cf-pb_n2e')?.value || 0) > 0;
     const pbSoft = fv('pb_n2s'), pbFull = fv('pb_n2h');
     if (pbEnabled && ((pbSoft > 0 && pbSoft >= n2RpmLimit) ||
                       (pbFull > 0 && pbFull >= n2RpmLimit))) {
@@ -1944,6 +1968,22 @@ async function validateBeforeSave(cfg) {
   const hasFlame = hasRegistryInput('flame');
   const hasAnyIdleRpm = hasN1 || hasN2;
 
+  const windmillEnabled = !!gv(cfg, 'standby_oil', 'enabled');
+  const windmillPumpId = String(gv(cfg, 'standby_oil', 'output_id') || '');
+  const fittedOutputs = _independentFittedOutputs();
+  const fittedOilPumps = fittedOutputs.filter(row => String(row?.purpose || '') === 'oil_pump');
+  const windmillPump = fittedOutputs.find(row => String(row.id || '') === windmillPumpId);
+  if (windmillEnabled && !windmillPump)
+    errors.push(fittedOilPumps.length
+      ? 'Windmilling Oil Protection: choose the fitted output this protection should command.'
+      : 'Windmilling Oil Protection: choose a fitted output or turn this optional protection off.');
+  if (windmillEnabled && windmillPump && Number(gv(cfg, 'standby_oil', 'feed_bar') || 0) > 0) {
+    const matchingLoop = (hwCfg?.oil_loops || []).some(loop => loop?.enabled !== false &&
+      String(loop?.pump_output || '') === windmillPumpId && String(loop?.pressure_input || ''));
+    if (!matchingLoop)
+      errors.push('Windmilling Oil Protection: its pressure target needs an enabled oil-pressure controller using the same pump. Use a fixed output or configure that loop.');
+  }
+
   const customControls = _controllerRulesDirty && Array.isArray(cfg.rules) ? cfg.rules : [];
   const installedInputs = new Set(simpleControlInputs().map(row => String(row.id || '')));
   const availableOutputs = new Set(simpleControlOutputs().map(row => String(row.id || '')));
@@ -1994,15 +2034,25 @@ async function validateBeforeSave(cfg) {
   if (gv(cfg, 'relight', 'enabled')) {
     const relightMin = Number(gv(cfg, 'relight', 'min_rpm') || 0);
     const relightConfirm = Number(gv(cfg, 'relight', 'confirm_rpm') || 0);
+    const relightTriggerSource = Number(gv(cfg, 'relight', 'trigger_source') || 0);
     const relightConfirmSource = Number(gv(cfg, 'relight', 'confirm_source') || 0);
-    const flameoutSource = Number(gv(cfg, 'safety', 'flameout_source') || 0);
-    const effectiveConfirmSource = relightConfirmSource || flameoutSource || (hasFlame ? 1 : (hasN1 ? 2 : 0));
+    const automaticSource = hasFlame ? 1 : (hasN1 ? 2 : ((hasRegistryInput('tot') || hasRegistryInput('tit')) ? 3 : 0));
+    const effectiveTriggerSource = relightTriggerSource || automaticSource;
+    const effectiveConfirmSource = relightConfirmSource || effectiveTriggerSource;
     if (relightMin <= 0)
       errors.push('Automatic relight requires an explicit Minimum N1 to Fire Relight Ignition above 0 RPM.');
     if (effectiveConfirmSource === 2 && relightConfirm <= 0)
       errors.push('N1-based relight confirmation requires an explicit N1 Recovery Confirmation above 0 RPM.');
+    if (!effectiveTriggerSource)
+      errors.push('Automatic relight requires its own fitted flame, N1, TOT, or TIT trigger source.');
+    if (effectiveTriggerSource === 3 &&
+        Number(gv(cfg, 'relight', 'trigger_egt_below_c') || 0) <= 0 &&
+        Number(gv(cfg, 'relight', 'trigger_egt_fall_rate_c_s') || 0) <= 0)
+      errors.push('EGT-triggered automatic relight requires a low-temperature threshold, a fall-rate threshold, or both.');
     const minimumRunningN1 = Number(gv(cfg, 'engine', 'min_rpm') || 0);
     const effectiveRelightMin = Math.max(relightMin, minimumRunningN1);
+    if (effectiveTriggerSource === 2 && relightConfirm <= effectiveRelightMin)
+      errors.push('N1-triggered automatic relight needs its trigger/recovery speed above the effective minimum firing speed, creating a usable relight band.');
     if (relightMin > 0 && minimumRunningN1 > 0 && relightMin < minimumRunningN1)
       warns.push(`Minimum N1 to fire relight is below Minimum Running N1. The ECU will use ${Math.round(minimumRunningN1)} RPM as the automatic-relight floor.`);
     if (effectiveConfirmSource === 2 && relightConfirm < effectiveRelightMin)
@@ -2053,6 +2103,7 @@ async function validateBeforeSave(cfg) {
     warns.push('Automatic N2 speed control is enabled in Hardware, but Target N2 RPM is 0. The governor remains inactive until you enter the rated output-shaft speed.');
 
   // Windmilling oil protection must be able to trigger and command oil.
+  const standbyEnabled = !!gv(cfg, 'standby_oil', 'enabled');
   const standbySource = Number(gv(cfg, 'standby_oil', 'source') || 0);
   const standbyRpm = Number(gv(cfg, 'standby_oil', 'rpm_limit') || 0);
   const standbyPct = Number(gv(cfg, 'standby_oil', 'feed_pct') || 0);
@@ -2061,9 +2112,9 @@ async function validateBeforeSave(cfg) {
                        standbySource === 1 ? [Number(n2RpmLimit) || 0] :
                        [Number(rpmLimit) || 0, Number(n2RpmLimit) || 0];
   const usableLimits = sourceLimits.filter(v => v > 0);
-  if (usableLimits.length && usableLimits.every(limit => standbyRpm >= limit))
+  if (standbyEnabled && usableLimits.length && usableLimits.every(limit => standbyRpm >= limit))
     warns.push('Windmilling-oil start threshold (' + standbyRpm + ' RPM) is at or above every selected shaft limit. The protective oil pump can never start; use a threshold well below normal shaft speed.');
-  if (standbyPct <= 0 && standbyBar <= 0)
+  if (standbyEnabled && standbyPct <= 0 && standbyBar <= 0)
     warns.push('Windmilling-oil protection commands neither pump output nor pressure. Set a protective pump percentage or pressure target, or it will run without delivering oil.');
 
   // Oil system cross-checks
@@ -2159,8 +2210,14 @@ async function saveConfig() {
     sec.fields.forEach(f => {
       const el = document.getElementById('cf-' + f.key);
       if (!el) return;
-      if (f.type === 'checkbox') {
+      if (f.type === 'pullback_mode') {
+        const mode = Number(el.value || 0);
+        setPath(cfg, f.path, mode > 0);
+        setPath(cfg, f.modePath, mode === 2 ? 1 : 0);
+      } else if (f.type === 'checkbox') {
         setPath(cfg, f.path, el.checked);
+      } else if (f.string) {
+        setPath(cfg, f.path, String(el.value || ''));
       } else {
         let v = parseFloat(el.value);
         if (!isNaN(v)) {
@@ -2270,6 +2327,10 @@ function _doSave() {
     if (runningLive && !LIVE_CONFIG_KEYS.has(field.key)) return;
     const value = field.path.reduce((obj, key) => obj?.[key], cfg);
     if (value !== undefined) setPath(payload, field.path, value);
+    if (field.type === 'pullback_mode') {
+      const modeValue = field.modePath.reduce((obj, key) => obj?.[key], cfg);
+      if (modeValue !== undefined) setPath(payload, field.modePath, modeValue);
+    }
   }));
   if (_controllerRulesDirty) {
     payload.rules = JSON.parse(JSON.stringify(cfg.rules || []));
@@ -2289,37 +2350,18 @@ function _doSave() {
   // filesystem transaction, then resume normal telemetry automatically.
   const pauseTelemetry = typeof stopGlobalTelemetry === 'function';
   const sendSave = async () => {
-    let lastError;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 8000);
-      try {
-        const r = await fetch('/api/config', {
-          method: 'PATCH',
-          body: JSON.stringify(payload),
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal
-        });
-        const d = await r.json().catch(() => ({}));
-        if (r.ok && d.ok !== false) return d;
-        lastError = new Error(d.error || d.reason || ('HTTP ' + r.status));
-        if (![500, 503].includes(r.status)) throw lastError;
-      } catch (error) {
-        lastError = error;
-        if (attempt >= 2) throw error;
-      } finally {
-        clearTimeout(timeout);
-      }
-      saveMsg.textContent = 'Storage busy — retrying…';
-      await new Promise(resolve => setTimeout(resolve, 1200 + attempt * 600));
-    }
-    throw lastError || new Error('Save failed');
+    if (typeof window.OTSaveConfigPatch !== 'function')
+      throw new Error('Shared save support did not load; reload this page and retry');
+    const { response, data } = await window.OTSaveConfigPatch(payload);
+    if (response?.ok && data?.ok !== false) return data;
+    throw new Error(data?.error || data?.reason || ('HTTP ' + (response?.status || 0)));
   };
   const finishSave = () => sendSave().then(async d => {
     if (d.ok) {
       if (window.OTSetup) OTSetup.mark('config');
-      // Firmware returns success only after validating and durably persisting
-      // this candidate. Keep the exact values just sent as the new baseline.
+      // Firmware returns success after validation and queueing. Ordinary saves
+      // are already durable; Developer-Mode live tuning is deliberately kept
+      // out of flash until the engine reaches a safe mode.
       // A full immediate /api/config reread is both unnecessary (PATCH contains
       // no stale sibling fields) and unreliable on Classic while the prior
       // large response finishes releasing its bounded shared-buffer lease.
@@ -2331,7 +2373,9 @@ function _doSave() {
       applyDeveloperLiveFields();
       runValidation();
       saveMsg.textContent = (d.warn ? 'Saved — ' + d.warn :
-        (d.live_now ? '✓ Applied live — ' : '✓ Saved — ') + new Date().toLocaleTimeString());
+        (d.persist === 'deferred_until_safe'
+          ? '✓ Live update queued — saves permanently after STOP'
+          : (d.live_now ? '✓ Applied live — ' : '✓ Saved — ') + new Date().toLocaleTimeString()));
       saveMsg.style.color = d.warn ? 'var(--yellow)' : 'var(--green)';
       if (cb) cb.disabled = false;
     } else {
@@ -2467,9 +2511,6 @@ window.applyData = function(d) {
   if (d.has_governor !== undefined && !!d.has_governor !== _hasGovernorCfg) {
     _hasGovernorCfg = !!d.has_governor; extChanged = true;
   }
-  if (d.has_glow_plug !== undefined && !!d.has_glow_plug !== _hasGlowCfg) {
-    _hasGlowCfg = !!d.has_glow_plug; extChanged = true;
-  }
   if (d.has_pulsed_starter_assist !== undefined && !!d.has_pulsed_starter_assist !== _hasStarterSupportCfg) {
     _hasStarterSupportCfg = !!d.has_pulsed_starter_assist; extChanged = true;
   }
@@ -2602,6 +2643,7 @@ function _cfgShowField(key, show) {
 
 function applyFlameoutRelightVisibility() {
   const flSrc = parseInt(document.getElementById('cf-sf_fs')?.value || '0', 10);
+  const rlTriggerSrc = parseInt(document.getElementById('cf-rl_ts')?.value || '0', 10);
   const rlSrc = parseInt(document.getElementById('cf-rl_cs')?.value || '0', 10);
   const hasFlame = hasRegistryInput('flame');
   const hasN1 = hasRegistryInput('n1_speed');
@@ -2610,11 +2652,14 @@ function applyFlameoutRelightVisibility() {
   const hasEgt = hasTot || hasTit;
   const autoFlameSrc = hasFlame ? 1 : (hasN1 ? 2 : (hasEgt ? 3 : 0));
   const effFl = flSrc || autoFlameSrc;
-  const effRl = rlSrc || effFl;
+  const effTrigger = rlTriggerSrc || autoFlameSrc;
+  const effRl = rlSrc || effTrigger;
   _cfgShowField('sf_fn', effFl === 2);
   _cfgShowField('sf_eb', effFl === 3);
   _cfgShowField('sf_ef', effFl === 3);
-  _cfgShowField('rl_cr', effRl === 2);
+  _cfgShowField('rl_tb', effTrigger === 3);
+  _cfgShowField('rl_tf', effTrigger === 3);
+  _cfgShowField('rl_cr', effTrigger === 2 || effRl === 2);
   _cfgShowField('rl_tr', effRl === 3);
   applyView();
 }
@@ -2643,12 +2688,11 @@ function applyAbCfgVisibility() {
 }
 
 // ── Safety-ext / Governor / Glow / StarterAssist sections — show when hardware fitted ──
-let _hasGovernorCfg = false, _hasGlowCfg = false, _hasSafetyExtCfg = false, _hasStarterSupportCfg = false;
+let _hasGovernorCfg = false, _hasSafetyExtCfg = false, _hasStarterSupportCfg = false;
 function refreshFeatureCachesFromHardware() {
   const a = hwCfg.actuators || {};
   hasAfterburnerCfg = hasActualAfterburnerHardware();
   _hasGovernorCfg = !!hwCfg.controllers?.governor;
-  _hasGlowCfg = hasRegistryOutput('glow_plug');
   const starterDriver = Number(registryOutputByPurpose('starter')?.driver);
   _hasStarterSupportCfg = !!(hasRegistryOutput('starter') && starterDriver !== 4 && hasRegistryInput('n1_speed'));
   // AB servo-PWM input uses the same shared RC failsafe timeout, so an
@@ -2674,9 +2718,6 @@ function applyExtSectionVisibility() {
 
   const govSec = document.getElementById('governor-cfg-section');
   if (govSec) { govSec.dataset.forceHidden = _hasGovernorCfg ? '0' : '1'; govSec.style.display = ''; }
-
-  const glowSec = document.getElementById('glow-cfg-section');
-  if (glowSec) { glowSec.dataset.forceHidden = _hasGlowCfg ? '0' : '1'; glowSec.style.display = ''; }
 
   const supportSec = document.getElementById('starter-support-section');
   if (supportSec) { supportSec.dataset.forceHidden = _hasStarterSupportCfg ? '0' : '1'; supportSec.style.display = ''; }
@@ -2712,7 +2753,8 @@ function registryInputByPurpose(...purposes) {
 function registryOutputByPurpose(...purposes) {
   const wanted = new Set(purposes.map(String));
   return (hwCfg.channel_registry?.outputs || []).find(channel =>
-    registryChannelInstalled(channel) && wanted.has(String(channel.purpose || channel.id || '')));
+    registryChannelInstalled(channel) && !String(channel.mirror_of || '') &&
+    wanted.has(String(channel.purpose || channel.id || '')));
 }
 function hasRegistryInput(...purposes) { return !!registryInputByPurpose(...purposes); }
 function hasRegistryOutput(...purposes) { return !!registryOutputByPurpose(...purposes); }
@@ -2812,7 +2854,7 @@ function applyHwConditions() {
     } else if (el.type === 'checkbox' && !el.checked) {
       const unlockHints = {
         oil_tm: 'Turn this on to unlock Map Max and make oil pressure target rise with throttle.',
-        rl_en: 'Turn this on to allow automatic relight settings to affect running flameout recovery.',
+        rl_en: 'Turn this on to run the independent automatic-relight detector and ignition attempt.',
         ab_ut: 'Turn this on to unlock torch fuel-spike duration and EGT cut settings.',
         ab_ui: 'Turn this on to fire the dedicated afterburner igniter during AB ignition.'
       };
@@ -2882,21 +2924,27 @@ function applyHwConditions() {
 
   // ── Windmilling oil protection from N1/N2, no oil-pressure sensor required ─────
   const hasStandbyOilSource = hasN1 || hasN2;
-  const standbyOilAvailable = hasOilPump && hasStandbyOilSource;
+  const hasStandbyOilActuator = _independentFittedOutputs().length > 0;
+  const standbyOilAvailable = hasStandbyOilActuator && hasStandbyOilSource;
+  const standbyOilEnabled = !!document.getElementById('cf-so_en')?.checked;
   ghostSectionByTitle('Windmilling Oil Protection', standbyOilAvailable,
-    !hasOilPump
-      ? 'Oil pump output is not configured in Hardware. Enable an oil pump to unlock windmilling oil protection.'
+    !hasStandbyOilActuator
+      ? 'No fitted output is available. Add an oil pump (recommended) or another usable output in Hardware.'
       : 'No N1 or N2 RPM sensor is configured. Enable a shaft RPM sensor to unlock windmilling oil protection.');
-  ghostField('so_src', standbyOilAvailable,
-    'Windmilling oil protection needs an oil pump and at least one shaft RPM sensor.');
+  ghostField('so_en', standbyOilAvailable,
+    'Windmilling oil protection needs a fitted output and at least one shaft RPM sensor.');
+  ghostField('so_src', standbyOilAvailable && standbyOilEnabled,
+    'Windmilling oil protection needs a fitted output and at least one shaft RPM sensor.');
   ghostSelectOption('so_src', 0, hasN1,
     'N1 RPM sensor is not configured in Hardware.');
   ghostSelectOption('so_src', 1, hasN2,
     'N2 RPM sensor is not configured in Hardware.');
   ghostSelectOption('so_src', 2, hasStandbyOilSource,
     'No N1 or N2 RPM sensor is configured in Hardware.');
-  ['so_rl','so_fp','so_fb'].forEach(k => ghostField(k, standbyOilAvailable,
-    'Windmilling oil protection needs an oil pump and at least one shaft RPM sensor.'));
+  ['so_oid','so_rl','so_fp','so_fb'].forEach(k => ghostField(k, standbyOilAvailable && standbyOilEnabled,
+    standbyOilEnabled
+      ? 'Windmilling oil protection needs a fitted output and at least one shaft RPM sensor.'
+      : 'Enable Windmilling Oil Protection to edit this setting.'));
 
   // ── Core sensor-dependent limits stay visible but ghosted so users can see
   // which common protections need hardware before they matter.
@@ -2938,47 +2986,54 @@ function applyHwConditions() {
       : 'Low-throttle sensitivity only applies to a physical throttle input configured in Hardware.');
   const hasN1Pb = hasRegistryInput('n1_speed');
   const hasEgtPb = hasRegistryInput('tot', 'tit');
-  ['pb_n1e','pb_n1s','pb_n1h','pb_n1m','pb_n1l','pb_n1str','rl_ramp','rl_zone','rl_acc'].forEach(k =>
+  ['pb_n1e','pb_n1s','pb_n1h','pb_n1l','pb_n1str','rl_ramp','rl_zone','rl_acc'].forEach(k =>
     ghostField(k, hasThrottleOut && hasN1Pb,
       !hasN1Pb ? 'N1 pullback requires an N1 RPM sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_n2e','pb_n2s','pb_n2h','pb_n2m','pb_n2l','pb_n2str'].forEach(k =>
+  ['pb_n2e','pb_n2s','pb_n2h','pb_n2l','pb_n2str'].forEach(k =>
     ghostField(k, hasThrottleOut && hasN2,
       !hasN2 ? 'N2 pullback requires an N2 RPM sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_egte','pb_egts','pb_egth','pb_egtm','pb_egtl','pb_egtstr'].forEach(k =>
+  ['pb_egte','pb_egts','pb_egth','pb_egtl','pb_egtstr'].forEach(k =>
     ghostField(k, hasThrottleOut && hasEgtPb,
       !hasEgtPb ? 'EGT pullback requires a TOT or TIT sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_p1e','pb_p1s','pb_p1h','pb_p1m','pb_p1l','pb_p1str'].forEach(k =>
+  ['pb_p1e','pb_p1s','pb_p1h','pb_p1l','pb_p1str'].forEach(k =>
     ghostField(k, hasThrottleOut && hasP1,
       !hasP1 ? 'P1 pullback requires a P1 pressure sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_p2e','pb_p2s','pb_p2h','pb_p2m','pb_p2l','pb_p2str'].forEach(k =>
+  ['pb_p2e','pb_p2s','pb_p2h','pb_p2l','pb_p2str'].forEach(k =>
     ghostField(k, hasThrottleOut && hasP2,
       !hasP2 ? 'P2 pullback requires a P2 pressure sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  ['pb_tqe','pb_tqs','pb_tqh','pb_tqm','pb_tql','pb_tqstr'].forEach(k =>
+  ['pb_tqe','pb_tqs','pb_tqh','pb_tql','pb_tqstr'].forEach(k =>
     ghostField(k, hasThrottleOut && hasTorque,
       !hasTorque ? 'Torque pullback requires a shaft-torque sensor in Hardware.' : 'Main fuel output is not configured in Hardware.'));
   const hasAnyPullbackSource = hasN1Pb || hasN2 || hasEgtPb || hasP1 || hasP2 || hasTorque;
   ['pb_min'].forEach(k =>
     ghostField(k, hasThrottleOut && hasAnyPullbackSource,
       !hasAnyPullbackSource ? 'Pullback floor has no effect until an N1, N2, TOT, TIT, P1, P2, or torque sensor is configured in Hardware.' : 'Main fuel output is not configured in Hardware.'));
-  const configurePullbackVisibility = (enableKey, modeKey, normalKeys, predictiveKeys) => {
-    const enabled = !!document.getElementById('cf-' + enableKey)?.checked;
-    const predictive = Number(document.getElementById('cf-' + modeKey)?.value || 0) === 1;
+  const configurePullbackVisibility = (modeKey, normalKeys, predictiveKeys) => {
+    const mode = Number(document.getElementById('cf-' + modeKey)?.value || 0);
+    const enabled = mode > 0;
+    const predictive = mode === 2;
     normalKeys.forEach(key => setCfgFieldHardHidden(key, !enabled));
     predictiveKeys.forEach(key => setCfgFieldHardHidden(key, !enabled || !predictive));
   };
-  configurePullbackVisibility('pb_n1e','pb_n1m',['pb_n1s','pb_n1h','pb_n1m','pb_n1str'],['pb_n1l','rl_ramp','rl_zone','rl_acc']);
-  configurePullbackVisibility('pb_n2e','pb_n2m',['pb_n2s','pb_n2h','pb_n2m','pb_n2str'],['pb_n2l']);
-  configurePullbackVisibility('pb_egte','pb_egtm',['pb_egts','pb_egth','pb_egtm','pb_egtstr'],['pb_egtl']);
-  configurePullbackVisibility('pb_p1e','pb_p1m',['pb_p1s','pb_p1h','pb_p1m','pb_p1str'],['pb_p1l']);
-  configurePullbackVisibility('pb_p2e','pb_p2m',['pb_p2s','pb_p2h','pb_p2m','pb_p2str'],['pb_p2l']);
-  configurePullbackVisibility('pb_tqe','pb_tqm',['pb_tqs','pb_tqh','pb_tqm','pb_tqstr'],['pb_tql']);
+  configurePullbackVisibility('pb_n1e',['pb_n1s','pb_n1h'],['pb_n1l','pb_n1str','rl_ramp','rl_zone','rl_acc']);
+  configurePullbackVisibility('pb_n2e',['pb_n2s','pb_n2h'],['pb_n2l','pb_n2str']);
+  configurePullbackVisibility('pb_egte',['pb_egts','pb_egth'],['pb_egtl','pb_egtstr']);
+  configurePullbackVisibility('pb_p1e',['pb_p1s','pb_p1h'],['pb_p1l','pb_p1str']);
+  configurePullbackVisibility('pb_p2e',['pb_p2s','pb_p2h'],['pb_p2l','pb_p2str']);
+  configurePullbackVisibility('pb_tqe',['pb_tqs','pb_tqh'],['pb_tql','pb_tqstr']);
   ghostField('lm_mt', hasThrottleOut, 'Reduced-power mode requires a throttle/fuel output.');
   const hasAnyIgnitionOutput = hasIgniter || hasIgniter2 || hasGlowPlug;
   ghostField('ms_is', hasAnyIgnitionOutput, 'Igniter-on-START requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
-  ghostField('ms_it', hasAnyIgnitionOutput, 'START relight output requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
-  ghostSelectOption('ms_it', 0, hasIgniter, 'Igniter 1 is not configured in Hardware.');
-  ghostSelectOption('ms_it', 1, hasIgniter2, 'Secondary Igniter is not configured in Hardware.');
-  ghostSelectOption('ms_it', 2, hasGlowPlug, 'Glow/Wet Glow is not configured in Hardware.');
+  const manualRelightId = String((document.getElementById('cf-ms_oid') || {}).value || cfg?.misc?.igniter_on_start_output_id || '');
+  const hasManualRelightOutput = _installedIgnitionOutputs().some(row => String(row.id || '') === manualRelightId);
+  ghostField('ms_oid', hasAnyIgnitionOutput,
+    hasAnyIgnitionOutput
+      ? 'Choose the fitted ignition device controlled while START is held during RUNNING.'
+      : 'START relight requires an Igniter, Afterburner Igniter, or Glow/Wet Glow output in Hardware.');
+  ghostField('ms_is', hasManualRelightOutput,
+    hasAnyIgnitionOutput
+      ? 'Select a fitted START relight output first.'
+      : 'Igniter-on-START requires a fitted ignition output in Hardware.');
   ghostField('tl_fp', hasFuelSol, 'Main Fuel Prime duration requires a main fuel shutoff output.');
   ghostField('tl_fs', hasFuelSol, 'Main Fuel Shutoff Pulse duration requires a main fuel shutoff output.');
   ghostField('tl_op', hasOilPump, 'Oil Prime duration requires an oil pump output.');
@@ -3078,22 +3133,24 @@ function applyHwConditions() {
   ghostSelectOption('rl_cs', 1, hasFlame, 'Flame sensor is not configured in Hardware.');
   ghostSelectOption('rl_cs', 2, hasN1, 'N1 RPM sensor is not configured in Hardware.');
   ghostSelectOption('rl_cs', 3, hasEgt, 'No primary EGT source is configured in Hardware.');
-  ghostSelectOption('rl_it', 0, hasIgniter, 'Igniter 1 is not configured in Hardware.');
-  ghostSelectOption('rl_it', 1, hasIgniter2, 'Secondary Igniter is not configured in Hardware.');
-  ghostSelectOption('rl_it', 2, hasGlowPlug, 'Glow/Wet Glow is not configured in Hardware.');
-  const relightTarget = Number((document.getElementById('cf-rl_it') || {}).value || 0);
-  const hasRelightIgnition = relightTarget === 1 ? hasIgniter2 : relightTarget === 2 ? hasGlowPlug : hasIgniter;
+  ghostSelectOption('rl_ts', 1, hasFlame, 'Flame sensor is not configured in Hardware.');
+  ghostSelectOption('rl_ts', 2, hasN1, 'N1 RPM sensor is not configured in Hardware.');
+  ghostSelectOption('rl_ts', 3, hasEgt, 'No primary EGT source is configured in Hardware.');
+  const relightOutputId = String((document.getElementById('cf-rl_oid') || {}).value || cfg?.relight?.output_id || '');
+  const hasRelightIgnition = _installedIgnitionOutputs().some(row => String(row.id || '') === relightOutputId);
   const hasAutoRelightHardware = hasN1 && hasRelightIgnition;
-  ghostField('rl_it', hasN1 && hasAnyIgnitionOutput,
+  ghostField('rl_oid', hasN1 && hasAnyIgnitionOutput,
     !hasN1
       ? 'Auto-relight requires N1 RPM feedback so the ECU can prove the engine is still windmilling.'
       : 'Auto-relight requires Igniter 1, Secondary Igniter, or Glow/Wet Glow to be configured in Hardware.');
-  ['rl_en','rl_mr','rl_cs','rl_cr','rl_tr','rl_to'].forEach(k =>
+  ['rl_en','rl_ts','rl_td','rl_tb','rl_tf','rl_mr','rl_cs','rl_cr','rl_tr','rl_to'].forEach(k =>
     ghostField(k, hasAutoRelightHardware,
       !hasN1
         ? 'Auto-relight requires N1 RPM feedback so the ECU can prove the engine is still windmilling.'
         : 'Auto-relight requires the selected ignition output to be configured in Hardware.'));
   ghostField('rl_tr', hasAutoRelightHardware && hasEgt, 'EGT relight recovery requires N1, the selected ignition output, and a configured TOT or TIT sensor.');
+  ghostField('rl_tb', hasAutoRelightHardware && hasEgt, 'An EGT relight trigger requires N1, the selected ignition output, and a configured TOT or TIT sensor.');
+  ghostField('rl_tf', hasAutoRelightHardware && hasEgt, 'An EGT relight trigger requires N1, the selected ignition output, and a configured TOT or TIT sensor.');
 
   ghostSelectOption('ab_fm', 0, hasAbFlame, 'AB flame sensor is not configured in Hardware.');
   ghostSelectOption('ab_fm', 1, hasEgt, 'No primary EGT source is configured in Hardware.');
@@ -3216,6 +3273,7 @@ document.addEventListener('DOMContentLoaded', () => {
   .then(([c, hw]) => {
     cfg   = c;
     hwCfg = hw;
+    migrateBuiltInOutputIds();
     const controllerMigrated = CONFIG_SURFACE === 'controllers' && migrateLegacyControllerDefinitions();
     renderForm();
     _applyAllVisibility();

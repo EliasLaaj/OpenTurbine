@@ -1,6 +1,6 @@
 name: OpenTurbine
-version: "2.1.0"
-status: Experimental
+version: "2.2.0"
+status: Development
 default_ip: 192.168.4.1
 windows_asset_name: OpenTurbineSetupTool.exe
 windows_download_url: https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbineSetupTool.exe

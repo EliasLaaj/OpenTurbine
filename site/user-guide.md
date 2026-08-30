@@ -384,13 +384,15 @@ Do not copy this blindly; make it match the engine. A common logic pattern is:
 
 1. **Build Oil Pressure (OilPrime):** runs the oil pump and waits for pressure, or uses a timed fixed output if no pressure sensor exists.
 2. **Starter Spin to Light-Off Speed (StarterSpin):** enables/ramps the starter and waits for the configured light-off N1.
-3. **Igniter On / Pre-Heat:** energizes the selected ignition or glow output.
-4. **Fuel Open / Fuel Pulse:** admits the configured starting fuel.
+3. **Set Output / Pre-Heat:** energizes the selected ignition or glow output. A Set Output card always names the exact fitted device and can be changed between ON/OFF or a proportional demand where its Hardware driver allows that.
+4. **Set Output / Fuel Pulse:** opens the selected fuel-shutoff device or applies a bounded priming pulse where that is deliberately required.
 5. **Confirm Combustion:** uses FlameConfirm or TempConfirm; never leave light-off unverified merely because a timer expired.
 6. **Spool / Modified Idle / Fuel Pump Idle:** increases fuel toward the idle-entry condition.
 7. **Verify Stable Idle (SafetyHold):** confirms RPM/oil conditions before RUNNING.
 
-Use **Timed Delay** only when time itself is the correct requirement. **Wait For Input** is for an installed permission switch. The output action blocks—Igniter, starter enable, starter, oil/scavenge pump, air starter, cooling fan, bleed valve, auxiliary fuel pump and throttle set—command the corresponding fitted actuator directly.
+Use **Timed Delay** only when time itself is the correct requirement. **Wait For Input** is for an installed permission switch. Use **Set Output** for ordinary device commands; the add list presents one professionally named action for each fitted output and the card remains editable afterward. Purpose-specific blocks remain only where the ECU must perform real turbine logic rather than merely command an output.
+
+On a fresh generic development-board installation, the safe example profile contains throttle and idle inputs plus Main Fuel Metering, Oil Pump and Igniter outputs. Its example startup builds oil, enables ignition, establishes minimum fuel and uses delays; its shutdown immediately cuts combustion, keeps oil running for the configured delay, then switches the selected oil pump off. It is a commissioning example, not a tune or sequence to copy into an engine. Add the actual sensors, starter, fuel shutoff and feedback checks your installation requires before introducing energy.
 
 ### 12.2 Beginner shutdown order
 

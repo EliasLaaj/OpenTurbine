@@ -438,6 +438,8 @@ Never calibrate pressure or flow using an unverified web reading as its own refe
 
 Open **Sequence** and read every block in order. A block being available does not mean it belongs in your engine.
 
+The fresh generic development-board profile is deliberately only a safe commissioning example: throttle and idle inputs, Main Fuel Metering, Oil Pump and Igniter outputs, a timed oil/ignition/minimum-fuel startup, and an immediate fuel cut followed by timed oil shutdown. Ordinary device commands appear as editable **Set Output** cards that name the exact fitted output. This default is neither an engine tune nor proof that the sequence suits an installation; add and validate the real starter, shutoff, sensors and feedback checks before applying energy.
+
 Confirm that:
 
 - Oil flow/pressure is established before ignition when required.

@@ -138,9 +138,11 @@ def main():
             with urllib.request.urlopen("http://192.168.4.1/api/session/log", timeout=10) as response:
                 csv_text = response.read().decode("utf-8")
         lines = [line for line in csv_text.splitlines() if line.strip()]
-        header_ok = bool(lines) and lines[0] == (
-            "t_ms,mode,n1_rpm,thr_pct,loop_hz,loop_exec_avg_ms,loop_exec_max_ms"
+        expected_header = (
+            "t_ms,mode,n1_rpm,thr_pct,loop_hz,loop_period_max_ms,"
+            "loop_exec_avg_ms,loop_exec_max_ms,loop_overrun_count"
         )
+        header_ok = bool(lines) and lines[0] == expected_header
         # Compact telemetry deliberately omits loop diagnostics, so the
         # one-time /api/data base can contain a pre-run configuration spike.
         # The session rows are the authoritative timing evidence for this run.
@@ -148,11 +150,11 @@ def main():
             first_sample_ms = None
             for line in lines[1:]:
                 columns = line.split(",")
-                if len(columns) >= 7:
+                if len(columns) >= 9:
                     sample_ms = int(columns[0])
                     if first_sample_ms is None:
                         first_sample_ms = sample_ms
-                    sample_max = float(columns[6])
+                    sample_max = float(columns[7])
                     max_recorded_loop_exec_ms = max(max_recorded_loop_exec_ms, sample_max)
                     # The first completed one-second windows may predate START
                     # and include the deliberately heavy STANDBY config apply.
@@ -178,6 +180,7 @@ def main():
             "completed_path": completed_path,
             "csv_lines": len(lines),
             "header_ok": header_ok,
+            "header": lines[0] if lines else "",
             "web_samples": web_samples,
             "max_active_loop_exec_ms": max_active_loop_exec_ms,
             "max_recorded_loop_exec_ms": max_recorded_loop_exec_ms,

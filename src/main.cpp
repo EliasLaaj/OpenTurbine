@@ -27,18 +27,23 @@ static HardwareSerial _mavSerial(2);  // UART2
 // ── Global hardware objects (always compiled in) ──────────────
 OT_DECLARE_HARDWARE;
 
+class SetOutputSequenceBlock : public IBlock {
+public:
+    const char* name() override { return "SetOutput"; }
+    BlockResult tick() override { return BlockResult::Complete; }
+};
+static SetOutputSequenceBlock g_blkSetOutput;
+
 // ── Sequence arrays — built from the ecu_config.json hardware section ─────
 // Block name → pointer registry (all sequence blocks)
 struct BlockEntry { const char* name; IBlock* blk; };
 static const BlockEntry _blockRegistry[] = {
+    {"SetOutput",     &g_blkSetOutput},
     // Core sequence blocks
     {"OilPrime",      &g_blkOilPrime},
     {"StarterSpin",   &g_blkStarterSpin},
-    {"PreIgnSpark",   &g_blkPreIgnSpark},
-    {"FuelOpen",      &g_blkFuelOpen},
     {"FlameConfirm",  &g_blkFlameConfirm},
     {"TempConfirm",   &g_blkTempConfirm},
-    {"TimedDelay",    &g_blkTimedDelay},
     {"FuelPumpIdle",  &g_blkFuelPumpIdle},
     {"ModifiedIdle",  &g_blkModifiedIdle},
     {"Spool",         &g_blkSpool},
@@ -47,52 +52,36 @@ static const BlockEntry _blockRegistry[] = {
     {"RPMDrop",       &g_blkRPMDrop},
     {"CooldownSpin",  &g_blkCooldownSpin},
     {"FinalStop",     &g_blkFinalStop},
-    // Simple actuator blocks
-    {"IgniterOn",     &g_blkIgniterOn},
-    {"IgniterOff",    &g_blkIgniterOff},
-    {"FuelSolClose",  &g_blkFuelSolClose},
-    {"StarterEnOn",   &g_blkStarterEnOn},
-    {"StarterEnOff",  &g_blkStarterEnOff},
-    {"StarterOff",    &g_blkStarterOff},
-    {"OilPumpOn",     &g_blkOilPumpOn},
-    {"OilPumpOff",    &g_blkOilPumpOff},
-    {"CoolFanOn",     &g_blkCoolFanOn},
-    {"CoolFanOff",    &g_blkCoolFanOff},
-    {"AirstarterOn",  &g_blkAirstarterOn},
-    {"AirstarterOff", &g_blkAirstarterOff},
-    {"ABPumpOn",      &g_blkABPumpOn},
-    {"ABPumpOff",     &g_blkABPumpOff},
-    {"ABIgnOn",       &g_blkABIgnOn},
-    {"ABIgnOff",      &g_blkABIgnOff},
-    {"OilScavengeOn",  &g_blkOilScavengeOn},
-    {"OilScavengeOff", &g_blkOilScavengeOff},
-    {"DrainValveOpen", &g_blkDrainValveOpen},
-    {"DrainValveClose", &g_blkDrainValveClose},
     // Extended blocks
-    {"FuelPulse",      &g_blkFuelPulse},
     {"WaitTOTCool",    &g_blkWaitTOTCool},
     {"WaitForInput",   &g_blkWaitForInput},
     {"WaitForInputOff",&g_blkWaitForInputOff},
-    {"ThrottleSet",    &g_blkThrottleSet},
-    {"PreHeat",        &g_blkPreHeat},
     // Advanced / extended hardware blocks
-    {"BleedOpen",      &g_blkBleedOpen},
-    {"BleedClose",     &g_blkBleedClose},
-    {"GlowPreheat",    &g_blkGlowPreheat},
-    {"FuelPumpRamp",   &g_blkFuelPumpRamp},
-    {"FuelPump2Set",   &g_blkFuelPump2Set},
-    {"FuelPump2On",    &g_blkFuelPump2On},
-    {"FuelPump2Off",   &g_blkFuelPump2Off},
     {"GovernorHold",   &g_blkGovernorHold},
     // Afterburner blocks
-    {"ABSolOpen",      &g_blkABSolOpen},
-    {"ABSolClose",     &g_blkABSolClose},
     {"ABCheckReady",   &g_blkABCheckReady},
     {"ABIgnite",       &g_blkABIgnite},
     {"ABFlameConfirm", &g_blkABFlameConfirm},
     {"ABStabilize",    &g_blkABStabilize},
 };
 static constexpr size_t _blockRegistryLen = sizeof(_blockRegistry) / sizeof(BlockEntry);
+
+static bool perSlotBlockName(const char* name) {
+    if (!name) return false;
+    static const char* const names[] = {
+        "TimedDelay", "IgniterOn", "IgniterOff", "ABIgnOn", "ABIgnOff",
+        "PreHeat", "PreIgnSpark", "GlowPreheat", "FuelOpen", "FuelSolClose",
+        "FuelPulse", "StarterEnOn", "StarterEnOff", "StarterOff", "OilPumpOn",
+        "OilPumpOff", "CoolFanOn", "CoolFanOff", "AirstarterOn", "AirstarterOff",
+        "ABPumpOn", "ABPumpOff", "OilScavengeOn", "OilScavengeOff",
+        "DrainValveOpen", "DrainValveClose", "BleedOpen", "BleedClose",
+        "FuelPumpRamp", "FuelPump2Set", "FuelPump2On", "FuelPump2Off",
+        "ABSolOpen", "ABSolClose", "ThrottleSet",
+    };
+    for (const char* candidate : names)
+        if (!strcmp(candidate, name)) return true;
+    return false;
+}
 
 // Pointer tables are populated once from the stored configuration. Keeping
 // their small backing store on the heap preserves classic ESP32 static DRAM
@@ -211,81 +200,278 @@ private:
 
 class IgnitionCommandBlock : public IBlock {
 public:
-    void bind(const char* blockName, uint8_t target, unsigned long preheatMs) {
+    void bind(const char* blockName, const char* targetId, const char* defaultPurpose,
+              unsigned long dwellMs) {
         _name = blockName;
-        _target = constrain(target, 0, 2);
-        _preheatMs = preheatMs;
+        const char* resolved = targetId && targetId[0] ? targetId :
+            HardwareConfig::defaultOutputIdForPurpose(defaultPurpose);
+        const auto* output = HardwareConfig::channelRegistry.find(resolved, ChannelRegistry::Output);
+        _glow = output && !strcmp(output->purpose, "glow_plug");
+        _relay = output && ChannelRegistry::driverIsOnOffOutput(output->driver);
+        _outputIndex = output ? (int8_t)(output - HardwareConfig::channelRegistry.outputs) : -1;
+        _target = HardwareConfig::outputActuatorForId(resolved);
+        _dwellMs = dwellMs;
+        _onDemand = _glow && output && output->ignitionProfileConfigured
+            ? output->ignitionHoldDemand
+            : _glow ? constrain(Config::glowHoldPct / 100.0f, 0.0f, 1.0f) : 1.0f;
+        _glowRamp = blockName && !strcmp(blockName, "GlowPreheat");
+        if (output && output->ignitionProfileConfigured &&
+            blockName && !strcmp(blockName, "PreHeat"))
+            _dwellMs = output->ignitionPreheatMs;
+        if (_glowRamp) {
+            _dwellMs = output && output->ignitionProfileConfigured
+                ? output->ignitionPreheatMs : (unsigned long)max(Config::glowPreheatMs, 0);
+            _peakDemand = _relay ? 1.0f : output && output->ignitionProfileConfigured
+                ? output->ignitionPeakDemand : constrain(Config::glowPreheatMaxPct / 100.0f, 0.0f, 1.0f);
+            _holdDemand = _relay ? 1.0f : output && output->ignitionProfileConfigured
+                ? output->ignitionHoldDemand : constrain(Config::glowHoldPct / 100.0f, 0.0f, 1.0f);
+            _waitUntilHot = output && output->ignitionProfileConfigured
+                ? output->ignitionWaitUntilHot : Config::glowWaitUntilHot;
+            _hotTimeoutMs = output && output->ignitionProfileConfigured
+                ? output->ignitionHotTimeoutMs : 30000UL;
+        }
     }
 
     const char* name() override { return _name ? _name : "IgnitionCommand"; }
 
     void onEnter() override {
         _entryMs = millis();
-        if (strcmp(name(), "IgniterOff") == 0) _setTarget(false);
+        if (_glowRamp) {
+            _setDemand(0.0f);
+            return;
+        }
+        if (strcmp(name(), "IgniterOff") == 0 || strcmp(name(), "ABIgnOff") == 0) _setTarget(false);
         else _setTarget(true);
+        if (strcmp(name(), "PreIgnSpark") == 0)
+            EngineData::instance().clusterCode = 5;
     }
 
     BlockResult tick() override {
-        if (strcmp(name(), "PreHeat") != 0) return BlockResult::Complete;
-        return (millis() - _entryMs) >= _preheatMs ? BlockResult::Complete : BlockResult::Running;
+        if (_glowRamp) {
+            const unsigned long elapsed = millis() - _entryMs;
+            if (_dwellMs && elapsed < _dwellMs) {
+                _setDemand(_peakDemand * ((float)elapsed / (float)_dwellMs));
+                return BlockResult::Running;
+            }
+            _setDemand(_holdDemand);
+            if (!_waitUntilHot || EngineData::instance().benchMode) {
+                clearWaitReason();
+                return BlockResult::Complete;
+            }
+            auto& ed = EngineData::instance();
+            bool feedbackFitted = false;
+            bool feedbackHealthy = false;
+            bool hot = false;
+            if (_outputIndex >= 0 && _outputIndex < HardwareConfig::channelRegistry.outputCount) {
+                const auto& output = HardwareConfig::channelRegistry.outputs[_outputIndex];
+                feedbackFitted = output.hasCurrent;
+                feedbackHealthy = ed.registryOutputCurrentHealthy[_outputIndex];
+                hot = feedbackHealthy &&
+                      ed.registryOutputCurrentAmps[_outputIndex] <= output.currentReadyAmps;
+            } else {
+                feedbackFitted = HardwareConfig::hasGlowCurrentSensor;
+                feedbackHealthy = ed.glowCurrentHealthy;
+                hot = ed.glowPlugHot;
+            }
+            if (feedbackFitted && feedbackHealthy && hot) {
+                clearWaitReason();
+                return BlockResult::Complete;
+            }
+            setWaitReason(!feedbackFitted ? "Glow current feedback not fitted" :
+                          !feedbackHealthy ? "Glow current feedback unavailable" :
+                          "Waiting for selected glow plug temperature");
+            if (elapsed < _dwellMs + _hotTimeoutMs) return BlockResult::Running;
+            _setDemand(0.0f);
+            return BlockResult::Abort;
+        }
+        if (strcmp(name(), "PreHeat") != 0 && strcmp(name(), "PreIgnSpark") != 0)
+            return BlockResult::Complete;
+        return (millis() - _entryMs) >= _dwellMs ? BlockResult::Complete : BlockResult::Running;
     }
 
     void onExit() override {}
 
 private:
-    void _setTarget(bool on) {
-        auto& ed = EngineData::instance();
-        switch (_target) {
-            case 1: ed.igniter2On = on; break;
-            case 2: ed.glowPlugDemand = on ? (Config::glowHoldPct / 100.0f) : 0.0f; break;
-            default: ed.igniterOn = on; break;
+    void _setDemand(float demand) {
+        if (_target >= 0) {
+            RulesEngine::applyActuatorDemand((uint8_t)_target, constrain(demand, 0.0f, 1.0f));
+            setSequenceIgnitionTracked(_outputIndex, demand > 0.0f);
         }
+    }
+    void _setTarget(bool on) {
+        if (_target < 0) return;
+        const float demand = on ? _onDemand : 0.0f;
+        RulesEngine::applyActuatorDemand((uint8_t)_target, demand);
+        setSequenceIgnitionTracked(_outputIndex, on && demand > 0.0f);
     }
 
     const char* _name = nullptr;
-    uint8_t _target = 0;
-    unsigned long _preheatMs = 0;
+    int8_t _target = -1;
+    int8_t _outputIndex = -1;
+    bool _glow = false;
+    bool _relay = false;
+    bool _glowRamp = false;
+    bool _waitUntilHot = false;
+    float _peakDemand = 1.0f;
+    float _holdDemand = 1.0f;
+    float _onDemand = 1.0f;
+    unsigned long _hotTimeoutMs = 30000;
+    unsigned long _dwellMs = 0;
     unsigned long _entryMs = 0;
 };
 
-static bool ignitionTargetAvailable(uint8_t target) {
-    auto& hw = HardwareConfig::instance();
-    switch (target) {
-        case 1: return hw.hasIgniter2;
-        case 2: return hw.hasGlowPlug;
-        default: return hw.hasIgniter;
+class TargetedActuatorBlock : public IBlock {
+public:
+    void bind(const char* blockName, const char* targetId, const char* defaultPurpose,
+              float demand) {
+        _name = blockName;
+        const char* resolved = targetId && targetId[0] ? targetId :
+            HardwareConfig::defaultOutputIdForPurpose(defaultPurpose);
+        _target = HardwareConfig::outputActuatorForId(resolved);
+        _demand = constrain(demand, 0.0f, 1.0f);
+        _mode = 0;
+        _completed = false;
+        if (!strcmp(blockName, "FuelPulse")) {
+            _mode = 1;
+            _durationMs = (unsigned long)Config::fuelPulsePulseMs;
+            _offMs = (unsigned long)Config::fuelPulseOffMs;
+        } else if (!strcmp(blockName, "FuelPumpRamp")) {
+            _mode = 2;
+            _startDemand = constrain(Config::fp2StartPct / 100.0f, 0.0f, 1.0f);
+            _demand = constrain(Config::fp2EndPct / 100.0f, 0.0f, 1.0f);
+            _durationMs = (unsigned long)max(Config::fp2RampMs, 1);
+        }
     }
+
+    const char* name() override { return _name ? _name : "TargetedActuator"; }
+    void onEnter() override {
+        _entryMs = millis();
+        _phaseMs = 0;
+        _phase = 0;
+        _completed = false;
+        if (!strcmp(name(), "OilPumpOff")) EngineData::instance().oilTargetBar = 0.0f;
+        if (_target >= 0) RulesEngine::applyActuatorDemand((uint8_t)_target,
+            _mode == 2 ? _startDemand : _demand);
+        if (_demand > 0.0f && (!strcmp(name(), "ABPumpOn") || !strcmp(name(), "ABSolOpen"))) {
+            auto& ed = EngineData::instance();
+            if (!ed.abFirstFuelMs) ed.abFirstFuelMs = millis();
+        }
+    }
+    BlockResult tick() override {
+        if (_mode == 0) return BlockResult::Complete;
+        if (_target < 0) return BlockResult::Abort;
+        const unsigned long now = millis();
+        if (_mode == 1) {
+            if (_phase == 0 && now - _entryMs >= _durationMs) {
+                RulesEngine::applyActuatorDemand((uint8_t)_target, 0.0f);
+                _phase = 1;
+                _phaseMs = now;
+            }
+            if (_phase == 1 && now - _phaseMs >= _offMs) {
+                _completed = true;
+                return BlockResult::Complete;
+            }
+            return BlockResult::Running;
+        }
+        const unsigned long elapsed = now - _entryMs;
+        if (elapsed >= _durationMs) {
+            RulesEngine::applyActuatorDemand((uint8_t)_target, _demand);
+            _completed = true;
+            return BlockResult::Complete;
+        }
+        const float fraction = (float)elapsed / (float)_durationMs;
+        RulesEngine::applyActuatorDemand((uint8_t)_target,
+            _startDemand + fraction * (_demand - _startDemand));
+        return BlockResult::Running;
+    }
+    void onExit() override {
+        if (_target < 0) return;
+        if (_mode == 1 || (_mode == 2 && !_completed))
+            RulesEngine::applyActuatorDemand((uint8_t)_target, 0.0f);
+    }
+
+private:
+    const char* _name = nullptr;
+    int8_t _target = -1;
+    float _demand = 0.0f;
+    float _startDemand = 0.0f;
+    uint8_t _mode = 0;
+    uint8_t _phase = 0;
+    bool _completed = false;
+    unsigned long _entryMs = 0;
+    unsigned long _phaseMs = 0;
+    unsigned long _durationMs = 0;
+    unsigned long _offMs = 0;
+};
+
+static const char* uniqueIgnitionOutputId(uint8_t legacyTarget) {
+    const char* purpose = legacyTarget == 1 ? "ab_igniter" :
+                          legacyTarget == 2 ? "glow_plug" : "igniter";
+    const char* sole = nullptr;
+    uint8_t matches = 0;
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.outputCount; ++i) {
+        const auto& output = HardwareConfig::channelRegistry.outputs[i];
+        if (!output.installed || output.mirrorOf[0] || strcmp(output.purpose, purpose) ||
+            !ChannelRegistry::channelAddressable(output)) continue;
+        sole = output.id;
+        ++matches;
+    }
+    return matches == 1 ? sole : nullptr;
 }
 
-static const char* ignitionTargetName(uint8_t target) {
-    switch (target) {
-        case 1: return "Secondary Igniter";
-        case 2: return "Glow/Wet Glow";
-        default: return "Igniter 1";
-    }
+static bool ignitionOutputPurpose(const char* purpose) {
+    return purpose && (!strcmp(purpose, "igniter") ||
+                       !strcmp(purpose, "ab_igniter") ||
+                       !strcmp(purpose, "glow_plug"));
 }
 
-static void commandIgnitionTarget(uint8_t target, bool on) {
-    auto& ed = EngineData::instance();
-    switch (target) {
-        case 1:
-            ed.igniter2On = on;
-            break;
-        case 2:
-            ed.glowPlugDemand = on ? (Config::glowHoldPct / 100.0f) : 0.0f;
-            break;
-        default:
-            ed.igniterOn = on;
-            break;
-    }
+static bool configuredIgnitionOutputAvailable(const char* outputId, uint8_t legacyTarget) {
+    if (!outputId || !outputId[0]) return uniqueIgnitionOutputId(legacyTarget) != nullptr;
+    const auto* output = HardwareConfig::channelRegistry.find(outputId, ChannelRegistry::Output);
+    if (!output || !output->installed || output->mirrorOf[0] ||
+        !ignitionOutputPurpose(output->purpose) ||
+        !ChannelRegistry::channelAddressable(*output)) return false;
+    return true;
 }
 
-static CustomSequenceBlock* const _sequenceCustomBlockStorage =
-    new (std::nothrow) CustomSequenceBlock[HardwareConfig::MAX_SEQ_BLOCKS * 4]();
-static IgnitionCommandBlock* const _sequenceIgnitionBlockStorage =
-    new (std::nothrow) IgnitionCommandBlock[HardwareConfig::MAX_SEQ_BLOCKS * 4]();
-static CustomSequenceBlock* const _startupCustomBlocks = _sequenceCustomBlockStorage;
-static IgnitionCommandBlock* const _startupIgnitionBlocks = _sequenceIgnitionBlockStorage;
+static const char* configuredIgnitionOutputName(const char* outputId, uint8_t legacyTarget) {
+    if (outputId && outputId[0]) {
+        const auto* output = HardwareConfig::channelRegistry.find(outputId, ChannelRegistry::Output);
+        if (output) return output->name[0] ? output->name : output->id;
+    }
+    if (const char* resolved = uniqueIgnitionOutputId(legacyTarget)) {
+        const auto* output = HardwareConfig::channelRegistry.find(resolved, ChannelRegistry::Output);
+        if (output) return output->name[0] ? output->name : output->id;
+    }
+    return "No unambiguous ignition output";
+}
+
+static void commandConfiguredIgnitionOutput(const char* outputId, uint8_t legacyTarget, bool on) {
+    if (!outputId || !outputId[0]) {
+        outputId = uniqueIgnitionOutputId(legacyTarget);
+        if (!outputId) return;
+    }
+    if (!configuredIgnitionOutputAvailable(outputId, legacyTarget)) return;
+    const auto* output = HardwareConfig::channelRegistry.find(outputId, ChannelRegistry::Output);
+    const int8_t actuator = HardwareConfig::outputActuatorForId(outputId);
+    if (!output || actuator < 0) return;
+    const float demand = on && !strcmp(output->purpose, "glow_plug")
+        ? (output->ignitionProfileConfigured
+            ? output->ignitionHoldDemand : Config::glowHoldPct / 100.0f)
+        : on ? 1.0f : 0.0f;
+    RulesEngine::applyActuatorDemand((uint8_t)actuator, demand);
+}
+
+static CustomSequenceBlock* _sequenceCustomBlockStorage = nullptr;
+static uint8_t _sequenceCustomBlockCapacity = 0;
+static IgnitionCommandBlock* _sequenceIgnitionBlockStorage = nullptr;
+static uint8_t _sequenceIgnitionBlockCapacity = 0;
+// Targeted actuator blocks are comparatively large and most engine sequences
+// use only a few of them.  Allocating the theoretical maximum of 64 objects at
+// boot leaves the original ESP32 without enough heap to lease a web asset.
+// Grow this pool only to the number the configured sequences actually need.
+static TargetedActuatorBlock* _sequenceTargetedBlockStorage = nullptr;
+static uint8_t _sequenceTargetedBlockCapacity = 0;
 static int     _startupCount  = 0;
 static IBlock** const _shutdownBlocks =
     _sequenceBlockStorage
@@ -293,12 +479,6 @@ static IBlock** const _shutdownBlocks =
 static TimedDelay* const _shutdownDelays =
     _sequenceDelayStorage
         ? _sequenceDelayStorage + HardwareConfig::MAX_SEQ_BLOCKS : nullptr;
-static CustomSequenceBlock* const _shutdownCustomBlocks =
-    _sequenceCustomBlockStorage
-        ? _sequenceCustomBlockStorage + HardwareConfig::MAX_SEQ_BLOCKS : nullptr;
-static IgnitionCommandBlock* const _shutdownIgnitionBlocks =
-    _sequenceIgnitionBlockStorage
-        ? _sequenceIgnitionBlockStorage + HardwareConfig::MAX_SEQ_BLOCKS : nullptr;
 static int     _shutdownCount = 0;
 static IBlock** const _abIgnBlocks =
     _sequenceBlockStorage
@@ -306,12 +486,6 @@ static IBlock** const _abIgnBlocks =
 static TimedDelay* const _abIgnDelays =
     _sequenceDelayStorage
         ? _sequenceDelayStorage + HardwareConfig::MAX_SEQ_BLOCKS * 2 : nullptr;
-static CustomSequenceBlock* const _abIgnCustomBlocks =
-    _sequenceCustomBlockStorage
-        ? _sequenceCustomBlockStorage + HardwareConfig::MAX_SEQ_BLOCKS * 2 : nullptr;
-static IgnitionCommandBlock* const _abIgnitionBlocks =
-    _sequenceIgnitionBlockStorage
-        ? _sequenceIgnitionBlockStorage + HardwareConfig::MAX_SEQ_BLOCKS * 2 : nullptr;
 static int     _abIgnCount    = 0;
 static IBlock** const _abShutBlocks =
     _sequenceBlockStorage
@@ -319,12 +493,6 @@ static IBlock** const _abShutBlocks =
 static TimedDelay* const _abShutDelays =
     _sequenceDelayStorage
         ? _sequenceDelayStorage + HardwareConfig::MAX_SEQ_BLOCKS * 3 : nullptr;
-static CustomSequenceBlock* const _abShutCustomBlocks =
-    _sequenceCustomBlockStorage
-        ? _sequenceCustomBlockStorage + HardwareConfig::MAX_SEQ_BLOCKS * 3 : nullptr;
-static IgnitionCommandBlock* const _abShutIgnitionBlocks =
-    _sequenceIgnitionBlockStorage
-        ? _sequenceIgnitionBlockStorage + HardwareConfig::MAX_SEQ_BLOCKS * 3 : nullptr;
 static int     _abShutCount   = 0;
 static void validateSequences(bool report = true);  // defined after buildSequences
 static bool _configApplyDeferred = false;
@@ -341,8 +509,72 @@ static void applyConfigOnEcuCore() {
 
 static void buildSequences() {
     auto& hw = HardwareConfig::instance();
+
+    auto isTargetedActuatorBlock = [](const char* name) {
+        static const char* const names[] = {
+            "FuelOpen", "FuelSolClose", "FuelPulse", "StarterEnOn", "StarterEnOff",
+            "StarterOff", "OilPumpOn", "OilPumpOff", "CoolFanOn", "CoolFanOff",
+            "AirstarterOn", "AirstarterOff", "ABPumpOn", "ABPumpOff", "OilScavengeOn",
+            "OilScavengeOff", "DrainValveOpen", "DrainValveClose", "BleedOpen", "BleedClose",
+            "FuelPump2Set", "FuelPumpRamp", "FuelPump2On", "FuelPump2Off", "ABSolOpen",
+            "ABSolClose", "ThrottleSet"
+        };
+        if (!name) return false;
+        for (const char* candidate : names) {
+            if (!strcmp(name, candidate)) return true;
+        }
+        return false;
+    };
+    uint8_t targetedRequired = 0;
+    uint8_t customRequired = 0;
+    uint8_t ignitionRequired = 0;
+    auto countPlacedBlocks = [&](const char blocks[][24], int length) {
+        for (uint8_t i = 0; i < length; ++i) {
+            if (isTargetedActuatorBlock(blocks[i])) ++targetedRequired;
+            if (!strncmp(blocks[i], "custom_", 7)) ++customRequired;
+            if (!strcmp(blocks[i], "IgniterOn") || !strcmp(blocks[i], "IgniterOff") ||
+                !strcmp(blocks[i], "ABIgnOn") || !strcmp(blocks[i], "ABIgnOff") ||
+                !strcmp(blocks[i], "PreHeat") || !strcmp(blocks[i], "PreIgnSpark") ||
+                !strcmp(blocks[i], "GlowPreheat")) ++ignitionRequired;
+        }
+    };
+    countPlacedBlocks(hw.startupSeq, hw.startupSeqLen);
+    countPlacedBlocks(hw.shutdownSeq, hw.shutdownSeqLen);
+    countPlacedBlocks(hw.abSeq, hw.abSeqLen);
+    countPlacedBlocks(hw.abShutSeq, hw.abShutSeqLen);
+
+    auto growCustomPool = [&](uint8_t required) {
+        if (required <= _sequenceCustomBlockCapacity) return true;
+        auto* expanded = new (std::nothrow) CustomSequenceBlock[required]();
+        if (!expanded) return false;
+        delete[] _sequenceCustomBlockStorage;
+        _sequenceCustomBlockStorage = expanded;
+        _sequenceCustomBlockCapacity = required;
+        return true;
+    };
+    auto growIgnitionPool = [&](uint8_t required) {
+        if (required <= _sequenceIgnitionBlockCapacity) return true;
+        auto* expanded = new (std::nothrow) IgnitionCommandBlock[required]();
+        if (!expanded) return false;
+        delete[] _sequenceIgnitionBlockStorage;
+        _sequenceIgnitionBlockStorage = expanded;
+        _sequenceIgnitionBlockCapacity = required;
+        return true;
+    };
+    const bool customPoolReady = growCustomPool(customRequired);
+    const bool ignitionPoolReady = growIgnitionPool(ignitionRequired);
+    if (targetedRequired > _sequenceTargetedBlockCapacity) {
+        auto* expanded = new (std::nothrow) TargetedActuatorBlock[targetedRequired]();
+        if (expanded) {
+            delete[] _sequenceTargetedBlockStorage;
+            _sequenceTargetedBlockStorage = expanded;
+            _sequenceTargetedBlockCapacity = targetedRequired;
+        }
+    }
     if (!_sequenceBlockStorage || !_sequenceDelayStorage ||
-        !_sequenceCustomBlockStorage || !_sequenceIgnitionBlockStorage) {
+        !customPoolReady || !ignitionPoolReady ||
+        (targetedRequired > 0 && (!_sequenceTargetedBlockStorage ||
+                                 _sequenceTargetedBlockCapacity < targetedRequired))) {
         _startupCount = _shutdownCount = _abIgnCount = _abShutCount = 0;
         auto& ed = EngineData::instance();
         ed.configLocked = true;
@@ -363,8 +595,12 @@ static void buildSequences() {
         }
         return nullptr;
     };
+    uint8_t targetedUsed = 0;
+    uint8_t customUsed = 0;
+    uint8_t ignitionUsed = 0;
     auto addBlock = [&](const char* name, int delayMs, uint8_t ignitionTarget,
-                       TimedDelay& delay, CustomSequenceBlock& custom, IgnitionCommandBlock& ignition,
+                       const char* deviceTarget,
+                       TimedDelay& delay,
                        IBlock** blocks, int& count) {
         if (strcmp(name, "TimedDelay") == 0) {
             delay.dwellMs = (unsigned long)(delayMs > 0 ? delayMs : Config::timedDelayMs);
@@ -372,12 +608,59 @@ static void buildSequences() {
             return;
         }
         if (strcmp(name, "IgniterOn") == 0 || strcmp(name, "IgniterOff") == 0 ||
-            strcmp(name, "PreHeat") == 0) {
-            ignition.bind(name, ignitionTarget, (unsigned long)Config::preHeatMs);
+            strcmp(name, "ABIgnOn") == 0 || strcmp(name, "ABIgnOff") == 0 ||
+            strcmp(name, "PreHeat") == 0 || strcmp(name, "PreIgnSpark") == 0 ||
+            strcmp(name, "GlowPreheat") == 0) {
+            const char* purpose = ignitionTarget == 1 ? "ab_igniter" :
+                                  ignitionTarget == 2 ? "glow_plug" : "igniter";
+            if (strcmp(name, "ABIgnOn") == 0 || strcmp(name, "ABIgnOff") == 0)
+                purpose = "ab_igniter";
+            if (strcmp(name, "GlowPreheat") == 0)
+                purpose = "glow_plug";
+            const unsigned long dwell = !strcmp(name, "PreIgnSpark")
+                ? (unsigned long)Config::preIgnSparkMs : (unsigned long)Config::preHeatMs;
+            IgnitionCommandBlock& ignition = _sequenceIgnitionBlockStorage[ignitionUsed++];
+            ignition.bind(name, deviceTarget, purpose, dwell);
             blocks[count++] = &ignition;
             return;
         }
+        const char* purpose = nullptr;
+        float demand = 0.0f;
+        if (!strcmp(name, "FuelOpen"))             { purpose = "fuel_shutoff"; demand = 1.0f; }
+        else if (!strcmp(name, "FuelSolClose"))    { purpose = "fuel_shutoff"; }
+        else if (!strcmp(name, "FuelPulse"))       { purpose = "fuel_shutoff"; demand = 1.0f; }
+        else if (!strcmp(name, "StarterEnOn"))     { purpose = "starter_enable"; demand = 1.0f; }
+        else if (!strcmp(name, "StarterEnOff"))    { purpose = "starter_enable"; }
+        else if (!strcmp(name, "StarterOff"))      { purpose = "starter"; }
+        else if (!strcmp(name, "OilPumpOn"))       { purpose = "oil_pump"; demand = Config::oilPumpOnPct / 100.0f; }
+        else if (!strcmp(name, "OilPumpOff"))      { purpose = "oil_pump"; }
+        else if (!strcmp(name, "CoolFanOn"))       { purpose = "cooling_fan"; demand = 1.0f; }
+        else if (!strcmp(name, "CoolFanOff"))      { purpose = "cooling_fan"; }
+        else if (!strcmp(name, "AirstarterOn"))    { purpose = "air_starter"; demand = 1.0f; }
+        else if (!strcmp(name, "AirstarterOff"))   { purpose = "air_starter"; }
+        else if (!strcmp(name, "ABPumpOn"))        { purpose = "ab_pump"; demand = Config::abLightupPumpPct / 100.0f; }
+        else if (!strcmp(name, "ABPumpOff"))       { purpose = "ab_pump"; }
+        else if (!strcmp(name, "OilScavengeOn"))   { purpose = "scavenge_pump"; demand = 1.0f; }
+        else if (!strcmp(name, "OilScavengeOff"))  { purpose = "scavenge_pump"; }
+        else if (!strcmp(name, "DrainValveOpen"))  { purpose = "drain_valve"; demand = 1.0f; }
+        else if (!strcmp(name, "DrainValveClose")) { purpose = "drain_valve"; }
+        else if (!strcmp(name, "BleedOpen"))       { purpose = "bleed_valve"; demand = 1.0f; }
+        else if (!strcmp(name, "BleedClose"))      { purpose = "bleed_valve"; }
+        else if (!strcmp(name, "FuelPump2Set"))    { purpose = "fuel_pump"; demand = Config::fp2DemandPct / 100.0f; }
+        else if (!strcmp(name, "FuelPumpRamp"))    { purpose = "fuel_pump"; }
+        else if (!strcmp(name, "FuelPump2On"))     { purpose = "fuel_pump"; demand = 1.0f; }
+        else if (!strcmp(name, "FuelPump2Off"))    { purpose = "fuel_pump"; }
+        else if (!strcmp(name, "ABSolOpen"))       { purpose = "ab_valve"; demand = 1.0f; }
+        else if (!strcmp(name, "ABSolClose"))      { purpose = "ab_valve"; }
+        else if (!strcmp(name, "ThrottleSet"))     { purpose = "main_fuel"; demand = Config::throttleSetPct / 100.0f; }
+        if (purpose) {
+            TargetedActuatorBlock& targeted = _sequenceTargetedBlockStorage[targetedUsed++];
+            targeted.bind(name, deviceTarget, purpose, demand);
+            blocks[count++] = &targeted;
+            return;
+        }
         if (const auto* def = findCustomDef(name)) {
+            CustomSequenceBlock& custom = _sequenceCustomBlockStorage[customUsed++];
             custom.bind(def);
             blocks[count++] = &custom;
             return;
@@ -391,28 +674,28 @@ static void buildSequences() {
     };
     _startupCount = 0;
     for (int i = 0; i < hw.startupSeqLen; i++) {
-        addBlock(hw.startupSeq[i], hw.startupDelayMs[i], hw.startupIgnitionTarget[i],
-                 _startupDelays[i], _startupCustomBlocks[i], _startupIgnitionBlocks[i],
+        addBlock(hw.startupSeq[i], hw.startupDelayMs[i], hw.startupIgnitionTarget[i], hw.startupDeviceTarget[i],
+                 _startupDelays[i],
                  _startupBlocks, _startupCount);
     }
     _shutdownCount = 0;
     for (int i = 0; i < hw.shutdownSeqLen; i++) {
-        addBlock(hw.shutdownSeq[i], hw.shutdownDelayMs[i], hw.shutdownIgnitionTarget[i],
-                 _shutdownDelays[i], _shutdownCustomBlocks[i], _shutdownIgnitionBlocks[i],
+        addBlock(hw.shutdownSeq[i], hw.shutdownDelayMs[i], hw.shutdownIgnitionTarget[i], hw.shutdownDeviceTarget[i],
+                 _shutdownDelays[i],
                  _shutdownBlocks, _shutdownCount);
     }
     // AB ignition sequence
     _abIgnCount = 0;
     for (int i = 0; i < hw.abSeqLen; i++) {
-        addBlock(hw.abSeq[i], hw.abDelayMs[i], hw.abIgnitionTarget[i],
-                 _abIgnDelays[i], _abIgnCustomBlocks[i], _abIgnitionBlocks[i],
+        addBlock(hw.abSeq[i], hw.abDelayMs[i], hw.abIgnitionTarget[i], hw.abDeviceTarget[i],
+                 _abIgnDelays[i],
                  _abIgnBlocks, _abIgnCount);
     }
     // AB shutdown sequence
     _abShutCount = 0;
     for (int i = 0; i < hw.abShutSeqLen; i++) {
-        addBlock(hw.abShutSeq[i], hw.abShutDelayMs[i], hw.abShutIgnitionTarget[i],
-                 _abShutDelays[i], _abShutCustomBlocks[i], _abShutIgnitionBlocks[i],
+        addBlock(hw.abShutSeq[i], hw.abShutDelayMs[i], hw.abShutIgnitionTarget[i], hw.abShutDeviceTarget[i],
+                 _abShutDelays[i],
                  _abShutBlocks, _abShutCount);
     }
     Serial.printf("[OT] Sequences: startup=%d, shutdown=%d, ab_ign=%d, ab_shut=%d blocks\n",
@@ -432,14 +715,6 @@ static void validateSequences(bool report) {
     ed.seqIssueCount = 0;
     ed.seqHasErrors  = false;
     ed.seqHasStructuralErrors = false;
-
-    auto ignitionTargetAvailable = [&](uint8_t target) {
-        switch (constrain(target, 0, 2)) {
-            case 1: return hw.hasIgniter2;
-            case 2: return hw.hasGlowPlug;
-            default: return hw.hasIgniter;
-        }
-    };
 
     auto addIssue = [&](const char* block, const char* reason, bool isError) {
         if (isError) ed.seqHasErrors = true;
@@ -470,6 +745,7 @@ static void validateSequences(bool report) {
     };
     auto blockKnown = [&](const char* name) {
         if (customDefFor(name)) return true;
+        if (perSlotBlockName(name)) return true;
         for (size_t j = 0; j < _blockRegistryLen; j++) {
             if (strcmp(_blockRegistry[j].name, name) == 0) return true;
         }
@@ -498,6 +774,155 @@ static void validateSequences(bool report) {
     checkNames("ab_ign",   hw.abSeq,       hw.abSeqLen);
     checkNames("ab_shut",  hw.abShutSeq,   hw.abShutSeqLen);
 
+    auto isIgnitionTargetBlock = [](const char* block) {
+        return block && (!strcmp(block, "IgniterOn") || !strcmp(block, "IgniterOff") ||
+            !strcmp(block, "ABIgnOn") || !strcmp(block, "ABIgnOff") ||
+            !strcmp(block, "PreHeat") || !strcmp(block, "PreIgnSpark") ||
+            !strcmp(block, "GlowPreheat"));
+    };
+    auto blockAcceptsPurpose = [isIgnitionTargetBlock](const char* block, const char* purpose) {
+        if (!block || !purpose) return false;
+        const bool ignition = isIgnitionTargetBlock(block);
+        if (ignition) return !strcmp(purpose, "igniter") || !strcmp(purpose, "ab_igniter") ||
+                             !strcmp(purpose, "glow_plug");
+        if (!strcmp(block, "FuelOpen") || !strcmp(block, "FuelSolClose") || !strcmp(block, "FuelPulse")) return !strcmp(purpose, "fuel_shutoff");
+        if (!strcmp(block, "StarterEnOn") || !strcmp(block, "StarterEnOff")) return !strcmp(purpose, "starter_enable");
+        if (!strcmp(block, "StarterOff")) return !strcmp(purpose, "starter");
+        if (!strcmp(block, "OilPumpOn") || !strcmp(block, "OilPumpOff")) return !strcmp(purpose, "oil_pump");
+        if (!strcmp(block, "CoolFanOn") || !strcmp(block, "CoolFanOff")) return !strcmp(purpose, "cooling_fan");
+        if (!strcmp(block, "AirstarterOn") || !strcmp(block, "AirstarterOff")) return !strcmp(purpose, "air_starter");
+        if (!strcmp(block, "ABPumpOn") || !strcmp(block, "ABPumpOff")) return !strcmp(purpose, "ab_pump");
+        if (!strcmp(block, "OilScavengeOn") || !strcmp(block, "OilScavengeOff")) return !strcmp(purpose, "scavenge_pump");
+        if (!strcmp(block, "DrainValveOpen") || !strcmp(block, "DrainValveClose")) return !strcmp(purpose, "drain_valve");
+        if (!strcmp(block, "BleedOpen") || !strcmp(block, "BleedClose")) return !strcmp(purpose, "bleed_valve");
+        if (!strcmp(block, "FuelPumpRamp") || !strcmp(block, "FuelPump2Set") || !strcmp(block, "FuelPump2On") || !strcmp(block, "FuelPump2Off")) return !strcmp(purpose, "fuel_pump");
+        if (!strcmp(block, "ABSolOpen") || !strcmp(block, "ABSolClose")) return !strcmp(purpose, "ab_valve");
+        if (!strcmp(block, "ThrottleSet")) return !strcmp(purpose, "main_fuel");
+        return false;
+    };
+    auto blockNeedsProportionalOutput = [](const char* block) {
+        return block && (!strcmp(block, "FuelPumpRamp") ||
+                         !strcmp(block, "FuelPump2Set") ||
+                         !strcmp(block, "ThrottleSet"));
+    };
+    auto isDeviceTargetBlock = [&](const char* block) {
+        static const char* purposes[] = {
+            "igniter", "ab_igniter", "glow_plug", "fuel_shutoff",
+            "starter_enable", "starter", "oil_pump", "cooling_fan",
+            "air_starter", "ab_pump", "scavenge_pump", "drain_valve",
+            "bleed_valve", "fuel_pump", "ab_valve", "main_fuel"
+        };
+        for (const char* purpose : purposes)
+            if (blockAcceptsPurpose(block, purpose)) return true;
+        return false;
+    };
+    auto checkTargetReferences = [&](const char (*names)[24], int len,
+                                     const char (*targets)[20]) {
+        for (int i = 0; i < len; ++i) {
+            if (!isDeviceTargetBlock(names[i])) continue;
+            if (!targets[i][0]) {
+                uint8_t compatible = 0;
+                for (uint8_t j = 0; j < hw.channelRegistry.outputCount; ++j) {
+                    const auto& output = hw.channelRegistry.outputs[j];
+                    if (output.installed && !output.mirrorOf[0] &&
+                        ChannelRegistry::channelAddressable(output) &&
+                        blockAcceptsPurpose(names[i], output.purpose)) ++compatible;
+                }
+                if (compatible == 0)
+                    addIssue(names[i], "No compatible fitted output device is available", true);
+                else if (compatible > 1)
+                    addIssue(names[i], "Several compatible outputs are fitted - choose the exact device", true);
+                continue;
+            }
+            const auto* output = hw.channelRegistry.find(targets[i], ChannelRegistry::Output);
+            if (!output || !output->installed || output->mirrorOf[0] ||
+                !ChannelRegistry::channelAddressable(*output) ||
+                (isIgnitionTargetBlock(names[i]) &&
+                 !blockAcceptsPurpose(names[i], output->purpose)) ||
+                (blockNeedsProportionalOutput(names[i]) &&
+                 !ChannelRegistry::driverIsProportionalOutput(output->driver)) ||
+                (!strcmp(names[i], "ThrottleSet") &&
+                 strcmp(output->purpose, "main_fuel"))) {
+                addIssue(names[i], "Selected output device is missing or incompatible - choose a fitted output", true);
+            }
+        }
+    };
+    checkTargetReferences(hw.startupSeq, hw.startupSeqLen, hw.startupDeviceTarget);
+    checkTargetReferences(hw.shutdownSeq, hw.shutdownSeqLen, hw.shutdownDeviceTarget);
+    checkTargetReferences(hw.abSeq, hw.abSeqLen, hw.abDeviceTarget);
+    checkTargetReferences(hw.abShutSeq, hw.abShutSeqLen, hw.abShutDeviceTarget);
+
+    for (uint8_t i = 0; i < hw.channelRegistry.outputCount; ++i) {
+        const auto& ignition = hw.channelRegistry.outputs[i];
+        if (!ignition.installed || !ignition.ignitionProfileConfigured ||
+            !ignition.pairedOutputId[0]) continue;
+        const auto* paired = hw.channelRegistry.find(ignition.pairedOutputId,
+                                                     ChannelRegistry::Output);
+        if (!paired || !paired->installed || paired->mirrorOf[0] ||
+            strcmp(paired->purpose, "pilot_fuel") ||
+            !ChannelRegistry::channelAddressable(*paired)) {
+            addIssue(ignition.name[0] ? ignition.name : ignition.id,
+                     "Paired start-fuel output is missing or incompatible - restore it or choose another output",
+                     false);
+        }
+    }
+
+    // Windmilling oil protection is an independent built-in owner. Preserve a
+    // missing explicit reference for repair, and require a choice when more
+    // than one independent pump is fitted instead of silently driving the
+    // first device in registry order.
+    uint8_t usableOilPumpCount = 0;
+    for (uint8_t i = 0; i < hw.channelRegistry.outputCount; ++i) {
+        const auto& output = hw.channelRegistry.outputs[i];
+        if (output.installed && !output.mirrorOf[0] &&
+            !strcmp(output.purpose, "oil_pump") &&
+            ChannelRegistry::channelAddressable(output)) ++usableOilPumpCount;
+    }
+    if (!Config::standbyOilEnabled) {
+        // Optional protection is intentionally quiet until the user enables it.
+    } else if (Config::standbyOilOutputId[0]) {
+        const auto* output = hw.channelRegistry.find(Config::standbyOilOutputId,
+                                                     ChannelRegistry::Output);
+        if (!output || !output->installed || output->mirrorOf[0] ||
+            !ChannelRegistry::channelAddressable(*output)) {
+            addIssue("Windmill Oil", "Selected output device is missing or incompatible - protection remains inactive until repaired", false);
+        }
+    } else if (usableOilPumpCount == 0) {
+        addIssue("Windmill Oil", "Protection is enabled but no addressable oil pump is fitted", false);
+    } else if (usableOilPumpCount > 1) {
+        addIssue("Windmill Oil", "Several oil pumps are fitted - choose which pump windmilling protection controls", false);
+    }
+
+    auto checkSideActions = [&](const char (*names)[24], int len,
+                                const HardwareConfig::SeqSideAction
+                                    actions[HardwareConfig::MAX_SEQ_BLOCKS]
+                                           [HardwareConfig::MAX_SEQ_SIDE_ACTIONS]) {
+        for (int i = 0; i < len; ++i) {
+            for (int j = 0; j < HardwareConfig::MAX_SEQ_SIDE_ACTIONS; ++j) {
+                const auto& action = actions[i][j];
+                if (action.enabled && !RulesEngine::actuatorUsable(action.actuator))
+                    addIssue(names[i], "Sequence side action references a missing output - restore it or choose another output", true);
+            }
+        }
+    };
+    checkSideActions(hw.startupSeq, hw.startupSeqLen, hw.startupEnterActions);
+    checkSideActions(hw.startupSeq, hw.startupSeqLen, hw.startupExitActions);
+    checkSideActions(hw.shutdownSeq, hw.shutdownSeqLen, hw.shutdownEnterActions);
+    checkSideActions(hw.shutdownSeq, hw.shutdownSeqLen, hw.shutdownExitActions);
+    checkSideActions(hw.abSeq, hw.abSeqLen, hw.abEnterActions);
+    checkSideActions(hw.abSeq, hw.abSeqLen, hw.abExitActions);
+    checkSideActions(hw.abShutSeq, hw.abShutSeqLen, hw.abShutEnterActions);
+    checkSideActions(hw.abShutSeq, hw.abShutSeqLen, hw.abShutExitActions);
+
+    auto ignitionTargetAvailableFor = [&](const char* targetId, uint8_t legacyTarget) {
+        if (targetId && targetId[0]) {
+            const auto* output = hw.channelRegistry.find(targetId, ChannelRegistry::Output);
+            return output && output->installed && !output->mirrorOf[0] &&
+                   ChannelRegistry::channelAddressable(*output);
+        }
+        return uniqueIgnitionOutputId(legacyTarget) != nullptr;
+    };
+
     auto checkCustomBlockHardware = [&](const char* nm) {
         const auto* def = customDefFor(nm);
         if (!def) return false;
@@ -520,7 +945,7 @@ static void validateSequences(bool report) {
                 case 3:  return hw.hasOilPress;
                 case 4:  return hw.hasTit;
                 case 5:  return hw.hasBattVoltage;
-                case 6:  return hw.hasTwoShaft && hw.hasN2Rpm;
+                case 6:  return hw.hasN2Rpm;
                 case 7:  return hw.diCh[0].pin >= 0;
                 case 8:  return hw.diCh[1].pin >= 0;
                 case 9:  return hw.diCh[2].pin >= 0;
@@ -562,6 +987,9 @@ static void validateSequences(bool report) {
 
     auto checkCommonBlockHardware = [&](const char* nm) {
         if (checkCustomBlockHardware(nm)) return;
+        // Exact output references (including deliberate purpose overrides)
+        // were fully checked above. Do not add legacy-purpose warnings here.
+        if (isDeviceTargetBlock(nm)) return;
         if (strcmp(nm, "FuelSolClose") == 0) {
             if (!hw.hasFuelSol)
                 addIssue(nm, "No main fuel shutoff configured - close command has no physical output", false);
@@ -613,6 +1041,23 @@ static void validateSequences(bool report) {
     for (int i = 0; i < _startupCount; i++) {
         const char* nm = _startupBlocks[i]->name();
         checkCommonBlockHardware(nm);
+
+        // Targeted action blocks are validated against their exact selected
+        // device above. Only retain the glow-specific feedback warning when a
+        // real glow-plug profile requests wait-until-hot behavior.
+        if (isDeviceTargetBlock(nm)) {
+            if (strcmp(nm, "GlowPreheat") == 0) {
+                const char* targetId = hw.startupDeviceTarget[i];
+                const auto* target = targetId[0]
+                    ? hw.channelRegistry.find(targetId, ChannelRegistry::Output) : nullptr;
+                if (target && !strcmp(target->purpose, "glow_plug") &&
+                    (target->ignitionProfileConfigured
+                        ? target->ignitionWaitUntilHot : Config::glowWaitUntilHot) &&
+                    !target->hasCurrent)
+                    addIssue(nm, "Wait-until-hot requires current feedback on the selected glow plug", true);
+            }
+            continue;
+        }
 
         if (strcmp(nm, "StarterSpin") == 0) {
             if (!hw.hasN1Rpm)
@@ -669,25 +1114,30 @@ static void validateSequences(bool report) {
                 addIssue(nm, "No oil pump actuator configured - stock pre-lube step has no physical output", false);
         }
         else if (strcmp(nm, "GlowPreheat") == 0) {
-            if (!hw.hasGlowPlug)
-                addIssue(nm, "No glow plug configured - block will spend its configured time with no physical heating output", false);
-            else if (Config::glowWaitUntilHot && !hw.hasGlowCurrentSensor)
-                addIssue(nm, "Wait-until-hot requires calibrated glow-plug current feedback", true);
+            const char* targetId = hw.startupDeviceTarget[i];
+            const auto* target = targetId[0]
+                ? hw.channelRegistry.find(targetId, ChannelRegistry::Output) : nullptr;
+            if (!target || !target->installed || strcmp(target->purpose, "glow_plug"))
+                addIssue(nm, "Selected glow-plug output is missing or incompatible", true);
+            else if ((target->ignitionProfileConfigured
+                        ? target->ignitionWaitUntilHot : Config::glowWaitUntilHot) &&
+                     !target->hasCurrent)
+                addIssue(nm, "Wait-until-hot requires current feedback on the selected glow plug", true);
         }
         else if (strcmp(nm, "PreIgnSpark") == 0) {
             if (!hw.hasIgniter)
                 addIssue(nm, "No Igniter 1 output configured - block will spend its configured time with no ignition output", false);
         }
         else if (strcmp(nm, "PreHeat") == 0) {
-            if (!ignitionTargetAvailable(hw.startupIgnitionTarget[i]))
+            if (!ignitionTargetAvailableFor(hw.startupDeviceTarget[i], hw.startupIgnitionTarget[i]))
                 addIssue(nm, "Selected ignition output (igniter/glow) not fitted - pre-heat has no effect", false);
         }
         else if (strcmp(nm, "IgniterOn") == 0) {
-            if (!ignitionTargetAvailable(hw.startupIgnitionTarget[i]))
+            if (!ignitionTargetAvailableFor(hw.startupDeviceTarget[i], hw.startupIgnitionTarget[i]))
                 addIssue(nm, "Selected ignition output (igniter/glow) not fitted - light-up has no ignition", false);
         }
         else if (strcmp(nm, "IgniterOff") == 0) {
-            if (!ignitionTargetAvailable(hw.startupIgnitionTarget[i]))
+            if (!ignitionTargetAvailableFor(hw.startupDeviceTarget[i], hw.startupIgnitionTarget[i]))
                 addIssue(nm, "Selected ignition output is not configured - off command has no physical output", false);
         }
         else if (strcmp(nm, "FuelOpen") == 0) {
@@ -923,6 +1373,7 @@ static void validateSequences(bool report) {
     // Skip entirely if no AB hardware is fitted (hasAbSol / hasAbPump).
     auto checkAbActuatorBlockHardware = [&](const char* nm) {
         checkCommonBlockHardware(nm);
+        if (isDeviceTargetBlock(nm)) return;
         if ((strcmp(nm, "ABPumpOn") == 0 || strcmp(nm, "ABPumpOff") == 0) && !hw.hasAbPump) {
             addIssue(nm, "No AB pump actuator configured - block has no physical output", false);
         } else if ((strcmp(nm, "ABSolOpen") == 0 || strcmp(nm, "ABSolClose") == 0) && !hw.hasAbSol) {
@@ -1022,7 +1473,7 @@ static void validateSequences(bool report) {
          (Config::idleSource == 3 && !hw.hasP2)))
         addIssue("DynamicIdle", "The selected idle feedback source is not configured in Hardware", true);
     if (Config::pullbackN2Enabled) {
-        if (!hw.hasTwoShaft || !hw.hasN2Rpm)
+        if (!hw.hasN2Rpm)
             addIssue("N2 Pullback", "N2 soft pullback is enabled but no effective N2 RPM sensor is configured", false);
         else if (Config::pullbackN2SoftRpm <= 0.0f || Config::pullbackN2HardRpm <= 0.0f)
             addIssue("N2 Pullback", "N2 soft pullback is enabled but start/full RPM is 0 - pullback will not reduce throttle", false);
@@ -1138,21 +1589,36 @@ static void validateSequences(bool report) {
     }
 
     const uint8_t relightTarget = (uint8_t)constrain(Config::relightIgnitionTarget, 0, 2);
-    const bool hasRelightTarget = ignitionTargetAvailable(relightTarget);
+    const bool hasRelightTarget = configuredIgnitionOutputAvailable(Config::relightOutputId, relightTarget);
     if (Config::relightEnabled && (!hw.hasN1Rpm || !hasRelightTarget)) {
         const char* reason = !hw.hasN1Rpm
             ? "no N1 RPM sensor is configured. Relight requires N1 feedback to prove the engine is still windmilling."
             : "the selected relight ignition output is not configured in Hardware.";
         char msg[180];
         snprintf(msg, sizeof(msg), "Auto-relight is enabled but %s Selected output: %s.",
-                 reason, ignitionTargetName(relightTarget));
+                 reason, configuredIgnitionOutputName(Config::relightOutputId, relightTarget));
         addIssue("AutoRelight", msg, false);
     }
     else if (Config::relightEnabled) {
+        int relightTriggerSrc = Config::relightTriggerSource;
+        if (relightTriggerSrc == 0) {
+            if (hw.hasFlame) relightTriggerSrc = 1;
+            else if (hw.hasN1Rpm) relightTriggerSrc = 2;
+            else if (Config::effectiveEgtSource() != 0) relightTriggerSrc = 3;
+        }
+        if ((relightTriggerSrc == 1 && !hw.hasFlame) ||
+            (relightTriggerSrc == 2 && !hw.hasN1Rpm) ||
+            (relightTriggerSrc == 3 && Config::effectiveEgtSource() == 0) ||
+            relightTriggerSrc == 0) {
+            addIssue("AutoRelight", "Auto-relight trigger source is not configured", false);
+        } else if (relightTriggerSrc == 3 && Config::relightTriggerEgtBelowC <= 0.0f &&
+                   Config::relightTriggerEgtFallRateCPerSec <= 0.0f) {
+            addIssue("AutoRelight", "Both EGT relight-trigger conditions are disabled", false);
+        }
         int relightConfirmSrc = Config::relightConfirmSource;
         if (relightConfirmSrc == 0) {
-            if (Config::flameoutSource >= 1 && Config::flameoutSource <= 3)
-                relightConfirmSrc = Config::flameoutSource;
+            if (relightTriggerSrc >= 1 && relightTriggerSrc <= 3)
+                relightConfirmSrc = relightTriggerSrc;
             else if (hw.hasFlame) relightConfirmSrc = 1;
             else if (hw.hasN1Rpm) relightConfirmSrc = 2;
             else if (Config::effectiveEgtSource() != 0) relightConfirmSrc = 3;
@@ -1183,16 +1649,18 @@ static void enterShutdown();
 static void enterFaultShutdown();
 static void handleCommand(const OTPacket& pkt);
 
-static void cutCombustionAndStarterNow() {
+static void cutCombustionAndStarterNow(bool writePhysical = true) {
     auto& ed = EngineData::instance();
     ed.throttleDemand = 0.0f; ed.abFuelOffset = 0.0f;
     ed.fuelSolOpen = false; ed.fuelPump2Demand = 0.0f;
     ed.igniterOn = false; ed.igniter2On = false;
+    ed.sequenceIgnitionMask = 0;
     ed.glowPlugDemand = 0.0f; ed.wetGlowFuelDemand = 0.0f;
     ed.abSolOpen = false; ed.abPumpDemand = 0.0f;
     ed.starterDemand = 0.0f; ed.effectiveStarterDemand = 0.0f; ed.starterEnabled = false;
     ed.airstarterOpen = false;
     Hardware::cutRegistryHazardousDemands();
+    if (writePhysical) Hardware::cutHazardousOutputsNow();
 }
 
 // ── General-purpose DI debounce state ────────────────────────
@@ -1312,6 +1780,9 @@ static unsigned long deadlineAfter(unsigned long now, unsigned long durationMs) 
 // disengages or an oil-prime timer expires, so neither path silently wipes
 // the operator's setting to 0. Reset on entering STANDBY.
 static float _manualOilPct = 0.0f;
+static int8_t _standbyOilActuator = -1;
+static uint8_t _standbyOilOutputIndex = 255;
+static unsigned long _standbyOilLastMs = 0;
 
 // STOP's standby/fault path: release every temporary owner immediately while
 // preserving the current mode so a configuration FAULT remains visible.
@@ -1326,13 +1797,13 @@ static void cancelTemporaryOutputOwners() {
     ed.oilTargetBar = 0.0f;
     ed.oilPumpPct = 0.0f;
     ed.oilScavengeDemand = 0.0f;
-    ed.oilScavengeOn = false;
     ed.coolFanDemand = 0.0f;
-    ed.coolFanOn = false;
     ed.bleedValveDemand = 0.0f;
-    ed.bleedValveOpen = false;
     ed.propPitchDemand = Hardware::propPitchParkDemand();
     _manualOilPct = 0.0f;
+    _standbyOilActuator = -1;
+    _standbyOilOutputIndex = 255;
+    _standbyOilLastMs = 0;
     _fuelPrimeUntilMs = _oilPrimeUntilMs = _ignTestUntilMs = 0;
     _ign2TestUntilMs = _startTestUntilMs = _idleTestUntilMs = 0;
     _oilScavTestUntilMs = _coolFanTestUntilMs = _airstarterTestUntilMs = 0;
@@ -1366,10 +1837,10 @@ static void checkToolTimers() {
     if (deadlineExpired(now, _ign2TestUntilMs))    { ed.igniter2On     = false; _ign2TestUntilMs  = 0; }
     if (deadlineExpired(now, _startTestUntilMs))   { ed.starterDemand = 0; ed.starterEnabled = false; _startTestUntilMs = 0; }
     if (deadlineExpired(now, _idleTestUntilMs))    { ed.throttleDemand = 0;    _idleTestUntilMs  = 0; }
-    if (deadlineExpired(now, _oilScavTestUntilMs))    { ed.oilScavengeDemand = 0.0f; ed.oilScavengeOn  = false; _oilScavTestUntilMs    = 0; }
-    if (deadlineExpired(now, _coolFanTestUntilMs))    { ed.coolFanDemand = 0.0f; ed.coolFanOn       = false; _coolFanTestUntilMs    = 0; }
+    if (deadlineExpired(now, _oilScavTestUntilMs))    { ed.oilScavengeDemand = 0.0f; _oilScavTestUntilMs = 0; }
+    if (deadlineExpired(now, _coolFanTestUntilMs))    { ed.coolFanDemand = 0.0f; _coolFanTestUntilMs = 0; }
     if (deadlineExpired(now, _airstarterTestUntilMs)) { ed.airstarterOpen  = false; _airstarterTestUntilMs = 0; }
-    if (deadlineExpired(now, _bleedValveTestUntilMs)) { ed.bleedValveDemand = 0.0f; ed.bleedValveOpen  = false; _bleedValveTestUntilMs = 0; }
+    if (deadlineExpired(now, _bleedValveTestUntilMs)) { ed.bleedValveDemand = 0.0f; _bleedValveTestUntilMs = 0; }
     if (deadlineExpired(now, _glowTestUntilMs))       { ed.glowPlugDemand  = 0.0f;  _glowTestUntilMs       = 0; }
     if (deadlineExpired(now, _fuelPump2TestUntilMs))  { ed.fuelPump2Demand = 0.0f;  _fuelPump2TestUntilMs  = 0; }
     if (deadlineExpired(now, _abSolTestUntilMs))      { ed.abSolOpen       = false; _abSolTestUntilMs      = 0; }
@@ -1400,7 +1871,6 @@ static void checkExtraCooldown() {
         ed.starterEnabled      = false;
         ed.oilPumpPct          = 0;
         ed.oilScavengeDemand   = 0.0f;
-        ed.oilScavengeOn       = false;
         ed.extraCooldownUntilMs  = 0;
         return;
     }
@@ -1411,7 +1881,6 @@ static void checkExtraCooldown() {
         ed.starterEnabled      = false;
         ed.oilPumpPct          = 0;
         ed.oilScavengeDemand   = 0.0f;
-        ed.oilScavengeOn       = false;
         ed.extraCooldownUntilMs  = 0;
         Serial.println("[OT] Extra cooldown complete (timeout)");
     }
@@ -1424,8 +1893,8 @@ static void checkExtraCooldown() {
 static int effectiveRelightConfirmSource() {
     if (Config::relightConfirmSource >= 1 && Config::relightConfirmSource <= 3)
         return Config::relightConfirmSource;
-    if (Config::flameoutSource >= 1 && Config::flameoutSource <= 3)
-        return Config::flameoutSource;
+    if (Config::relightTriggerSource >= 1 && Config::relightTriggerSource <= 3)
+        return Config::relightTriggerSource;
     if (HardwareConfig::hasFlame) return 1;
     if (HardwareConfig::hasN1Rpm) return 2;
     if (Config::effectiveEgtSource() != 0) return 3;
@@ -1467,30 +1936,40 @@ static void checkRelight() {
     if (ed.mode != SysMode::RUNNING) {
         _relightActive  = false;
         _relightBeginMs = 0;
-        commandIgnitionTarget((uint8_t)Config::relightIgnitionTarget, false);
+        commandConfiguredIgnitionOutput(Config::relightOutputId, (uint8_t)Config::relightIgnitionTarget, false);
         return;
     }
-    // Success: flame returned — turn igniter off, SafetyMonitor will clear flameout timer
+    // Success: the independently selected recovery signal confirms combustion.
     if (relightConfirmed(ed)) {
         _relightActive  = false;
-        commandIgnitionTarget((uint8_t)Config::relightIgnitionTarget, false);
+        commandConfiguredIgnitionOutput(Config::relightOutputId, (uint8_t)Config::relightIgnitionTarget, false);
         _relightBeginMs = 0;
         Serial.println("[OT] Relight successful");
         return;
     }
-    // Abort: N1 dropped below minimum — engine winding down, stop trying.
-    // A fitted N1 sensor must remain trustworthy throughout the attempt.
+    const unsigned long hardRelightLimitMs = 30000;
+    const unsigned long configuredRelightMs = Config::relightTimeoutMs > 0
+        ? (unsigned long)Config::relightTimeoutMs : hardRelightLimitMs;
+    const unsigned long relightLimitMs = min(configuredRelightMs, hardRelightLimitMs);
+    const bool timedOut = millis() - _relightBeginMs >= relightLimitMs;
+
+    // Failure: timeout or loss of the N1 airflow needed to fire safely. This
+    // subsystem owns its failure response and does not depend on the separate
+    // combustion-loss protection being enabled.
     const float minimumRelightRpm = Config::effectiveRelightMinRpm();
-    if (!HardwareConfig::hasN1Rpm || !ed.n1Healthy || ed.n1Rpm < minimumRelightRpm) {
+    if (timedOut || !HardwareConfig::hasN1Rpm || !ed.n1Healthy || ed.n1Rpm < minimumRelightRpm) {
         _relightActive  = false;
         _relightBeginMs = 0;
-        commandIgnitionTarget((uint8_t)Config::relightIgnitionTarget, false);
-        Serial.printf("[OT] Relight aborted - N1 below min (%.0f < %.0f)\n",
+        commandConfiguredIgnitionOutput(Config::relightOutputId, (uint8_t)Config::relightIgnitionTarget, false);
+        Serial.printf("[OT] Relight failed - %s (N1 %.0f, min %.0f)\n",
+            timedOut ? "timeout" : "N1 below safe firing speed",
             (double)ed.n1Rpm, (double)minimumRelightRpm);
+        g_safety.setExternalFault("RELIGHT_FAILED");
+        enterFaultShutdown();
         return;
     }
     // Criteria still met — keep igniter on continuously
-    commandIgnitionTarget((uint8_t)Config::relightIgnitionTarget, true);
+    commandConfiguredIgnitionOutput(Config::relightOutputId, (uint8_t)Config::relightIgnitionTarget, true);
 }
 
 // ── Windmilling oil protection in standby ────────────────────
@@ -1501,15 +1980,59 @@ static void checkRelight() {
 static void checkStandbyOilFeed() {
     auto& hw = HardwareConfig::instance();
     auto& ed = EngineData::instance();
-    if (!hw.hasOilPump) {
+    auto releaseOwnedPump = [&]() {
+        if (_standbyOilActuator >= 0) {
+            float restore = 0.0f;
+            if (_standbyOilActuator == RulesEngine::OIL_PUMP) {
+                restore = constrain(_manualOilPct / 100.0f, 0.0f, 1.0f);
+            } else if (_standbyOilOutputIndex < hw.channelRegistry.outputCount) {
+                restore = constrain(hw.channelRegistry.outputs[_standbyOilOutputIndex].safeDemand,
+                                    0.0f, 1.0f);
+            }
+            RulesEngine::applyActuatorDemand((uint8_t)_standbyOilActuator, restore);
+        }
         ed.standbyOilFeedActive = false;
+        ed.oilTargetBar = 0.0f;
+        _standbyOilActuator = -1;
+        _standbyOilOutputIndex = 255;
+        _standbyOilLastMs = 0;
+    };
+
+    // An explicit ID never falls back to another pump. Empty is the migration
+    // path for old files and resolves to the normal/sole fitted oil pump.
+    const char* selectedId = Config::standbyOilOutputId;
+    if (!selectedId[0]) {
+        const char* soleOilPump = "";
+        uint8_t oilPumpCount = 0;
+        for (uint8_t i = 0; i < hw.channelRegistry.outputCount; ++i) {
+            const auto& output = hw.channelRegistry.outputs[i];
+            if (!output.installed || output.mirrorOf[0] ||
+                strcmp(output.purpose, "oil_pump") ||
+                !ChannelRegistry::channelAddressable(output)) continue;
+            soleOilPump = output.id;
+            ++oilPumpCount;
+        }
+        if (oilPumpCount == 1) selectedId = soleOilPump;
+    }
+    const auto* selected = selectedId[0]
+        ? hw.channelRegistry.find(selectedId, ChannelRegistry::Output) : nullptr;
+    const bool selectedUsable = selected && selected->installed && !selected->mirrorOf[0] &&
+        ChannelRegistry::channelAddressable(*selected);
+    const int8_t selectedActuator = selectedUsable
+        ? HardwareConfig::outputActuatorForId(selectedId) : -1;
+    const uint8_t selectedIndex = selectedUsable
+        ? (uint8_t)(selected - hw.channelRegistry.outputs) : 255;
+
+    if (!Config::standbyOilEnabled || !selectedUsable || selectedActuator < 0 ||
+        (ed.mode != SysMode::STANDBY && ed.mode != SysMode::FAULT) ||
+        ed.extraCooldownActive) {
+        if (ed.standbyOilFeedActive || _standbyOilActuator >= 0) releaseOwnedPump();
         return;
     }
-    if (ed.mode != SysMode::STANDBY && ed.mode != SysMode::FAULT) {
-        ed.standbyOilFeedActive = false;   // FAULT: windmill protection stays active
-        return;
+    if (_standbyOilActuator >= 0 &&
+        (_standbyOilActuator != selectedActuator || _standbyOilOutputIndex != selectedIndex)) {
+        releaseOwnedPump();
     }
-    if (ed.extraCooldownActive) return;  // extra cooldown controls oil in standby
 
     const bool n1Ok = hw.hasN1Rpm && ed.n1Healthy && ed.n1Rpm >= Config::standbyOilRpmLimit;
     const bool n2Ok = hw.hasN2Rpm && ed.n2Healthy && ed.n2Rpm >= Config::standbyOilRpmLimit;
@@ -1523,53 +2046,61 @@ static void checkStandbyOilFeed() {
     if (windmilling) {
         if (!ed.standbyOilFeedActive) {
             ed.standbyOilFeedActive = true;
+            _standbyOilActuator = selectedActuator;
+            _standbyOilOutputIndex = selectedIndex;
+            _standbyOilLastMs = millis();
             Serial.printf("[OT] Windmilling oil protection ON (N1=%.0f N2=%.0f)\n",
                 (double)ed.n1Rpm, (double)ed.n2Rpm);
         }
-        // Pressure mode: with an oil sensor + the oil control loop enabled, regulate the
-        // standby feed to a target pressure (bar) instead of a fixed pump %. Reuses the
-        // tuned oil loop (dt-normalised, with its own sensor-fault failsafe); the fixed
-        // feed % is kept as a hard floor so bearings always see at least the safe flow.
-        // The loop no-ops in bench mode, so pressure mode is validated on a real start.
-        if (Config::standbyOilFeedBar > 0.0f && hw.hasOilPress && hw.hasOilLoop) {
-            ed.oilTargetBar = Config::standbyOilFeedBar;
-            bool binaryPump = hw.oilPumpType == 2;
+        float demandPct = constrain(Config::standbyOilFeedPct, 0.0f, 100.0f);
+        int8_t matchingLoop = -1;
+        if (Config::standbyOilFeedBar > 0.0f) {
             for (uint8_t i = 0; i < HardwareConfig::oilLoopCount; ++i) {
-                const auto& loop = HardwareConfig::oilLoops[i];
-                if (!loop.enabled || loop.pumpOutputIndex >= hw.channelRegistry.outputCount) continue;
-                binaryPump = ChannelRegistry::driverIsOnOffOutput(
-                    hw.channelRegistry.outputs[loop.pumpOutputIndex].driver);
-                break;
+                if (HardwareConfig::oilLoops[i].enabled &&
+                    HardwareConfig::oilLoops[i].pumpOutputIndex == selectedIndex) {
+                    matchingLoop = (int8_t)i;
+                    break;
+                }
             }
-            if (binaryPump && ed.oilHealthy) {
-                const float deadband = max(0.0f, Config::oilPressureDeadband);
-                if (ed.oilPressure < ed.oilTargetBar - deadband) ed.oilPumpPct = 100.0f;
-                else if (ed.oilPressure > ed.oilTargetBar + deadband) ed.oilPumpPct = 0.0f;
-            } else {
-                g_ctrlOilLoop.tick();
-                if (binaryPump) ed.oilPumpPct = ed.oilPumpPct > 0.0f ? 100.0f : 0.0f;
-            }
-            if (!binaryPump && ed.oilPumpPct < Config::standbyOilFeedPct)
-                ed.oilPumpPct = Config::standbyOilFeedPct;
-        } else if (ed.oilPumpPct < Config::standbyOilFeedPct) {
-            // Fixed % mode (default, or when no sensor/loop is available).
-            ed.oilPumpPct = Config::standbyOilFeedPct;
         }
+        if (matchingLoop >= 0) {
+            const auto& loop = HardwareConfig::oilLoops[(uint8_t)matchingLoop];
+            const bool binary = ChannelRegistry::driverIsOnOffOutput(selected->driver);
+            const float minPct = binary ? 0.0f : max(demandPct, (float)loop.minDemandPct);
+            const float maxPct = binary ? 100.0f : max(minPct, (float)loop.maxDemandPct);
+            float& loopPct = Hardware::g_registryOilLoopPct[(uint8_t)matchingLoop];
+            if (loopPct < minPct) loopPct = minPct;
+            const unsigned long now = millis();
+            float dt = _standbyOilLastMs ? (now - _standbyOilLastMs) / 1000.0f : 0.0025f;
+            _standbyOilLastMs = now;
+            dt = constrain(dt, 0.0005f, 0.05f);
+            ed.oilTargetBar = Config::standbyOilFeedBar;
+            if (loop.pressureInputIndex < hw.channelRegistry.inputCount &&
+                ed.registryInputHealthy[loop.pressureInputIndex]) {
+                const float pressure = constrain(ed.registryInputValue[loop.pressureInputIndex], 0.0f, 20.0f);
+                const float deadband = loop.deadbandCentiBar / 100.0f;
+                if (binary) {
+                    if (pressure < ed.oilTargetBar - deadband) loopPct = 100.0f;
+                    else if (pressure > ed.oilTargetBar + deadband) loopPct = 0.0f;
+                } else {
+                    const float error = ed.oilTargetBar - pressure;
+                    if (fabsf(error) > deadband)
+                        loopPct = constrain(loopPct + error * (loop.adjustScaleCenti / 100.0f) *
+                                            (dt * 400.0f), minPct, maxPct);
+                }
+                demandPct = binary ? loopPct : max(demandPct, loopPct);
+            }
+            // A failed pressure sensor must not stop windmilling lubrication:
+            // retain the configured fixed/floor demand until feedback recovers.
+        }
+        if (selectedActuator == RulesEngine::OIL_PUMP)
+            demandPct = max(demandPct, _manualOilPct);
+        else if (selectedIndex < ChannelRegistry::MAX_OUTPUT_CHANNELS)
+            demandPct = max(demandPct, ed.registryOutputDemand[selectedIndex] * 100.0f);
+        RulesEngine::applyActuatorDemand((uint8_t)selectedActuator,
+                                         constrain(demandPct / 100.0f, 0.0f, 1.0f));
     } else if (ed.standbyOilFeedActive) {
-        ed.standbyOilFeedActive = false;
-        const bool pressureMode = Config::standbyOilFeedBar > 0.0f && hw.hasOilPress && hw.hasOilLoop;
-        if (pressureMode) {
-            // Pressure mode owned the pump via the oil loop and may have regulated it
-            // above the feed %, so the fixed-% "<=" guard below wouldn't clear it —
-            // leaving the pump running in standby. Hand back to the operator's manual
-            // value and clear the target so the loop stops holding pressure.
-            ed.oilTargetBar = 0.0f;
-            ed.oilPumpPct   = _manualOilPct;
-        } else if (ed.oilPumpPct <= Config::standbyOilFeedPct) {
-            // Fixed %: only drop demand if we were the highest bidder — don't cut a
-            // running oil prime. Restore the operator's manual SET_OIL_PCT value.
-            ed.oilPumpPct = _manualOilPct;
-        }
+        releaseOwnedPump();
         Serial.printf("[OT] Windmilling oil protection OFF (oil %.0f%%)\n", (double)ed.oilPumpPct);
     }
 }
@@ -2268,7 +2799,7 @@ static void enterShutdown() {
     // The manual relight target may be igniter2 or glow — cut it explicitly;
     // checkStartSwitch's cut path is skipped once the flag is cleared here.
     if (ed.manualRelightActive)
-        commandIgnitionTarget((uint8_t)Config::manualRelightIgnitionTarget, false);
+        commandConfiguredIgnitionOutput(Config::manualRelightOutputId, (uint8_t)Config::manualRelightIgnitionTarget, false);
     ed.manualRelightActive = false;
     ed.igniterOn           = false;
     if (HardwareConfig::hasAfterburner) enterABShutdown();
@@ -2292,6 +2823,7 @@ static void enterFaultShutdown() {
     auto& ed = EngineData::instance();
     const char* fault = g_safety.lastFault();
     if (!fault || !fault[0]) fault = "UNKNOWN";
+    ed.faultLatched = true;
     if (ed.mode == SysMode::SHUTDOWN) {
         ed.faultShutdownActive = true;
         // Already shutting down — log the additional fault but keep the
@@ -2306,6 +2838,20 @@ static void enterFaultShutdown() {
     }
     FlightRecorder::logFault(fault);           // sensor snapshot at moment of fault
     FlightRecorder::logFaultShutdown(fault);   // shutdown event record
+    if (ed.dryOilStopActive) {
+        const uint32_t pumpRunMs = ed.dryOilPumpUntilMs;
+        ed.dryOilPumpUntilMs = deadlineAfter(millis(), pumpRunMs);
+        if (g_sequencer.isRunning()) g_sequencer.stopSequence();
+        if (g_abSequencer.isRunning()) g_abSequencer.stopSequence();
+        cutCombustionAndStarterNow();
+        ed.faultShutdownActive = true;
+        snprintf(ed.lastEvent, sizeof(ed.lastEvent), "FAULT: %s", fault);
+        _buzzerPattern = 1;
+        enterStandby();
+        Serial.printf("[OT] IMMEDIATE DRY-OIL STOP: %s; selected pump retained for %lu ms\n",
+                      fault, (unsigned long)pumpRunMs);
+        return;
+    }
     ed.mode = SysMode::SHUTDOWN;
     cutCombustionAndStarterNow();
     ed.faultShutdownActive = true;
@@ -2344,6 +2890,11 @@ static void enterFaultShutdown() {
 
 static void enterStandby() {
     auto& ed = EngineData::instance();
+    const bool keepDryOilPump = ed.faultLatched && ed.dryOilStopActive &&
+        (long)(ed.dryOilPumpUntilMs - millis()) > 0 &&
+        ed.dryOilPumpIndex < HardwareConfig::channelRegistry.outputCount;
+    const uint8_t dryPumpIndex = ed.dryOilPumpIndex;
+    const float dryPumpDemand = constrain(ed.dryOilPumpDemand, 0.0f, 1.0f);
     // Some paths intentionally bypass normal sequence completion (most
     // notably the operator's START+STOP cooldown override). Stop the active
     // block before changing mode so it cannot tick again in STANDBY and
@@ -2367,7 +2918,7 @@ static void enterStandby() {
         ed.runStartMs = 0;   // stop the live hour meter; persisted total now reflects this run
     }
     _buzzerPattern = 0;  // silence any buzzer
-    ed.mode               = SysMode::STANDBY;
+    ed.mode               = ed.faultLatched ? SysMode::FAULT : SysMode::STANDBY;
     ed.throttleDemand     = 0;
     ed.finalCoreFuelDemand = 0;
     ed.propPitchDemand    = Hardware::propPitchParkDemand();
@@ -2375,6 +2926,10 @@ static void enterStandby() {
     ed.fuelPump2Demand    = 0;
     ed.oilTargetBar          = 0;
     ed.oilPumpPct       = 0;      // clear pump % — prevents stuck-at-failsafe in standby
+    ed.standbyOilFeedActive = false;
+    _standbyOilActuator = -1;
+    _standbyOilOutputIndex = 255;
+    _standbyOilLastMs = 0;
     ed.oilFailsafeActive  = false;
     ed.fuelSolOpen        = false;
     ed.igniterOn          = false;
@@ -2437,8 +2992,23 @@ static void enterStandby() {
     // Keep any startup-abort or fault explanation visible after the ECU returns
     // to STANDBY. START clears it before a new attempt.
     Hardware::allOff();
-    ed.faultShutdownActive = false;
-    Serial.println("[OT] STANDBY");
+    if (keepDryOilPump) {
+        ed.dryOilStopActive = true;
+        ed.dryOilPumpIndex = dryPumpIndex;
+        ed.dryOilPumpDemand = dryPumpDemand;
+        ed.registryOutputDemand[dryPumpIndex] = dryPumpDemand;
+        if (HardwareConfig::channelRegistry.ownsCoreOutput(
+                HardwareConfig::channelRegistry.outputs[dryPumpIndex]))
+            ed.oilPumpPct = dryPumpDemand * 100.0f;
+        ed.faultShutdownActive = true;
+    } else {
+        ed.dryOilStopActive = false;
+        ed.dryOilPumpIndex = 255;
+        ed.dryOilPumpDemand = 0.0f;
+        ed.dryOilPumpUntilMs = 0;
+        ed.faultShutdownActive = false;
+    }
+    Serial.println(ed.mode == SysMode::FAULT ? "[OT] FAULT LATCHED" : "[OT] STANDBY");
 }
 
 static void enterAbortStandby(const char* resultBlock, BlockResult) {
@@ -2633,29 +3203,72 @@ static void continueABArming() {
 static void enforceEmergencyShutdownTerminal() {
     if (!_emergencyShutdownActive) return;
     auto& ed = EngineData::instance();
-    cutCombustionAndStarterNow();
+    // Physical outputs were cut when emergency shutdown was entered. Keep the
+    // terminal demand invariant here without repeating I2C writes every tick.
+    cutCombustionAndStarterNow(false);
     if ((long)(millis() - _emergencyShutdownUntilMs) < 0) {
         // Fixed, bounded bearing/cooling assistance. This path deliberately
         // does not execute editable sequence actions or indefinite waits.
         if (HardwareConfig::hasOilPump) ed.oilPumpPct = 30.0f;
         if (HardwareConfig::hasOilScavengePump) {
             ed.oilScavengeDemand = 1.0f;
-            ed.oilScavengeOn = true;
         }
         if (HardwareConfig::hasCoolFan) {
             ed.coolFanDemand = 1.0f;
-            ed.coolFanOn = true;
         }
         return;
     }
     Hardware::allOff();
     ed.mode = SysMode::FAULT;
+    ed.faultLatched = true;
     ed.recoveryLockout = true;
     ed.recoveryStopAcknowledged = false;
     ed.faultShutdownActive = false;
     _emergencyShutdownActive = false;
     strncpy(ed.lastEvent, "FAULT: shutdown sequence failed; emergency cooling complete",
             sizeof(ed.lastEvent) - 1);
+}
+
+// Immediate oil-system response: hazardous outputs stay cut while exactly the
+// selected pump receives its bounded coastdown command. No sequence, rule,
+// controller, STOP, or fault-safe output mapping may extend this timer.
+static void enforceDryOilStop() {
+    auto& ed = EngineData::instance();
+    if (!ed.dryOilStopActive) return;
+    cutCombustionAndStarterNow();
+    ed.abPumpDemand = 0.0f;
+    ed.fuelPump2Demand = 0.0f;
+    ed.glowPlugDemand = 0.0f;
+    ed.wetGlowFuelDemand = 0.0f;
+    ed.airstarterOpen = false;
+    ed.bleedValveDemand = 0.0f;
+    ed.coolFanDemand = 0.0f;
+    ed.oilScavengeDemand = 0.0f;
+    ed.oilPumpPct = 0.0f;
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.outputCount; ++i)
+        if (i != ed.dryOilPumpIndex) ed.registryOutputDemand[i] = 0.0f;
+    ed.faultShutdownActive = true;
+    const unsigned long now = millis();
+    if (deadlineExpired(now, ed.dryOilPumpUntilMs)) {
+        ed.dryOilStopActive = false;
+        ed.dryOilPumpDemand = 0.0f;
+        ed.dryOilPumpUntilMs = 0;
+        ed.oilPumpPct = 0.0f;
+        if (ed.dryOilPumpIndex < HardwareConfig::channelRegistry.outputCount)
+            ed.registryOutputDemand[ed.dryOilPumpIndex] = 0.0f;
+        ed.dryOilPumpIndex = 255;
+        Hardware::allOff();
+        ed.faultShutdownActive = false;
+        strncpy(ed.lastEvent, "FAULT latched: dry-oil pump window complete",
+                sizeof(ed.lastEvent) - 1);
+        return;
+    }
+    if (ed.dryOilPumpIndex >= HardwareConfig::channelRegistry.outputCount) return;
+    const auto& pump = HardwareConfig::channelRegistry.outputs[ed.dryOilPumpIndex];
+    const float demand = constrain(ed.dryOilPumpDemand, 0.0f, 1.0f);
+    ed.registryOutputDemand[ed.dryOilPumpIndex] = demand;
+    if (HardwareConfig::channelRegistry.ownsCoreOutput(pump))
+        ed.oilPumpPct = demand * 100.0f;
 }
 
 // ── Command handler (called from ECU loop on Core 1) ─────────
@@ -2683,8 +3296,8 @@ static void handleCommand(const OTPacket& pkt) {
                 accepted ? "" : (data.lastEvent[0] ? data.lastEvent : "START rejected at ECU core"));
         }
     } startResult{pkt, ed, startCommand};
-    // FAULT is a light lockout: START stays blocked, but tools, toggles and
-    // dev mode behave exactly as in STANDBY so the user can diagnose and fix.
+    // FAULT blocks START. Diagnostic tools remain available once any protected
+    // dry-oil pump window has completed.
     const bool standbyLike = (ed.mode == SysMode::STANDBY || ed.mode == SysMode::FAULT);
 
     auto mayEnergizeOutput = [](OTCommand cmd) {
@@ -3239,7 +3852,6 @@ static void handleCommand(const OTPacket& pkt) {
                         ? (HardwareConfig::oilPumpType == 2 ? 100.0f : Config::cooldownOilPct)
                         : 0.0f;
                     ed.oilScavengeDemand      = ecUseScavenge ? 1.0f : 0.0f;
-                    ed.oilScavengeOn          = ecUseScavenge;
                     ed.extraCooldownUntilMs = deadlineAfter(millis(), durationMs);
                     Serial.printf("[OT] Extra cooldown started (%lu s)\n",
                         (unsigned long)seconds);
@@ -3253,7 +3865,6 @@ static void handleCommand(const OTPacket& pkt) {
                     ed.starterEnabled      = false;
                     ed.oilPumpPct          = 0;
                     ed.oilScavengeDemand   = 0.0f;
-                    ed.oilScavengeOn       = false;
                     ed.extraCooldownUntilMs  = 0;
                     Serial.println("[OT] Extra cooldown cancelled");
                 }
@@ -3282,6 +3893,27 @@ static void handleCommand(const OTPacket& pkt) {
                 FlightRecorder::requestClear();
             } else {
                 Serial.println("[OT] CLEAR_LOG ignored: engine not in STANDBY");
+            }
+            break;
+
+        case OTCommand::CLEAR_FAULT:
+            if (ed.mode != SysMode::FAULT || !ed.faultLatched) {
+                strncpy(ed.lastEvent, "No latched run fault to clear", sizeof(ed.lastEvent) - 1);
+            } else if (ed.dryOilStopActive) {
+                strncpy(ed.lastEvent, "Fault clear blocked: oil-pump coast window active", sizeof(ed.lastEvent) - 1);
+            } else if (!ed.hardwareReady || !ed.watchdogReady || !Config::profileMatch || ed.configLocked) {
+                strncpy(ed.lastEvent, "Fault clear blocked: ECU readiness fault remains", sizeof(ed.lastEvent) - 1);
+            } else if (OutputActivity::anyPhysicalDemand(false)) {
+                strncpy(ed.lastEvent, "Fault clear blocked: an output is still active", sizeof(ed.lastEvent) - 1);
+            } else {
+                ed.faultLatched = false;
+                ed.faultShutdownActive = false;
+                ed.mode = SysMode::STANDBY;
+                ed.faultDescription[0] = '\0';
+                strncpy(ed.lastEvent, "Fault acknowledged and cleared", sizeof(ed.lastEvent) - 1);
+                g_safety.clearFault();
+                _buzzerPattern = 0;
+                Serial.println("[OT] Fault latch explicitly cleared");
             }
             break;
 
@@ -3340,14 +3972,14 @@ static void handleCommand(const OTPacket& pkt) {
         // ── Actuator tests (STANDBY only, auto-expire via checkToolTimers) ────
         case OTCommand::OIL_SCAV_TEST:
             if (HardwareConfig::hasOilScavengePump && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
-                ed.oilScavengeDemand = 1.0f; ed.oilScavengeOn = true;
+                ed.oilScavengeDemand = 1.0f;
                 _oilScavTestUntilMs = deadlineAfter(millis(), Config::toolOilScavTestMs);
             }
             break;
 
         case OTCommand::COOL_FAN_TEST:
             if (HardwareConfig::hasCoolFan && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
-                ed.coolFanDemand = 1.0f; ed.coolFanOn = true;
+                ed.coolFanDemand = 1.0f;
                 _coolFanTestUntilMs = deadlineAfter(millis(), Config::toolCoolFanTestMs);
             }
             break;
@@ -3361,7 +3993,7 @@ static void handleCommand(const OTPacket& pkt) {
 
         case OTCommand::BLEED_VALVE_TEST:
             if (HardwareConfig::hasBleedValve && standbyLike && !anyToolTimerActive() && !ed.extraCooldownActive) {
-                ed.bleedValveDemand = 1.0f; ed.bleedValveOpen = true;
+                ed.bleedValveDemand = 1.0f;
                 _bleedValveTestUntilMs = deadlineAfter(millis(), Config::toolBleedValveTestMs);
             }
             break;
@@ -3557,7 +4189,7 @@ static void checkStartSwitch() {
         ed.startSwitchReady = false;
         ed.startReleasedSinceBoot = false;
         if (ed.manualRelightActive) {
-            commandIgnitionTarget((uint8_t)Config::manualRelightIgnitionTarget, false);
+            commandConfiguredIgnitionOutput(Config::manualRelightOutputId, (uint8_t)Config::manualRelightIgnitionTarget, false);
             ed.manualRelightActive = false;
         }
         return;
@@ -3615,16 +4247,17 @@ static void checkStartSwitch() {
         if (Config::igniterOnStart && cur == LOW) {
             if (!ed.manualRelightActive) {
                 const uint8_t target = (uint8_t)Config::manualRelightIgnitionTarget;
-                if (ignitionTargetAvailable(target)) {
+                if (configuredIgnitionOutputAvailable(Config::manualRelightOutputId, target)) {
                     ed.manualRelightActive = true;
-                    commandIgnitionTarget(target, true);
-                    Serial.printf("[OT] Manual relight - START held (%s)\n", ignitionTargetName(target));
+                    commandConfiguredIgnitionOutput(Config::manualRelightOutputId, target, true);
+                    Serial.printf("[OT] Manual relight - START held (%s)\n",
+                                  configuredIgnitionOutputName(Config::manualRelightOutputId, target));
                 }
             }
         } else if (ed.manualRelightActive) {
             // START released, or manual relight disabled live → cut the igniter
             ed.manualRelightActive = false;
-            commandIgnitionTarget((uint8_t)Config::manualRelightIgnitionTarget, false);
+            commandConfiguredIgnitionOutput(Config::manualRelightOutputId, (uint8_t)Config::manualRelightIgnitionTarget, false);
             Serial.println("[OT] Manual relight - igniter cut");
         }
     } else {
@@ -3632,7 +4265,7 @@ static void checkStartSwitch() {
         // by manual relight.  ImmediateCut also clears it, but doing it here
         // avoids a one-frame gap.
         if (ed.manualRelightActive) {
-            commandIgnitionTarget((uint8_t)Config::manualRelightIgnitionTarget, false);
+            commandConfiguredIgnitionOutput(Config::manualRelightOutputId, (uint8_t)Config::manualRelightIgnitionTarget, false);
         }
         ed.manualRelightActive = false;
     }
@@ -3827,13 +4460,13 @@ void setup() {
     });
     // Safety thresholds are applied via Hardware::applyConfig() above
 
-    // Relight callback — fires on flameout if relightEnabled and conditions met.
+    // Relight callback — fires from the independent automatic-relight detector.
     // Igniter stays ON continuously; checkRelight() turns it off when done.
     g_safety.setRelightCallback([]() {
         auto& ed = EngineData::instance();
         if (!_relightActive) {
             // First call for this flameout event — start continuous ignition.
-            // SafetyMonitor owns the timeout; this callback just lights the igniter.
+            // checkRelight() owns success, timeout, and fault shutdown.
             ed.relightAttempts = ed.relightAttempts + 1;
             _relightActive     = true;
             _relightBeginMs    = millis();
@@ -3848,7 +4481,7 @@ void setup() {
             Serial.printf("[OT] Relight started - N1=%.0f RPM\n", (double)ed.n1Rpm);
         }
         // Keep igniter on — checkRelight() clears this when flame returns or N1 drops
-        commandIgnitionTarget((uint8_t)Config::relightIgnitionTarget, true);
+        commandConfiguredIgnitionOutput(Config::relightOutputId, (uint8_t)Config::relightIgnitionTarget, true);
     });
 
     // Web maintenance tick on Core 0 — independent FreeRTOS task
@@ -3886,6 +4519,7 @@ void loop() {
     static uint32_t lastLoopStartUs = 0;
     static uint32_t loopWindowStartMs = 0;
     static uint32_t loopWindowMaxUs = 0;
+    static uint32_t loopWindowMaxPeriodUs = 0;
     static uint32_t loopWorstSensorsUs = 0;
     static uint32_t loopWorstSequencersUs = 0;
     static uint32_t loopWorstControllersUs = 0;
@@ -3903,7 +4537,8 @@ void loop() {
     if (ConfigApplyGate::tryBeginCoreApply()) {
         static uint8_t configHeapRetryCount = 0;
         size_t candidateLen = 0;
-        char* candidateJson = ConfigApplyGate::takeCandidate(candidateLen);
+        bool livePatchCandidate = false;
+        char* candidateJson = ConfigApplyGate::takeCandidate(candidateLen, livePatchCandidate);
         JsonDocument candidate;
         const bool hasCandidate = candidateLen > 0;
         DeserializationError candidateError = candidateJson && hasCandidate
@@ -3924,9 +4559,11 @@ void loop() {
         const SysMode configMode = EngineData::instance().mode;
         const bool liveApply = configMode == SysMode::RUNNING && EngineData::instance().devMode;
         const uint32_t candidateGeneration = ConfigApplyGate::pendingGeneration();
-        bool candidateApplied = !hasCandidate ||
-            (candidateParsed && Config::applyJsonRuntimeOnly(candidate, liveApply));
-        if (hasCandidate && !candidateParsed &&
+        bool candidateApplied = !hasCandidate || (candidateParsed &&
+            (livePatchCandidate
+                ? Config::applyJsonLivePatch(candidate)
+                : Config::applyJsonRuntimeOnly(candidate, liveApply)));
+        if (!livePatchCandidate && hasCandidate && !candidateParsed &&
             candidateError == DeserializationError::NoMemory) {
             // A maximum Classic configuration may not fit beside both the
             // serialized transfer buffer and a second ArduinoJson tree. The
@@ -3949,27 +4586,31 @@ void loop() {
             }
         }
         if (candidateJson) free(candidateJson);
-        const bool retryForHeap = hasCandidate && !candidateParsed &&
+        const bool retryForHeap = !livePatchCandidate && hasCandidate && !candidateParsed &&
             candidateError == DeserializationError::NoMemory;
         if (retryForHeap) {
             if (configHeapRetryCount < 255) ++configHeapRetryCount;
         } else {
             configHeapRetryCount = 0;
         }
-        if (hasCandidate && !retryForHeap) Config::clearStagedJsonCandidate();
+        if (!livePatchCandidate && hasCandidate && !retryForHeap)
+            Config::clearStagedJsonCandidate();
         if (retryForHeap) {
             // Keep the transaction queued. Continue normal ECU processing;
             // retrying never blocks the real-time loop.
         } else if (!candidateApplied) {
-            Serial.println("[OT] ERROR: persisted configuration candidate could not be published");
+            Serial.println("[OT] ERROR: configuration candidate could not be published");
         } else if (configMode == SysMode::STANDBY || configMode == SysMode::FAULT) {
+            if (livePatchCandidate) Config::requestSave();
             applyConfigOnEcuCore();
             _configApplyDeferred = false;
         } else if (configMode == SysMode::RUNNING) {
             Hardware::applyLiveControllerTuning();
+            if (livePatchCandidate) Config::requestSave();
             _configApplyDeferred = false;
-            Serial.println("[OT] Developer tuning applied live as one controller transaction");
+            Serial.println("[OT] Developer tuning applied live; flash save deferred until safe");
         } else {
+            if (livePatchCandidate) Config::requestSave();
             // Active non-running modes reject web settings writes. Retain this
             // guard for any future producer using the transaction gate.
             _configApplyDeferred = true;
@@ -4065,6 +4706,7 @@ void loop() {
     checkGeneralDI();
     buzzerTick();
     checkCooldownSkip();
+    enforceDryOilStop();
 
     // Oil regulation uses the previous tick's final protected core-fuel
     // demand. Running it before rules preserves rule-final ownership of an
@@ -4086,6 +4728,7 @@ void loop() {
     // and other safety behavior still run and may legitimately delay reboot.
     if (!WebServer::rebootPending()) RulesEngine::evaluate();
     enforceEmergencyShutdownTerminal();
+    enforceDryOilStop();
     Hardware::applyThrottleProtection();
     EngineData::instance().finalCoreFuelDemand =
         constrain(EngineData::instance().throttleDemand, 0.0f, 1.0f);
@@ -4179,6 +4822,7 @@ void loop() {
         if (periodUs > 0) {
             edp.loopPeriodMs = (float)periodUs / 1000.0f;
             edp.loopHz = 1000000.0f / (float)periodUs;
+            if (periodUs > loopWindowMaxPeriodUs) loopWindowMaxPeriodUs = periodUs;
         }
     }
     lastLoopStartUs = loopStartUs;
@@ -4186,6 +4830,7 @@ void loop() {
     const uint32_t nowMs = millis();
     if (loopWindowStartMs == 0) loopWindowStartMs = nowMs;
     if (nowMs - loopWindowStartMs >= 1000) {
+        edp.loopPeriodMaxMs = (float)loopWindowMaxPeriodUs / 1000.0f;
         edp.loopExecMaxMs = (float)loopWindowMaxUs / 1000.0f;
         // Report the section breakdown from that same worst loop, rather than
         // unrelated values from whichever loop happened to end the window.
@@ -4196,6 +4841,7 @@ void loop() {
         edp.loopLoggingMs = (float)loopWorstLoggingUs / 1000.0f;
         edp.loopLedMs = (float)loopWorstLedUs / 1000.0f;
         loopWindowMaxUs = 0;
+        loopWindowMaxPeriodUs = 0;
         loopWorstSensorsUs = loopWorstSequencersUs = loopWorstControllersUs = 0;
         loopWorstActuatorsUs = loopWorstLoggingUs = loopWorstLedUs = 0;
         loopWindowStartMs = nowMs;
@@ -4207,6 +4853,10 @@ void loop() {
     const uint32_t loopElapsedUs = micros() - loopStartUs;
     const uint32_t targetHz = constrain((uint32_t)Config::controlLoopHz, 50u, 1000u);
     const uint32_t targetPeriodUs = 1000000u / targetHz;
+    // Count only genuine body overruns, not harmless scheduler jitter in the
+    // deliberate end-of-loop wait. The worst start-to-start period above
+    // separately exposes all sources of a long control cycle.
+    if (loopElapsedUs > targetPeriodUs) edp.loopOverrunCount = edp.loopOverrunCount + 1U;
     if (loopElapsedUs < targetPeriodUs) {
         uint32_t waitUs = targetPeriodUs - loopElapsedUs;
         if (waitUs >= 1000u) {

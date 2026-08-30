@@ -274,7 +274,7 @@ async function setActCurrentSensor(actKey, field, val) {
   const key = keyMap[field] || field;
   cfg.actuators[actKey][key] = val;
   const row = (registryRoot().outputs || []).find(c => registryCoreActuatorKey(c) === actKey);
-  if (row && ['current_pin','current_mv_a','current_zero_v','current_max_a','current_trip_delay_ms'].includes(key)) row[key] = val;
+  if (row && ['current_pin','current_mv_a','current_zero_v','current_ready_a','current_max_a','current_trip_delay_ms'].includes(key)) row[key] = val;
   if (field === 'pin') refreshAllPins();
   dirty();
 }

@@ -86,6 +86,29 @@ const baseRegistry = {
 
 const setups = [
   {
+    id: 'monitoring_only_hand_fuel',
+    title: 'Monitoring-only turbine with manual fuel hardware',
+    hardware: {
+      has_afterburner: false, has_two_shaft: false,
+      sensors: { n1_rpm: { enabled: true, pin: 34 }, tot: { enabled: true, chip: 'max31855' }, oil_press: { enabled: false }, throttle_input: { enabled: false }, idle_input: { enabled: false } },
+      actuators: { throttle: { enabled: false }, oil_pump: { enabled: false }, igniter: { enabled: false }, starter: { enabled: false }, fuel_sol: { enabled: false } },
+      controllers: { oil_loop: false, dynamic_idle: false, governor: false },
+      safety: { overspeed: false, overtemp: false, low_oil: false, oil_zero: false, flameout: false, hot_start: false },
+      channel_registry: {
+        inputs: [
+          regIn('n1_main', 'N1 Speed', 'n1_speed', 'speed', 2, 34, { pulses_per_unit: 1 }),
+          regIn('tot_main', 'Turbine Temperature', 'tot', 'temperature', 1, -1, { temp_interface: 2, spi_clk: 18, spi_cs: 5, spi_miso: 19 }),
+          regIn('coolant_flow', 'Coolant Flow', 'general_flow', 'flow', 2, 27, { pulses_per_unit: 450 }),
+          regIn('accessory_current', 'Accessory Current', 'general_current', 'current', 1, 35,
+            { analog_zero_mv: 1650, analog_mv_per_unit: 100 })
+        ],
+        outputs: [], bindings: []
+      }
+    },
+    config: { rules: [], controller_schema: 1 },
+    commands: []
+  },
+  {
     id: 'minimal_timer_turbojet',
     title: 'Minimal timer turbojet',
     hardware: {
@@ -385,7 +408,7 @@ const setups = [
         ]
       }
     },
-    config: { standby_oil: { source: 1, rpm_limit: 600, feed_pct: 35, feed_bar: 0 } },
+    config: { standby_oil: { enabled: true, source: 1, rpm_limit: 600, feed_pct: 35, feed_bar: 0 } },
     commands: [{ cmd: 'OIL_PRIME' }]
   },
   {
@@ -511,6 +534,17 @@ const setups = [
       await page.goto(`${base}/controllers.html#${setup.id}`);
       await page.waitForSelector('#btn-save');
       await assertVisibleTextClean(page, `${setup.id} config`);
+      if (setup.id === 'monitoring_only_hand_fuel') {
+        assert.equal(await page.locator('#controller-overview [data-controller-output="main_fuel"]').count(), 0,
+          'a monitoring-only ECU must not invent or require a main-fuel controller');
+        assert.doesNotMatch(await page.locator('body').innerText(), /main fuel.*required|must fit.*main fuel/i,
+          'monitoring-only setups must remain first-class rather than appearing invalid');
+        await page.goto(`${base}/hardware.html#standalone-sensors`);
+        await page.waitForSelector('#registry-inputs');
+        const inputs = await page.locator('#registry-inputs').textContent();
+        assert.match(inputs, /Coolant Flow/);
+        assert.match(inputs, /Accessory Current/);
+      }
       if (setup.id === 'fuel_governed_generator') {
         const controller = page.locator('#controller-overview [data-controller-output="main_fuel"]');
         assert.equal(await controller.count(), 1);
@@ -538,7 +572,7 @@ const setups = [
         await page.locator('#btn-view-explore').click();
         for (const key of ['pb_p1e','pb_p2e','pb_tqe']) {
           assert.equal(await page.locator(`#cf-${key}`).isDisabled(), false, `${key} should be available`);
-          assert.equal(await page.locator(`#cf-${key}`).isChecked(), true, `${key} should remain enabled`);
+          assert.ok(Number(await page.locator(`#cf-${key}`).inputValue()) > 0, `${key} should remain enabled`);
         }
         const limiterHelp = await page.locator('#engine-limits').textContent();
         assert.doesNotMatch(limiterHelp, /\bundefined\b/i);
@@ -584,8 +618,8 @@ const setups = [
       if (setup.id === 'dry_sump_flow_monitored_turbine') {
         const startupOptions = await page.locator('#add-startup-sel').textContent();
         const shutdownOptions = await page.locator('#add-shutdown-sel').textContent();
-        assert.match(startupOptions, /Open Drain Valve/);
-        assert.match(shutdownOptions, /Close Drain Valve/);
+        assert.match(startupOptions, /Set Drain Valve/);
+        assert.match(shutdownOptions, /Set Drain Valve/);
         const sharedChannels = await page.evaluate(() => ({
           sensors: getEnabledSensors().map(item => item.key),
           actuators: getEnabledActuators().map(item => item.key)
@@ -608,8 +642,8 @@ const setups = [
           hwCfg = original;
           return result;
         });
-        assert.deepEqual(renamedOwnership, {primary:true, secondary:false, pump:true, secondPump:false},
-          'renamed canonical owners must stay core-bound while additional oil circuits remain selectable');
+        assert.deepEqual(renamedOwnership, {primary:true, secondary:false, pump:false, secondPump:false},
+          'duplicate non-canonical oil pumps must require an explicit primary binding instead of inheriting ownership from registry order');
       }
       if (setup.id === 'dry_sump_flow_monitored_turbine') {
         await page.goto(`${base}/controllers.html#${setup.id}`);

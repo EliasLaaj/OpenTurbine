@@ -74,17 +74,46 @@ def main() -> int:
         dut.ensure_bench_mode(True)
         start_and_wait()
 
+        baseline_start = dut.full_data()
+        baseline_deadline = time.monotonic() + 1.2
+        while time.monotonic() < baseline_deadline:
+            dut.status()
+            time.sleep(0.15)
+        dut.data()
+        baseline_end = dut.full_data()
+        baseline_overruns = (
+            int(baseline_end.get("loop_overrun_count", 0) or 0) -
+            int(baseline_start.get("loop_overrun_count", 0) or 0)
+        )
+        overruns_before = int(baseline_end.get("loop_overrun_count", 0) or 0)
         code, resp = dut.patch("/api/config", {
             "throttle": {"ramp_up_ms": 250},
         })
         live_apply_complete = code == 200 and runner.dc._wait_config_apply()
         live = dut.data()
+        live_full = dut.full_data()
+        overruns_after = int(live_full.get("loop_overrun_count", 0) or 0)
         applied = int(dut.config().get("throttle", {}).get("ramp_up_ms") or 0) == 250
         record(
             "DEV_MODE_APPLIES_MARKED_LIVE_FIELD_WHILE_RUNNING",
-            code == 200 and live_apply_complete and applied,
+            code == 200 and live_apply_complete and applied and
+            resp.get("persist") == "deferred_until_safe" and
+            # Compare against an equivalent status-polling window. HTTP work
+            # shares CPU/memory bandwidth with the control core, so an
+            # absolute zero-overrun assertion measures the observer rather
+            # than the live-patch transaction. Still require a tight maximum
+            # cycle and no material overrun increase over that control load.
+            # A single 4 ms scheduler boundary can add a few counts while the
+            # full diagnostic snapshot is fetched. Keep the bound tight but
+            # avoid turning one extra observation cycle into a false failure.
+            overruns_after - overruns_before <= baseline_overruns * 2 + 5 and
+            float(live_full.get("loop_exec_max_ms", 999) or 999) < 10.0,
             http=code, response=resp, mode=live.get("mode"),
             saved_ramp_up_ms=dut.config().get("throttle", {}).get("ramp_up_ms"),
+            baseline_overrun_delta=baseline_overruns,
+            loop_overrun_delta=overruns_after - overruns_before,
+            loop_exec_max_ms=live_full.get("loop_exec_max_ms"),
+            loop_period_max_ms=live_full.get("loop_period_max_ms"),
         )
 
         block_code, block_resp = dut.patch("/api/config", {
@@ -102,12 +131,16 @@ def main() -> int:
         standby, stopped = dut.poll_until(
             lambda d: d.get("mode") == "STANDBY", timeout=5, interval=0.02
         )
+        time.sleep(0.5)
+        durable_engine = dut._get("/api/ecu_config")
         elapsed = time.monotonic() - started
         oil_after = tester.get("OILPUMP_OUT")
         record(
             "NO_N1_FINALSTOP_USES_CONFIGURED_DELAY",
-            in_shutdown and standby and 1.75 <= elapsed <= 3.2,
+            in_shutdown and standby and 1.75 <= elapsed <= 3.7 and
+            int(durable_engine.get("settings", {}).get("throttle", {}).get("ramp_up_ms") or 0) == 250,
             elapsed_s=round(elapsed, 3), last_event=stopped.get("last_event"),
+            durable_ramp_up_ms=durable_engine.get("settings", {}).get("throttle", {}).get("ramp_up_ms"),
         )
         record(
             "OIL_STAYS_ON_THROUGH_DELAY_THEN_STANDBY_FORCES_OFF",

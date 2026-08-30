@@ -4,6 +4,7 @@
 #include "../system/Config.h"
 #include "../system/HardwareConfig.h"
 #include "../system/FeedbackRequirements.h"
+#include "../system/OutputActivity.h"
 #include <Arduino.h>
 #include <functional>
 #include <string.h>
@@ -39,6 +40,10 @@ public:
     float         flameoutN1MinRpm     = 0.0f;
     float         flameoutEgtBelowC    = 300.0f;
     float         flameoutEgtFallRateCPerSec = 50.0f;
+    int           relightTriggerSource = 0;
+    int           relightTriggerConfirmMs = 200;
+    float         relightTriggerEgtBelowC = 300.0f;
+    float         relightTriggerEgtFallRateCPerSec = 50.0f;
     unsigned long checkIntervalMs      = 100;
     uint32_t      lowOilConfirmMs      = 500;
     uint32_t      oilZeroConfirmMs     = 100;
@@ -51,9 +56,8 @@ public:
         _enterFault       = enterFault;
         _lastCheckMs      = 0;
         _flameoutMs       = 0;
-        _relightStartMs   = 0;
-        _relightWindowActive = false;
-        _relightStartEgt  = 0.0f;
+        _relightDetectMs  = 0;
+        _relightLatched   = false;
         _startupSpooled   = false;
         _startupSpoolSinceMs = 0;
         _startupUnderSpeedSinceMs = 0;
@@ -66,6 +70,7 @@ public:
     // Allow external callers (e.g. DI fault handler) to inject a fault code
     // so lastFault() returns the right string when enterFaultShutdown() reads it.
     void setExternalFault(const char* code) { _lastFault = code; }
+    void clearFault() { _lastFault = nullptr; }
 
     void setRelightCallback(RelightFn fn) { _relight = fn; }
 
@@ -81,9 +86,8 @@ public:
         bool inOp = (m == SysMode::STARTUP || m == SysMode::RUNNING);
         if (!inOp) {
             _flameoutMs     = 0;
-            _relightStartMs = 0;
-            _relightWindowActive = false;
-            _relightStartEgt = 0.0f;
+            _relightDetectMs = 0;
+            _relightLatched = false;
             _overspeedPending = false;
             _n2OverspeedPending = false;
             _resetDwellConfirmations(m != SysMode::SHUTDOWN);
@@ -196,7 +200,7 @@ public:
                 snprintf(ed.lastEvent, sizeof(ed.lastEvent), "WARNING: %s overcurrent",
                          c.name[0] ? c.name : c.id);
             } else if (fastNow - _registryOvercurrentSinceMs[i] >= c.currentTripDelayMs) {
-                _trigger("OUTPUT_OVERCURRENT");
+                _trigger("OUTPUT_OVERCURRENT", c.name[0] ? c.name : c.id);
                 return;
             }
         }
@@ -214,9 +218,8 @@ public:
             _lastEgtMs       = 0;
             ed.totRiseRate   = 0.0f;
             _flameoutMs      = 0;
-            _relightStartMs  = 0;
-            _relightWindowActive = false;
-            _relightStartEgt = 0.0f;
+            _relightDetectMs = 0;
+            _relightLatched = false;
         }
         _lastCheckMs = now;
 
@@ -253,7 +256,12 @@ public:
             return;
         }
 
-        if (_confirmed(HardwareConfig::safetyLowOil && HardwareConfig::hasOilPress
+        if (_checkOilLoops(ed, m, now)) return;
+
+        // Legacy single-sensor protection remains for configurations without
+        // explicit oil-loop ownership. Per-loop installations use their own
+        // independently selected response and must not be tripped twice here.
+        if (_confirmed(!HardwareConfig::hasOilLoop && HardwareConfig::safetyLowOil && HardwareConfig::hasOilPress
             && ed.oilMinBar > 0 && ed.oilHealthy && ed.oilPressure < ed.oilMinBar,
             now, lowOilConfirmMs, _lowOilSinceMs))
         {
@@ -264,7 +272,7 @@ public:
         // Oil near-zero while sensor is ADC-healthy → catastrophic failure or
         // disconnected fitting.  Distinguished from LOW_OIL (calibrated range)
         // and from sensor-rail fault (oilHealthy=false).
-        if (_confirmed(HardwareConfig::safetyOilZero && HardwareConfig::hasOilPress
+        if (_confirmed(!HardwareConfig::hasOilLoop && HardwareConfig::safetyOilZero && HardwareConfig::hasOilPress
             && m == SysMode::RUNNING && ed.oilHealthy
             && ed.oilPressure < Config::oilZeroBar,
             now, oilZeroConfirmMs, _oilZeroSinceMs))
@@ -273,54 +281,48 @@ public:
             return;
         }
 
-        if (HardwareConfig::safetyFlameout &&
-            m == SysMode::RUNNING && ed.flameMonitorActive && _flameoutSourceUsable()) {
+        // Automatic relight is an independent subsystem with its own source
+        // and confirmation timer. It may coexist with a differently sourced
+        // combustion-loss shutdown monitor below.
+        if (Config::relightEnabled && m == SysMode::RUNNING && ed.relightArmed &&
+            ed.flameMonitorActive && _relightTriggerSourceUsable()) {
+            if (_relightTriggerLost(ed)) {
+                if (_relightDetectMs == 0) _relightDetectMs = now;
+                if (!_relightLatched &&
+                    now - _relightDetectMs >= (unsigned long)relightTriggerConfirmMs) {
+                    const bool n1Ok = HardwareConfig::hasN1Rpm && ed.n1Healthy &&
+                        ed.n1Rpm >= Config::effectiveRelightMinRpm();
+                    if (!n1Ok || ed.relightAttempts >= MAX_RELIGHT_ATTEMPTS || !_relight) {
+                        _trigger("RELIGHT_FAILED");
+                        return;
+                    }
+                    _relightLatched = true;
+                    _relight();
+                }
+            } else {
+                _relightDetectMs = 0;
+                _relightLatched = false;
+            }
+        } else {
+            _relightDetectMs = 0;
+            _relightLatched = false;
+        }
+
+        // Independent combustion-loss protection. Its timer always requests
+        // fault shutdown; it never delegates its decision to auto-relight.
+        if (HardwareConfig::safetyFlameout && m == SysMode::RUNNING &&
+            ed.flameMonitorActive && _flameoutSourceUsable()) {
             if (_flameoutLost(ed)) {
                 if (_flameoutMs == 0) _flameoutMs = now;
-
-                if ((now - _flameoutMs) > (unsigned long)flameoutShutdownMs) {
-                    // Relight path: enabled, armed, N1 still viable
-                    bool n1Ok = HardwareConfig::hasN1Rpm && ed.n1Healthy
-                             && ed.n1Rpm >= Config::effectiveRelightMinRpm();
-                    bool relightIgnitionOk = false;
-                    switch (Config::relightIgnitionTarget) {
-                        case 1: relightIgnitionOk = HardwareConfig::hasIgniter2; break;
-                        case 2: relightIgnitionOk = HardwareConfig::hasGlowPlug; break;
-                        default: relightIgnitionOk = HardwareConfig::hasIgniter; break;
-                    }
-                    if (Config::relightEnabled && ed.relightArmed && relightIgnitionOk && n1Ok &&
-                        ed.relightAttempts < MAX_RELIGHT_ATTEMPTS && _relight) {
-                        if (!_relightWindowActive) {
-                            // First trigger — start continuous ignition
-                            _relight();
-                            _relightStartMs = now;
-                            _relightWindowActive = true;
-                            _relightStartEgt = Config::primaryEgtC(ed);
-                        } else {
-                            // Relight window: check N1 still viable and timeout not expired
-                            bool stillViable = HardwareConfig::hasN1Rpm && ed.n1Healthy
-                                            && ed.n1Rpm >= Config::effectiveRelightMinRpm();
-                            const unsigned long configuredMs = Config::relightTimeoutMs > 0
-                                ? (unsigned long)Config::relightTimeoutMs : RELIGHT_HARD_LIMIT_MS;
-                            const unsigned long effectiveMs = min(configuredMs, RELIGHT_HARD_LIMIT_MS);
-                            bool timedOut = (now - _relightStartMs) >= effectiveMs;
-                            if (!stillViable || timedOut) {
-                                _trigger("FLAMEOUT");
-                                return;
-                            }
-                        }
-                        return;  // checkRelight() in main.cpp keeps igniterOn true each tick
-                    }
-                    // Relight not enabled / armed / N1 too low — fault immediately
+                if (now - _flameoutMs >= (unsigned long)flameoutShutdownMs) {
                     _trigger("FLAMEOUT");
                     return;
                 }
             } else {
-                _flameoutMs     = 0;
-                _relightStartEgt = 0.0f;
-                _relightStartMs = 0;  // flame returned — reset relight state
-                _relightWindowActive = false;
+                _flameoutMs = 0;
             }
+        } else {
+            _flameoutMs = 0;
         }
 
         // ── Oil temperature high ──────────────────────────────
@@ -455,13 +457,12 @@ public:
                 (FeedbackRequirements::p2ForProtectionOrControl() && !ed.p2Healthy) ||
                 (FeedbackRequirements::torqueForProtectionOrControl() && !ed.torqueHealthy) ||
                 (HardwareConfig::safetyFlameout && _effectiveFlameoutSource() == 1 &&
-                 HardwareConfig::hasFlame && !ed.flameHealthy) ||
-                (HardwareConfig::hasOilPumpCurrentSensor && HardwareConfig::oilPumpCurrentMaxAmps > 0.0f &&
-                 ed.oilPumpPct > 0.01f && !ed.oilPumpCurrentHealthy);
+                 HardwareConfig::hasFlame && !ed.flameHealthy);
             for (uint8_t i = 0; i < reg.outputCount && !protectionBlind; ++i) {
                 const auto& c = reg.outputs[i];
                 if (c.installed && c.hasCurrent && c.currentMaxAmps > 0.0f &&
-                    !reg.ownsCoreOutput(c) && RelayDemand::requested(ed.registryOutputDemand[i]) &&
+                    OutputActivity::hasPhysicalEndpoint(c) &&
+                    RelayDemand::requested(OutputActivity::logicalDemand(c, i, ed)) &&
                     !ed.registryOutputCurrentHealthy[i]) protectionBlind = true;
             }
             const bool feedbackBlind = n1Blind || n2Blind || protectionBlind;
@@ -509,7 +510,6 @@ private:
     // Fuel increases are blocked immediately; only the persistent degraded
     // mode latch is delayed to reject isolated unhealthy samples.
     static constexpr unsigned long FEEDBACK_LOSS_CONFIRM_MS = 500;
-    static constexpr unsigned long RELIGHT_HARD_LIMIT_MS = 30000;
     static constexpr uint8_t MAX_RELIGHT_ATTEMPTS = 3;
     // A hole in monitoring longer than this (skip-safety toggle, stall)
     // invalidates EGT rate history and any in-progress detection timestamps.
@@ -520,9 +520,8 @@ private:
     RelightFn     _relight;
     unsigned long _lastCheckMs    = 0;
     unsigned long _flameoutMs     = 0;
-    unsigned long _relightStartMs = 0;   // millis() when relight was first triggered
-    bool          _relightWindowActive = false;
-    float         _relightStartEgt = 0.0f;
+    unsigned long _relightDetectMs = 0;
+    bool          _relightLatched = false;
     const char*   _lastFault      = nullptr;
     float         _lastEgt        = -1.0f;   // for dEGT/dt calculation
     unsigned long _lastEgtMs      = 0;
@@ -534,6 +533,10 @@ private:
     unsigned long _registryOvercurrentSinceMs[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     unsigned long _oilUnderflowSinceMs[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     bool          _oilUnderflowWarned[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
+    unsigned long _oilLoopLowSinceMs[HardwareConfig::MAX_OIL_LOOPS] = {};
+    unsigned long _oilLoopFeedbackSinceMs[HardwareConfig::MAX_OIL_LOOPS] = {};
+    bool          _oilLoopLowWarned[HardwareConfig::MAX_OIL_LOOPS] = {};
+    bool          _oilLoopFeedbackWarned[HardwareConfig::MAX_OIL_LOOPS] = {};
     unsigned long _lowOilSinceMs = 0;
     unsigned long _oilZeroSinceMs = 0;
     unsigned long _oilTempSinceMs = 0;
@@ -636,6 +639,10 @@ private:
             memset(_oilUnderflowWarned, 0, sizeof(_oilUnderflowWarned));
             EngineData::instance().oilFlowWarningActive = false;
         }
+        memset(_oilLoopLowSinceMs, 0, sizeof(_oilLoopLowSinceMs));
+        memset(_oilLoopFeedbackSinceMs, 0, sizeof(_oilLoopFeedbackSinceMs));
+        memset(_oilLoopLowWarned, 0, sizeof(_oilLoopLowWarned));
+        memset(_oilLoopFeedbackWarned, 0, sizeof(_oilLoopFeedbackWarned));
         _lowOilSinceMs = 0;
         _oilZeroSinceMs = 0;
         _oilTempSinceMs = 0;
@@ -645,6 +652,57 @@ private:
         _p2TripSinceMs = 0;
         _torqueTripSinceMs = 0;
         _feedbackBlindSinceMs = 0;
+    }
+
+    bool _applyOilLoopResponse(EngineData& ed, uint8_t loopIndex, uint8_t response,
+                               const char* code, bool& warned) {
+        if (response == HardwareConfig::OilFaultDisabled) return false;
+        const auto& loop = HardwareConfig::oilLoops[loopIndex];
+        const auto& pump = HardwareConfig::channelRegistry.outputs[loop.pumpOutputIndex];
+        const char* name = pump.name[0] ? pump.name : (loop.id[0] ? loop.id : "Oil pump");
+        if (response == HardwareConfig::OilFaultWarning) {
+            if (!warned) {
+                snprintf(ed.lastEvent, sizeof(ed.lastEvent), "WARNING: %.28s oil feedback", name);
+                warned = true;
+                Serial.printf("[Safety] WARNING %s: %s\n", code, name);
+            }
+            return false;
+        }
+        ed.dryOilPumpIndex = loop.pumpOutputIndex;
+        ed.dryOilPumpDemand = constrain(loop.failsafeDemandPct / 100.0f, 0.0f, 1.0f);
+        ed.dryOilPumpUntilMs = loop.immediatePumpRunDeciSec * 100UL;
+        ed.dryOilStopActive = response == HardwareConfig::OilFaultImmediateStop;
+        _trigger(code, name);
+        return true;
+    }
+
+    bool _checkOilLoops(EngineData& ed, SysMode mode, unsigned long now) {
+        if (!HardwareConfig::hasOilLoop ||
+            (mode != SysMode::STARTUP && mode != SysMode::RUNNING)) return false;
+        for (uint8_t i = 0; i < HardwareConfig::oilLoopCount; ++i) {
+            const auto& loop = HardwareConfig::oilLoops[i];
+            if (!loop.enabled || loop.pressureInputIndex >= HardwareConfig::channelRegistry.inputCount ||
+                loop.pumpOutputIndex >= HardwareConfig::channelRegistry.outputCount) continue;
+            const bool healthy = ed.registryInputHealthy[loop.pressureInputIndex];
+            if (_confirmed(!healthy, now, loop.failsafeDelayMs, _oilLoopFeedbackSinceMs[i])) {
+                if (_applyOilLoopResponse(ed, i, loop.feedbackLossResponse,
+                                          "OIL_FEEDBACK_LOST", _oilLoopFeedbackWarned[i])) return true;
+            } else if (healthy) {
+                _oilLoopFeedbackWarned[i] = false;
+            }
+            // Pressure is only judged once normal running has begun. Startup
+            // priming/spool blocks own their own pressure and timeout checks.
+            const float pressure = ed.registryInputValue[loop.pressureInputIndex];
+            const bool low = mode == SysMode::RUNNING && healthy &&
+                loop.lowPressureCentiBar > 0 && pressure < loop.lowPressureCentiBar / 100.0f;
+            if (_confirmed(low, now, loop.lowPressureConfirmMs, _oilLoopLowSinceMs[i])) {
+                if (_applyOilLoopResponse(ed, i, loop.lowPressureResponse,
+                                          "OIL_PRESSURE_LOW", _oilLoopLowWarned[i])) return true;
+            } else if (!low) {
+                _oilLoopLowWarned[i] = false;
+            }
+        }
+        return false;
     }
 
     void _resetSurge() {
@@ -693,12 +751,54 @@ private:
         }
     }
 
-    void _trigger(const char* code) {
+    int _effectiveRelightTriggerSource() const {
+        if (relightTriggerSource >= 1 && relightTriggerSource <= 3)
+            return relightTriggerSource;
+        if (HardwareConfig::hasFlame) return 1;
+        if (HardwareConfig::hasN1Rpm) return 2;
+        if (Config::effectiveEgtSource() != 0) return 3;
+        return 0;
+    }
+
+    bool _relightTriggerSourceUsable() const {
+        switch (_effectiveRelightTriggerSource()) {
+            case 1: return HardwareConfig::hasFlame;
+            case 2: return HardwareConfig::hasN1Rpm;
+            case 3: return Config::effectiveEgtSource() != 0;
+            default: return false;
+        }
+    }
+
+    bool _relightTriggerLost(const EngineData& ed) const {
+        switch (_effectiveRelightTriggerSource()) {
+            case 1:
+                return HardwareConfig::hasFlame && ed.flameHealthy && !ed.flameDetected;
+            case 2:
+                // Start below the recovery threshold, but the independent
+                // minimum firing speed must still be satisfied by the caller.
+                return HardwareConfig::hasN1Rpm && ed.n1Healthy &&
+                    ed.n1Rpm < Config::relightConfirmRpm;
+            case 3: {
+                if (!Config::primaryEgtHealthy(ed)) return false;
+                const float egt = Config::primaryEgtC(ed);
+                const bool belowAndFalling = relightTriggerEgtBelowC > 0.0f &&
+                    egt <= relightTriggerEgtBelowC && ed.totRiseRate < 0.0f;
+                const bool fallingRapidly = relightTriggerEgtFallRateCPerSec > 0.0f &&
+                    ed.totRiseRate <= -relightTriggerEgtFallRateCPerSec;
+                return belowAndFalling || fallingRapidly;
+            }
+            default:
+                return false;
+        }
+    }
+
+    void _trigger(const char* code, const char* detail = nullptr) {
         _lastFault = code;
         auto& ed = EngineData::instance();
 
         // Populate plain-language description for the web UI fault banner
         const char* desc = nullptr;
+        char fallbackDesc[256] = {};
         if      (strcmp(code, "OVERSPEED")  == 0) desc =
             "Engine over-speed: RPM exceeded the safety limit.\n"
             "What to do: Wait for the engine to cool down fully. Check your RPM limit setting "
@@ -728,16 +828,37 @@ private:
             "Oil pressure read near zero - possible pump failure or broken fitting.\n"
             "What to do: Inspect oil pump, lines, and fittings before any restart. "
             "Do not run the engine until oil supply is confirmed.";
-        else if (strcmp(code, "OIL_PUMP_OVERCURRENT") == 0) desc =
-            "Oil pump current remained above its configured limit.\n"
-            "What to do: Check the pump, driver, wiring, oil viscosity and current-sensor calibration before restarting.";
+        else if (strcmp(code, "OUTPUT_OVERCURRENT") == 0) {
+            snprintf(fallbackDesc, sizeof(fallbackDesc),
+                "%s current remained above its configured shutdown limit.\n"
+                "What to do: Check that output's load, driver, wiring and current-sensor calibration before restarting.",
+                detail && detail[0] ? detail : "An output");
+            desc = fallbackDesc;
+        }
         else if (strcmp(code, "OIL_FLOW_LOW") == 0) desc =
             "A monitored oil pump did not produce the configured minimum flow for the confirmation time.\n"
             "What to do: Check oil level, pump operation, filters, lines and flow-meter calibration before restarting.";
+        else if (strcmp(code, "OIL_PRESSURE_LOW") == 0) {
+            snprintf(fallbackDesc, sizeof(fallbackDesc),
+                "%s pressure remained below this oil loop's configured minimum.\n"
+                "What to do: Check oil level, pump, lines, relief/accumulator arrangement and pressure-sensor calibration before clearing the fault.",
+                detail && detail[0] ? detail : "Oil system");
+            desc = fallbackDesc;
+        }
+        else if (strcmp(code, "OIL_FEEDBACK_LOST") == 0) {
+            snprintf(fallbackDesc, sizeof(fallbackDesc),
+                "%s pressure feedback was lost for longer than this oil loop permits.\n"
+                "What to do: Check the selected pressure sensor, wiring and calibration before clearing the fault.",
+                detail && detail[0] ? detail : "Oil system");
+            desc = fallbackDesc;
+        }
         else if (strcmp(code, "FLAMEOUT")   == 0) desc =
-            "Flameout: combustion was lost according to the configured flameout source, and relight was not possible.\n"
+            "Combustion-loss shutdown: the independent monitor confirmed loss for its configured time.\n"
             "What to do: Check fuel supply, fuel valve, and the selected flameout sensor/source. "
-            "Ensure ignition system is working. Try a normal start.";
+            "Inspect the cause before another start.";
+        else if (strcmp(code, "RELIGHT_FAILED") == 0) desc =
+            "Automatic relight failed: combustion did not recover within the configured relight window, or N1 fell below the safe firing speed.\n"
+            "What to do: Check fuel delivery, the selected relight trigger and confirmation sensors, and the selected ignition device before restarting.";
         else if (strcmp(code, "UNDERSPEED") == 0) desc =
             "Under-speed: RPM dropped below the minimum running threshold.\n"
             "What to do: Check fuel supply and throttle settings. "
@@ -776,14 +897,13 @@ private:
             desc = multipleSensorDesc;
         }
         // Fallback for unknown / DI-channel fault codes — generate a generic message
-        char _fallbackDesc[192];
         if (!desc) {
-            snprintf(_fallbackDesc, sizeof(_fallbackDesc),
+            snprintf(fallbackDesc, sizeof(fallbackDesc),
                 "Safety fault: %s. Engine has been shut down as a precaution.\n"
                 "Check the event log for sensor readings at the time of the fault "
                 "and review relevant calibration and limit settings before restarting.",
                 code);
-            desc = _fallbackDesc;
+            desc = fallbackDesc;
         }
 
         ed.faultDescription[0] = '\0';  // clear previous fault message before writing

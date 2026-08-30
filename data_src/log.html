@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#101012">
 <title>OpenTurbine — Log</title>
-<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}</style>
+<style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}@keyframes otFailsafeReveal{to{visibility:visible}}html:not(.ot-theme-ready) body{visibility:hidden;animation:otFailsafeReveal 0s 8s forwards}</style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260824a',false);x.send(null);if(x.status>=200&&x.status<300){var s=document.createElement('script');s.setAttribute('data-ot-version','20260824a');s.setAttribute('data-ot-app','true');s.text=x.responseText;document.head.appendChild(s);}}catch(e){}},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260828c',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260828c');s.setAttribute('data-ot-app','true');s.text=c;document.head.appendChild(s);},{once:true});</script>
 </head>
 <body>
 <nav>
@@ -132,8 +132,9 @@ document.addEventListener('DOMContentLoaded',function(){try{var x=new XMLHttpReq
           <label class="slog-chk"><input type="checkbox" data-bit="ab">Afterburner state/fuel</label>
           <label class="slog-chk"><input type="checkbox" data-bit="prop">Prop pitch %</label>
           <label class="slog-chk"><input type="checkbox" data-bit="mode">Engine state</label>
-          <label class="slog-chk" title="Records loop frequency (Hz), average execution time (ms), and maximum execution time (ms)."><input type="checkbox" data-bit="loop">ECU loop timing (Hz / ms)</label>
+          <label class="slog-chk" title="Records loop frequency, worst complete cycle, average/maximum execution time, and cumulative missed deadlines."><input type="checkbox" data-bit="loop">ECU loop timing (Hz / ms)</label>
         </div>
+        <div id="registry-log-inputs" style="margin-top:.7rem;padding-top:.65rem;border-top:1px solid var(--border);font-size:.72rem;color:var(--dim)">Loading fitted general sensors…</div>
         <div style="margin-top:.65rem;font-size:.7rem;color:var(--dim)">Changes take effect on the next engine start.</div>
         <label class="slog-chk" style="display:block;margin-top:.6rem" title="When off, Event Log does not add periodic sensor snapshots while the ECU is in standby.">
           <input type="checkbox" id="log-standby"> Log periodic snapshots while in standby
@@ -630,6 +631,39 @@ function confirmClear() {
 const SLOG_BITS = ['n1','n2','tot','tit','oil_temp','oil','p1','p2','torque','thrust','throttle','starter','oil_pct','batt','fuel_press','fuel_flow','glow','wet_glow','glow_current','ign_current','ign2_current','oil_current','fp2','ab','prop','mode','loop'];
 let _sessionSettingsLocked = false;
 let _sessionSettingsLoaded = false;
+let _loadedRegistryLogIds = [];
+
+function _registryLogUnit(purpose) {
+  return ({
+    shaft_speed:'RPM', general_temperature:'°C', general_pressure:'bar',
+    general_flow:'L/min', general_current:'A', general_voltage:'V',
+    general_torque:'Nm', general_thrust:'N'
+  })[purpose] || '';
+}
+
+function _renderRegistryLogInputs(hw, selectedIds) {
+  const host = document.getElementById('registry-log-inputs');
+  if (!host) return;
+  const selected = new Set(Array.isArray(selectedIds) ? selectedIds.map(String) : []);
+  const channels = (hw?.channel_registry?.inputs || []).filter(channel => {
+    const purpose = String(channel?.purpose || '');
+    return channel?.installed !== false && channel?.id &&
+      (purpose === 'shaft_speed' || purpose.startsWith('general_'));
+  });
+  if (!channels.length) {
+    host.innerHTML = '<span>No fitted general-purpose sensors. Add one on Hardware to make it selectable here.</span>';
+    return;
+  }
+  host.innerHTML = '<div style="text-transform:uppercase;letter-spacing:.08em;margin-bottom:.5rem">Fitted general sensors</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:.5rem .9rem">' + channels.map(channel => {
+      const id = String(channel.id);
+      const name = String(channel.name || id);
+      const unit = _registryLogUnit(String(channel.purpose || ''));
+      return `<label class="slog-chk" title="Record this fitted sensor as its own session CSV column.">` +
+        `<input type="checkbox" data-registry-log-id="${escapeHtmlText(id)}"${selected.has(id) ? ' checked' : ''}>` +
+        `${escapeHtmlText(name)}${unit ? ' (' + escapeHtmlText(unit) + ')' : ''}</label>`;
+    }).join('') + '</div>';
+}
 
 function loadSessionCfg() {
   _sessionSettingsLoaded = false;
@@ -641,6 +675,7 @@ function loadSessionCfg() {
   loadSessionCfgJson().then(({cfg, hw, status}) => {
     _sessionSettingsLocked = !!status?.locked;
     const sl = cfg.session_log || {};
+    _loadedRegistryLogIds = Array.isArray(sl.registry_inputs) ? sl.registry_inputs.map(String) : [];
     const sb = document.getElementById('log-standby');
     if (sb) sb.checked = !!cfg.telemetry?.log_standby;
     const sessionInterval = document.getElementById('session-log-interval');
@@ -651,6 +686,7 @@ function loadSessionCfg() {
       const el = document.querySelector('[data-bit="' + bit + '"]');
       if (el) el.checked = !!sl[bit];
     });
+    _renderRegistryLogInputs(hw, _loadedRegistryLogIds);
     _sessionSettingsLoaded = true;
     _applyLogHwVisibility(hw);
     _applySessionSettingsLock();
@@ -658,6 +694,7 @@ function loadSessionCfg() {
     // Fallback: at least load the config without hardware filtering
     fetch('/api/config').then(r => r.json()).then(cfg => {
       const sl = cfg.session_log || {};
+      _loadedRegistryLogIds = Array.isArray(sl.registry_inputs) ? sl.registry_inputs.map(String) : [];
       const sessionInterval = document.getElementById('session-log-interval');
       const snapshotInterval = document.getElementById('event-snapshot-interval');
       if (sessionInterval) sessionInterval.value = Number(sl.interval_ms || 1000);
@@ -669,6 +706,7 @@ function loadSessionCfg() {
           el.disabled = _sessionSettingsLocked;
         }
       });
+      _renderRegistryLogInputs(null, _loadedRegistryLogIds);
       _sessionSettingsLoaded = true;
       _applySessionSettingsLock();
     }).catch(() => {});
@@ -798,6 +836,14 @@ function _applySessionSettingsLock() {
     const input = document.getElementById(id);
     if (input) input.disabled = controlsLocked;
   });
+  document.querySelectorAll('[data-registry-log-id]').forEach(input => {
+    input.disabled = controlsLocked;
+    const label = input.closest('label.slog-chk');
+    if (label) {
+      label.style.opacity = controlsLocked ? '0.55' : '';
+      label.style.cursor = controlsLocked ? 'not-allowed' : '';
+    }
+  });
   const sbLabel = sb ? sb.closest('label.slog-chk') : null;
   if (sbLabel) {
     sbLabel.style.opacity = controlsLocked ? '0.55' : '';
@@ -874,12 +920,15 @@ function saveSessionCfg() {
       const el = document.querySelector('[data-bit="' + bit + '"]');
       patch.session_log[bit] = el ? el.checked : false;
     });
-    fetch('/api/config', {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-      headers: { 'Content-Type': 'application/json' }
-    }).then(async r => {
-      if (!r.ok) throw new Error(await r.text() || ('HTTP ' + r.status));
+    const registryChoices = Array.from(document.querySelectorAll('[data-registry-log-id]'));
+    patch.session_log.registry_inputs = registryChoices.length
+      ? registryChoices.filter(input => input.checked).map(input => input.dataset.registryLogId)
+      : _loadedRegistryLogIds.slice();
+    if (typeof window.OTSaveConfigPatch !== 'function')
+      throw new Error('Shared save support did not load; reload this page and retry');
+    window.OTSaveConfigPatch(patch).then(({response, data}) => {
+      if (!response?.ok || data?.ok === false)
+        throw new Error(data?.error || ('HTTP ' + (response?.status || 0)));
     }).then(() => {
       const msg = document.getElementById('session-save-msg');
       if (msg) { msg.style.display = ''; setTimeout(() => msg.style.display = 'none', 2000); }

@@ -1,0 +1,13 @@
+Classic v2.2 final cb0debb0 ESP32 build=cb0debb03f749508; original ramp=600 ms; duration=120s
+Classic v2.2 final cb0debb0 navigation 1: /controllers.html connected heap=51700/38900 ws=0 tw=0 boot=undefined reset=undefined
+Classic v2.2 final cb0debb0 edit: throttle ramp 650 ms save acknowledged
+Classic v2.2 final cb0debb0 navigation 2: /tools.html connected heap=54220/38900 ws=0 tw=0 boot=undefined reset=undefined
+Classic v2.2 final cb0debb0 complete engine-file download + same-file restore passed
+Classic v2.2 final cb0debb0 navigation 3: / connected heap=54248/38900 ws=0 tw=0 boot=undefined reset=undefined
+Classic v2.2 final cb0debb0 navigation 4: /hardware.html connected heap=53360/38900 ws=0 tw=0 boot=undefined reset=undefined
+Classic v2.2 final cb0debb0 navigation 5: /controllers.html connected heap=54664/38900 ws=0 tw=0 boot=undefined reset=undefined
+Classic v2.2 final cb0debb0 restore: throttle ramp 600 ms save acknowledged
+Classic v2.2 final cb0debb0 navigation 6: / connected heap=52564/38900 ws=0 tw=0 boot=undefined reset=undefined
+Classic v2.2 final cb0debb0 recovered 4 top-level document retry/retries; every resulting page reached CONNECTED.
+Classic v2.2 final cb0debb0 recovered 5 transient API GET reset(s) during page handoff.
+Classic v2.2 final cb0debb0 realistic session PASSED: 113s, 6 navigations, 2 persisted config saves, original config restored.

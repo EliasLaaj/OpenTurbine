@@ -141,9 +141,22 @@ def main() -> int:
         throttle = t.get("THROTTLE_OUT")
         sol = t.get("STARTER_EN")
         fuel = t.get("FUEL_SOL")
+        telemetry_clear, stopped_full = dut.poll_until(
+            lambda d: (
+                not d.get("ab_sol_open") and
+                float(d.get("ab_pump_demand") or 0) <= 0.001 and
+                float(d.get("ab_fuel_offset") or 0) <= 0.001
+            ),
+            timeout=2, interval=0.08,
+        )
+        # Capture one coherent post-cut document for the report. Compact live
+        # telemetry rotates field groups and can legitimately retain the last
+        # RUNNING AB group for one frame after the physical pins are already safe.
+        stopped_data = dut.full_data()
         safe = (
             stopped and int(throttle.get("us") or 0) <= 1050 and
             int(sol.get("level") or 0) == 0 and int(fuel.get("level") or 0) == 0 and
+            telemetry_clear and
             not stopped_data.get("ab_sol_open") and
             float(stopped_data.get("ab_pump_demand") or 0) <= 0.001 and
             float(stopped_data.get("ab_fuel_offset") or 0) <= 0.001

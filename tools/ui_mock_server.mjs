@@ -138,13 +138,24 @@ function makeHardware() {
     mavlink: { enabled: true, tx_pin: 3, baud: 57600, interval_ms: 100 },
     controllers: { oil_loop: true, dynamic_idle: true, governor: true },
     safety: { overspeed: true, n2_overspeed: true, overtemp: true, low_oil: true, oil_zero: true, flameout: true, hot_start: true, oil_temp_high: true, fuel_press_low: true, batt_low: true, surge: true },
-    startup_seq: ['OilPumpOn', 'TimedDelay', 'IgniterOn', 'FuelPumpIdle', 'TimedDelay', 'IgniterOff', 'TimedDelay'],
+    startup_seq: ['SetOutput', 'TimedDelay', 'SetOutput', 'FuelPumpIdle', 'TimedDelay', 'SetOutput', 'TimedDelay'],
     startup_delay_ms: [0, 15000, 0, 0, 10000, 0, 5000],
-    shutdown_seq: ['ImmediateCut', 'TimedDelay', 'OilPumpOff'],
+    startup_enter_actions: [
+      [{act:7,target:'oil_pump',value:1}], [], [{act:9,target:'igniter',value:1}], [], [],
+      [{act:9,target:'igniter',value:0}], []
+    ],
+    startup_exit_actions: [[], [], [], [], [], [], []],
+    shutdown_seq: ['ImmediateCut', 'TimedDelay', 'SetOutput'],
     shutdown_delay_ms: [0, 15000, 0],
+    shutdown_enter_actions: [[], [], [{act:7,target:'oil_pump',value:0}]],
+    shutdown_exit_actions: [[], [], []],
     ab_trigger: { source: 0, requires_arm: true, arm_pin: 35, arm_active_h: true, switch_pin: 34, switch_active_h: true, input_pin: -1, input_rc_pwm: false, input_min_us: 1000, input_max_us: 2000, input_threshold: 2048 },
-    ab_seq: ['ABCheckReady', 'ABSolOpen', 'ABPumpOn', 'ABIgnite', 'ABFlameConfirm', 'ABStabilize'],
-    ab_shut_seq: ['ABPumpOff', 'ABSolClose', 'ABIgnOff'],
+    ab_seq: ['ABCheckReady', 'SetOutput', 'SetOutput', 'ABIgnite', 'ABFlameConfirm', 'ABStabilize'],
+    ab_enter_actions: [[], [{act:11,target:'ab_solenoid',value:1}], [{act:12,target:'ab_pump',value:0.8}], [], [], []],
+    ab_exit_actions: [[], [], [], [], [], []],
+    ab_shut_seq: ['SetOutput', 'SetOutput', 'SetOutput'],
+    ab_shut_enter_actions: [[{act:12,target:'ab_pump',value:0}], [{act:11,target:'ab_solenoid',value:0}], [{act:10,target:'ab_igniter',value:0}]],
+    ab_shut_exit_actions: [[], [], []],
     labels: { tot: 'TOT', tit: 'TIT', n1: 'N1', n2: 'N2', oil_press: 'Oil Press', oil_temp: 'Oil Temp', p1: 'Pressure 1', p2: 'Pressure 2', fuel_press: 'Fuel Press', fuel_flow: 'Fuel Flow', stop: 'Stop', start: 'Start', ab_arm: 'AB Arm' },
     di_channels: [
       { pin: 18, active_h: true, debounce_ms: 20, label: 'Door interlock', role: 'fault', fault_code: 20, fault_msg: 'Door open', active_modes: 7 },
@@ -177,7 +188,7 @@ function makeSettings() {
     telemetry: { ws_interval_ms: 100, snapshot_interval_ms: 500, log_standby: false },
     starter_control: { pulsed_assist_enabled: true, pulsed_assist_pwm_pct: 15, pulsed_assist_until_rpm: 1000, pulsed_assist_on_ms: 500, pulsed_assist_off_ms: 250, startup_ramp_pct_per_s: 5 },
     oil_advanced: { zero_bar: 0.05, deadband_bar: 0.1, pump_underflow_delay_ms: 5000, shutdown_on_underflow: false },
-    standby_oil: { source: 0, rpm_limit: 500, feed_pct: 10 },
+    standby_oil: { enabled: false, source: 0, rpm_limit: 500, feed_pct: 10 },
     limp_mode: { max_throttle_pct: 35 },
     misc: { cooldown_skip_hold_ms: 1500, igniter_on_start: true },
     rpm_health: { jump_threshold: 15000, zero_stuck_ticks: 20 },
@@ -322,11 +333,11 @@ function blankCommissioningState() {
   next.settings.profile_id = 'blank-devboard';
   next.settings.relight.enabled = false;
   next.data = scenarios.minimal();
-  syncDataFromHardware(next.data, next.hardware);
+  syncDataFromHardware(next.data, next.hardware, next.settings);
   return next;
 }
 
-function syncDataFromHardware(data, hardware) {
+function syncDataFromHardware(data, hardware, settings = state?.settings || {}) {
   const s = hardware.sensors || {};
   const a = hardware.actuators || {};
   const registryInputs = hardware.channel_registry?.inputs || [];
@@ -376,7 +387,10 @@ function syncDataFromHardware(data, hardware) {
   data.has_pulsed_starter_assist = !!(data.has_n1 &&
     (a.starter?.enabled || hardware.has_starter) &&
     a.starter?.type !== 2);
-  data.relight_enabled = !!(hardware.safety?.flameout && data.has_n1 && a.igniter?.enabled);
+  data.relight_enabled = !!(settings.relight?.enabled && data.has_n1 &&
+    ((hardware.channel_registry?.outputs || []).some(output =>
+      output?.installed !== false && ['igniter','ab_igniter','glow_plug'].includes(String(output?.purpose || ''))) ||
+     a.igniter?.enabled || a.igniter2?.enabled || a.glow_plug?.enabled));
   data.throttle_input_type = s.throttle_input?.enabled ? (s.throttle_input?.rc_pwm ? 'servo' : 'adc') : 'none';
   data.idle_input_type = s.idle_input?.enabled ? (s.idle_input?.rc_pwm ? 'servo' : 'adc') : 'none';
   data.rc_pwm_active = !!((s.throttle_input?.enabled && s.throttle_input?.rc_pwm) ||
@@ -517,7 +531,10 @@ const server = http.createServer(async (req, res) => {
       const body = await bodyJson(req);
       if (req.method === 'PATCH') state.last_config_patch = clone(body);
       state.settings = req.method === 'POST' ? body : merge(state.settings, body);
-      return sendJson(res, 200, { ok: true });
+      const live = req.method === 'PATCH' && state.data.mode === 'RUNNING' && state.data.dev_mode;
+      return sendJson(res, 200, live
+        ? { ok:true, saved:false, persist:'deferred_until_safe', applying:true, live_now:false }
+        : { ok:true, saved:true, applying:true });
     }
     if (req.method === 'POST' && url.pathname === '/api/theme') {
       state.settings.ui_theme = url.searchParams.get('t') || state.settings.ui_theme;
@@ -533,7 +550,7 @@ const server = http.createServer(async (req, res) => {
         delete body.channel_registry_calibration;
       }
       state.hardware = req.method === 'POST' ? body : merge(state.hardware, body);
-      syncDataFromHardware(state.data, state.hardware);
+      syncDataFromHardware(state.data, state.hardware, state.settings);
       if (req.method === 'POST' && state.hardware.profile_id) {
         state.settings.profile_id = state.hardware.profile_id;
       }
@@ -550,7 +567,7 @@ const server = http.createServer(async (req, res) => {
       }
       state.hardware = body.hardware;
       state.settings = body.settings;
-      syncDataFromHardware(state.data, state.hardware);
+      syncDataFromHardware(state.data, state.hardware, state.settings);
       return sendJson(res, 200, { ok: true, reboot: true });
     }
     if (req.method === 'POST' && url.pathname === '/api/start') {

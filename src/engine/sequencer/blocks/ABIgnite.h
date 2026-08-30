@@ -2,6 +2,8 @@
 #include "../IBlock.h"
 #include "../../EngineData.h"
 #include "../../../system/Config.h"
+#include "../../../system/HardwareConfig.h"
+#include "../SequenceIgnition.h"
 #include <Arduino.h>
 
 // ============================================================
@@ -60,6 +62,11 @@ public:
         if (_useIgniterEff) {
             if (!ed.abFirstIgnitionMs) ed.abFirstIgnitionMs = millis();
             ed.igniter2On = true;
+            const char* outputId = HardwareConfig::defaultOutputIdForPurpose("ab_igniter");
+            const auto* output = HardwareConfig::channelRegistry.find(outputId, ChannelRegistry::Output);
+            const int8_t outputIndex = output
+                ? (int8_t)(output - HardwareConfig::channelRegistry.outputs) : -1;
+            setSequenceIgnitionTracked(outputIndex, true);
             Serial.println("[AB] Ignite: AB igniter ON");
         }
     }

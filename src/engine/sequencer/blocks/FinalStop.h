@@ -40,7 +40,7 @@ public:
                 ed.oilPumpPct = 0;
                 // Start scavenge phase if pump is fitted and duration > 0
                 if (oilScavengeMs > 0 && HardwareConfig::hasOilScavengePump) {
-                    ed.oilScavengeDemand = 1.0f; ed.oilScavengeOn = true;
+                    ed.oilScavengeDemand = 1.0f;
                     _stoppedMs = now;
                     _phase     = 1;
                 } else {
@@ -74,7 +74,7 @@ public:
         auto& ed = EngineData::instance();
         ed.oilTargetBar     = 0;
         ed.oilPumpPct  = 0;
-        ed.oilScavengeDemand = 0.0f; ed.oilScavengeOn = false;
+        ed.oilScavengeDemand = 0.0f;
     }
 
 private:
