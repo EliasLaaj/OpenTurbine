@@ -8,7 +8,7 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ---
 
-## [2.2.0] — Unreleased
+## [2.2.0] — 2026-08-30
 
 ### Development focus
 - Harden real-time behavior, turbine-plant fault coverage, persistence, and long-duration operation without expanding OpenTurbine beyond its role as a versatile experimental turbine ECU.

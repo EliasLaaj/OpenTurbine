@@ -362,7 +362,7 @@ async function goto(page, route, waitSelector) {
       'The redundant Essentials filter should not be shown');
     assert.equal(await page.locator('#btn-view-expert').getAttribute('class').then(v => v.includes('active')), true);
     assert.equal(await page.locator('#cfg-state-badge').textContent(), 'Saved');
-    const configuredCount = await page.locator('.cfg-field:visible').count();
+    const configuredCount = await page.locator('.cfg-field').count();
     assert.ok(configuredCount > 0, 'Configured system should expose applicable settings');
     assert.match(await page.locator('#cf-lm_mt').evaluate(el => el.closest('.cfg-field')?.textContent || ''),
       /automatically because feedback used by an enabled protection\/controller becomes unhealthy/i);

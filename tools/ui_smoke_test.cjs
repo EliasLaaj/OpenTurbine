@@ -987,6 +987,7 @@ function installedBrowser() {
     assert.equal(await igniterOwnerCard.locator('#relight-section').count(), 1);
     assert.equal(await igniterOwnerCard.locator('#manual-relight-section').count(), 1);
     const creator = page.locator('#controller-overview .controller-create-card');
+    await creator.locator(':scope > summary').click();
     await creator.locator('#new-controller-output').selectOption('warning_lamp_pwm');
     await creator.getByRole('button', {name:'Create controller', exact:true}).click();
     const simpleCard = page.locator('#controller-overview [data-controller-output="warning_lamp_pwm"]');
