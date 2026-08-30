@@ -918,23 +918,25 @@ const BLOCK_INFO = {
 };
 
 // ------ Block info panel ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
-let _infoPanelBlock = null;
+let _openBlockInfoPanel = null;
 
-function showBlockInfo(bname) {
-  const info = BLOCK_INFO[bname];
-  const panel = document.getElementById('block-info-panel');
+function showBlockInfo(bname, trigger) {
+  const card = trigger?.closest('.block-card');
+  const panel = card?.querySelector('.block-info-panel');
   if (!panel) return;
-  if (!info) {
-    panel.style.display = 'none';
-    _infoPanelBlock = null;
+
+  if (_openBlockInfoPanel === panel && !panel.hidden) {
+    hideBlockInfo(panel);
     return;
   }
-  _infoPanelBlock = bname;
+
+  hideBlockInfo();
   const def = BLOCKS[bname] || {};
+  const info = BLOCK_INFO[bname] || { desc: def.desc || 'This block is configured entirely within the sequence.', links: [] };
   const missingGlowHardware = bname === 'GlowPreheat' && !actuatorEnabled('glow_plug');
   const infoLinks = missingGlowHardware
     ? [{label:'Install or configure Glow Plug hardware', url:'/hardware.html#registry-outputs'}]
-    : info.links;
+    : (info.links || []);
   const linksHtml = infoLinks.length
     ? `<div class="bip-links-label">${missingGlowHardware ? 'Hardware required:' : 'Config fields used:'}</div><div class="bip-links">` +
       infoLinks.map(l => `<a class="bip-link" href="${l.url}">${l.label}</a>`).join('') +
@@ -943,15 +945,23 @@ function showBlockInfo(bname) {
   panel.innerHTML = `
     <div class="bip-header">
       <span class="bip-name">${def.label ?? bname}</span>
-      <button class="bip-close" onclick="hideBlockInfo()">x</button>
+      <button type="button" class="bip-close" aria-label="Close block explanation" onclick="hideBlockInfo(this.closest('.block-info-panel'))">Close</button>
     </div>
     <div class="bip-desc">${info.desc}</div>
     ${linksHtml}`;
-  panel.style.display = '';
+  panel.hidden = false;
+  trigger.setAttribute('aria-expanded', 'true');
+  trigger.classList.add('active');
+  _openBlockInfoPanel = panel;
 }
 
-function hideBlockInfo() {
-  const panel = document.getElementById('block-info-panel');
-  if (panel) panel.style.display = 'none';
-  _infoPanelBlock = null;
+function hideBlockInfo(panel = _openBlockInfoPanel) {
+  if (!panel) return;
+  panel.hidden = true;
+  const trigger = panel.closest('.block-card')?.querySelector('.bip-btn');
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.classList.remove('active');
+  }
+  if (_openBlockInfoPanel === panel) _openBlockInfoPanel = null;
 }

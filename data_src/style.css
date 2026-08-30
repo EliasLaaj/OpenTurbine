@@ -1988,15 +1988,15 @@ select option.pin-inonly { color: #5ba3e0; }
 }
 
 /* ── Block info panel (sequence page) ───────────────────────── */
-#block-info-panel {
+.block-info-panel {
   background: var(--surface-2);
-  border: 1px solid var(--accent);
-  border-radius: var(--r-md);
+  border-top: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  border-bottom: 1px solid var(--border);
   padding: .75rem 1rem;
-  margin-bottom: 1rem;
   font-size: .78rem;
   line-height: 1.55;
 }
+.block-info-panel[hidden] { display: none; }
 .bip-header {
   display: flex; align-items: center; gap: .5rem;
   margin-bottom: .45rem;
@@ -2029,7 +2029,8 @@ select option.pin-inonly { color: #5ba3e0; }
 
 /* Info button in block actions */
 .blk-btn.bip-btn { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
-.blk-btn.bip-btn:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.blk-btn.bip-btn:hover,
+.blk-btn.bip-btn.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 
 /* A disconnected dashboard must not leave old instruments looking live. */
 body.telemetry-stale .telemetry,

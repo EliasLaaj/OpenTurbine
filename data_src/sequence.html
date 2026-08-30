@@ -8,7 +8,7 @@
 <style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}@keyframes otFailsafeReveal{to{visibility:visible}}html:not(.ot-theme-ready) body{visibility:hidden;animation:otFailsafeReveal 0s 8s forwards}</style>
 <title>OpenTurbine - Sequence</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260828d',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260828d');s.text=c;document.head.appendChild(s);},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260830a',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260830a');s.text=c;document.head.appendChild(s);},{once:true});</script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -290,8 +290,6 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
 
   </div>
 </div>
-
-<div id="block-info-panel" style="display:none"></div>
 
 <div class="save-bar seq-save-bar" id="sequence-save-bar">
   <div class="save-status" id="save-status">Loading configuration…</div>
@@ -1228,23 +1226,25 @@ const BLOCK_INFO = {
 };
 
 // ------ Block info panel ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
-let _infoPanelBlock = null;
+let _openBlockInfoPanel = null;
 
-function showBlockInfo(bname) {
-  const info = BLOCK_INFO[bname];
-  const panel = document.getElementById('block-info-panel');
+function showBlockInfo(bname, trigger) {
+  const card = trigger?.closest('.block-card');
+  const panel = card?.querySelector('.block-info-panel');
   if (!panel) return;
-  if (!info) {
-    panel.style.display = 'none';
-    _infoPanelBlock = null;
+
+  if (_openBlockInfoPanel === panel && !panel.hidden) {
+    hideBlockInfo(panel);
     return;
   }
-  _infoPanelBlock = bname;
+
+  hideBlockInfo();
   const def = BLOCKS[bname] || {};
+  const info = BLOCK_INFO[bname] || { desc: def.desc || 'This block is configured entirely within the sequence.', links: [] };
   const missingGlowHardware = bname === 'GlowPreheat' && !actuatorEnabled('glow_plug');
   const infoLinks = missingGlowHardware
     ? [{label:'Install or configure Glow Plug hardware', url:'/hardware.html#registry-outputs'}]
-    : info.links;
+    : (info.links || []);
   const linksHtml = infoLinks.length
     ? `<div class="bip-links-label">${missingGlowHardware ? 'Hardware required:' : 'Config fields used:'}</div><div class="bip-links">` +
       infoLinks.map(l => `<a class="bip-link" href="${l.url}">${l.label}</a>`).join('') +
@@ -1253,17 +1253,25 @@ function showBlockInfo(bname) {
   panel.innerHTML = `
     <div class="bip-header">
       <span class="bip-name">${def.label ?? bname}</span>
-      <button class="bip-close" onclick="hideBlockInfo()">x</button>
+      <button type="button" class="bip-close" aria-label="Close block explanation" onclick="hideBlockInfo(this.closest('.block-info-panel'))">Close</button>
     </div>
     <div class="bip-desc">${info.desc}</div>
     ${linksHtml}`;
-  panel.style.display = '';
+  panel.hidden = false;
+  trigger.setAttribute('aria-expanded', 'true');
+  trigger.classList.add('active');
+  _openBlockInfoPanel = panel;
 }
 
-function hideBlockInfo() {
-  const panel = document.getElementById('block-info-panel');
-  if (panel) panel.style.display = 'none';
-  _infoPanelBlock = null;
+function hideBlockInfo(panel = _openBlockInfoPanel) {
+  if (!panel) return;
+  panel.hidden = true;
+  const trigger = panel.closest('.block-card')?.querySelector('.bip-btn');
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.classList.remove('active');
+  }
+  if (_openBlockInfoPanel === panel) _openBlockInfoPanel = null;
 }
 
 // Source: data_src/pages/sequence-state.js
@@ -2136,10 +2144,11 @@ function buildCard(bname, idx, tab) {
     <div class="block-actions" onclick="event.stopPropagation()">
       <button type="button" class="blk-btn drag-handle" title="Drag to reorder; arrow keys also work" aria-label="Drag to reorder block; use up and down arrow keys"><span class="drag-grip" aria-hidden="true"></span></button>
       ${customBlocks[bname] ? `<button class="blk-btn" onclick="editCustomBlock('${bname}','${tab}')">Edit</button>` : ''}
-      ${BLOCK_INFO[bname] ? `<button class="blk-btn bip-btn" aria-label="Explain ${esc(def?.label ?? bname)}" title="${esc(def?.desc || 'What does this block use?')}" onclick="showBlockInfo('${bname}')">?</button>` : ''}
+      <button type="button" class="blk-btn bip-btn" aria-label="Explain ${esc(def?.label ?? bname)}" aria-expanded="false" title="Explain this block" onclick="showBlockInfo('${bname}',this)">?</button>
       <button class="blk-btn del" title="Remove this sequence block" aria-label="Remove this sequence block" onclick="removeBlock('${tab}',${idx})">Remove</button>
     </div>
   </div>
+  <div class="block-info-panel" hidden></div>
   ${buildParamsHtml(bname, idx, tab)}`;
 
   wireBlockDragHandle(card, tab, idx);
@@ -2575,8 +2584,8 @@ function updateSetOutput(tab, idx, newTarget, newValue) {
 }
 
 function toggleParams(header) {
-  const panel = header.nextElementSibling;
-  panel.classList.toggle('open');
+  const panel = header.closest('.block-card')?.querySelector('.block-params');
+  if (panel) panel.classList.toggle('open');
 }
 
 function onParamChange(bname, pkey, configKey, rawVal, tab, idx) {

@@ -52,10 +52,11 @@ function buildCard(bname, idx, tab) {
     <div class="block-actions" onclick="event.stopPropagation()">
       <button type="button" class="blk-btn drag-handle" title="Drag to reorder; arrow keys also work" aria-label="Drag to reorder block; use up and down arrow keys"><span class="drag-grip" aria-hidden="true"></span></button>
       ${customBlocks[bname] ? `<button class="blk-btn" onclick="editCustomBlock('${bname}','${tab}')">Edit</button>` : ''}
-      ${BLOCK_INFO[bname] ? `<button class="blk-btn bip-btn" aria-label="Explain ${esc(def?.label ?? bname)}" title="${esc(def?.desc || 'What does this block use?')}" onclick="showBlockInfo('${bname}')">?</button>` : ''}
+      <button type="button" class="blk-btn bip-btn" aria-label="Explain ${esc(def?.label ?? bname)}" aria-expanded="false" title="Explain this block" onclick="showBlockInfo('${bname}',this)">?</button>
       <button class="blk-btn del" title="Remove this sequence block" aria-label="Remove this sequence block" onclick="removeBlock('${tab}',${idx})">Remove</button>
     </div>
   </div>
+  <div class="block-info-panel" hidden></div>
   ${buildParamsHtml(bname, idx, tab)}`;
 
   wireBlockDragHandle(card, tab, idx);
@@ -491,8 +492,8 @@ function updateSetOutput(tab, idx, newTarget, newValue) {
 }
 
 function toggleParams(header) {
-  const panel = header.nextElementSibling;
-  panel.classList.toggle('open');
+  const panel = header.closest('.block-card')?.querySelector('.block-params');
+  if (panel) panel.classList.toggle('open');
 }
 
 function onParamChange(bname, pkey, configKey, rawVal, tab, idx) {

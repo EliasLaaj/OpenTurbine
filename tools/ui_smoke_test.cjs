@@ -415,7 +415,7 @@ function installedBrowser() {
     assert.equal(await page.locator('#fault-desc-text').evaluate(el =>
       ['anywhere', 'break-word'].includes(getComputedStyle(el).overflowWrap)), true);
     for (const route of ['/log.html', '/calibration.html', '/controllers.html', '/tools.html'])
-      assert.equal(await page.locator(`#fault-card a[href="${route}?v=20260828d"]`).count(), 1);
+      assert.equal(await page.locator(`#fault-card a[href="${route}?v=20260830a"]`).count(), 1);
     results.push('fault scenario exposes the current diagnosis and direct investigation routes');
 
     await scenario(page, 'full');
@@ -815,6 +815,19 @@ function installedBrowser() {
     assert.equal(stableDeviceBinding.saveBlocked, true);
     assert.equal(stableDeviceBinding.groupedOverrides, true,
       'sequence output selectors should group purpose matches before explicit alternate outputs');
+    const startupCards = page.locator('#list-startup .block-card');
+    assert.equal(await page.locator('#list-startup .bip-btn').count(), await startupCards.count(),
+      'every sequence block should expose the same help control');
+    assert.equal(await page.locator('#block-info-panel').count(), 0,
+      'sequence help must not use a detached panel at the bottom of the page');
+    const firstInfoButton = page.locator('#list-startup .bip-btn').first();
+    await firstInfoButton.click();
+    const firstInfoPanel = page.locator('#list-startup .block-card').first().locator('.block-info-panel');
+    assert.equal(await firstInfoPanel.isVisible(), true);
+    assert.equal(await firstInfoButton.getAttribute('aria-expanded'), 'true');
+    assert.ok((await firstInfoPanel.locator('.bip-desc').textContent()).trim().length > 10);
+    await firstInfoPanel.locator('.bip-close').click();
+    assert.equal(await firstInfoPanel.isVisible(), false);
     const reorderHandles = page.locator('#list-startup .drag-handle');
     assert.equal(await reorderHandles.count(), await page.locator('#list-startup .block-card').count());
     assert.match(await reorderHandles.first().getAttribute('aria-label'), /arrow keys/i);
