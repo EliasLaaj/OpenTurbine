@@ -130,6 +130,34 @@
   function loadBootAssets() {
     var version = (bootScript && bootScript.getAttribute('data-ot-version')) || '';
     var suffix = version ? '?v=' + encodeURIComponent(version) : '';
+    // HTML documents are immutable within one installed web release, just
+    // like the shared assets. Carry the release token on every local page
+    // link so the ECU can give exact-version navigation a long browser cache.
+    // Without this, pages age out after 60 seconds and the Classic repeatedly
+    // retransfers up to 110 KiB from LittleFS during ordinary navigation.
+    if (version) {
+      function versionLocalLinks(root) {
+        var links = root.matches && root.matches('a[href]')
+          ? [root] : root.querySelectorAll ? root.querySelectorAll('a[href]') : [];
+        Array.prototype.forEach.call(links, function (link) {
+          var raw = link.getAttribute('href') || '';
+          if (!raw || raw.charAt(0) !== '/' || raw.indexOf('//') === 0 || raw.indexOf('?v=') >= 0) return;
+          var hashAt = raw.indexOf('#');
+          var hash = hashAt >= 0 ? raw.slice(hashAt) : '';
+          var path = hashAt >= 0 ? raw.slice(0, hashAt) : raw;
+          if (path !== '/' && !/\.html$/.test(path)) return;
+          link.setAttribute('href', path + '?v=' + encodeURIComponent(version) + hash);
+        });
+      }
+      versionLocalLinks(document);
+      new MutationObserver(function (records) {
+        records.forEach(function (record) {
+          Array.prototype.forEach.call(record.addedNodes, function (node) {
+            if (node.nodeType === 1) versionLocalLinks(node);
+          });
+        });
+      }).observe(document.documentElement, { childList: true, subtree: true });
+    }
     function read(url) {
       // One synchronous attempt preserves the normal single-request Classic
       // boot path. Repeating a blocked synchronous read can starve the very

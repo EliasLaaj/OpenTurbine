@@ -437,20 +437,27 @@ function enumNames(source, marker) {
     assert.doesNotMatch(indexHtml, /20260612b|20260617b|20260619a|20260625a|20260705a|Primary thermal limit/);
     assert.doesNotMatch(indexHtml, />Not saved<|No calibration saved|No successful test recorded/);
     assert.match(indexHtml, /Run a safe actuator or dry-sequence test/);
-    assert.match(indexHtml, /20260828c/);
+    assert.match(indexHtml, /20260828d/);
     for (const pageName of ['index.html', 'hardware.html', 'controllers.html', 'system.html', 'calibration.html', 'sequence.html', 'log.html', 'tools.html']) {
       const pageSource = fs.readFileSync(path.join('data_src', pageName), 'utf8');
       const sharedRefs = [...pageSource.matchAll(/\/(?:style\.css|app\.js|theme\.js|ui_dialog\.js)\?v=([^"'&]+)/g)];
       assert.ok(sharedRefs.length > 0, `${pageName} must version its shared assets`);
-      assert.ok(sharedRefs.every(match => match[1] === '20260828c'), `${pageName} has a stale shared-asset cache key`);
+      assert.ok(sharedRefs.every(match => match[1] === '20260828d'), `${pageName} has a stale shared-asset cache key`);
     }
+    const themeSource = fs.readFileSync(path.join('data_src', 'theme.js'), 'utf8');
+    assert.match(themeSource, /function versionLocalLinks\(root\)/,
+      'local page navigation must inherit the installed web-release cache key');
+    assert.match(themeSource, /link\.setAttribute\('href', path \+ '\?v='/,
+      'local page links must become exact-version immutable URLs');
+    assert.match(themeSource, /new MutationObserver/,
+      'links rendered after page boot must also inherit the web-release cache key');
     assert.match(indexHtml, /<body data-page="dashboard">/);
     assert.match(indexHtml, /id="profile-mismatch-banner" style="display:none"/);
     const appSource = fs.readFileSync(path.join('data_src', 'app.js'), 'utf8');
     assert.match(appSource, /let _lastBootCount = null/);
     assert.match(appSource, /nextUptime <= 5 && _lastUptimeS > 5/);
     assert.match(appSource, /bootChanged && usesGlobalTelemetry\(\)/);
-    results.push('all pages use the current shared-asset cache key and selected-EGT tooltip');
+    results.push('all pages and local navigation use the current shared-asset cache key and selected-EGT tooltip');
 
     await page.goto(`${base}/generate_204`);
     await page.waitForSelector('#n1-card', { state: 'attached' });

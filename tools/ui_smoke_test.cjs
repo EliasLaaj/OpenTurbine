@@ -415,7 +415,7 @@ function installedBrowser() {
     assert.equal(await page.locator('#fault-desc-text').evaluate(el =>
       ['anywhere', 'break-word'].includes(getComputedStyle(el).overflowWrap)), true);
     for (const route of ['/log.html', '/calibration.html', '/controllers.html', '/tools.html'])
-      assert.equal(await page.locator(`#fault-card a[href="${route}"]`).count(), 1);
+      assert.equal(await page.locator(`#fault-card a[href="${route}?v=20260828d"]`).count(), 1);
     results.push('fault scenario exposes the current diagnosis and direct investigation routes');
 
     await scenario(page, 'full');

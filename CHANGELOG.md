@@ -8,6 +8,17 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ---
 
+## [2.2.1] — 2026-08-30
+
+### Fixed
+- Browser navigation now carries the installed web-release token on every
+  local page link. Exact-version pages remain in the browser cache instead of
+  expiring after 60 seconds and repeatedly crossing the Classic ESP32's slower
+  LittleFS/Wi-Fi path.
+- Repeated Calibration and cross-page navigation were qualified on physical
+  ESP32 Classic and ESP32-S3 boards, including full engine-file download,
+  restore, reboot and semantic readback.
+
 ## [2.2.0] — 2026-08-30
 
 ### Development focus
