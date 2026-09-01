@@ -451,10 +451,16 @@ def patch_async_webserver_stream_buffer(env):
     with open(impl_header, "r", encoding="utf-8") as handle:
         text = handle.read()
     oversized = "#define ASYNC_RESPONCE_BUFF_SIZE CONFIG_LWIP_TCP_MSS * 2"
-    bounded = "#define ASYNC_RESPONCE_BUFF_SIZE CONFIG_LWIP_TCP_MSS"
+    bounded = """#if CONFIG_IDF_TARGET_ESP32S3
+#define ASYNC_RESPONCE_BUFF_SIZE CONFIG_LWIP_TCP_MSS
+#else
+// Classic prioritizes bounded heap over page-transfer throughput. One small
+// flash chunk per ACK keeps the engine's memory reserve intact.
+#define ASYNC_RESPONCE_BUFF_SIZE 1024
+#endif"""
     if oversized in text:
         text = text.replace(oversized, bounded, 1)
-    elif bounded not in text:
+    elif bounded not in text and "#define ASYNC_RESPONCE_BUFF_SIZE 1024" not in text:
         raise RuntimeError("ESPAsyncWebServer stream-buffer definition changed; review dependency")
     with open(impl_header, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(text)
@@ -496,6 +502,55 @@ def patch_async_webserver_final_stream_flush(env):
         handle.write(text)
 
 
+def patch_async_webserver_paced_streaming(env):
+    """Queue at most one response segment per ACK/callback.
+
+    AsyncClient's advertised window can cover several MSS-sized writes. The
+    upstream response loop fills that entire window immediately, causing lwIP
+    to allocate multiple pbuf chains before any ACK can release memory. That is
+    needlessly bursty for flash-backed setup pages and can starve a Classic
+    ESP32 with a PCB catalog loaded. One segment per callback keeps peak memory
+    bounded; ACKs naturally pace the remaining transfer.
+    """
+    import os
+
+    responses_cpp = os.path.join(
+        env.subst("$PROJECT_LIBDEPS_DIR"), env["PIOENV"],
+        "ESPAsyncWebServer", "src", "WebResponses.cpp")
+    if not os.path.exists(responses_cpp):
+        return
+    with open(responses_cpp, "r", encoding="utf-8") as handle:
+        text = handle.read()
+    loop_start = """    do {
+      if (_send_buffer_len && _send_buffer) {"""
+    paced_start = """    do {
+      bool drainedResponseSegment = false;
+      if (_send_buffer_len && _send_buffer) {"""
+    if loop_start in text:
+        text = text.replace(loop_start, paced_start, 1)
+    elif paced_start not in text:
+        raise RuntimeError("ESPAsyncWebServer response loop changed; review dependency")
+    drained = """        } else {
+          _send_buffer_len = _send_buffer_offset = 0;  // consider buffer empty
+        }
+        payloadlen += added_len;"""
+    paced_drained = """        } else {
+          _send_buffer_len = _send_buffer_offset = 0;  // consider buffer empty
+          drainedResponseSegment = true;
+        }
+        payloadlen += added_len;
+        // Bound flash-backed page streaming to one queued TCP segment. ACKs
+        // pace subsequent callbacks without growing lwIP's in-flight pbuf set.
+        if (drainedResponseSegment) break;"""
+    if drained in text:
+        text = text.replace(drained, paced_drained, 1)
+    elif not ("drainedResponseSegment = true;" in text and
+              "if (drainedResponseSegment) break;" in text):
+        raise RuntimeError("ESPAsyncWebServer send-buffer drain changed; review dependency")
+    with open(responses_cpp, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
 patch_async_webserver_request(env)
 patch_async_webserver_accept(env)
 patch_async_webserver_responses(env)
@@ -504,3 +559,4 @@ patch_async_webserver_default_response_headers(env)
 patch_asynctcp_graceful_close(env)
 patch_async_webserver_stream_buffer(env)
 patch_async_webserver_final_stream_flush(env)
+patch_async_webserver_paced_streaming(env)

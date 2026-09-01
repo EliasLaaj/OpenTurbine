@@ -7,7 +7,7 @@
 <style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}@keyframes otFailsafeReveal{to{visibility:visible}}html:not(.ot-theme-ready) body{visibility:hidden;animation:otFailsafeReveal 0s 8s forwards}</style>
 <title>OpenTurbine - Sequence</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260830a',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260830a');s.text=c;document.head.appendChild(s);},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260901f',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260901f');s.text=c;document.head.appendChild(s);},{once:true});</script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -55,8 +55,8 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" class="active" title="Edit startup, shutdown, and afterburner transitions and block timings.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
-  <a href="/tools.html" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
-  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
+  <a href="/tools.html" title="Run standby commissioning, actuator tests, software updates, and developer controls.">Tools</a>
+  <a href="/system.html" title="Configure ECU behavior and communications; manage backups, diagnostics, and reset.">System</a>
   <span id="conn" class="conn-dot disconnected" title="WebSocket"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
 <main>

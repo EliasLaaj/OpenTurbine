@@ -14,7 +14,7 @@ The project aims to support the variety found in hobby turbines instead of presc
 
 1. Connect an ESP32 or supported ESP32-S3 board by USB.
 2. Open `OpenTurbineSetupTool.exe`.
-3. Choose **Clean install / reinstall**. This USB path erases the selected board and is correct for a blank board or an intentional fresh installation on an older board. If the older board still works, first download its complete engine file from Tools; the clean-install path cannot recover erased settings.
+3. Choose **Clean install / reinstall**. This USB path erases the selected board and is correct for a blank board or an intentional fresh installation on an older board. If the older board still works, first download its complete engine file from System; the clean-install path cannot recover erased settings.
 4. Select the detected board. For a clean install, choose **Development board** for the normal GPIO workflow, a compatible bundled **Official OpenTurbine PCB**, or **Custom PCB profile** for a chip-specific profile supplied with a PCB design.
 5. After installation, join the Wi-Fi network shown by the tool and open `http://192.168.4.1`.
 
@@ -58,6 +58,8 @@ Use only the environment matching the board. The filesystem upload is required b
 A development-board install leaves the dedicated PCB-profile partition erased. Hardware setup then works exactly as the normal manual workflow: choose electrical interfaces, GPIOs, buses, addresses, polarity, and calibration.
 
 A PCB-profile install stores an immutable, chip-specific description of the soldered hardware during the USB clean install. In Hardware, you still add engine purposes such as N1, TOT, throttle input, starter, or oil pump, but **Connected to** offers only compatible labelled connections from that PCB. GPIOs, chip addresses, bus wiring, and fixed polarity are not editable. Calibration and operating ranges remain user settings.
+
+A fresh or factory-reset PCB-profile installation starts with its labelled connections unassigned. The web interface remains available for commissioning, while START stays locked until a required Stop input has been assigned and the resulting engine setup passes validation.
 
 The profile describes what the PCB was designed to contain; live device discovery reports whether supported I²C chips are actually responding. A missing fixed device cannot be selected for a new assignment. Existing dependent assignments remain visible as unhealthy and can be removed to free the rest of the setup. A damaged, wrong-chip, or unrecognized profile locks START instead of falling back to unrelated development-board pins.
 
@@ -311,7 +313,7 @@ This is the literal path from an unopened board to a dry-tested ECU.
 13. **Connect and test loads individually.** Use Tools in STANDBY. Begin with short duration and conservative proportional output. Keep fuel and ignition separated until each path is proven.
 14. **Test every stop path.** Verify web STOP, physical STOP, loss-of-signal behavior, and fuel shutoff. Do not continue if any stop path is ambiguous.
 15. **Run complete dry sequences.** Fuel disconnected, ignition disabled where appropriate, and turbine restrained. Confirm mode/block progress and output order.
-16. **Back up the engine file.** Download it from Tools and store it securely.
+16. **Back up the engine file.** Download it from System and store it securely.
 17. **Perform the pre-start review below.** Only then plan a controlled fueled test.
 
 ### 1. Hardware
@@ -502,7 +504,7 @@ Developer Mode exposes diagnostics and allows Bench Mode. While RUNNING, it perm
 
 Before every first fueled run or major configuration change:
 
-- Back up the full engine file from Tools.
+- Back up the full engine file from System.
 - Confirm Hardware has no pin or dependency errors.
 - Confirm every safety-critical sensor is healthy and calibrated.
 - Compare Config limits against authoritative engine and sensor information.
@@ -519,7 +521,7 @@ For a first light, use conservative fuel, short attempts, immediate abort criter
 
 ### Back up
 
-In **Tools**, download the full engine file before an update. It contains hardware, settings, sequences, calibration, and the ECU Wi-Fi AP password. Treat it as sensitive.
+In **System → Backup, diagnostics & reset**, download the full engine file before an update. It contains hardware, settings, sequences, calibration, and the ECU Wi-Fi AP password. Treat it as sensitive. This System section also shows live ECU loop timing and owns factory reset; Tools remains focused on commissioning and physical tests.
 
 ### Update
 
@@ -541,7 +543,7 @@ After an update, reconnect to the ECU, verify the displayed firmware version, op
 - If the board does not appear over USB, try a data cable, another USB port, the official driver page opened by the setup tool, and the board’s BOOT/RESET procedure.
 - If a configuration error puts the ECU in FAULT, the web interface remains available for repair.
 - If a restored engine file is rejected, verify that it is a complete matching OpenTurbine `ecu_config.json`, not only one section.
-- Factory reset erases hardware, settings, calibration, and logs. Back up first.
+- Factory reset erases the turbine setup, hardware assignments, settings, calibration, Wi-Fi password, and logs. It preserves an installed PCB profile because that profile describes the physical board. After reset, only safe assignments explicitly declared as defaults by that profile are restored; other turbine devices remain unassigned until configured. A complete engine setup is a separate engine file, not an implicit property of the PCB. Back up first.
 
 ## Troubleshooting index
 

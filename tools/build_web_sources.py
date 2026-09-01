@@ -65,6 +65,7 @@ PAGE_MANIFEST = {
             "config-render.js",
             "config-validation-save.js",
             "config-runtime.js",
+            "system-maintenance.js",
         ),
     ),
 }

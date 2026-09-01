@@ -35,11 +35,12 @@ main{max-width:1380px;padding:1.1rem 1.5rem 5.5rem}
 .controller-subcard{margin-top:.7rem;background:var(--surface)}.controller-subcard:first-child{margin-top:0}.controller-subcard-content{padding:.75rem;border-top:1px solid var(--border)}.controller-subcard-content>.cfg-section{padding:0!important;margin:0!important;border:0!important}.controller-subcard-content>.cfg-section>.cfg-title{display:none}.controller-subcard-content>.controller-option-row{margin-bottom:.75rem}.automatic-idle-settings{margin-top:.8rem;padding-top:.8rem;border-top:1px solid var(--border)}.automatic-idle-settings>.cfg-title{margin-bottom:.55rem}
 .controller-empty-action{display:flex;align-items:center;justify-content:space-between;gap:.8rem;margin-top:.7rem;padding:.75rem;border:1px dashed var(--border);border-radius:8px;color:var(--muted)}
 .controller-state{font-size:.66rem;color:var(--dim);white-space:nowrap}.controller-state-ok{color:var(--green)}.controller-state-warn{color:var(--yellow)}
+.system-maintenance{display:none;margin-top:1rem}.system-surface .system-maintenance{display:block}.system-maintenance-grid{display:grid;gap:.75rem}.maintenance-card{padding:1rem;border:1px solid var(--border);border-radius:11px;background:var(--surface)}.maintenance-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-bottom:.55rem}.maintenance-title{font-size:.84rem;font-weight:750}.maintenance-state{font-size:.64rem;color:var(--dim);white-space:nowrap}.maintenance-desc{font-size:.72rem;line-height:1.5;color:var(--dim)}.maintenance-actions{display:flex;align-items:center;gap:.55rem;flex-wrap:wrap;margin-top:.8rem}.maintenance-message{display:none;margin-top:.55rem;font-size:.72rem}.maintenance-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.6rem;margin-top:.7rem}.maintenance-metric{padding:.55rem .65rem;border:1px solid var(--border);border-radius:7px;background:var(--surface-2)}.maintenance-metric span{display:block;font-size:.64rem;color:var(--dim)}.maintenance-metric strong{display:block;margin-top:.18rem;font:700 .78rem var(--font-mono)}.maintenance-danger{border-color:color-mix(in srgb,var(--red) 60%,var(--border))}.maintenance-danger .maintenance-title{color:var(--red)}
 @media(max-width:650px){.controller-empty-action{align-items:stretch;flex-direction:column}}
 @media(max-width:700px){main{padding:.85rem .75rem 7.6rem}.cfg-workspace{position:relative;top:auto;margin:-.85rem 0 .75rem;padding:.75rem 0 .55rem;background:var(--bg)}.cfg-workspace-card{padding:.75rem;border-radius:11px}.cfg-workspace-head{margin-bottom:.6rem}.cfg-header-actions{margin-left:0;width:100%}.cfg-search{height:44px}.cfg-toolbar{flex-wrap:wrap}.cfg-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;overflow:visible}.cfg-filter{width:100%;padding:.28rem .4rem}.cfg-result-count{display:none}.config-group>summary{min-height:68px;padding:.7rem}.control-definition-card>summary{min-height:84px}.group-desc{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.group-meta{display:none}.group-content{padding:0 .55rem .55rem}.cfg-grid{grid-template-columns:minmax(0,1fr)}.controller-card-body{padding:.7rem}.controller-card-actions,.controller-create-body,.controller-option-row{align-items:stretch;flex-direction:column}.controller-card-actions button,.controller-create-body button{width:100%}body>.save-bar{position:fixed;left:.5rem;right:.5rem;width:auto;transform:none;bottom:max(8px,env(safe-area-inset-bottom));display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:.45rem;overflow:hidden}body>.save-bar:not(.is-dirty){display:none}.save-bar .save-change-count{grid-column:1/-1;min-width:0;white-space:normal}.save-bar .save-spacer,.save-bar a,.save-msg{display:none}.save-bar button{min-width:0;padding:.42rem .7rem}.save-recap-card{width:calc(100vw - 1rem);max-height:92vh}.save-recap-header,.save-recap-footer{flex-wrap:wrap}.save-recap-body{padding:.65rem;max-height:62vh;overflow-x:auto}}
 </style>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260830a',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260830a');s.setAttribute('data-ot-app','true');s.text=c;document.head.appendChild(s);},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260901f',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260901f');s.setAttribute('data-ot-app','true');s.text=c;document.head.appendChild(s);},{once:true});</script>
 </head>
 <body>
 <nav>
@@ -49,8 +50,8 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
-  <a href="/tools.html" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
-  <a href="/system.html" class="ot-nav-system" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
+  <a href="/tools.html" title="Run standby commissioning, actuator tests, software updates, and developer controls.">Tools</a>
+  <a href="/system.html" class="ot-nav-system" title="Configure ECU behavior and communications; manage backups, diagnostics, and reset.">System</a>
   <span id="conn" class="conn-dot disconnected"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
 <main>
@@ -88,6 +89,21 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
 
   <section id="controller-overview" class="control-overview" style="display:none"></section>
   <div id="cfg-form"><p style="color:var(--dim);font-size:.85rem">Loading settings…</p></div>
+  <section id="system-appearance" class="system-maintenance" aria-label="Appearance">
+    <details class="config-group" data-always-visible="1">
+      <summary>
+        <span class="group-heading"><span class="group-title">Appearance</span><span class="group-desc">Choose how the browser interface looks</span></span>
+        <span class="group-meta">Theme</span><span class="group-chevron">›</span>
+      </summary>
+      <div class="group-content">
+        <div class="appearance-card">
+          <div id="appearance-picker"></div>
+          <div class="appearance-note">Applies instantly and is remembered by this browser.</div>
+        </div>
+      </div>
+    </details>
+  </section>
+  <section id="system-maintenance" class="system-maintenance" aria-label="System maintenance"></section>
 
   <!-- ── Save-recap modal ─────────────────────────────────── -->
   <div class="save-recap-backdrop" id="save-recap-modal" style="display:none" onclick="if(event.target===this)_cancelSaveRecap()">
@@ -112,7 +128,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <span class="save-spacer"></span>
     <button id="btn-discard" onclick="reloadConfigPage()" disabled>Discard</button>
     <button id="btn-save" class="primary" onclick="saveConfig()" disabled>Save to device</button>
-    <a href="/tools.html" style="color:var(--dim)">Full engine file backup / restore</a>
+    <a href="/system.html#system-maintenance" style="color:var(--dim)">Full engine file backup / restore</a>
     <span class="save-msg" id="save-msg"></span>
   </div>
 

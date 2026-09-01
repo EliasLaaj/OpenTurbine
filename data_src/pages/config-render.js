@@ -503,6 +503,10 @@ function setSystemHardware(path, value) {
   _controllerHardwareDirty = true;
   _markDirty();
   renderSystemSetup();
+  // The System groups are rebuilt after each edit. Recompute the fixed save
+  // bar after that replacement so its count and enabled state cannot retain
+  // the pre-edit snapshot (notably on the slower Classic page load path).
+  _updateWorkspaceState();
 }
 function renderSystemSetup() {
   const root = document.getElementById('system-device-setup');
@@ -777,9 +781,11 @@ function applyView() {
       const section = field.closest('.cfg-section');
       return !section || !section.classList.contains('filter-hidden');
     }).length;
-    group.classList.toggle('filter-hidden', count === 0);
+    const alwaysVisible = group.dataset.alwaysVisible === '1' &&
+      (_workspaceFilter !== 'changed' || _controllerRulesDirty || _controllerHardwareDirty);
+    group.classList.toggle('filter-hidden', !alwaysVisible && count === 0);
     const meta = group.querySelector('.group-meta');
-    if (meta) meta.textContent = count ? `${count} setting${count === 1 ? '' : 's'}` : '';
+    if (meta && !alwaysVisible) meta.textContent = count ? `${count} setting${count === 1 ? '' : 's'}` : '';
     if ((search || _workspaceFilter === 'changed') && count) group.open = true;
   });
 

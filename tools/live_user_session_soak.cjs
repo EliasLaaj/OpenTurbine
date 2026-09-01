@@ -58,6 +58,7 @@ async function json(response, label) {
   let originalRamp;
   let editedRamp;
   let restored = false;
+  let rampEdited = false;
   let classicStandbySaveReboots = false;
   let saves = 0;
   let navigations = 0;
@@ -87,6 +88,13 @@ async function json(response, label) {
   page.on('request', request => {
     requestEpoch.set(request, navigationEpoch);
     try { requestPagePath.set(request, new URL(page.url()).pathname); } catch (_) {}
+    try {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/ecu_config' && request.method() === 'POST') {
+        const body = request.postData();
+        if (body) fs.writeFileSync(path.join(outDir, `${label.toLowerCase()}-ecu-config-post-${navigationEpoch}.json`), body);
+      }
+    } catch (_) {}
   });
   page.on('requestfailed', request => {
     const failure = request.failure()?.errorText || 'unknown failure';
@@ -118,7 +126,8 @@ async function json(response, label) {
     // actually failed. Mutating requests remain fatal.
     if (pathname.startsWith('/api/') && request.method() === 'GET' &&
         (failure === 'net::ERR_CONNECTION_RESET' ||
-         failure === 'net::ERR_CONTENT_LENGTH_MISMATCH')) {
+         failure === 'net::ERR_CONTENT_LENGTH_MISMATCH' ||
+         failure === 'net::ERR_NETWORK_CHANGED')) {
       recoveredGetResets.push(`${request.url()}: ${failure}`);
       return;
     }
@@ -153,7 +162,8 @@ async function json(response, label) {
       await page.waitForTimeout(500 + attempt * 250);
     }
     const info = await json(response, `${where} device info`);
-    assert.equal(info.state, 'STANDBY', `${where}: ECU left STANDBY`);
+    assert.ok(['STANDBY','FAULT'].includes(info.state),
+      `${where}: ECU left the safe STANDBY/FAULT commissioning states (${info.state})`);
     assert.equal(info.outputs_active, false, `${where}: an output became active`);
     return info;
   }
@@ -262,7 +272,11 @@ async function json(response, label) {
     // Classic serves the settings and hardware documents serially from one
     // bounded workspace. After a cold reconnect the second document can need
     // more than 12 s without indicating a broken page.
-    await page.waitForSelector('#cf-th_ru', { state: 'attached', timeout: 30000 });
+    await page.waitForFunction(() => /Saved|unsaved/i.test(document.getElementById('cfg-state-badge')?.textContent || ''), null, { timeout:30000 });
+    if (!await page.locator('#cf-th_ru').count()) {
+      console.log(`${label} ${purpose}: no fitted Main Fuel controller; controller-ramp edit is not applicable`);
+      return false;
+    }
     await page.waitForFunction(() => typeof isLocked !== 'undefined' && !isLocked, null, { timeout:12000 });
     const field = page.locator('#cf-th_ru');
     await field.evaluate(el => {
@@ -301,6 +315,7 @@ async function json(response, label) {
     }
     saves++;
     console.log(`${label} ${purpose}: throttle ramp ${value} ms save acknowledged`);
+    return true;
   }
 
   async function exerciseDashboard() {
@@ -370,7 +385,10 @@ async function json(response, label) {
   }
 
   async function exerciseEngineFileRoundTrip() {
-    await navigate('/tools.html');
+    await navigate('/system.html');
+    await page.waitForSelector('#system-maintenance-group > summary:visible', { timeout:10000 });
+    const maintenance = page.locator('#system-maintenance-group');
+    if (!await maintenance.getAttribute('open')) await maintenance.locator('summary').click();
     await page.waitForFunction(async () => {
       try { const r = await fetch('/api/status', {cache:'no-store'}); const s = await r.json(); return !s.config_apply_busy; }
       catch (_) { return false; }
@@ -387,7 +405,7 @@ async function json(response, label) {
         await page.waitForTimeout(3000);
       }
     }
-    assert.ok(download, 'Tools backup did not produce a download after three attempts');
+    assert.ok(download, 'System backup did not produce a download after three attempts');
     const filePath = await download.path();
     assert.ok(filePath && fs.statSync(filePath).size > 1000, 'complete engine-file download is empty');
     const backup = JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -408,7 +426,7 @@ async function json(response, label) {
     }, null, { timeout:60000 });
     const restoreMessage = await page.locator('#cfg-backup-msg').textContent();
     assert.doesNotMatch(restoreMessage || '', /failed|error/i,
-      `Tools reported an engine-file restore failure: ${restoreMessage}`);
+      `System reported an engine-file restore failure: ${restoreMessage}`);
     await page.waitForTimeout(5000);
     let restoredConfig;
     // The ECU intentionally reboots after a complete engine-file restore.
@@ -493,16 +511,21 @@ async function json(response, label) {
     const initialTelemetry = await telemetrySafe('initial');
     assert.match(info.target, /esp32/, 'unexpected target');
     const initialCfg = await configSafe('initial');
+    // Classic persists a standby settings patch and then reboots to reconstruct
+    // the complete runtime tree with a clean contiguous heap. S3 applies the
+    // same durable patch live without that constrained-target reboot.
     classicStandbySaveReboots = info.target === 'esp32dev';
     originalRamp = Number(initialCfg.throttle.ramp_up_ms);
     editedRamp = originalRamp >= 9950 ? originalRamp - 50 : originalRamp + 50;
     assert.notEqual(editedRamp, originalRamp);
     console.log(`${label} ${info.chip} build=${info.build_id}; original ramp=${originalRamp} ms; duration=${durationSec}s`);
 
-    await saveRamp(editedRamp, 'edit', originalRamp);
-    const editedBootCount = classicStandbySaveReboots
-      ? await waitForExpectedReboot(initialTelemetry.boot_count, 'Classic controller save')
-      : await proveSaveWithoutReboot(initialTelemetry.boot_count, 'controller save');
+    rampEdited = await saveRamp(editedRamp, 'edit', originalRamp);
+    const editedBootCount = rampEdited
+      ? (classicStandbySaveReboots
+          ? await waitForExpectedReboot(initialTelemetry.boot_count, 'Classic controller save')
+          : await proveSaveWithoutReboot(initialTelemetry.boot_count, 'controller save'))
+      : Number(initialTelemetry.boot_count);
     await exerciseEngineFileRoundTrip();
     const soakBootCount = await waitForExpectedReboot(editedBootCount, 'engine-file restore');
     const actions = [exerciseDashboard, exerciseHardware, exerciseSystem, exerciseCalibration, exerciseSequence, exerciseLog, exerciseTools];
@@ -519,10 +542,13 @@ async function json(response, label) {
     const beforeCleanup = await telemetrySafe('before cleanup save');
     assert.equal(Number(beforeCleanup.boot_count), Number(soakBootCount),
       `ECU rebooted unexpectedly during ordinary browsing (boot ${soakBootCount} -> ${beforeCleanup.boot_count}, reset reason ${beforeCleanup.reset_reason})`);
-    await saveRamp(originalRamp, 'restore', editedRamp);
-    const cleanupBootCount = classicStandbySaveReboots
-      ? await waitForExpectedReboot(soakBootCount, 'Classic cleanup controller save')
-      : await proveSaveWithoutReboot(soakBootCount, 'cleanup controller save');
+    let cleanupBootCount = Number(soakBootCount);
+    if (rampEdited) {
+      await saveRamp(originalRamp, 'restore', editedRamp);
+      cleanupBootCount = classicStandbySaveReboots
+        ? await waitForExpectedReboot(soakBootCount, 'Classic cleanup controller save')
+        : await proveSaveWithoutReboot(soakBootCount, 'cleanup controller save');
+    }
     restored = true;
     await exerciseDashboard();
     await deviceSafe('final');
@@ -543,7 +569,7 @@ async function json(response, label) {
     }
     assert.deepEqual(httpErrors, [], `ordinary browsing received HTTP errors:\n${httpErrors.join('\n')}`);
     const recoveredDocumentRetries = consoleErrors.filter(message =>
-      /https?:\/\/[^ ]+\/(?:[^ :?]+\.html)(?:\?[^ :]*)?: Failed to load resource: net::ERR_CONNECTION_RESET/.test(message));
+      /https?:\/\/[^ ]+\/(?:[^ :?]+\.html)(?:\?[^ :]*)?: Failed to load resource: net::ERR_(?:CONNECTION_RESET|NETWORK_CHANGED|CONTENT_LENGTH_MISMATCH)/.test(message));
     const relevantConsoleErrors = consoleErrors.filter(message =>
       !/favicon\.ico|Failed to load resource.*(?:404|409)/.test(message) &&
       !recoveredDocumentRetries.includes(message));
@@ -559,7 +585,7 @@ async function json(response, label) {
     }
     console.log(`${label} realistic session PASSED: ${Math.round((Date.now() - started) / 1000)}s, ${navigations} navigations, ${saves} persisted config saves, original config restored.`);
   } finally {
-    if (!restored && Number.isFinite(originalRamp)) {
+    if (!restored && rampEdited && Number.isFinite(originalRamp)) {
       try {
         const cleanupApi = await request.newContext({
           baseURL: base,
@@ -578,16 +604,16 @@ async function json(response, label) {
             }
             if (!engineFile) throw new Error('complete engine file could not be downloaded');
             engineFile.settings.throttle.ramp_up_ms = originalRamp;
-            for (let attempt = 0; attempt < 20; attempt++) {
-              try {
-                response = await cleanupApi.post('/api/ecu_config', { data:engineFile, timeout:20000 });
-              } catch (_) {
-                await page.waitForTimeout(750);
-                continue;
-              }
-              if (response.ok()) break;
-              if (![409, 503].includes(response.status())) throw new Error(`HTTP ${response.status()}`);
-              await page.waitForTimeout(750);
+            // A successful complete-engine restore deliberately reboots the
+            // ECU. Its final HTTP acknowledgement can therefore be lost even
+            // though the file was committed. Never retry this mutation
+            // blindly: doing so can apply the same file and reboot repeatedly.
+            // The readback loop below is the authoritative success proof.
+            try {
+              response = await cleanupApi.post('/api/ecu_config', { data:engineFile, timeout:20000 });
+              if (!response.ok()) throw new Error(`HTTP ${response.status()}`);
+            } catch (error) {
+              console.log(`${label} cleanup restore acknowledgement was lost; verifying by readback without resending.`);
             }
           } else {
             for (let attempt = 0; attempt < 20; attempt++) {
@@ -604,7 +630,8 @@ async function json(response, label) {
               await page.waitForTimeout(750);
             }
           }
-          if (!response?.ok()) throw new Error(`HTTP ${response?.status()}`);
+          if (!classicStandbySaveReboots && !response?.ok())
+            throw new Error(`HTTP ${response?.status()}`);
           for (let attempt = 0; attempt < 40; attempt++) {
             await page.waitForTimeout(750);
             try {

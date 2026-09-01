@@ -117,8 +117,13 @@ function installedBrowser() {
   // opening a competing API connection on memory-constrained Classic boards.
   await page.waitForFunction(() => {
     const visible = element => element && getComputedStyle(element).display !== 'none';
-    return visible(document.getElementById('di-states-wrap')) ||
+    const hasVisibleInput = visible(document.getElementById('di-states-wrap')) ||
       visible(document.getElementById('operator-input-row'));
+    const noFittedInputs = !visible(document.getElementById('di-states-wrap')) &&
+      !visible(document.getElementById('operator-input-row')) &&
+      !document.querySelector('.registry-input-card');
+    return document.getElementById('conn-label')?.textContent === 'Connected' &&
+      (hasVisibleInput || noFittedInputs);
   }, null, { timeout: 15000 });
   await page.waitForFunction(() => {
     const visible = element => element && getComputedStyle(element).display !== 'none';
@@ -196,17 +201,19 @@ function installedBrowser() {
   for (const bit of ['p1', 'p2', 'torque', 'starter'])
     assert.equal(await page.locator(`[data-bit="${bit}"]`).count(), 1, `${bit.toUpperCase()} logging is missing from Log > Session Data`);
 
-  await navigate(`${base}/tools.html`, { waitUntil: 'domcontentloaded' });
+  await navigate(`${base}/system.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('#system-maintenance-group > summary:visible', { timeout: 10000 });
+  await page.locator('#system-maintenance-group > summary').click();
   try {
     await page.waitForSelector('#btn-factory-reset:not([disabled])', { timeout: 10000 });
   } catch (error) {
     const state = await page.evaluate(() => ({
       connection: document.getElementById('conn-label')?.textContent,
-      mode: document.getElementById('mode-badge')?.textContent,
+      mode: typeof runtimeMode === 'string' ? runtimeMode : 'unknown',
       factoryDisabled: document.getElementById('btn-factory-reset')?.disabled,
       staleBanner: document.getElementById('telemetry-stale-banner')?.textContent || '',
     }));
-    throw new Error(`${error.message}\nTools live state=${JSON.stringify(state)}`);
+    throw new Error(`${error.message}\nSystem maintenance state=${JSON.stringify(state)}`);
   }
   await page.locator('#btn-factory-reset').click();
   await page.locator('#ot-dialog-confirm').click();

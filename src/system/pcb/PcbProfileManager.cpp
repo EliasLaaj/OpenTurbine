@@ -37,7 +37,8 @@ bool idValid(const char* value, size_t maxLength) {
     return true;
 }
 
-bool adapterKnown(const char* value) {
+PcbProfileManager::Adapter parseAdapter(const char* value) {
+    using Adapter = PcbProfileManager::Adapter;
     static const char* const names[] = {
         "digital_input", "analog_input", "pcnt_input", "rc_pwm_input",
         "pwm_duty_input", "spi_thermocouple", "onewire_temperature",
@@ -45,8 +46,9 @@ bool adapterKnown(const char* value) {
         "digital_output", "relay_output", "pwm_output", "servo_output",
         "i2c_digital_output"
     };
-    for (const char* name : names) if (!strcmp(name, value)) return true;
-    return false;
+    for (uint8_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+        if (!strcmp(names[i], value)) return static_cast<Adapter>(i + 1);
+    return Adapter::Unknown;
 }
 
 bool adapterDriver(const char* adapter, ChannelRegistry::Driver& driver) {
@@ -76,6 +78,18 @@ int jsonPin(JsonObjectConst pins, const char* key) {
 PcbProfileManager::State PcbProfileManager::_state = PcbProfileManager::State::Absent;
 PcbProfileManager::Catalog* PcbProfileManager::_catalog = nullptr;
 char PcbProfileManager::_fault[128] = {};
+
+const char* PcbProfileManager::adapterName(Adapter adapter) {
+    static const char* const names[] = {
+        "unknown", "digital_input", "analog_input", "pcnt_input", "rc_pwm_input",
+        "pwm_duty_input", "spi_thermocouple", "onewire_temperature",
+        "i2c_digital_input", "i2c_adc_input", "i2c_adc_digital_input", "i2c_load_cell",
+        "digital_output", "relay_output", "pwm_output", "servo_output",
+        "i2c_digital_output"
+    };
+    const uint8_t index = static_cast<uint8_t>(adapter);
+    return index < sizeof(names) / sizeof(names[0]) ? names[index] : names[0];
+}
 
 void PcbProfileManager::setFault(const char* reason) {
     _state = State::Fault;
@@ -250,15 +264,16 @@ void PcbProfileManager::driveEarlySafeStates() {
         const Port& port = _catalog->ports[i];
         for (uint8_t j = 0; j < port.modeCount; ++j) {
             const Mode& mode = port.modes[j];
-            if (mode.gpio < 0 || !strstr(mode.adapter, "output") ||
-                !strncmp(mode.adapter, "i2c_", 4))
+            const char* adapter = adapterName(mode.adapter);
+            if (mode.gpio < 0 || !strstr(adapter, "output") ||
+                !strncmp(adapter, "i2c_", 4))
                 continue;
 
             // PWM and servo outputs must not emit a waveform before their
             // driver owns the pin. Static inactive is safer than attempting
             // to approximate a fractional demand with a constant level.
-            if (!strcmp(mode.adapter, "pwm_output") ||
-                !strcmp(mode.adapter, "servo_output")) {
+            if (!strcmp(adapter, "pwm_output") ||
+                !strcmp(adapter, "servo_output")) {
                 driveInactive(mode.gpio, mode.activeHigh);
             } else {
                 const bool commandedOn = RelayDemand::requested(mode.safeDemand);
@@ -476,6 +491,23 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
         strlcpy(_fault, "not enough memory for PCB ports", sizeof(_fault));
         return false;
     }
+    uint16_t defaultCount = 0;
+    for (JsonObjectConst source : ports)
+        for (JsonObjectConst modeSource : source["modes"].as<JsonArrayConst>())
+            if (!modeSource["default"].as<JsonObjectConst>().isNull()) ++defaultCount;
+    if (defaultCount > UINT8_MAX) {
+        delete catalog;
+        strlcpy(_fault, "too many PCB default assignments", sizeof(_fault));
+        return false;
+    }
+    if (defaultCount) {
+        catalog->defaults = new (std::nothrow) DefaultAssignment[defaultCount];
+        if (!catalog->defaults) {
+            delete catalog;
+            strlcpy(_fault, "not enough memory for PCB default assignments", sizeof(_fault));
+            return false;
+        }
+    }
     for (JsonObjectConst source : ports) {
         Port& port = catalog->ports[catalog->portCount++];
         if (!copyText(port.id, sizeof(port.id), source["id"] | "", true, "port.id") ||
@@ -494,19 +526,31 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
         for (JsonObjectConst modeSource : modes) {
             Mode& mode = port.modes[port.modeCount++];
             if (!copyText(mode.id, sizeof(mode.id), modeSource["id"] | "", true, "mode.id") ||
-                !copyText(mode.adapter, sizeof(mode.adapter), modeSource["adapter"] | "", true, "mode.adapter") ||
-                !copyText(mode.deviceId, sizeof(mode.deviceId), modeSource["device"] | "", false, "mode.device") ||
-                !copyText(mode.defaultId, sizeof(mode.defaultId), modeSource["default"]["id"] | "", false, "mode.default.id") ||
-                !copyText(mode.defaultName, sizeof(mode.defaultName), modeSource["default"]["name"] | "", false, "mode.default.name") ||
-                !copyText(mode.defaultRole, sizeof(mode.defaultRole), modeSource["default"]["role"] | "", false, "mode.default.role") ||
-                !copyText(mode.defaultPurpose, sizeof(mode.defaultPurpose), modeSource["default"]["purpose"] | "", false, "mode.default.purpose") ||
                 !idValid(mode.id, sizeof(mode.id))) { delete catalog; return false; }
-            const bool hasDefault = mode.defaultId[0] || mode.defaultName[0] ||
-                                    mode.defaultRole[0] || mode.defaultPurpose[0];
-            const bool completeDefault = mode.defaultId[0] && mode.defaultName[0] &&
-                                         mode.defaultRole[0] && mode.defaultPurpose[0];
+            const char* adapterText = modeSource["adapter"] | "";
+            mode.adapter = parseAdapter(adapterText);
+            const char* deviceId = modeSource["device"] | "";
+            if (deviceId[0]) {
+                for (uint8_t deviceIndex = 0; deviceIndex < catalog->deviceCount; ++deviceIndex)
+                    if (!strcmp(catalog->devices[deviceIndex].id, deviceId)) {
+                        mode.deviceIndex = static_cast<int8_t>(deviceIndex);
+                        break;
+                    }
+            }
+            JsonObjectConst defaultSource = modeSource["default"].as<JsonObjectConst>();
+            const char* defaultId = defaultSource["id"] | "";
+            const char* defaultName = defaultSource["name"] | "";
+            const char* defaultRole = defaultSource["role"] | "";
+            const char* defaultPurpose = defaultSource["purpose"] | "";
+            const bool hasDefault = !defaultSource.isNull();
+            const bool completeDefault = defaultId[0] && defaultName[0] &&
+                                         defaultRole[0] && defaultPurpose[0] &&
+                                         strlen(defaultId) < sizeof(catalog->defaults[0].id) &&
+                                         strlen(defaultName) < sizeof(catalog->defaults[0].name) &&
+                                         strlen(defaultRole) < sizeof(catalog->defaults[0].role) &&
+                                         strlen(defaultPurpose) < sizeof(catalog->defaults[0].purpose);
             if (hasDefault && (!completeDefault ||
-                !idValid(mode.defaultId, sizeof(mode.defaultId)))) {
+                !idValid(defaultId, sizeof(catalog->defaults[0].id)))) {
                 delete catalog;
                 strlcpy(_fault, "PCB port mode has an incomplete or invalid default assignment",
                         sizeof(_fault));
@@ -532,27 +576,27 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
             if (mode.referenceMv < 1000.0f || mode.referenceMv > 5500.0f) {
                 delete catalog; strlcpy(_fault, "PCB port mode has invalid ADC reference", sizeof(_fault)); return false;
             }
-            if (!adapterKnown(mode.adapter)) {
+            if (mode.adapter == Adapter::Unknown) {
                 // Forward-compatible: retain the port so UI can report that a
                 // newer firmware is required, but never resolve this mode.
                 continue;
             }
-            const bool output = strstr(mode.adapter, "output") != nullptr;
+            const bool output = strstr(adapterText, "output") != nullptr;
             if (hasDefault) {
                 const auto direction = output ? ChannelRegistry::Output : ChannelRegistry::Input;
                 ChannelRegistry::Driver driver;
-                if (!ChannelRegistry::roleValid(direction, mode.defaultRole) ||
-                    !ChannelRegistry::purposeValid(direction, mode.defaultPurpose) ||
-                    !adapterDriver(mode.adapter, driver) ||
-                    !ChannelRegistry::purposeRoleDriverValid(direction, mode.defaultPurpose,
-                                                             mode.defaultRole, driver) ||
-                    (!strcmp(mode.adapter, "spi_thermocouple") &&
-                     strcmp(mode.defaultPurpose, "tot") && strcmp(mode.defaultPurpose, "tit") &&
-                     strcmp(mode.defaultPurpose, "oil_temperature")) ||
-                    (!strcmp(mode.adapter, "onewire_temperature") &&
-                     strcmp(mode.defaultPurpose, "oil_temperature") &&
-                     strcmp(mode.defaultPurpose, "coolant_temp") &&
-                     strcmp(mode.defaultPurpose, "intake_temperature"))) {
+                if (!ChannelRegistry::roleValid(direction, defaultRole) ||
+                    !ChannelRegistry::purposeValid(direction, defaultPurpose) ||
+                    !adapterDriver(adapterText, driver) ||
+                    !ChannelRegistry::purposeRoleDriverValid(direction, defaultPurpose,
+                                                             defaultRole, driver) ||
+                    (!strcmp(adapterText, "spi_thermocouple") &&
+                     strcmp(defaultPurpose, "tot") && strcmp(defaultPurpose, "tit") &&
+                     strcmp(defaultPurpose, "oil_temperature")) ||
+                    (!strcmp(adapterText, "onewire_temperature") &&
+                     strcmp(defaultPurpose, "oil_temperature") &&
+                     strcmp(defaultPurpose, "coolant_temp") &&
+                     strcmp(defaultPurpose, "intake_temperature"))) {
                     delete catalog;
                     strlcpy(_fault, "PCB port mode default is incompatible with its electrical adapter",
                             sizeof(_fault));
@@ -563,11 +607,17 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
                 (output && (!mode.hasSafeDemand || mode.safeDemand < 0.0f || mode.safeDemand > 1.0f))) {
                 delete catalog; strlcpy(_fault, "PCB port mode has invalid GPIO or safe state", sizeof(_fault)); return false;
             }
-            if (mode.deviceId[0]) {
-                bool found = false;
-                for (uint8_t i = 0; i < catalog->deviceCount; ++i)
-                    if (!strcmp(catalog->devices[i].id, mode.deviceId)) { found = true; break; }
-                if (!found) { delete catalog; strlcpy(_fault, "port mode refers to missing device", sizeof(_fault)); return false; }
+            if (deviceId[0] && mode.deviceIndex < 0) {
+                delete catalog; strlcpy(_fault, "port mode refers to missing device", sizeof(_fault)); return false;
+            }
+            if (hasDefault) {
+                DefaultAssignment& assignment = catalog->defaults[catalog->defaultCount++];
+                assignment.portIndex = catalog->portCount - 1;
+                assignment.modeIndex = port.modeCount - 1;
+                strlcpy(assignment.id, defaultId, sizeof(assignment.id));
+                strlcpy(assignment.name, defaultName, sizeof(assignment.name));
+                strlcpy(assignment.role, defaultRole, sizeof(assignment.role));
+                strlcpy(assignment.purpose, defaultPurpose, sizeof(assignment.purpose));
             }
         }
         // A multipurpose connector may offer multiple adapters over one GPIO,
@@ -576,20 +626,22 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
         // before the user configuration is loaded.
         for (uint8_t a = 0; a < port.modeCount; ++a) {
             const Mode& first = port.modes[a];
-            if (first.gpio < 0 || !strstr(first.adapter, "output") ||
-                !strncmp(first.adapter, "i2c_", 4))
+            const char* firstAdapter = adapterName(first.adapter);
+            if (first.gpio < 0 || !strstr(firstAdapter, "output") ||
+                !strncmp(firstAdapter, "i2c_", 4))
                 continue;
-            const bool firstProportional = !strcmp(first.adapter, "pwm_output") ||
-                                           !strcmp(first.adapter, "servo_output");
+            const bool firstProportional = !strcmp(firstAdapter, "pwm_output") ||
+                                           !strcmp(firstAdapter, "servo_output");
             const bool firstLevel = firstProportional ? !first.activeHigh :
                 RelayDemand::physicalLevel(first.safeDemand, !first.activeHigh);
             for (uint8_t b = a + 1; b < port.modeCount; ++b) {
                 const Mode& second = port.modes[b];
-                if (second.gpio != first.gpio || !strstr(second.adapter, "output") ||
-                    !strncmp(second.adapter, "i2c_", 4))
+                const char* secondAdapter = adapterName(second.adapter);
+                if (second.gpio != first.gpio || !strstr(secondAdapter, "output") ||
+                    !strncmp(secondAdapter, "i2c_", 4))
                     continue;
-                const bool secondProportional = !strcmp(second.adapter, "pwm_output") ||
-                                                !strcmp(second.adapter, "servo_output");
+                const bool secondProportional = !strcmp(secondAdapter, "pwm_output") ||
+                                                !strcmp(secondAdapter, "servo_output");
                 const bool secondLevel = secondProportional ? !second.activeHigh :
                     RelayDemand::physicalLevel(second.safeDemand, !second.activeHigh);
                 if (firstLevel != secondLevel) {
@@ -645,11 +697,11 @@ bool PcbProfileManager::parsePayload(const uint8_t* payload, size_t length,
             if (!claimGpio(mode.gpio, i, true)) {
                 delete catalog; strlcpy(_fault, "separate PCB ports share an exclusive GPIO", sizeof(_fault)); return false;
             }
-            if (!mode.deviceId[0]) continue;
+            if (mode.deviceIndex < 0) continue;
             for (uint8_t priorPort = 0; priorPort < i; ++priorPort) {
                 const Port& prior = catalog->ports[priorPort];
                 for (uint8_t priorMode = 0; priorMode < prior.modeCount; ++priorMode)
-                    if (!strcmp(prior.modes[priorMode].deviceId, mode.deviceId) &&
+                    if (prior.modes[priorMode].deviceIndex == mode.deviceIndex &&
                         prior.modes[priorMode].channel == mode.channel) {
                         delete catalog; strlcpy(_fault, "separate PCB ports share a device channel", sizeof(_fault)); return false;
                     }
@@ -679,6 +731,12 @@ const PcbProfileManager::Device* PcbProfileManager::findDevice(const char* id) {
     for (uint8_t i = 0; i < _catalog->deviceCount; ++i)
         if (!strcmp(_catalog->devices[i].id, id)) return &_catalog->devices[i];
     return nullptr;
+}
+
+const PcbProfileManager::Device* PcbProfileManager::deviceForMode(const Mode& mode) {
+    if (!_catalog || mode.deviceIndex < 0 || mode.deviceIndex >= _catalog->deviceCount)
+        return nullptr;
+    return &_catalog->devices[mode.deviceIndex];
 }
 
 const PcbProfileManager::Bus* PcbProfileManager::findBus(const char* id) {
@@ -787,21 +845,30 @@ void PcbProfileManager::toJson(JsonObject out, bool includePorts,
         for (uint8_t j = 0; j < port.modeCount; ++j) {
             const Mode& mode = port.modes[j];
             JsonObject m = modes.add<JsonObject>();
-            m["id"] = mode.id; m["adapter"] = mode.adapter;
-            if (mode.deviceId[0]) {
-                m["device"] = mode.deviceId;
-                const Device* device = findDevice(mode.deviceId);
-                if (device) m["device_driver"] = device->driver;
+            const char* adapter = adapterName(mode.adapter);
+            m["id"] = mode.id; m["adapter"] = adapter;
+            const Device* device = deviceForMode(mode);
+            if (device) {
+                m["device"] = device->id;
+                m["device_driver"] = device->driver;
             }
-            if (mode.defaultId[0]) {
+            const DefaultAssignment* defaultAssignment = nullptr;
+            for (uint8_t d = 0; d < _catalog->defaultCount; ++d) {
+                const DefaultAssignment& candidate = _catalog->defaults[d];
+                if (candidate.portIndex == i && candidate.modeIndex == j) {
+                    defaultAssignment = &candidate;
+                    break;
+                }
+            }
+            if (defaultAssignment) {
                 JsonObject assignment = m["default"].to<JsonObject>();
-                assignment["id"] = mode.defaultId;
-                assignment["name"] = mode.defaultName;
-                assignment["role"] = mode.defaultRole;
-                assignment["purpose"] = mode.defaultPurpose;
+                assignment["id"] = defaultAssignment->id;
+                assignment["name"] = defaultAssignment->name;
+                assignment["role"] = defaultAssignment->role;
+                assignment["purpose"] = defaultAssignment->purpose;
             }
-            if ((!strcmp(mode.adapter, "i2c_adc_input") ||
-                 !strcmp(mode.adapter, "i2c_adc_digital_input")) &&
+            if ((!strcmp(adapter, "i2c_adc_input") ||
+                 !strcmp(adapter, "i2c_adc_digital_input")) &&
                 mode.referenceMv > 0.0f)
                 m["reference_mv"] = mode.referenceMv;
         }

@@ -551,18 +551,32 @@ async function _saveUnifiedControllerChanges(payload, saveMsg, confirmButton) {
   const engine = await latestResponse.json();
   if (!engine.hardware || !engine.settings) throw new Error('current engine file is incomplete');
   merge(engine.settings, payload);
+  let hardwareChanged = false;
   if (CONFIG_SURFACE === 'controllers') {
-    engine.hardware.controllers = JSON.parse(JSON.stringify(hwCfg.controllers || {}));
-    engine.hardware.safety = JSON.parse(JSON.stringify(hwCfg.safety || {}));
-    engine.hardware.oil_loops = JSON.parse(JSON.stringify(hwCfg.oil_loops || []));
+    const nextControllers = JSON.parse(JSON.stringify(hwCfg.controllers || {}));
+    const nextSafety = JSON.parse(JSON.stringify(hwCfg.safety || {}));
+    const nextOilLoops = JSON.parse(JSON.stringify(hwCfg.oil_loops || []));
+    hardwareChanged = JSON.stringify(engine.hardware.controllers || {}) !== JSON.stringify(nextControllers) ||
+      JSON.stringify(engine.hardware.safety || {}) !== JSON.stringify(nextSafety) ||
+      JSON.stringify(engine.hardware.oil_loops || []) !== JSON.stringify(nextOilLoops);
+    engine.hardware.controllers = nextControllers;
+    engine.hardware.safety = nextSafety;
+    engine.hardware.oil_loops = nextOilLoops;
   } else if (CONFIG_SURFACE === 'system') {
     for (const key of ['profile_id','profile_desc','wifi_password','wifi_tx_power_dbm','cluster_serial','mavlink']) {
       if (hwCfg[key] !== undefined) engine.hardware[key] = JSON.parse(JSON.stringify(hwCfg[key]));
     }
     engine.settings.profile_id = engine.hardware.profile_id;
   }
-  const response = await fetch('/api/ecu_config?source=controllers', {
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(engine)
+  // Dependency normalization can mark the hardware side dirty even when its
+  // resulting controller/safety assignments are byte-for-byte unchanged.
+  // Keep that ordinary settings save on the smaller settings-only transaction;
+  // a full engine restore needlessly consumes Classic's filesystem/parser
+  // resources and revalidates unchanged hardware.
+  const settingsOnly = CONFIG_SURFACE === 'controllers' && !hardwareChanged;
+  const response = await fetch(settingsOnly ? '/api/config' : '/api/ecu_config?source=controllers', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(settingsOnly ? engine.settings : engine)
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || result.ok === false) throw new Error(result.detail || result.error || `HTTP ${response.status}`);

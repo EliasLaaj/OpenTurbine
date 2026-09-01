@@ -466,7 +466,8 @@ for (const key of [
 }
 
 expect('physical STOP remains mandatory while START is optional',
-  hwConfig.includes('if (!registryStop && stopPin < 0) return false') &&
+  hwConfig.includes('if (!registryStop && stopPin < 0 && !PcbProfileManager::active()) return false') &&
+  (hwConfig.match(/assign the required Stop switch to a PCB connection in Hardware/g) || []).length === 2 &&
   hwConfig.includes('(startPin >= 0 && !gpioAllowed(startPin))'));
 expect('standby control-rule masks survive validation and both load paths',
   configCpp.includes('validInt(rule["mode_mask"], 1, 15)') &&
@@ -589,12 +590,13 @@ expect('flash persistence is prohibited while engine control is active',
   web.includes('if (storageWriteWindow && !_hwRebootPending) Config::flushPendingSave()') &&
   web.includes('if (storageWriteWindow) Config::flushPendingRuntimeStats()'));
 expect('flash-backed asset responses lease LittleFS against concurrent writes',
-  web.includes('class LeasedCallbackResponse final : public AsyncCallbackResponse') &&
+  web.includes('class LeasedAssetResponse final : public AsyncAbstractResponse') &&
   web.includes('++s_activeAssetResponses') &&
   web.includes('if (s_activeAssetResponses) --s_activeAssetResponses') &&
-  web.includes('new (std::nothrow) LeasedCallbackResponse(') &&
+  web.includes('new (std::nothrow) LeasedAssetResponse(source, path, contentType)') &&
   web.includes("File source = LittleFS.open(path, \"r\")") &&
-  web.includes("if (count && index + count >= fileSize && !leaseReleased->exchange(true))") &&
+  web.includes('~LeasedAssetResponse() override') &&
+  web.includes('_releaseAssetResponseLease();') &&
   web.includes('s_storageWriteActive = true') &&
   web.includes('if (storageWriteWindow) _endStorageWriteWindow()'));
 expect('config UI PATCH sends only recap-listed changed fields',
@@ -877,17 +879,21 @@ expect('bounded web JSON serialization measures once and calls ArduinoJson',
   web.includes('return serializeJson(doc, buf, len);') &&
   web.includes('return _serializeJsonBounded(doc, buf, len);') &&
   !/_serializeJsonBounded\([^)]*\)\s*\{[\s\S]{0,350}return _serializeJsonBounded/.test(web));
-expect('fixed web workspaces reserve once and fail into START lockout',
+expect('TX and RX workspaces are reserved before Wi-Fi service starts',
   web.includes('#if defined(CONFIG_IDF_TARGET_ESP32S3)') &&
   web.includes('using WebRxBuffer = char[24576]') &&
   web.includes('using WebRxBuffer = char[16384]') &&
   web.includes('using WebTxBuffer = char[16384]') &&
   web.includes('using WebTxBuffer = char[12288]') &&
-  (web.match(/heap_caps_malloc\(sizeof\(WebRxBuffer\)/g) || []).length === 1 &&
+  web.includes('static WebRxBuffer* _allocateWebRxStorage()') &&
+  web.includes('g_webRxStorage = _allocateWebRxStorage()') &&
+  web.includes('if (!g_webRxStorage || !g_webTxStorage)') &&
+  web.includes('g_webRxLen = 0;') &&
+  !web.includes('released = g_webRxStorage') &&
   (web.match(/heap_caps_malloc\(sizeof\(WebTxBuffer\)/g) || []).length === 1 &&
-  web.includes('Web service memory reservation failed; reboot or reflash before START') &&
   main.includes('const bool webServerReady = WebServer::begin()') &&
-  main.includes('if (!webServerReady)') &&
+  main.includes('Web server unavailable - physical engine control remains available') &&
+  !main.includes('if (!webServerReady)') &&
   !web.includes('static char   g_webRxBuf[16384]') &&
   !web.includes('static char   g_webTxBuf[16384]'));
 expect('maximum legal hardware JSON is streamed independently of fixed web scratch buffers',

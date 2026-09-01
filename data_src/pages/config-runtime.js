@@ -871,6 +871,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applyView();
     hookValidation();
     runValidation();
+    document.dispatchEvent(new CustomEvent('ot:config-loaded', { detail:{ surface:CONFIG_SURFACE } }));
     if (typeof startTelemetryBoot === 'function') startTelemetryBoot();
     // Form controls are generated after load, so reveal the exact cross-page
     // destination only after rendering and dependency visibility are settled.

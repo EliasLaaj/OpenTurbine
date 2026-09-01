@@ -8,6 +8,22 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ---
 
+## [Unreleased]
+
+## [2.2.2] — 2026-09-01
+
+### Changed
+- System now owns complete engine-file backup/restore, ECU loop diagnostics,
+  and factory reset. Tools remains focused on commissioning, actuator checks,
+  software updates, and developer controls.
+- Factory-reset guidance now states precisely that an installed physical PCB
+  profile is preserved while turbine assignments and settings are cleared.
+
+### Fixed
+- A web-service allocation failure no longer prints the misleading claim that
+  START is locked; autonomous physical engine control remains independent of
+  the browser service.
+
 ## [2.2.1] — 2026-08-30
 
 ### Fixed

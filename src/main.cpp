@@ -4278,10 +4278,8 @@ static void checkStartSwitch() {
 static void webTask(void*) {
     for (;;) {
         WebServer::tick();
-        // Give web more CPU in STANDBY; engine is priority when active.
-        // FAULT is standby-like — the web UI is the repair path there.
-        SysMode m = EngineData::instance().mode;
-        bool engineActive = (m != SysMode::STANDBY && m != SysMode::FAULT);
+        const SysMode mode = EngineData::instance().mode;
+        const bool engineActive = mode != SysMode::STANDBY && mode != SysMode::FAULT;
         vTaskDelay(pdMS_TO_TICKS(engineActive ? 20 : 5));
     }
 }
@@ -4386,17 +4384,13 @@ void setup() {
     Serial.println("[OT] Starting web server");
     const bool webServerReady = WebServer::begin();
     Serial.println(webServerReady ? "[OT] Web server ready"
-                                  : "[OT] Web server unavailable - START will remain locked");
+                                  : "[OT] Web server unavailable - physical engine control remains available");
 
     Hardware::initSensors();
     Hardware::initActuators();
-    if (!webServerReady) {
-        auto& startupState = EngineData::instance();
-        startupState.hardwareReady = false;
-        strlcpy(startupState.hardwareFault,
-                "Web service memory reservation failed; reboot or reflash before START",
-                sizeof(startupState.hardwareFault));
-    }
+    // The browser is a configuration/monitoring convenience, not an engine
+    // control dependency. A failed web workspace must never revoke otherwise
+    // valid hardware authority or prevent autonomous physical controls.
     if (!commandQueueReady) {
         auto& startupState = EngineData::instance();
         if (startupState.hardwareReady || startupState.hardwareFault[0] == '\0') {
@@ -4484,12 +4478,10 @@ void setup() {
         commandConfiguredIgnitionOutput(Config::relightOutputId, (uint8_t)Config::relightIgnitionTarget, true);
     });
 
-    // Web maintenance tick on Core 0 — independent FreeRTOS task
-    // Stack needs to hold char buf[5120] + ArduinoJson + call frames from webTask tick
-    // Priority 8: high enough to time-share Core 0 with async_tcp (prio 10)
-    // instead of being fully preempted during file serving. Keeps WS updates
-    // regular even when the browser is fetching pages.
-    if (xTaskCreatePinnedToCore(webTask, "web", 12288, nullptr, 8, nullptr, 0) != pdPASS) {
+    // Keep filesystem/network maintenance on Core 0 with AsyncTCP. Its measured
+    // working stack is below 4 KiB; 5 KiB retains measured margin while still
+    // fitting after a maximum Classic PCB profile has been loaded.
+    if (xTaskCreatePinnedToCore(webTask, "web", 5120, nullptr, 8, nullptr, 0) != pdPASS) {
         Serial.println("[OT] ERROR: web task allocation failed; network controls and log draining unavailable");
     }
 

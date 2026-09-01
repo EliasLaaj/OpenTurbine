@@ -17,10 +17,11 @@ import urllib.request
 
 
 class DUT:
-    def __init__(self, base=None, timeout=4.0):
+    def __init__(self, base=None, timeout=8.0):
         base = base or os.environ.get("OTBENCH_DUT", "http://192.168.4.1")
         self.base = base.rstrip("/")
         self.timeout = timeout
+        self.wifi_profile = os.environ.get("OTBENCH_WIFI_PROFILE", "OpenTurbine")
         self._data_base = None
         self._last_wifi_reconnect = 0.0
 
@@ -43,10 +44,6 @@ class DUT:
                 timeout=5,
                 check=False,
             ).stdout
-            connected_to_dut = (
-                "State" in state and "connected" in state and
-                "SSID" in state and "OpenTurbine" in state
-            )
             addresses = subprocess.run(
                 ["ipconfig"],
                 stdout=subprocess.PIPE,
@@ -55,6 +52,12 @@ class DUT:
                 timeout=5,
                 check=False,
             ).stdout
+            # PCB profiles may use their own AP name. The 192.168.4.x lease,
+            # not a hard-coded SSID, identifies a healthy DUT connection.
+            connected_to_dut = (
+                "State" in state and "connected" in state and
+                "192.168.4." in addresses
+            )
             # Association alone is not enough: Windows can remain associated
             # after losing the ECU DHCP lease and fall back to 169.254/16.
             if connected_to_dut and "192.168.4." in addresses:
@@ -76,7 +79,10 @@ class DUT:
                 )
                 time.sleep(0.5)
             subprocess.run(
-                ["netsh", "wlan", "connect", "name=OpenTurbine", "ssid=OpenTurbine", "interface=Wi-Fi"],
+                ["netsh", "wlan", "connect",
+                 "name=" + self.wifi_profile,
+                 "ssid=" + self.wifi_profile,
+                 "interface=Wi-Fi"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=8,

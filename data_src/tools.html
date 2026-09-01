@@ -6,7 +6,7 @@
 <style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}@keyframes otFailsafeReveal{to{visibility:visible}}html:not(.ot-theme-ready) body{visibility:hidden;animation:otFailsafeReveal 0s 8s forwards}</style>
 <title>OpenTurbine — Tools</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260830a',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260830a');s.setAttribute('data-ot-app','true');s.text=c;document.head.appendChild(s);},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260901f',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260901f');s.setAttribute('data-ot-app','true');s.text=c;document.head.appendChild(s);},{once:true});</script>
 <style>
 .test-settings-card{width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;overflow:hidden;background:var(--surface);border:1px solid var(--border);border-radius:10px}
 .test-settings-head,.test-settings-foot{flex:0 0 auto;padding:1rem}
@@ -24,15 +24,15 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
-  <a href="/tools.html" class="active" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
-  <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
+  <a href="/tools.html" class="active" title="Run standby commissioning, actuator tests, software updates, and developer controls.">Tools</a>
+  <a href="/system.html" title="Configure ECU behavior and communications; manage backups, diagnostics, and reset.">System</a>
   <span id="conn" class="conn-dot disconnected"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
 <main>
   <div id="tools-page-head" class="page-heading">
     <div class="page-heading-main">
       <h1 class="page-title">Tools</h1>
-      <p class="page-subtitle">STANDBY/FAULT tests, diagnostics, backups, software updates and device maintenance.</p>
+      <p class="page-subtitle">STANDBY/FAULT commissioning, actuator tests, software updates, and developer controls.</p>
     </div>
     <div class="page-heading-actions">
       <button id="btn-test-settings" onclick="openTestSettings()" title="Edit actuator-test durations, output levels, and the shared safety confirmation preference.">Tool settings</button>
@@ -54,35 +54,6 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   </div>
 
   <div id="tool-area"></div>
-
-  <div class="tool-card tools-wide-card" id="loop-diag-card" title="Main ECU loop speed and execution timing. Worst cycle includes waiting and scheduling; missed deadlines count loop bodies that took longer than the configured period. Enable ECU loop timing in session logging only when you want these values written to CSV." style="margin-top:1rem">
-    <div class="tool-header">
-      <div class="tool-name">ECU Loop Timing</div>
-      <div class="tool-state off" id="loop-diag-state">Live</div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.65rem;margin-top:.45rem">
-      <div><div class="tool-desc">Loop rate</div><div style="font-family:monospace;font-weight:700" id="diag-loop-hz">-</div></div>
-      <div><div class="tool-desc">Period</div><div style="font-family:monospace;font-weight:700" id="diag-loop-period">-</div></div>
-      <div><div class="tool-desc">Worst cycle</div><div style="font-family:monospace;font-weight:700" id="diag-loop-period-max">-</div></div>
-      <div><div class="tool-desc">Exec avg</div><div style="font-family:monospace;font-weight:700" id="diag-loop-avg">-</div></div>
-      <div><div class="tool-desc">Exec max</div><div style="font-family:monospace;font-weight:700" id="diag-loop-max">-</div></div>
-      <div><div class="tool-desc">Missed deadlines</div><div style="font-family:monospace;font-weight:700" id="diag-loop-overruns">-</div></div>
-      <div><div class="tool-desc">Counter</div><div style="font-family:monospace;font-weight:700" id="diag-loop-count">-</div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:.55rem;margin-top:.8rem;padding-top:.75rem;border-top:1px solid var(--border)">
-      <div><div class="tool-desc">Sensors</div><div style="font-family:monospace;font-weight:700" id="diag-loop-sensors">-</div></div>
-      <div><div class="tool-desc">Sequencer</div><div style="font-family:monospace;font-weight:700" id="diag-loop-sequencer">-</div></div>
-      <div><div class="tool-desc">Controllers</div><div style="font-family:monospace;font-weight:700" id="diag-loop-controllers">-</div></div>
-      <div><div class="tool-desc">Actuators</div><div style="font-family:monospace;font-weight:700" id="diag-loop-actuators">-</div></div>
-      <div><div class="tool-desc">Logging</div><div style="font-family:monospace;font-weight:700" id="diag-loop-logging">-</div></div>
-      <div><div class="tool-desc">Status LED</div><div style="font-family:monospace;font-weight:700" id="diag-loop-led">-</div></div>
-    </div>
-  </div>
-
-  <div class="appearance-card">
-    <div id="appearance-picker"></div>
-    <div class="appearance-note">Interface theme for this device — applies instantly.</div>
-  </div>
 </main>
 
 <script>
@@ -346,30 +317,6 @@ function renderTools() {
   </div>`;
   }
 
-  // ── Complete engine file backup & restore ────────────────────
-  html += `<hr class="tool-divider">
-  <div class="tool-card" id="card-CONFIG_BACKUP" title="Export or restore the complete engine configuration file while the engine is stopped.">
-    <div class="tool-header">
-      <div class="tool-name">Engine File Backup &amp; Restore</div>
-      <div class="tool-state off" id="cfg-backup-state">Ready</div>
-    </div>
-    <div class="tool-footer" style="margin-top:.5rem;flex-wrap:wrap;gap:.5rem">
-      <div class="tool-desc" style="flex:1;min-width:140px">
-        Download one complete engine file containing hardware, settings, sequences,
-        and calibration, or restore a previously saved file. The engine must be in
-        STANDBY (or FAULT) to restore.
-        <br><span style="color:var(--yellow)">Note: the backup is complete by design —
-        it includes the Wi-Fi AP password. Review before sharing the file.</span>
-      </div>
-      <button id="cfg-backup-btn" onclick="backupConfig()">Backup</button>
-      <label style="cursor:pointer">
-        <input type="file" id="cfg-restore-file" accept=".json" style="display:none" onchange="restoreConfig(this)">
-        <button id="cfg-restore-btn" onclick="document.getElementById('cfg-restore-file').click()">Restore…</button>
-      </label>
-    </div>
-    <div id="cfg-backup-msg" style="font-size:.72rem;margin-top:.45rem;display:none"></div>
-  </div>`;
-
   // ── Manual update tools ─────────────────────────────────────
   // Keep raw firmware/assets upload available without placing developer-facing
   // file selection in the normal user path. The Windows setup tool performs
@@ -454,27 +401,6 @@ function renderTools() {
     </div>
   </div>`;
   document.getElementById('tool-area').insertAdjacentHTML('beforeend', devHtml);
-
-  // Factory reset card — always visible
-  const factoryResetHtml = `
-  <hr class="tool-divider" style="margin-top:1.4rem">
-  <div class="tool-card" id="card-factory-reset" style="border-color:var(--red);margin-top:.75rem">
-    <div class="tool-header">
-      <div class="tool-name" style="color:var(--red)">Factory Reset</div>
-      <div class="tool-state off" id="state-factory-reset">STANDBY / FAULT</div>
-    </div>
-    <div class="tool-footer">
-      <div class="tool-desc" style="color:var(--dim)">
-        Erases all engine settings, sequences, hardware assignments, calibration,
-        Wi-Fi password, event logs, and session logs, then reboots to the built-in
-        minimal profile. Download a complete engine file first if anything may be
-        needed later. <b style="color:var(--red)">Cannot be undone.</b>
-      </div>
-      <button onclick="factoryReset()" class="danger" id="btn-factory-reset">Factory Reset</button>
-    </div>
-    <div id="factory-reset-msg" style="font-size:.72rem;margin-top:.45rem;display:none"></div>
-  </div>`;
-  document.getElementById('tool-area').insertAdjacentHTML('beforeend', factoryResetHtml);
 
   // Dev mode — always-visible card so it's easy to find before the dev section appears
   const devToggleHtml = `
@@ -638,34 +564,6 @@ function refreshToggleState(tool) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────
-function updateLoopDiagnostics(d) {
-  const hz = Number(d.loop_hz);
-  const period = Number(d.loop_period_ms);
-  const periodMax = Number(d.loop_period_max_ms);
-  const avg = Number(d.loop_exec_avg_ms);
-  const max = Number(d.loop_exec_max_ms);
-  const overruns = Number(d.loop_overrun_count);
-  const count = Number(d.loop_counter);
-  const fmtMs = v => Number.isFinite(v) ? v.toFixed(3) + ' ms' : '-';
-  const set = (id, text) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text;
-  };
-  set('diag-loop-hz', Number.isFinite(hz) ? hz.toFixed(1) + ' Hz' : '-');
-  set('diag-loop-period', Number.isFinite(period) ? period.toFixed(2) + ' ms' : '-');
-  set('diag-loop-period-max', fmtMs(periodMax));
-  set('diag-loop-avg', fmtMs(avg));
-  set('diag-loop-max', fmtMs(max));
-  set('diag-loop-overruns', Number.isFinite(overruns) ? fmtInt(overruns) : '-');
-  set('diag-loop-count', Number.isFinite(count) ? fmtInt(count) : '-');
-  set('diag-loop-sensors', fmtMs(Number(d.loop_sensors_ms)));
-  set('diag-loop-sequencer', fmtMs(Number(d.loop_sequencer_ms)));
-  set('diag-loop-controllers', fmtMs(Number(d.loop_controllers_ms)));
-  set('diag-loop-actuators', fmtMs(Number(d.loop_actuators_ms)));
-  set('diag-loop-logging', fmtMs(Number(d.loop_logging_ms)));
-  set('diag-loop-led', fmtMs(Number(d.loop_led_ms)));
-}
-
 function setState(id, text, cls) {
   const el = document.getElementById('state-' + id);
   if (el) { el.textContent = text; el.className = 'tool-state' + (cls ? ' ' + cls : ''); }
@@ -692,9 +590,6 @@ function setAllButtons(forcedOff) {
   // Cooldown start button — only standby-like and not already running
   const ecBtn = document.getElementById('btn-EXTRA_COOLDOWN');
   if (ecBtn) ecBtn.disabled = forcedOff || !inStandby || ecActive || !extraCooldownAvailable();
-  // Factory reset — standby-like only (card label says so; enforce it here)
-  const frBtn = document.getElementById('btn-factory-reset');
-  if (frBtn) frBtn.disabled = forcedOff || !inStandby;
 }
 function refreshTimedToolLockStates() {
   const cooldownLocked = !!(liveData && liveData.extra_cooldown_active);
@@ -733,8 +628,6 @@ window.applyData = function(d) {
     setAllButtons(false);
     refreshTimedToolLockStates();
   }
-  updateLoopDiagnostics(d);
-
   // Toggle state badges
   TOOLS.forEach(t => { if (t.toggleKey) refreshToggleState(t); });
   const limpCap = document.getElementById('limp-cap-inline');
@@ -795,10 +688,6 @@ window.applyData = function(d) {
   // ever showed it, so the control was unreachable from the UI.
   const scCard = document.getElementById('card-TOGGLE_SAFETY_CHECKS');
   if (scCard) scCard.style.display = (devOn && benchOn) ? '' : 'none';
-
-  // Config restore button — standby-like (FAULT is the repair path)
-  const cfgRestoreBtn = document.getElementById('cfg-restore-btn');
-  if (cfgRestoreBtn) cfgRestoreBtn.disabled = !isStandbyLike(d.mode);
 
   // Config schema mismatch banner: missing or unsupported fields may need review.
   let cvmBanner = document.getElementById('cfg-version-mismatch-banner');
@@ -1067,212 +956,6 @@ window.addEventListener('pagehide', stopToolsTelemetry);
 window.addEventListener('ot:navigation-prepare', prepareToolsTelemetryNavigation);
 window.addEventListener('ot:navigation-start', stopToolsTelemetry);
 
-
-// ── Config backup ─────────────────────────────────────────────
-async function backupConfig() {
-  const msg = document.getElementById('cfg-backup-msg');
-  // The engine file is the large response. Finish it before requesting live
-  // metadata so a backup cannot overlap two heap-heavy snapshots on the ECU.
-  stopToolsTelemetry();
-  const fetchEngineFile = async () => {
-    let lastError;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const cfgRes = await fetch('/api/ecu_config', { cache:'no-store' });
-        if (!cfgRes.ok) throw new Error('HTTP ' + cfgRes.status);
-        return JSON.parse(await cfgRes.text());
-      } catch (error) {
-        lastError = error;
-        if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 700 * (attempt + 1)));
-      }
-    }
-    throw lastError || new Error('No response');
-  };
-  fetchEngineFile()
-    .then(async cfg => {
-      const dataRes = await fetch('/api/data');
-      const live = dataRes.ok ? await dataRes.json() : {};
-      return [cfg, live];
-    })
-    .then(([cfg, live]) => {
-      cfg._backup_meta = {
-        timestamp:    new Date().toISOString(),
-        fw_version:   live.fw_version || 'unknown',
-        profile:      (cfg.hardware || {}).profile_id || 'unknown',
-        uptime_s:     live.uptime_s  || 0
-      };
-      const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
-      const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const profile = String(cfg._backup_meta.profile || 'OpenTurbine')
-        .replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'OpenTurbine';
-      const profilePart = /^openturbine$/i.test(profile) ? '' : profile + '_';
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = 'OpenTurbine_' + profilePart + ts + '.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      document.getElementById('cfg-backup-state').textContent = 'Download started';
-      document.getElementById('cfg-backup-state').className   = 'tool-state done';
-      if (msg) { msg.textContent = 'Download started. Confirm the complete engine file appears in Downloads before relying on it.'; msg.style.color = 'var(--green)'; msg.style.display = ''; }
-      setTimeout(() => {
-        document.getElementById('cfg-backup-state').textContent = 'Ready';
-        document.getElementById('cfg-backup-state').className   = 'tool-state off';
-        if (msg) msg.style.display = 'none';
-      }, 3000);
-    })
-    .catch(e => {
-      if (msg) { msg.textContent = 'Backup failed: ' + e.message; msg.style.color = 'var(--red)'; msg.style.display = ''; }
-    })
-    .finally(startToolsTelemetry);
-}
-
-// ── Factory reset ─────────────────────────────────────────────
-async function factoryReset() {
-  if (!await OTDialog.confirm('⚠ Factory Reset\n\nThis will permanently ERASE:\n• Engine settings and sequences\n• Hardware assignments\n• All calibration\n• Wi-Fi password\n• Event and session logs\n\nDownload a complete engine file first if you may need this setup.', {
-    title: 'Factory reset this ECU?', confirmText: 'Continue', danger: true
-  })) return;
-  const typed = await OTDialog.prompt('Type RESET to erase this ECU and reboot with built-in defaults.', {
-    title: 'Final factory-reset confirmation', confirmText: 'Erase and reset', placeholder: 'RESET'
-  });
-  if (typed !== 'RESET') {
-    alert('Factory reset cancelled. Nothing was erased.');
-    return;
-  }
-  const msg = document.getElementById('factory-reset-msg');
-  const btn = document.getElementById('btn-factory-reset');
-  if (btn) btn.disabled = true;
-  fetch('/api/factory_reset', { method: 'POST' })
-    .then(async r => {
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || d.ok === false) throw new Error(d.error || d.reason || ('HTTP ' + r.status));
-      return d;
-    })
-    .then(d => {
-      if (d.ok) {
-        if (msg) { msg.textContent = 'Reset sent — device rebooting…'; msg.style.color = 'var(--yellow)'; msg.style.display = ''; }
-        setTimeout(() => location.reload(), 8000);
-      } else {
-        if (msg) { msg.textContent = d.error || 'Reset failed'; msg.style.color = 'var(--red)'; msg.style.display = ''; }
-        if (btn) btn.disabled = false;
-      }
-    })
-    .catch(e => {
-      if (msg) { msg.textContent = 'Error: ' + e.message; msg.style.color = 'var(--red)'; msg.style.display = ''; }
-      if (btn) btn.disabled = false;
-    });
-}
-
-// ── Config restore ────────────────────────────────────────────
-function compactEngineFileForRestore(text) {
-  const root = JSON.parse(text);
-  const registry = root?.hardware?.channel_registry;
-  const defaults = {
-    pulses_per_unit:1,
-    analog_zero_mv:0, analog_mv_per_unit:1000, analog_divider:1,
-    digital_threshold_raw:2048, digital_hysteresis_raw:64,
-    torque_interface:0, hx711_clk:-1, hx711_scale:1, hx711_zero:0,
-    temp_interface:0, spi_clk:-1, spi_cs:-1, spi_miso:-1, spi_mosi:-1,
-    tc_type:'K', temp_resolution:10, ntc_beta:3950, ntc_r0:10000,
-    ntc_r_fixed:10000, ntc_pullup:true,
-    safe_demand:0, force_safe_on_fault:false, min_run_demand:0,
-    pwm_freq_hz:5000, pwm_res_bits:10,
-    invert:false, pullup:false, pulldown:false,
-    has_current:false, current_pin:-1, current_mv_a:100,
-    current_zero_v:1.65, current_max_a:0,
-    has_flow_monitor:false, minimum_flow_l_min:0
-  };
-  for (const channel of [...(registry?.inputs || []), ...(registry?.outputs || [])]) {
-    if (!channel || typeof channel !== 'object') continue;
-    for (const [key, value] of Object.entries(defaults)) {
-      // These are decoder defaults, so omitting an exact match is lossless.
-      if (Object.is(channel[key], value)) delete channel[key];
-    }
-  }
-  return JSON.stringify(root);
-}
-
-async function restoreConfig(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const msg = document.getElementById('cfg-backup-msg');
-  const btn = document.getElementById('cfg-restore-btn');
-  if (!isStandbyLike(engineMode)) {
-    alert('Engine must be in STANDBY (or FAULT) to restore an engine file.');
-    input.value = '';
-    return;
-  }
-  if (!await OTDialog.confirm('Restore complete engine file from "' + file.name + '"?\n\nThis replaces hardware assignments, settings, sequences, calibration, profile/Wi-Fi details, and runtime statistics, then reboots. Current event and session logs remain on this ECU.\n\nDownload the current engine file first if it may be needed.', {
-    title: 'Restore complete engine file?', confirmText: 'Restore and reboot', danger: true
-  })) {
-    input.value = '';
-    return;
-  }
-  stopToolsTelemetry();
-  if (typeof stopGlobalTelemetry === 'function') stopGlobalTelemetry();
-  await new Promise(resolve => setTimeout(resolve, 250));
-  btn.disabled = true;
-  document.getElementById('cfg-backup-state').textContent = 'Restoring…';
-  document.getElementById('cfg-backup-state').className   = 'tool-state active';
-  const reader = new FileReader();
-  reader.onload = ev => {
-    const postRestore = async () => {
-      const payload = compactEngineFileForRestore(ev.target.result);
-      try {
-        return await fetch('/api/ecu_config', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: payload
-        });
-      } catch (error) {
-        // A successful restore immediately reboots the AP, so the browser can
-        // lose the response after the file was committed. Retrying this
-        // mutation could apply the same restore and reboot several times.
-        document.getElementById('cfg-backup-state').textContent = 'Checking after ECU restart…';
-        let sawDisconnect = false;
-        for (let attempt = 0; attempt < 45; attempt++) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          try {
-            const status = await fetch('/api/status', {cache:'no-store'});
-            if (status.ok && sawDisconnect) {
-              return new Response(JSON.stringify({ok:true,reboot:true,recovered:true}), {
-                status:200, headers:{'Content-Type':'application/json'}
-              });
-            }
-          } catch (_) {
-            sawDisconnect = true;
-          }
-        }
-        throw new Error(sawDisconnect
-          ? 'The ECU restarted but did not reconnect. Rejoin its Wi-Fi and verify the engine file before trying again.'
-          : 'The restore response was lost. The file was not sent again because repeating a restore may reboot the ECU twice. Reconnect and verify the current engine file.');
-      }
-    };
-    postRestore()
-    .then(async r => {
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || d.ok === false) throw new Error(d.error || d.reason || ('HTTP ' + r.status));
-      return d;
-    })
-    .then(d => {
-      if (d.ok) {
-        document.getElementById('cfg-backup-state').textContent = 'Done — rebooting…';
-        document.getElementById('cfg-backup-state').className   = 'tool-state done';
-        if (msg) { msg.textContent = 'Config restored. Device is rebooting.'; msg.style.color = 'var(--green)'; msg.style.display = ''; }
-      } else {
-        throw new Error(d.error || 'Unknown error');
-      }
-    })
-    .catch(e => {
-      document.getElementById('cfg-backup-state').textContent = 'Error';
-      document.getElementById('cfg-backup-state').className   = 'tool-state fault';
-      if (msg) { msg.textContent = 'Restore failed: ' + e.message; msg.style.color = 'var(--red)'; msg.style.display = ''; }
-      btn.disabled = false;
-    });
-    input.value = '';
-  };
-  reader.readAsText(file);
-}
 
 function startOTA(input) {
   const file = input.files[0];

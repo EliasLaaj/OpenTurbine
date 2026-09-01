@@ -18,7 +18,7 @@ either target to a build-only-by-a-few-bytes state.
 
 Systematic hardware-in-the-loop validation of the OpenTurbine firmware on the
 bench rig, aimed at finding defects **before** they reach a real turbine engine.
-The current release candidate is OpenTurbine 2.2.1. DUT and tester roles may be
+The current release candidate is OpenTurbine 2.2.2. DUT and tester roles may be
 swapped between the ESP32-S3 and Classic ESP32 as a campaign requires. Tests
 drive physical ADC/PCNT/SPI/digital paths where wired and use explicit simulator
 coverage for unavailable I²C devices.
@@ -29,6 +29,34 @@ the **v2.0.0 release-candidate HIL** section as the baseline and the newer
 superseded EGT-rate and old configuration behavior are not v2 requirements.
 
 Legend: ✅ pass · ⚠️ anomaly/concern · ❌ bug · ⏭️ not physically testable
+
+## v2.2.2 dual-target qualification — 2026-09-01
+
+- ✅ ESP32-S3 DUT with Classic ESP32 tester passed the timer-only and
+  single-shaft/TOT/oil physical web-configuration profiles. The campaign
+  exercised ADC input, calibrated throttle movement, oil PWM, fuel shutoff,
+  ignition, main-fuel servo demand, startup acceptance, active startup/run
+  states, physical output readback, configuration persistence and restoration
+  (`ten_build_webui_hil_20260901_211917.json` and
+  `ten_build_webui_hil_20260901_212101.json`).
+- ✅ Both physical targets completed engine-file export/import/reboot/readback.
+  Classic reproduced the exported file byte-for-byte; S3 reproduced the same
+  recursive JSON values after canonical serialization. PCB-backed Classic
+  hardware save/readback also passed without removing the installed
+  `jet-ecu-v1` PCB profile.
+- ✅ The exact Classic release firmware completed the eight-page connected
+  browser audit with API recovery, mobile checks, zero transient failures and
+  stable heap. The S3 completed 24 page loads with zero retries and stable heap.
+- ✅ The final software gate passed all 10 UI audit programs, 269 safety
+  regressions, 17 representative turbine configurations, native controller and
+  protocol vectors, 42 Python tests, Setup Tool Go tests, both firmware and
+  LittleFS builds, and all enforced image/linker budgets. Windows Application
+  Control blocked launching a newly linked unsigned local probe; the unchanged
+  trusted native probes passed locally and the clean GitHub runner repeats the
+  canonical compilation/execution gate.
+- ⚠️ This is dry-bench qualification. Every installed ECU still requires
+  wiring, polarity, independent emergency-stop, driver-power, plumbing, EMI
+  and controlled first-engine validation on its actual turbine.
 
 ## v2.2.0 Classic shipping qualification — 2026-08-30
 
