@@ -4278,10 +4278,8 @@ static void checkStartSwitch() {
 static void webTask(void*) {
     for (;;) {
         WebServer::tick();
-        // Give web more CPU in STANDBY; engine is priority when active.
-        // FAULT is standby-like — the web UI is the repair path there.
-        SysMode m = EngineData::instance().mode;
-        bool engineActive = (m != SysMode::STANDBY && m != SysMode::FAULT);
+        const SysMode mode = EngineData::instance().mode;
+        const bool engineActive = mode != SysMode::STANDBY && mode != SysMode::FAULT;
         vTaskDelay(pdMS_TO_TICKS(engineActive ? 20 : 5));
     }
 }
@@ -4386,17 +4384,13 @@ void setup() {
     Serial.println("[OT] Starting web server");
     const bool webServerReady = WebServer::begin();
     Serial.println(webServerReady ? "[OT] Web server ready"
-                                  : "[OT] Web server unavailable - START will remain locked");
+                                  : "[OT] Web server unavailable - physical engine control remains available");
 
     Hardware::initSensors();
     Hardware::initActuators();
-    if (!webServerReady) {
-        auto& startupState = EngineData::instance();
-        startupState.hardwareReady = false;
-        strlcpy(startupState.hardwareFault,
-                "Web service memory reservation failed; reboot or reflash before START",
-                sizeof(startupState.hardwareFault));
-    }
+    // The browser is a configuration/monitoring convenience, not an engine
+    // control dependency. A failed web workspace must never revoke otherwise
+    // valid hardware authority or prevent autonomous physical controls.
     if (!commandQueueReady) {
         auto& startupState = EngineData::instance();
         if (startupState.hardwareReady || startupState.hardwareFault[0] == '\0') {

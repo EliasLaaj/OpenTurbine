@@ -515,6 +515,10 @@ function setSystemHardware(path, value) {
   _systemHardwareChangedPaths.add(path);
   _markDirty();
   renderSystemSetup();
+  // The System groups are rebuilt after each edit. Recompute the fixed save
+  // bar after that replacement so its count and enabled state cannot retain
+  // the pre-edit snapshot (notably on the slower Classic page load path).
+  _updateWorkspaceState();
 }
 function renderSystemSetup() {
   const root = document.getElementById('system-device-setup');
@@ -607,7 +611,7 @@ function renderSystemSetup() {
         <span class="cfg-desc">
           Erases all engine settings, sequences, hardware assignments, calibration,
           Wi-Fi password, event logs, and session logs, then reboots to the built-in
-          minimal profile. Download a complete engine file first if anything may be
+          minimal profile. The PCB profile is preserved. Download a complete engine file first if anything may be
           needed later. <b style="color:var(--red)">Cannot be undone.</b>
         </span>
         <div style="margin-top:.6rem">
@@ -622,9 +626,9 @@ function renderSystemSetup() {
     group('Instrument cluster','Optional OpenTurbine serial display',clusterFields,false) +
     group('MAVLink telemetry','Optional serial telemetry for external systems',mavFields,false) +
     group('ECU runtime','Control-loop scheduling and device-wide execution',runtimeFields,false) +
-    group('ECU loop timing','Main ECU loop speed and execution timing diagnostics',loopTimingFields,false) +
+    group('ECU loop timing','Main ECU loop speed and execution timing diagnostics',loopTimingFields,false,'loop-diag-card') +
     group('Backup & restore','Download or restore the complete configuration file',backupRestoreFields,false,'system-backup-restore') +
-    group('Factory reset','Permanently erase all configuration and logs to restore factory defaults',factoryResetFields,false);
+    group('Factory reset','Permanently erase all configuration and logs to restore factory defaults',factoryResetFields,false,'card-factory-reset');
   root.querySelectorAll(':scope > details').forEach(card => {
     const title = card.querySelector('.group-title')?.textContent.trim();
     if (openGroups.size) card.open = openGroups.has(title);
@@ -887,9 +891,11 @@ function applyView() {
       const section = field.closest('.cfg-section');
       return !section || !section.classList.contains('filter-hidden');
     }).length;
-    group.classList.toggle('filter-hidden', count === 0);
+    const alwaysVisible = group.dataset.alwaysVisible === '1' &&
+      (_workspaceFilter !== 'changed' || _controllerRulesDirty || _controllerHardwareDirty);
+    group.classList.toggle('filter-hidden', !alwaysVisible && count === 0);
     const meta = group.querySelector('.group-meta');
-    if (meta) meta.textContent = count ? `${count} setting${count === 1 ? '' : 's'}` : '';
+    if (meta && !alwaysVisible) meta.textContent = count ? `${count} setting${count === 1 ? '' : 's'}` : '';
     if ((search || _workspaceFilter === 'changed') && count) group.open = true;
   });
 

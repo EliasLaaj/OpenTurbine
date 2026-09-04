@@ -116,9 +116,9 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(gs, /Calibrate/i);
     assert.match(gs, /not physical verification/i);
     assert.doesNotMatch(gs, /completed on this browser/i);
-    assert.equal(await page.locator('#getting-started-banner a[href="/hardware.html?v=20260830a"]').count(), 1);
-    assert.equal(await page.locator('#getting-started-banner a[href="/controllers.html?v=20260830a"]').count(), 1);
-    assert.equal(await page.locator('#getting-started-banner a[href="/calibration.html?v=20260830a"]').count(), 1);
+    assert.equal(await page.locator('#getting-started-banner a[href="/hardware.html?v=20260901f"]').count(), 1);
+    assert.equal(await page.locator('#getting-started-banner a[href="/controllers.html?v=20260901f"]').count(), 1);
+    assert.equal(await page.locator('#getting-started-banner a[href="/calibration.html?v=20260901f"]').count(), 1);
     await page.evaluate(() => localStorage.setItem('openturbine_setup_progress_v1',
       JSON.stringify({ hardware: Date.now(), tools: Date.now() })));
     await page.reload();
@@ -226,9 +226,9 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await oilPumpCard.locator('button', {hasText:'Edit'}).click();
     assert.match((await oilPumpCard.textContent()).trim(), /Flow sensing & monitoring.*Main oil-pump flow sensor.*Pulses \/ litre.*Minimum flow.*Safety & Limits.*Oil Pressure Safety/is);
     assert.match((await oilPumpCard.textContent()).trim(), /Current sensing.*Calibration page/is);
-    assert.equal(await oilPumpCard.locator('a[href="/controllers.html?v=20260830a#cf-oil_mm"]').count(), 1);
-    assert.equal(await oilPumpCard.locator('a[href="/controllers.html?v=20260830a#cf-so_en"]').count(), 1);
-    assert.equal(await oilPumpCard.locator('a[href="/sequence.html?v=20260830a#tab-startup"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/controllers.html?v=20260901f#cf-oil_mm"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/controllers.html?v=20260901f#cf-so_en"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/sequence.html?v=20260901f#tab-startup"]').count(), 1);
     results.push('add-device catalog reserves singleton checks for sensors while multi-instance outputs and pump-owned monitoring remain clear');
 
     const multiPumpFlow = await page.evaluate(() => {
@@ -308,16 +308,18 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     results.push('bad or crossed engine-file restores are rejected before changing state');
 
     await reset(page);
-    await goto(page, 'tools.html', '#cfg-restore-btn');
+    await goto(page, 'system.html', '#system-device-setup');
     await scenario(page, 'startup');
     await page.reload();
-    await page.waitForSelector('#cfg-restore-btn');
+    await page.waitForSelector('#cfg-restore-btn', {state:'attached'});
+    await page.waitForFunction(() => typeof runtimeMode === 'string' && runtimeMode === 'STARTUP');
     assert.equal(await page.locator('#cfg-restore-btn').isDisabled(), true);
     await scenario(page, 'minimal');
     await page.reload();
-    await page.waitForSelector('#cfg-restore-btn');
+    await page.waitForSelector('#cfg-restore-btn', {state:'attached'});
+    await page.waitForFunction(() => !document.getElementById('cfg-restore-btn')?.disabled);
     assert.equal(await page.locator('#cfg-restore-btn').isDisabled(), false);
-    assert.match(await text(page, '#card-CONFIG_BACKUP'), /STANDBY/i);
+    assert.match(await text(page, '#system-backup-restore'), /STANDBY/i);
     results.push('backup/restore UX blocks restore outside STANDBY and explains the gate');
 
     await reset(page);
@@ -1108,7 +1110,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(await throttleCard.textContent(), /RC pulse calibration.*1075.*1925.*Calibration page.*authoritative/is);
     assert.equal(await throttleCard.locator('input[oninput*="updateRegistryRangeField"]').count(), 0,
       'Hardware must not expose RC endpoints that the ECU does not consume');
-    assert.ok(await throttleCard.locator('a[href="/calibration.html?v=20260830a#throttle-cal-row"]').count() >= 1);
+    assert.ok(await throttleCard.locator('a[href="/calibration.html?v=20260901f#throttle-cal-row"]').count() >= 1);
     results.push('canonical RC operator endpoints have one visible authority on the Calibration page');
 
     await reset(page);
@@ -1140,7 +1142,9 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(await text(page, '#cfg-version-mismatch-banner'), /schema mismatch|review/i);
     assert.match(await text(page, '#card-WEB-ASSETS'), /without erasing config or logs/i);
     assert.match(await text(page, '#manual-update-tools'), /Download and verify a complete engine file/i);
+    await goto(page, 'system.html', '#system-device-setup');
     assert.match(await page.locator('body').evaluate(() => backupConfig.toString()), /Download started.*Confirm the complete engine file appears in Downloads/s);
+    await goto(page, 'tools.html', '#tool-area');
     assert.equal(await visible(page, '#card-TOGGLE_BENCH_MODE'), false);
     await patchData(page, { dev_mode: true });
     await page.waitForFunction(() => {

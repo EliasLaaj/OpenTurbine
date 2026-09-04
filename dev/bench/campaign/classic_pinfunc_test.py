@@ -24,9 +24,13 @@ from otbench.tester import Tester
 from reversed_digital_sensor_hil import ReversedDigitalSensorHil
 from ten_build_webui_hil import chan_input, chan_output
 
+print("[SETUP] Connecting DUT and S3 tester", flush=True)
 dut = DUT(); dc = DutConfig(dut); t = Tester(os.environ.get("OTBENCH_PORT", "COM4")).open()
+print("[SETUP] Tester ready; downloading original hardware", flush=True)
 original_hw = dut.hardware()
+print("[SETUP] Hardware downloaded; downloading complete engine file", flush=True)
 original_ecu = dut._get("/api/ecu_config")
+print("[SETUP] Original engine file secured", flush=True)
 cleaned = False
 restore_verified = False
 results = []

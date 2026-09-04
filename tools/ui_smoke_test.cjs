@@ -418,7 +418,7 @@ function installedBrowser() {
     assert.equal(await page.locator('#fault-desc-text').evaluate(el =>
       ['anywhere', 'break-word'].includes(getComputedStyle(el).overflowWrap)), true);
     for (const route of ['/log.html', '/calibration.html', '/controllers.html', '/tools.html'])
-      assert.equal(await page.locator(`#fault-card a[href="${route}?v=20260830a"]`).count(), 1);
+      assert.equal(await page.locator(`#fault-card a[href="${route}?v=20260901f"]`).count(), 1);
     results.push('fault scenario exposes the current diagnosis and direct investigation routes');
 
     await scenario(page, 'full');
@@ -697,12 +697,14 @@ function installedBrowser() {
     await page.waitForTimeout(100);
     assert.equal((await state(page)).settings.ui_theme, 'daylight');
     await page.locator('#appearance-picker [data-theme-key="carbon"]').click();
+    results.push('appearance is owned by System and persists the selected ECU theme');
     await page.goto(`${base}/tools.html`);
     await page.waitForFunction(() => {
       const devButton = document.querySelector('#btn-dev-mode');
       const oilButton = document.querySelector('#btn-OIL_PRIME');
       return devButton && !devButton.disabled && oilButton && !oilButton.disabled;
     });
+    assert.equal(await page.locator('#appearance-picker').count(), 0);
     assert.equal(await text(page, '#btn-dev-mode'), 'Enable Dev Mode');
     assert.equal(await page.locator('#card-TOGGLE_BENCH_MODE').isVisible(), false);
     assert.equal(await page.locator('#card-TOGGLE_SAFETY_CHECKS').isVisible(), false);
@@ -1096,7 +1098,18 @@ function installedBrowser() {
     assert.ok(desktopSystemBar.left >= 0 && desktopSystemBar.right <= desktopSystemBar.viewport,
       `System save bar bounds ${JSON.stringify(desktopSystemBar)}`);
     await page.evaluate(() => document.querySelector('.save-bar').classList.remove('is-dirty'));
-    results.push('System groups device settings coherently and centers its save bar only when needed');
+    assert.equal(await page.locator('#system-backup-restore').count(), 1);
+    assert.equal(await page.locator('#loop-diag-card').count(), 1);
+    assert.equal(await page.locator('#card-factory-reset').count(), 1);
+    assert.match(await text(page, '#card-factory-reset'), /PCB profile is preserved/);
+    await page.goto(`${base}/tools.html`);
+    assert.equal(await page.locator('#system-backup-restore').count(), 0);
+    assert.equal(await page.locator('#loop-diag-card').count(), 0);
+    assert.equal(await page.locator('#card-factory-reset').count(), 0);
+    results.push('System owns backup, loop diagnostics, and reset while Tools stays focused on commissioning');
+
+    await page.goto(`${base}/system.html`);
+    await page.waitForSelector('#system-device-setup');
 
     const unified = await (await page.request.get(`${base}/api/ecu_config`)).json();
     unified.hardware.profile_id = 'second-bench-engine';

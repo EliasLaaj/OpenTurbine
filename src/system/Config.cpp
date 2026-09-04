@@ -1195,9 +1195,9 @@ void Config::load() {
         profileMatch = false;
         return;
     }
-    // HardwareConfig already consumed and validated its own subtree. Filter
-    // here as well so Classic ESP32 never holds the complete unified file plus
-    // a second Settings copy during boot.
+    // Parse only the settings subtree before Wi-Fi/AsyncTCP reserve their
+    // runtime memory. The temporary JSON trees are released before the web
+    // server starts, keeping boot deterministic without a second parser path.
     JsonDocument filter;
     filter[SECTION] = true;
     JsonDocument fullDoc;
@@ -1224,12 +1224,6 @@ void Config::load() {
         fullDoc.shrinkToFit();
         delay(0);
     } else {
-        // HardwareConfig::load() creates the hardware half of a new unified
-        // file before settings are loaded. In PCB mode it also deliberately
-        // locks START until a required STOP input is assigned. That
-        // commissioning lock must not prevent us from completing the missing
-        // settings half: Config::save() preserves the hardware subtree
-        // verbatim, while the lock remains active until Hardware is valid.
         Serial.println("[Config] Settings missing from ecu_config.json - adding defaults");
         strncpy(profileId, HardwareConfig::profileId, sizeof(profileId) - 1);
         profileId[sizeof(profileId) - 1] = '\0';
@@ -1877,8 +1871,13 @@ bool Config::_saveSettingsJson(const char* settingsJson, size_t settingsLen,
 #endif
     } else {
         _writeDoc(section.to<JsonObject>());
-        const size_t settingsExpected = measureJson(section);
-        ok &= serializeJson(section, fw) == settingsExpected;
+        if (section.overflowed()) {
+            ok = false;
+            Serial.println("[Config] Refusing settings save: generated settings JSON overflowed");
+        } else {
+            const size_t settingsExpected = measureJson(section);
+            ok &= serializeJson(section, fw) == settingsExpected;
+        }
     }
     ok &= fw.print('}') == 1;
     const size_t writtenSize = fw.position();
@@ -2023,6 +2022,22 @@ bool Config::validateRuntimeHardwareDependencies() {
     if (starterAssistEnabled &&
         (!HardwareConfig::hasStarter || HardwareConfig::starterType == 2 ||
          !HardwareConfig::hasN1Rpm)) return false;
+    return true;
+}
+
+bool Config::resolveRuleHandlesForHardware() {
+    for (int i = 0; i < ruleCount; ++i) {
+        Rule& rule = rules[i];
+        const int8_t source = rule.kind == 3 ? 0 :
+            ConfigInternal::ruleSourceHandle(rule.sourceId);
+        const int8_t target = ConfigInternal::ruleTargetHandle(rule.targetId);
+        const int8_t targetSource = rule.targetSourceType == 0 ? 0 :
+            ConfigInternal::ruleSourceHandle(rule.targetSourceId);
+        if (source < 0 || target < 0 || targetSource < 0) return false;
+        rule.sensor = (uint8_t)source;
+        rule.actuator = (uint8_t)target;
+        rule.targetSensor = (uint8_t)targetSource;
+    }
     return true;
 }
 

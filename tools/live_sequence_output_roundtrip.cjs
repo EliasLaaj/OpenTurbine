@@ -32,6 +32,15 @@ async function getJson(base, route, attempts = 50) {
   throw new Error(`${route} did not become readable`);
 }
 
+async function getTelemetrySnapshot(base, attempts = 50) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const data = await getJson(base, '/api/data', 1);
+    if (typeof data.mode === 'string') return data;
+    await sleep(650);
+  }
+  throw new Error('/api/data did not return a complete telemetry snapshot');
+}
+
 async function restoreEngineFile(base, original) {
   const matchesOriginal = candidate =>
     JSON.stringify(candidate?.hardware?.startup_seq) === JSON.stringify(original.hardware.startup_seq) &&
@@ -124,14 +133,14 @@ async function restoreEngineFile(base, original) {
     assert.equal(action?.target, 'igniter', 'stored SetOutput target is not the selected Igniter');
     assert.equal(Number(action?.value), 1, 'stored binary SetOutput demand is not ON');
     console.log('Stored engine file preserved SetOutput → Igniter → ON exactly.');
-    const savedData = await getJson(base, '/api/data');
+    const savedData = await getTelemetrySnapshot(base);
     const savedInfo = await getJson(base, '/api/device_info');
     assert.equal(savedData.mode, 'STANDBY');
     assert.equal(savedInfo.outputs_active, false, 'saving the sequence activated an output');
 
     await restoreEngineFile(base, original);
     console.log('Original engine file restored.');
-    const finalData = await getJson(base, '/api/data');
+    const finalData = await getTelemetrySnapshot(base);
     const finalInfo = await getJson(base, '/api/device_info');
     assert.equal(finalData.mode, 'STANDBY');
     assert.equal(finalInfo.outputs_active, false);

@@ -76,5 +76,5 @@ Before publishing a release:
 6. Build the recommended ZIP with complete CP210x and CH340 driver packages.
 7. Test USB installation on a blank board and Wi-Fi update on an installed ECU.
 8. Perform the physical ECU bench campaign required by the changed control paths.
-9. Confirm the firmware, package manifest, changelog, release title, and website all identify `2.2.1`.
+9. Confirm the firmware, package manifest, changelog, release title, and website all identify `2.2.2`.
 10. Publish `OpenTurbineSetupTool.exe`, `OpenTurbine_Recommended.zip`, and their SHA-256 files under the exact stable asset names required by the release workflow and Setup Tool.

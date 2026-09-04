@@ -18,7 +18,7 @@ either target to a build-only-by-a-few-bytes state.
 
 Systematic hardware-in-the-loop validation of the OpenTurbine firmware on the
 bench rig, aimed at finding defects **before** they reach a real turbine engine.
-The current release candidate is OpenTurbine 2.2.1. DUT and tester roles may be
+The current release candidate is OpenTurbine 2.2.2. DUT and tester roles may be
 swapped between the ESP32-S3 and Classic ESP32 as a campaign requires. Tests
 drive physical ADC/PCNT/SPI/digital paths where wired and use explicit simulator
 coverage for unavailable I²C devices.
@@ -29,6 +29,74 @@ the **v2.0.0 release-candidate HIL** section as the baseline and the newer
 superseded EGT-rate and old configuration behavior are not v2 requirements.
 
 Legend: ✅ pass · ⚠️ anomaly/concern · ❌ bug · ⏭️ not physically testable
+
+## v2.2.2 Classic release-candidate qualification — 2026-09-04
+
+- ✅ The exact ESP32 Classic image (`build_id c477e5aa8648d325`, SHA-256
+  `B5AAA24BBC44B759FDBA78379A5C853998C00C7F81DCAEC2FBCEB177B8AC55D2`)
+  passed the Classic image/linker gate. The 1,657,584-byte firmware leaves
+  46,352 bytes in its OTA slot; the web payload leaves 144,257 bytes before
+  filesystem overhead; static DRAM, IRAM and RTC slow-memory headroom are
+  19,680, 40,288 and 116 bytes respectively.
+- ✅ The uninterrupted no-rebuild publication suite passed all 10 UI audit
+  programs, 274 safety regressions, 17 representative turbine setups, native
+  command/controller/I2C/feedback behavior, 32 extended sensor-protocol
+  vectors, 42 Python tests and the Setup Tool Go tests. The exact Classic
+  firmware and LittleFS images were built and checked separately.
+- ✅ With the ESP32-S3 running the OTBench tester firmware, the exact candidate
+  passed 11/11 reachable pin/function cases, 2/2 independent physical
+  fuel-isolation cases and 9/9 reversed digital-sensor cases
+  (`classic_pinfunc_hil_20260904_224833.json`,
+  `classic_safety_hil_20260904_224456.json` and
+  `reversed_digital_sensor_hil_20260904_225108.json`). These cover PWM and
+  servo outputs, relays, PCNT, ADC, digital input, starter behavior, physical
+  STOP, overspeed isolation, MAX6675/MAX31855/MAX31856 conversion and fault
+  detection, and HX711 signed conversion and timeout handling.
+- ✅ Live Wi-Fi validation covered all pages, persisted page-scoped saves,
+  sequence-output round trips, reboot detection, engine-file restore and a
+  591-second realistic session. A cross-profile restore defect found during
+  the campaign was corrected: full engine-file restore now resolves controller
+  rule handles only after installing the uploaded hardware, so valid custom
+  rules are not silently discarded. The final build preserved the exact
+  enabled Main Fuel rule across an incompatible hardware profile and reboot.
+- ✅ All 12 web assets served by the final DUT are byte-identical to the local
+  release files. Final recursive ECU-file comparison matches the saved baseline
+  except for the deliberately disabled physical START pin; the unit is in
+  STANDBY with no fault and all commanded outputs inactive.
+- ⚠️ This qualifies the Classic candidate for controlled external dry-bench
+  testing, not unattended operation or engine release. It does not cover a
+  fueled engine, installed driver-power stages, plumbing, EMI, a real
+  thermocouple junction/load-cell bridge, or installation-specific emergency
+  shutdown wiring. ESP32-S3 product-firmware qualification remains a separate
+  follow-up; the S3 was used here only as the physical stimulus/readback rig.
+
+## v2.2.2 dual-target qualification — 2026-09-01
+
+- ✅ ESP32-S3 DUT with Classic ESP32 tester passed the timer-only and
+  single-shaft/TOT/oil physical web-configuration profiles. The campaign
+  exercised ADC input, calibrated throttle movement, oil PWM, fuel shutoff,
+  ignition, main-fuel servo demand, startup acceptance, active startup/run
+  states, physical output readback, configuration persistence and restoration
+  (`ten_build_webui_hil_20260901_211917.json` and
+  `ten_build_webui_hil_20260901_212101.json`).
+- ✅ Both physical targets completed engine-file export/import/reboot/readback.
+  Classic reproduced the exported file byte-for-byte; S3 reproduced the same
+  recursive JSON values after canonical serialization. PCB-backed Classic
+  hardware save/readback also passed without removing the installed
+  `jet-ecu-v1` PCB profile.
+- ✅ The exact Classic release firmware completed the eight-page connected
+  browser audit with API recovery, mobile checks, zero transient failures and
+  stable heap. The S3 completed 24 page loads with zero retries and stable heap.
+- ✅ The final software gate passed all 10 UI audit programs, 269 safety
+  regressions, 17 representative turbine configurations, native controller and
+  protocol vectors, 42 Python tests, Setup Tool Go tests, both firmware and
+  LittleFS builds, and all enforced image/linker budgets. Windows Application
+  Control blocked launching a newly linked unsigned local probe; the unchanged
+  trusted native probes passed locally and the clean GitHub runner repeats the
+  canonical compilation/execution gate.
+- ⚠️ This is dry-bench qualification. Every installed ECU still requires
+  wiring, polarity, independent emergency-stop, driver-power, plumbing, EMI
+  and controlled first-engine validation on its actual turbine.
 
 ## v2.2.0 Classic shipping qualification — 2026-08-30
 

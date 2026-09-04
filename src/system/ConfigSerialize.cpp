@@ -367,7 +367,7 @@ bool Config::applyJsonRuntimeOnly(const JsonDocument& doc, bool allowActiveLive,
                       id, HardwareConfig::profileId);
         return false;
     }
-    _fromDoc(doc);
+    _fromDoc(doc, validateHardwareDependencies);
     profileMatch = true;
     EngineData::instance().configVersionMismatch = false;
     return true;
@@ -648,7 +648,7 @@ void Config::_applyDefaults() {
     // Runtime stats are NOT reset here; hour meter data persists across config reloads.
 }
 
-void Config::_fromDoc(const JsonDocument& doc) {
+void Config::_fromDoc(const JsonDocument& doc, bool resolveRuleHandles) {
     controllerSchema = constrain((int)(doc["controller_schema"] | 0), 0, 1);
     // Warn if an expected top-level section is entirely absent.
     // This typically means the file is truncated or severely corrupted —
@@ -891,15 +891,28 @@ void Config::_fromDoc(const JsonDocument& doc) {
             strlcpy(r.sourceId, source, sizeof(r.sourceId));
             strlcpy(r.targetId, target, sizeof(r.targetId));
             strlcpy(r.targetSourceId, targetSource, sizeof(r.targetSourceId));
-            int8_t sourceHandle = ConfigInternal::ruleSourceHandle(r.sourceId);
-            int8_t targetHandle = ConfigInternal::ruleTargetHandle(r.targetId);
-            const int8_t targetSourceHandle = r.targetSourceType == 0 ? 0 :
-                ConfigInternal::ruleSourceHandle(r.targetSourceId);
-            if (sourceHandle < 0 || targetHandle < 0 || targetSourceHandle < 0) r.enabled = false;
-            else {
-                r.sensor = (uint8_t)sourceHandle;
-                r.actuator = (uint8_t)targetHandle;
-                r.targetSensor = (uint8_t)targetSourceHandle;
+            if (resolveRuleHandles) {
+                const int8_t sourceHandle = r.kind == 3 ? 0 :
+                    ConfigInternal::ruleSourceHandle(r.sourceId);
+                const int8_t targetHandle = ConfigInternal::ruleTargetHandle(r.targetId);
+                const int8_t targetSourceHandle = r.targetSourceType == 0 ? 0 :
+                    ConfigInternal::ruleSourceHandle(r.targetSourceId);
+                if (sourceHandle < 0 || targetHandle < 0 || targetSourceHandle < 0) {
+                    r.enabled = false;
+                } else {
+                    r.sensor = (uint8_t)sourceHandle;
+                    r.actuator = (uint8_t)targetHandle;
+                    r.targetSensor = (uint8_t)targetSourceHandle;
+                }
+            } else {
+                // A full engine-file restore parses settings before replacing
+                // the hardware registry to keep Classic heap usage bounded.
+                // Preserve the stable IDs and enabled state until that uploaded
+                // registry is resident; resolving against the old registry can
+                // silently delete an otherwise valid controller during cleanup.
+                r.sensor = 0;
+                r.actuator = 0;
+                r.targetSensor = 0;
             }
         }
     }

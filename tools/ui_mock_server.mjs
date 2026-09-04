@@ -491,6 +491,14 @@ const server = http.createServer(async (req, res) => {
       ok: true, mode: state.data.mode, locked: !!state.data.config_locked,
       dev_mode: !!state.data.dev_mode
     });
+    if (req.method === 'GET' && url.pathname === '/api/loop_diagnostics') return sendJson(res, 200, {
+      mode: state.data.mode, loop_hz: 333.3, loop_period_ms: 3,
+      loop_period_max_ms: 3.1, loop_exec_avg_ms: 0.3,
+      loop_exec_max_ms: 0.5, loop_overrun_count: 0,
+      loop_sensors_ms: 0.05, loop_sequencer_ms: 0.06,
+      loop_controllers_ms: 0.14, loop_actuators_ms: 0.08,
+      loop_logging_ms: 0.03, loop_led_ms: 0.002
+    });
     if (req.method === 'GET' && url.pathname === '/api/device_info') return sendJson(res, 200, {
       project: 'OpenTurbine', firmware_version: 'test', build_id: 'ui-mock',
       target: 'esp32s3dev', chip: 'ESP32-S3', state: state.data.mode,

@@ -817,7 +817,7 @@ For each configured analog input:
 - Fields show current value, units, validation warnings, and hardware dependency state
 - Config locked during active engine modes unless Dev Mode is active
 - Save to device button with change recap
-- Full `ecu_config.json` backup/restore is routed through Tools so hardware and settings stay together
+- Full `ecu_config.json` backup/restore is routed through System so hardware and settings stay together; Tools remains focused on commissioning and physical tests
 - Profile mismatch shown as an engine-operation lockout banner
 
 **Log (`/log`)**

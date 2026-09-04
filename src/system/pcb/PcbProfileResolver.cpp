@@ -10,7 +10,7 @@ bool fail(char* reason, size_t size, const char* message) {
 }
 
 const char* deviceDriver(const PcbProfileManager::Mode& mode) {
-    const auto* device = PcbProfileManager::findDevice(mode.deviceId);
+    const auto* device = PcbProfileManager::deviceForMode(mode);
     return device ? device->driver : "";
 }
 
@@ -49,7 +49,7 @@ bool applyMode(ChannelRegistry::Channel& channel,
                bool seedUserInputOptions = false) {
     using Driver = ChannelRegistry::Driver;
     using Direction = ChannelRegistry::Direction;
-    const char* adapter = mode.adapter;
+    const char* adapter = PcbProfileManager::adapterName(mode.adapter);
     bool input = channel.direction == Direction::Input;
     if (!purposeAcceptsAdapter(channel, adapter))
         return fail(reason, reasonSize, "PCB port signal is incompatible with the selected engine purpose");
@@ -72,7 +72,7 @@ bool applyMode(ChannelRegistry::Channel& channel,
                                        !strcmp(chip, "max31856") ? 3 : 0;
         if (!channel.temperatureInterface)
             return fail(reason, reasonSize, "thermocouple port uses an unsupported chip");
-        const auto* device = PcbProfileManager::findDevice(mode.deviceId);
+        const auto* device = PcbProfileManager::deviceForMode(mode);
         const auto* bus = device ? PcbProfileManager::findBus(device->busId) : nullptr;
         if (!device || !bus || strcmp(bus->kind, "spi"))
             return fail(reason, reasonSize, "thermocouple port has no valid SPI device/bus");
@@ -108,7 +108,7 @@ bool applyMode(ChannelRegistry::Channel& channel,
 
     if (channel.driver == Driver::I2cDigital || channel.driver == Driver::I2cAnalog ||
         channel.driver == Driver::I2cLoadCell || channel.driver == Driver::I2cRelay) {
-        const auto* device = PcbProfileManager::findDevice(mode.deviceId);
+        const auto* device = PcbProfileManager::deviceForMode(mode);
         if (!device) return fail(reason, reasonSize, "I2C port refers to a missing device");
         channel.i2cAddress = device->address;
         channel.deviceChannel = mode.channel;
@@ -218,21 +218,24 @@ bool PcbProfileResolver::addProfileDefaults(ChannelRegistry& registry,
     if (!PcbProfileManager::active()) return !PcbProfileManager::faulted();
     const auto* catalog = PcbProfileManager::catalog();
     if (!catalog) return fail(reason, reasonSize, "PCB profile catalog is unavailable");
-    for (uint8_t i = 0; i < catalog->portCount; ++i) {
-        const auto& port = catalog->ports[i];
-        for (uint8_t j = 0; j < port.modeCount; ++j) {
-            const auto& mode = port.modes[j];
-            if (!mode.defaultId[0]) continue;
+    for (uint8_t i = 0; i < catalog->defaultCount; ++i) {
+            const auto& assignment = catalog->defaults[i];
+            if (assignment.portIndex >= catalog->portCount)
+                return fail(reason, reasonSize, "PCB profile default refers to a missing port");
+            const auto& port = catalog->ports[assignment.portIndex];
+            if (assignment.modeIndex >= port.modeCount)
+                return fail(reason, reasonSize, "PCB profile default refers to a missing mode");
+            const auto& mode = port.modes[assignment.modeIndex];
             ChannelRegistry::Channel channel;
             channel.installed = true;
-            channel.direction = strstr(mode.adapter, "output")
+            channel.direction = strstr(PcbProfileManager::adapterName(mode.adapter), "output")
                 ? ChannelRegistry::Output : ChannelRegistry::Input;
             channel.driver = channel.direction == ChannelRegistry::Input
                 ? ChannelRegistry::Digital : ChannelRegistry::Relay;
-            strlcpy(channel.id, mode.defaultId, sizeof(channel.id));
-            strlcpy(channel.name, mode.defaultName, sizeof(channel.name));
-            strlcpy(channel.role, mode.defaultRole, sizeof(channel.role));
-            strlcpy(channel.purpose, mode.defaultPurpose, sizeof(channel.purpose));
+            strlcpy(channel.id, assignment.id, sizeof(channel.id));
+            strlcpy(channel.name, assignment.name, sizeof(channel.name));
+            strlcpy(channel.role, assignment.role, sizeof(channel.role));
+            strlcpy(channel.purpose, assignment.purpose, sizeof(channel.purpose));
             strlcpy(channel.physicalPortId, port.id, sizeof(channel.physicalPortId));
             strlcpy(channel.physicalModeId, mode.id, sizeof(channel.physicalModeId));
             channel.safeDemand = 0.0f;
@@ -240,7 +243,6 @@ bool PcbProfileResolver::addProfileDefaults(ChannelRegistry& registry,
             if (!registry.add(channel))
                 return fail(reason, reasonSize,
                             "PCB profile default assignment could not be added");
-        }
     }
     return true;
 }

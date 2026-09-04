@@ -31,8 +31,10 @@ class ReversedDigitalSensorHil:
         self.dc = DutConfig(self.dut)
         self.tester = Tester(os.environ.get("OTBENCH_PORT", "COM4")).open()
         self.firmware = self.dut.data().get("fw_version", "unknown")
+        self.build_id = self.dut.device_info().get("build_id", "unknown")
         self.tester_version = self.tester.ping()
-        self.original_hw = self.dut.hardware()
+        self.original_ecu = self.dut._get("/api/ecu_config")
+        self.original_hw = self.original_ecu["hardware"]
         self.rows: list[dict] = []
         self.restored = False
         self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -44,7 +46,7 @@ class ReversedDigitalSensorHil:
         )
         os.makedirs(os.path.dirname(self.backup_path), exist_ok=True)
         with open(self.backup_path, "w", encoding="utf-8") as f:
-            json.dump(self.original_hw, f, indent=2)
+            json.dump(self.original_ecu, f, indent=2)
 
     def record(self, name, ok, **detail):
         row = {"name": name, "ok": bool(ok), "detail": detail}
@@ -246,7 +248,11 @@ class ReversedDigitalSensorHil:
             pass
         try:
             self.dut.ensure_mode_standby()
-            self.restored, response = self.dc.restore(self.original_hw)
+            previous_boot = self.dut.data().get("boot_count")
+            code, response = self.dut._post("/api/ecu_config", self.original_ecu)
+            self.restored = code == 200 and self.dc._wait_reboot(previous_boot)
+            if self.restored:
+                self.restored = self.dut._get("/api/ecu_config") == self.original_ecu
             if not self.restored:
                 print(f"WARNING: classic DUT restore rejected: {response}")
         except Exception as exc:
@@ -266,6 +272,7 @@ class ReversedDigitalSensorHil:
             self.tester.close()
             payload = {
                 "firmware": self.firmware,
+                "build_id": self.build_id,
                 "dut": "classic ESP32",
                 "tester": f"ESP32-S3 {self.tester_version}",
                 "results": self.rows,

@@ -153,11 +153,12 @@ static bool _runtimeGovernorAuthorityPreserved(JsonObjectConst patch) {
     return oldUsesPitch == newUsesPitch;
 }
 
-// Shared buffers. Body handlers hold g_webRxOwner across all chunks so concurrent
-// uploads cannot corrupt one another while RAM use remains bounded. Reserve them
-// once before Wi-Fi starts to keep web-only workspace out of the Classic ESP32's
-// small statically linkable DRAM region, without per-request heap allocation.
-// Array-reference aliases retain the existing compile-time sizeof bounds.
+// Bounded transfer buffers. TX is reserved once before Wi-Fi starts so ordinary
+// handlers never depend on a large contiguous allocation. RX is reserved at
+// boot too: allocating it only when Save was pressed made a valid Classic
+// configuration depend on the Wi-Fi heap still containing a contiguous 16 KiB
+// block after page navigation. The fixed reservation leaves a predictable
+// engine/web memory budget and makes every legal save deterministic.
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 // S3 registry capacity is 24 inputs. A legal all-analog layout with six-point
 // calibration tables can exceed 16 KiB on upload. Keep that receive capacity,
@@ -188,6 +189,11 @@ static unsigned long g_webRxClaimMs = 0;
 // Do not let the normal stale-upload timeout reclaim it mid-response.
 static bool g_webRxResponseLease = false;
 static portMUX_TYPE s_webRxMux = portMUX_INITIALIZER_UNLOCKED;
+
+static WebRxBuffer* _allocateWebRxStorage() {
+    return static_cast<WebRxBuffer*>(
+        heap_caps_malloc(sizeof(WebRxBuffer), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+}
 
 // Flash-backed log responses are intentionally single-reader. Several clients
 // building heap-backed history responses at once can exhaust async_tcp buffers
@@ -257,6 +263,8 @@ static void _mergeJsonObject(JsonObject dst, JsonObjectConst patch) {
 
 static bool _claimWebRx(AsyncWebServerRequest* req, size_t index,
                         bool reportConflict = true) {
+    WebRxBuffer* candidate = nullptr;
+    if (index == 0 && !g_webRxStorage) candidate = _allocateWebRxStorage();
     bool claimed = false;
     portENTER_CRITICAL(&s_webRxMux);
     if (index == 0) {
@@ -270,9 +278,23 @@ static bool _claimWebRx(AsyncWebServerRequest* req, size_t index,
         if (g_webRxOwner && !g_webRxResponseLease &&
             (millis() - g_webRxClaimMs) < 10000UL) {
             portEXIT_CRITICAL(&s_webRxMux);
+            if (candidate) heap_caps_free(candidate);
             if (reportConflict) {
                 req->send(409, "application/json",
                           "{\"error\":\"Another configuration transfer is in progress\"}");
+            }
+            return false;
+        }
+        if (!g_webRxStorage && candidate) {
+            g_webRxStorage = candidate;
+            candidate = nullptr;
+        }
+        if (!g_webRxStorage) {
+            portEXIT_CRITICAL(&s_webRxMux);
+            if (candidate) heap_caps_free(candidate);
+            if (reportConflict) {
+                req->send(503, "application/json",
+                          "{\"error\":\"Not enough maintenance memory; retry after closing other ECU pages\"}");
             }
             return false;
         }
@@ -284,6 +306,7 @@ static bool _claimWebRx(AsyncWebServerRequest* req, size_t index,
     }
     claimed = g_webRxOwner == req;
     portEXIT_CRITICAL(&s_webRxMux);
+    if (candidate) heap_caps_free(candidate);
     return claimed;
 }
 
@@ -307,6 +330,8 @@ static void _releaseWebRx(AsyncWebServerRequest* req) {
     if (g_webRxOwner == req) {
         g_webRxOwner = nullptr;
         g_webRxResponseLease = false;
+        g_webRxLen = 0;
+        g_webRxOverflow = false;
     }
     portEXIT_CRITICAL(&s_webRxMux);
 }
@@ -612,9 +637,6 @@ static bool _startInhibitActive() {
 
 static const char* _startPreflightRejectReason(bool allowEligibleSensorOverride = false) {
     const auto& ed = EngineData::instance();
-    if (!_webAssetsComplete) {
-        return "Web UI asset set is incomplete; re-upload the complete web assets or reflash the filesystem";
-    }
     // A reboot scheduled by hardware save / factory reset / config restore fires
     // unconditionally in tick() — starting now would reboot mid-startup with the
     // fuel solenoid and igniter energized.
@@ -1125,7 +1147,7 @@ public:
         // transaction gates for competing state changes.
         if (request && request->method() == HTTP_GET &&
             (ConfigApplyGate::busy() || _maintenanceUploadInProgress() ||
-             !g_webRxStorage || !g_webTxStorage ||
+             !g_webTxStorage ||
              ESP.getFreeHeap() < 24576 || ESP.getMaxAllocHeap() < 8192)) {
             // abort() marks the request sent before closing its client. Calling
             // client()->close() directly leaves _sent false; the framework then
@@ -1224,25 +1246,25 @@ static void _endStorageWriteWindow() {
     portEXIT_CRITICAL(&s_assetResponseMux);
 }
 
-class LeasedAssetResponse final : public AsyncFileResponse {
+class LeasedAssetResponse final : public AsyncAbstractResponse {
 public:
-    LeasedAssetResponse(const char* path, const char* contentType)
-        : AsyncFileResponse(LittleFS, path, contentType) {}
-    ~LeasedAssetResponse() { _releaseAssetResponseLease(); }
-};
-
-class LeasedCallbackResponse final : public AsyncCallbackResponse {
-public:
-    LeasedCallbackResponse(const char* contentType, size_t len, AwsResponseFiller callback,
-                           std::atomic<bool>* leaseReleased)
-        : AsyncCallbackResponse(contentType, len, callback), _leaseReleased(leaseReleased) {}
-    ~LeasedCallbackResponse() override {
-        if (_leaseReleased && !_leaseReleased->exchange(true))
-            _releaseAssetResponseLease();
-        delete _leaseReleased;
+    LeasedAssetResponse(fs::File source, const char* path, const char* contentType)
+        : AsyncAbstractResponse(nullptr), _source(source) {
+        (void)path;
+        _code = 200;
+        _contentLength = _source.size();
+        _contentType = contentType;
+    }
+    ~LeasedAssetResponse() override {
+        _source.close();
+        _releaseAssetResponseLease();
+    }
+    bool _sourceValid() const override { return (bool)_source; }
+    size_t _fillBuffer(uint8_t* buffer, size_t maxLen) override {
+        return _source.read(buffer, maxLen);
     }
 private:
-    std::atomic<bool>* _leaseReleased;
+    fs::File _source;
 };
 
 static void _sendGzipAsset(AsyncWebServerRequest* req, const char* path,
@@ -1251,7 +1273,7 @@ static void _sendGzipAsset(AsyncWebServerRequest* req, const char* path,
         if (strcmp(contentType, "text/html") == 0) {
             const char* page = "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
                 "<title>OpenTurbine recovery</title><body style='font:16px system-ui;max-width:42rem;margin:4rem auto;padding:1rem'>"
-                "<h1>Web interface recovery required</h1><p>The ECU detected an incomplete or changed web-asset set. START is inhibited.</p>"
+                "<h1>Web interface recovery required</h1><p>The ECU detected an incomplete or changed web-asset set. Physical engine control remains independent of the browser interface.</p>"
                 "<p>Use OpenTurbine Setup Tool to upload the complete matching web assets, or reflash the filesystem over USB. Configuration and logs are not erased.</p></body>";
             AsyncWebServerResponse* resp = req->beginResponse(503, "text/html", page);
             resp->addHeader("Cache-Control", "no-store");
@@ -1276,34 +1298,15 @@ static void _sendGzipAsset(AsyncWebServerRequest* req, const char* path,
         req->send(busy);
         return;
     }
-    File probe = LittleFS.open(path, "r");
-    const size_t fileSize = probe ? probe.size() : 0;
-    probe.close();
-    std::atomic<bool>* leaseReleased = fileSize
-        ? new (std::nothrow) std::atomic<bool>(false) : nullptr;
-    LeasedCallbackResponse* resp = fileSize && leaseReleased
-        ? new (std::nothrow) LeasedCallbackResponse(
-        contentType, fileSize,
-        [path, fileSize, leaseReleased](uint8_t* buffer, size_t maxLen, size_t index) -> size_t {
-            if (index >= fileSize) return 0;
-            File source = LittleFS.open(path, "r");
-            if (!source || !source.seek(index)) {
-                source.close();
-                return RESPONSE_TRY_AGAIN;
-            }
-            const size_t wanted = min(maxLen, fileSize - index);
-            const size_t count = source.read(buffer, wanted);
-            source.close();
-            if (count && index + count >= fileSize && !leaseReleased->exchange(true))
-                _releaseAssetResponseLease();
-            return count == 0 && wanted != 0 ? RESPONSE_TRY_AGAIN : count;
-        }, leaseReleased) : nullptr;
+    File source = LittleFS.open(path, "r");
+    // Keep one descriptor for the response lifetime. Reopening LittleFS on
+    // every TCP fill is both slower and can exhaust descriptors on a Classic
+    // while a large PCB catalog is resident.
+    LeasedAssetResponse* resp = source
+        ? new (std::nothrow) LeasedAssetResponse(source, path, contentType)
+        : nullptr;
     if (!resp || !resp->_sourceValid()) {
-        if (!resp) {
-            if (leaseReleased && !leaseReleased->exchange(true))
-                _releaseAssetResponseLease();
-            delete leaseReleased;
-        }
+        if (!resp) _releaseAssetResponseLease();
         delete resp;
         req->send(503, "text/plain", "Web UI asset is temporarily unavailable");
         return;
@@ -1507,36 +1510,16 @@ static void _sendOwnedJson(AsyncWebServerRequest* req, const char* json, size_t 
     req->send(resp);
 }
 
-// Use the preallocated receive workspace for large read-only responses on both
-// chips. An S3 normally has enough total heap for an owned copy, but long page
-// sessions can fragment its largest free block below the full telemetry size
-// while plenty of aggregate memory remains. The browser serializes these large
-// reads, so borrowing the otherwise-idle request workspace is deterministic
-// and gives Classic and S3 the same bounded behavior.
+// Read responses own only the bytes they actually transmit. The receive
+// workspace is sized for the largest legal import (16-24 KiB); borrowing that
+// whole workspace for an ordinary 5-8 KiB page document made first navigation
+// compete unnecessarily with Wi-Fi and flash-backed asset delivery on Classic.
+// OwnedJsonResponse releases its payload as soon as the final bytes have been
+// copied into TCP, so this remains bounded without retaining page data.
 static void _sendLargeReadJson(AsyncWebServerRequest* req, const char* json,
                                size_t len, int status = 200) {
-    if (!req || !json || len >= sizeof(g_webRxBuf) || !_claimWebRx(req, 0)) return;
-    portENTER_CRITICAL(&s_webRxMux);
-    g_webRxResponseLease = true;
-    portEXIT_CRITICAL(&s_webRxMux);
-    memcpy(g_webRxBuf, json, len);
-    AsyncWebServerResponse* resp = req->beginResponse(
-        "application/json", len,
-        [req, len](uint8_t* out, size_t maxLen, size_t index) -> size_t {
-            if (index >= len || g_webRxOwner != req) return 0;
-            const size_t count = min(maxLen, len - index);
-            memcpy(out, g_webRxBuf + index, count);
-            if (index + count >= len) _releaseWebRx(req);
-            return count;
-        });
-    if (!resp) {
-        _releaseWebRx(req);
-        req->send(503, "application/json", "{\"error\":\"ECU is busy; retry shortly\"}");
-        return;
-    }
-    (void)status;
-    _finalizeJsonResponse(resp);
-    req->send(resp);
+    if (!req || !json) return;
+    _sendOwnedJson(req, json, len, status);
 }
 
 
@@ -1597,8 +1580,16 @@ static void _startWiFi() {
     _dns.start(53, "*", activeIp);
     Serial.println("[WiFi] Captive portal DNS started");
 
-    // mDNS — accessible as http://ot.local on any mDNS-capable client
-    if (MDNS.begin("ot")) {
+    // mDNS is convenience only. A Classic carrying a named PCB profile needs
+    // that heap for deterministic page/config streaming; the captive portal
+    // and fixed 192.168.4.1 address remain available. Generic Classic and S3
+    // targets keep the friendly ot.local alias.
+#if defined(OT_PLATFORM_ESP32S3)
+    constexpr bool enableMdns = true;
+#else
+    const bool enableMdns = !PcbProfileManager::active();
+#endif
+    if (enableMdns && MDNS.begin("ot")) {
         MDNS.addService("http", "tcp", 80);
         Serial.println("[WiFi] mDNS: http://ot.local");
     }
@@ -1678,6 +1669,12 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     doc["start_switch_ready"] = ed.startSwitchReady;
     doc["limp_mode"] = ed.limpMode;
     doc["uptime_s"] = ed.uptimeMs / 1000;
+    // Keep reboot identity in every compact frame. Browser and HIL clients
+    // merge this endpoint into one boot-time /api/data snapshot; without the
+    // generation fields they cannot detect a reboot and will retain stale
+    // topology/state from the previous firmware instance.
+    doc["boot_count"] = ed.bootCount;
+    doc["reset_reason"] = ed.resetReason;
     doc["last_event"] = ed.lastEvent;
     doc["fault_description"] = ed.faultDescription;
 
@@ -3125,6 +3122,31 @@ void WebServer::_setupRoutes() {
         _sendOwnedJson(req, g_webTxBuf, n);
     });
 
+    // Small, page-specific diagnostics document. Keeping loop timing out of
+    // compact dashboard telemetry avoids spending Classic RAM and airtime on
+    // values that are only viewed from System, while still allowing a useful
+    // live display without repeatedly rebuilding the large /api/data snapshot.
+    _server.on("/api/loop_diagnostics", HTTP_GET, [](AsyncWebServerRequest* req) {
+        const EngineData& ed = EngineData::instance();
+        const int n = snprintf(g_webTxBuf, sizeof(g_webTxBuf),
+            "{\"mode\":\"%s\",\"loop_hz\":%.3f,\"loop_period_ms\":%.3f,"
+            "\"loop_period_max_ms\":%.3f,\"loop_exec_avg_ms\":%.3f,"
+            "\"loop_exec_max_ms\":%.3f,\"loop_overrun_count\":%lu,"
+            "\"loop_sensors_ms\":%.3f,\"loop_sequencer_ms\":%.3f,"
+            "\"loop_controllers_ms\":%.3f,\"loop_actuators_ms\":%.3f,"
+            "\"loop_logging_ms\":%.3f,\"loop_led_ms\":%.3f}",
+            sysModeStr(ed.mode), ed.loopHz, ed.loopPeriodMs,
+            ed.loopPeriodMaxMs, ed.loopExecAvgMs, ed.loopExecMaxMs,
+            (unsigned long)ed.loopOverrunCount, ed.loopSensorsMs,
+            ed.loopSequencerMs, ed.loopControllersMs, ed.loopActuatorsMs,
+            ed.loopLoggingMs, ed.loopLedMs);
+        if (n <= 0 || (size_t)n >= sizeof(g_webTxBuf)) {
+            req->send(500, "application/json", "{\"error\":\"diagnostics response too large\"}");
+            return;
+        }
+        _sendOwnedJson(req, g_webTxBuf, (size_t)n);
+    });
+
     // Register the base route after /raw and /csv. ESPAsyncWebServer matches
     // path prefixes, so placing /api/log first would steal both download routes.
     // The display response is capped so AsyncResponseStream stays bounded.
@@ -3966,17 +3988,22 @@ void WebServer::_setupRoutes() {
                 const auto* profilePort = PcbProfileManager::findPort(portId);
                 const auto* mode = profilePort
                     ? PcbProfileManager::findMode(*profilePort, modeId) : nullptr;
-                if (!mode || !mode->deviceId[0]) {
+                if (!mode) {
                     modeJson["available"] = mode != nullptr;
                     if (!mode) modeJson["status"] = "Profile entry is invalid";
                     continue;
                 }
-                const auto* device = PcbProfileManager::findDevice(mode->deviceId);
+                const auto* device = PcbProfileManager::deviceForMode(*mode);
+                if (!device) {
+                    modeJson["available"] = true;
+                    continue;
+                }
+                const char* adapter = PcbProfileManager::adapterName(mode->adapter);
                 uint8_t driver = 255;
-                if (!strcmp(mode->adapter, "i2c_digital_input")) driver = ChannelRegistry::I2cDigital;
-                else if (!strcmp(mode->adapter, "i2c_adc_input")) driver = ChannelRegistry::I2cAnalog;
-                else if (!strcmp(mode->adapter, "i2c_load_cell")) driver = ChannelRegistry::I2cLoadCell;
-                else if (!strcmp(mode->adapter, "i2c_digital_output")) driver = ChannelRegistry::I2cRelay;
+                if (!strcmp(adapter, "i2c_digital_input")) driver = ChannelRegistry::I2cDigital;
+                else if (!strcmp(adapter, "i2c_adc_input")) driver = ChannelRegistry::I2cAnalog;
+                else if (!strcmp(adapter, "i2c_load_cell")) driver = ChannelRegistry::I2cLoadCell;
+                else if (!strcmp(adapter, "i2c_digital_output")) driver = ChannelRegistry::I2cRelay;
                 if (device && driver != 255) {
                     const bool available =
                         I2CDeviceManager::assignmentAvailable(driver, device->address);
@@ -3988,8 +4015,8 @@ void WebServer::_setupRoutes() {
                     // drivers after assignment; unsupported adapters stay
                     // unavailable instead of silently becoming generic GPIO.
                     modeJson["available"] = driver == 255 &&
-                        strncmp(mode->adapter, "i2c_", 4) != 0;
-                    if (strncmp(mode->adapter, "i2c_", 4) == 0)
+                        strncmp(adapter, "i2c_", 4) != 0;
+                    if (strncmp(adapter, "i2c_", 4) == 0)
                         modeJson["status"] = "Requires newer firmware support";
                 }
             }
@@ -4093,13 +4120,14 @@ void WebServer::_setupRoutes() {
                                 const auto* port = PcbProfileManager::findPort(physicalPort);
                                 const auto* mode = port
                                     ? PcbProfileManager::findMode(*port, physicalMode) : nullptr;
-                                const auto* device = mode && mode->deviceId[0]
-                                    ? PcbProfileManager::findDevice(mode->deviceId) : nullptr;
+                                const auto* device = mode
+                                    ? PcbProfileManager::deviceForMode(*mode) : nullptr;
                                 if (!mode || !device) continue;
-                                if (!strcmp(mode->adapter, "i2c_digital_input")) driver = ChannelRegistry::I2cDigital;
-                                else if (!strcmp(mode->adapter, "i2c_adc_input")) driver = ChannelRegistry::I2cAnalog;
-                                else if (!strcmp(mode->adapter, "i2c_load_cell")) driver = ChannelRegistry::I2cLoadCell;
-                                else if (!strcmp(mode->adapter, "i2c_digital_output")) driver = ChannelRegistry::I2cRelay;
+                                const char* adapter = PcbProfileManager::adapterName(mode->adapter);
+                                if (!strcmp(adapter, "i2c_digital_input")) driver = ChannelRegistry::I2cDigital;
+                                else if (!strcmp(adapter, "i2c_adc_input")) driver = ChannelRegistry::I2cAnalog;
+                                else if (!strcmp(adapter, "i2c_load_cell")) driver = ChannelRegistry::I2cLoadCell;
+                                else if (!strcmp(adapter, "i2c_digital_output")) driver = ChannelRegistry::I2cRelay;
                                 else continue;
                                 address = device->address;
                                 channel = mode->channel;
@@ -4872,7 +4900,8 @@ void WebServer::_setupRoutes() {
 #endif
             HardwareConfig::applyValidatedJsonRuntimeOnly(*hwDoc);
             hwDoc.reset();
-            if (!Config::validateRuntimeHardwareDependencies()) {
+            if (!Config::resolveRuleHandlesForHardware() ||
+                !Config::validateRuntimeHardwareDependencies()) {
                 restoreRuntime();
                 req->send(400, "application/json",
                     "{\"error\":\"settings do not match uploaded hardware or sequence\"}");
@@ -4928,8 +4957,7 @@ void WebServer::_setupRoutes() {
 
 // ── Public API ────────────────────────────────────────────────
 bool WebServer::begin() {
-    g_webRxStorage = static_cast<WebRxBuffer*>(
-        heap_caps_malloc(sizeof(WebRxBuffer), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+    g_webRxStorage = _allocateWebRxStorage();
     g_webTxStorage = static_cast<WebTxBuffer*>(
         heap_caps_malloc(sizeof(WebTxBuffer), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
     if (!g_webRxStorage || !g_webTxStorage) {
@@ -4937,17 +4965,7 @@ bool WebServer::begin() {
         if (g_webTxStorage) heap_caps_free(g_webTxStorage);
         g_webRxStorage = nullptr;
         g_webTxStorage = nullptr;
-        auto& ed = EngineData::instance();
-        ed.hardwareReady = false;
-        strlcpy(ed.hardwareFault,
-                "Web service memory reservation failed; reboot or reflash before START",
-                sizeof(ed.hardwareFault));
-        strlcpy(ed.faultDescription,
-                "Cannot start: the ECU could not reserve its fixed web-service workspace. "
-                "Reboot once; if this repeats, reflash over USB and inspect the serial log.",
-                sizeof(ed.faultDescription));
-        strlcpy(ed.lastEvent, "START locked: web memory unavailable", sizeof(ed.lastEvent));
-        Serial.printf("[WebServer] FATAL: buffer allocation failed (free=%u max=%u)\n",
+        Serial.printf("[WebServer] unavailable: workspace allocation failed (free=%u max=%u)\n",
                       (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
         return false;
     }
@@ -4955,7 +4973,7 @@ bool WebServer::begin() {
     _recoverInterruptedAssetUpdate();
     _webAssetsComplete = _verifyWebAssetMarker();
     if (!_webAssetsComplete)
-        Serial.println("[WebAssets] Complete-generation marker missing or hash mismatch; START inhibited");
+        Serial.println("[WebAssets] Complete-generation marker missing or hash mismatch; recovery page only");
     _startWiFi();
     _server.addMiddleware(&s_lowHeapRequestGuard);
     _setupRoutes();

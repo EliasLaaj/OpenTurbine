@@ -540,6 +540,9 @@ public:
     // hardware without allocating another JSON document. Used by complete
     // engine-file restore on memory-constrained Classic ESP32.
     static bool validateRuntimeHardwareDependencies();
+    // Re-resolve stable controller source/target IDs after a complete engine
+    // restore has installed its uploaded hardware registry.
+    static bool resolveRuleHandlesForHardware();
     static bool fromJson(const char* json, size_t len);
     static bool fromJson(const JsonDocument& doc);  // PATCH merge variant
     // Applies a validated settings document, releases its heap before the
@@ -570,7 +573,7 @@ public:
 
 private:
     static void _applyDefaults();
-    static void _fromDoc(const JsonDocument& doc);
+    static void _fromDoc(const JsonDocument& doc, bool resolveRuleHandles = true);
     static void _toDoc(JsonDocument& doc);
     static void _writeDoc(JsonObject doc);
     static bool _saveSettingsJson(const char* settingsJson, size_t settingsLen,

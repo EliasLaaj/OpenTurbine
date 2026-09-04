@@ -875,6 +875,7 @@ body[data-page="tools"] main { max-width: 1180px; }
   border: 1px solid var(--border);
   border-radius: var(--r-md);
 }
+.system-surface .appearance-card { margin-top: .8rem; }
 .appearance-note { margin-top: .55rem; color: var(--dim); font-size: .68rem; }
 
 /* ── Hardware page section headers ───────────────────────────── */

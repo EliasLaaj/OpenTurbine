@@ -3,7 +3,7 @@
 Compress web assets from data_src/ into data/ as .gz files.
 Run this after editing any HTML/JS/CSS file, then do: pio run -t uploadfs
 """
-import gzip, hashlib, os
+import gzip, hashlib, os, re
 
 from build_web_sources import main as build_web_sources
 
@@ -36,6 +36,10 @@ for fname in os.listdir(SRC):
     # regardless of the checkout OS (Windows autocrlf yields CRLF working
     # trees). Text assets only (.html/.js/.css), so this cannot corrupt bytes.
     data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    # Source-only HTML comments are useful to maintainers but cost scarce
+    # Classic LittleFS space. They are not part of the browser contract.
+    if os.path.splitext(fname)[1] == ".html":
+        data = re.sub(rb"<!--(?!\[if\b).*?-->", b"", data, flags=re.DOTALL | re.IGNORECASE)
     with open(tmp_path, "wb") as raw_out:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw_out,
                            compresslevel=9, mtime=0) as f_out:

@@ -1545,7 +1545,12 @@ bool validatePlatformPins(const JsonDocument& doc,
             else if (!strcmp(channel.purpose, "start_switch")) startPin = channel.pin;
         }
     }
-    if (!registryStop && stopPin < 0) return false;
+    // A fresh PCB profile intentionally has no user assignments yet. Allow
+    // that commissioning document to validate so the Hardware page remains
+    // available; HardwareConfig::load() independently locks START until a
+    // profile-backed Stop input is assigned. Development-board defaults still
+    // require their compiled Stop input here.
+    if (!registryStop && stopPin < 0 && !PcbProfileManager::active()) return false;
     if ((stopPin >= 0 && !gpioAllowed(stopPin)) ||
         (startPin >= 0 && !gpioAllowed(startPin)) ||
         (stopPin >= 0 && startPin >= 0 && stopPin == startPin)) return false;
@@ -2666,9 +2671,8 @@ void HardwareConfig::load() {
         return;
     }
     delay(0);
-    // HardwareConfig shares ecu_config.json with the much larger settings
-    // document. Parse only our subtree so classic ESP32 validation does not
-    // need to hold every unrelated setting while expanding the registry.
+    // Parse only the hardware subtree before Wi-Fi/AsyncTCP reserve their
+    // runtime memory. This is the same straightforward boot path on both chips.
     JsonDocument filter;
     filter[SECTION] = true;
     JsonDocument fullDoc;
@@ -2685,8 +2689,6 @@ void HardwareConfig::load() {
     JsonDocument workDoc;
     if (fullDoc[SECTION].is<JsonObject>()) {
         workDoc.set(fullDoc[SECTION]);
-        // The classic ESP32 cannot reliably hold the complete ecu_config,
-        // a second hardware-only copy and registry validation scratch at once.
         fullDoc.clear();
         fullDoc.shrinkToFit();
         delay(0);
@@ -2912,6 +2914,15 @@ const char* HardwareConfig::defaultOutputIdForPurpose(const char* purpose) {
 
 void HardwareConfig::applyDefaults() {
     strncpy(profileId,   OT_PROFILE_ID,   sizeof(profileId)   - 1);
+    // An immutable PCB profile is the hardware identity for this installation.
+    // First boot and factory reset must seed both unified-config sections with
+    // that identity; retaining the development-board build ID here creates a
+    // guaranteed profile mismatch immediately after a successful reset.
+    if (PcbProfileManager::active() && PcbProfileManager::catalog() &&
+        PcbProfileManager::catalog()->boardId[0]) {
+        strlcpy(profileId, PcbProfileManager::catalog()->boardId,
+                sizeof(profileId));
+    }
     strncpy(profileDesc, OT_PROFILE_DESC, sizeof(profileDesc) - 1);
     hasAfterburner = DEFAULT_HAS_AFTERBURNER;
 

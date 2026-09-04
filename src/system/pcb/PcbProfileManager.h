@@ -15,6 +15,13 @@ public:
 
     enum class State : uint8_t { Absent, Valid, Fault };
     enum class Origin : uint8_t { Unknown, Custom, Official };
+    enum class Adapter : uint8_t {
+        Unknown,
+        DigitalInput, AnalogInput, PcntInput, RcPwmInput, PwmDutyInput,
+        SpiThermocouple, OneWireTemperature, I2cDigitalInput, I2cAdcInput,
+        I2cAdcDigitalInput, I2cLoadCell, DigitalOutput, RelayOutput,
+        PwmOutput, ServoOutput, I2cDigitalOutput
+    };
 
     struct Bus {
         char id[24] = {};
@@ -36,15 +43,8 @@ public:
 
     struct Mode {
         char id[24] = {};
-        char adapter[24] = {};
-        char deviceId[24] = {};
-        // Optional first-boot assignment supplied by the flashed PCB profile.
-        // This is intended for controls physically fitted to the board (for
-        // example its labelled START/STOP inputs), not turbine-specific loads.
-        char defaultId[20] = {};
-        char defaultName[24] = {};
-        char defaultRole[18] = {};
-        char defaultPurpose[20] = {};
+        Adapter adapter = Adapter::Unknown;
+        int8_t deviceIndex = -1;
         uint8_t channel = 0;
         int8_t gpio = -1;
         bool activeHigh = true;
@@ -56,6 +56,18 @@ public:
         float minimumMv = 0.0f;
         float maximumMv = 3300.0f;
         float referenceMv = 3300.0f;
+    };
+
+    // Optional first-boot assignments are sparse. Keeping four strings in
+    // every possible port mode cost several KiB even when a profile had no
+    // defaults at all. Store only assignments that actually exist.
+    struct DefaultAssignment {
+        uint8_t portIndex = 0;
+        uint8_t modeIndex = 0;
+        char id[20] = {};
+        char name[24] = {};
+        char role[18] = {};
+        char purpose[20] = {};
     };
 
     struct Port {
@@ -83,7 +95,9 @@ public:
         Bus* buses = nullptr;
         Device* devices = nullptr;
         Port* ports = nullptr;
+        DefaultAssignment* defaults = nullptr;
         uint8_t busCount = 0, deviceCount = 0, portCount = 0;
+        uint8_t defaultCount = 0;
         bool hasStatusLed = false, hasBuzzer = false;
         int8_t statusLedGpio = -1, buzzerGpio = -1;
         uint8_t statusLedType = 0;
@@ -102,6 +116,7 @@ public:
             delete[] buses;
             delete[] devices;
             delete[] ports;
+            delete[] defaults;
         }
     };
 
@@ -117,6 +132,8 @@ public:
     static const Port* findPort(const char* id);
     static const Mode* findMode(const Port& port, const char* id);
     static const Device* findDevice(const char* id);
+    static const Device* deviceForMode(const Mode& mode);
+    static const char* adapterName(Adapter adapter);
     static const Bus* findBus(const char* id);
     static const Bus* findBusKind(const char* kind);
     static bool ownsBusKind(const char* kind);
