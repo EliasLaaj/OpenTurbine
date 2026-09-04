@@ -19,8 +19,7 @@ the local controller-editor work and subsequent PCB/save-system fixes for contin
 - ESP32 build and COM3 firmware flash succeeded (97.2% application flash used).
 - Updated compressed web assets uploaded without replacing the configuration filesystem.
 - 272 safety-regression source checks passed.
-- 49 UI simulator smoke checks passed before the final navigation-warning adjustment;
-  a final rerun was started when this snapshot was prepared.
+- 49 UI simulator smoke checks passed again after the final navigation-warning adjustment.
 - Real ECU Settings PATCH saved and rebooted successfully.
 - Real ECU System hardware PATCH preserved Settings exactly across reboot.
 - Real ECU Controller hardware PATCH retained the Main Fuel rule; runtime statistics
