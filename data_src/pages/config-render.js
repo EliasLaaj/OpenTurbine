@@ -362,6 +362,9 @@ function feedbackDefaultsForInput(id) {
 function updateSimpleControl(index, key, value) {
   const rule = cfg.rules?.[index];
   if (!rule) return;
+  const previousTarget = key === 'target'
+    ? simpleControlOutputs().find(row => String(row.id) === String(rule.target))
+    : null;
   rule[key] = value;
   _controllerRulesDirty = true;
   if (key === 'kind') {
@@ -370,28 +373,28 @@ function updateSimpleControl(index, key, value) {
     if (Number(value) === 0) {
       rule.threshold ??= 0;
       rule.hysteresis ??= 0;
-      rule.on_value ??= 1;
-      rule.off_value ??= 0;
+      rule.on_value = 0;
+      rule.off_value = 0;
     } else if (Number(value) === 1) {
-      rule.input_min ??= 0;
-      rule.input_max ??= 1;
-      rule.output_min ??= 0;
-      rule.output_max ??= 1;
+      rule.input_min = 0;
+      rule.input_max = 1;
+      rule.output_min = 0;
+      rule.output_max = 1;
     } else if (Number(value) === 2) {
       const tuning = feedbackDefaultsForInput(rule.source);
-      rule.target_source_type ??= 0;
-      rule.target_source ??= '';
-      rule.target_fixed ??= 0;
-      rule.target_low ??= 0;
-      rule.target_high ??= 1;
-      rule.target_input_min ??= 0;
-      rule.target_input_max ??= 1;
-      rule.output_min ??= 0;
-      rule.output_max ??= 1;
-      rule.off_value ??= 0;
-      Object.entries(tuning).forEach(([field, fallback]) => rule[field] ??= fallback);
+      rule.target_source_type = 0;
+      rule.target_source = '';
+      rule.target_fixed = 0;
+      rule.target_low = 0;
+      rule.target_high = 1;
+      rule.target_input_min = 0;
+      rule.target_input_max = 1;
+      rule.output_min = 0;
+      rule.output_max = 1;
+      rule.off_value = 0;
+      Object.assign(rule, tuning);
     } else {
-      rule.on_value ??= 0;
+      rule.on_value = 0;
     }
   }
   if (key === 'source' && Number(rule.kind) === 2)
@@ -400,6 +403,14 @@ function updateSimpleControl(index, key, value) {
     rule.target_source = '';
   if (key === 'target') {
     const target = simpleControlOutputs().find(row => String(row.id) === String(value));
+    const wasRelay = previousTarget && [4,11].includes(Number(previousTarget.driver));
+    const isRelay = target && [4,11].includes(Number(target.driver));
+    if (previousTarget && target && wasRelay !== isRelay) {
+      rule.on_value = 0;
+      rule.off_value = 0;
+      rule.output_min = 0;
+      rule.output_max = 1;
+    }
     if (target && [4,11].includes(Number(target.driver)) && [1,2].includes(Number(rule.kind)))
       rule.kind = 0;
   }
@@ -500,17 +511,20 @@ function removeControllerOilLoop(index) {
 }
 function setSystemHardware(path, value) {
   setPath(hwCfg, path.split('.'), value);
-  _controllerHardwareDirty = true;
+  _systemHardwareDirty = true;
+  _systemHardwareChangedPaths.add(path);
   _markDirty();
   renderSystemSetup();
 }
 function renderSystemSetup() {
   const root = document.getElementById('system-device-setup');
   if (!root || CONFIG_SURFACE !== 'system') return;
+  const openGroups = new Set(Array.from(root.querySelectorAll(':scope > details[open] .group-title'))
+    .map(node => node.textContent.trim()));
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const cluster = hwCfg.cluster_serial || {};
   const mav = hwCfg.mavlink || {};
-  const group = (title, desc, body, open=true) => `<details class="config-group"${open?' open':''}><summary><span class="group-heading"><span class="group-title">${title}</span><span class="group-desc">${desc}</span></span><span class="group-chevron" aria-hidden="true">›</span></summary><div class="group-content"><div class="cfg-section"><div class="cfg-grid">${body}</div></div></div></details>`;
+  const group = (title, desc, body, open=true, id='') => `<details${id?` id="${id}"`:''} class="config-group"${open?' open':''}><summary><span class="group-heading"><span class="group-title">${title}</span><span class="group-desc">${desc}</span></span><span class="group-chevron" aria-hidden="true">›</span></summary><div class="group-content"><div class="cfg-section"><div class="cfg-grid">${body}</div></div></div></details>`;
   const identity = `
       <label class="cfg-field"><span class="cfg-label">Engine / Wi-Fi name</span><span class="cfg-desc">Identifies this engine and names its ECU access point.</span><input id="system-engine-name" maxlength="63" value="${esc(hwCfg.profile_id || 'OpenTurbine')}" onchange="setSystemHardware('profile_id',this.value.trim()||'OpenTurbine')"></label>
       <label class="cfg-field"><span class="cfg-label">Engine description</span><span class="cfg-desc">A short name or note used to distinguish this ECU and its saved engine file.</span><input id="system-engine-description" maxlength="63" value="${esc(hwCfg.profile_desc || '')}" onchange="setSystemHardware('profile_desc',this.value)"></label>`;
@@ -528,7 +542,103 @@ function renderSystemSetup() {
       ${mav.enabled?`<label class="cfg-field"><span class="cfg-label">Baud rate</span><select onchange="setSystemHardware('mavlink.baud',+this.value)">${[57600,115200,230400].map(v=>`<option value="${v}"${Number(mav.baud||57600)===v?' selected':''}>${v}</option>`).join('')}</select></label>
       <label class="cfg-field"><span class="cfg-label">Update interval (ms)</span><input type="number" min="50" max="5000" step="50" value="${Number(mav.interval_ms??200)}" onchange="setSystemHardware('mavlink.interval_ms',+this.value)"></label>`:''}
       <div class="cfg-field"><span class="cfg-label">Physical connection</span><a href="/hardware.html#hardware-comms-panel">Configure serial GPIO on Hardware &rarr;</a><span class="cfg-desc">Hardware owns pins and electrical capabilities.</span></div>`;
-  root.innerHTML = `<div class="cfg-title">Device setup</div>${group('Engine identity','How this ECU identifies itself and its saved engine setup',identity)}${group('Wi-Fi access','Local browser connection settings; internet is never required',wifi)}${group('Instrument cluster','Optional OpenTurbine serial display',clusterFields,false)}${group('MAVLink telemetry','Optional serial telemetry for external systems',mavFields,false)}`;
+  const appearanceFields = `
+      <div class="cfg-field" style="grid-column:1/-1">
+        <div id="appearance-picker"></div>
+        <span class="cfg-desc" style="margin-top:.45rem">Interface theme for this device — applies instantly.</span>
+      </div>`;
+  const runtimeHz = Number(getPath(cfg, ['telemetry','control_loop_hz']) ?? 400);
+  const runtimeFields = `
+      <div class="cfg-field" data-key="tm_lh" data-level="essential" style="grid-column:1/-1">
+        <div class="cfg-field-head"><div class="cfg-label">ECU Loop Target Hz (Hz)</div></div>
+        <input type="number" id="cf-tm_lh" aria-label="ECU Loop Target Hz" value="${runtimeHz}" step="50" min="50" max="1000" ${isLocked ? 'disabled' : ''}>
+        <details class="cfg-help"><summary>About this setting</summary><div class="cfg-desc">Main control-loop target frequency. Default 400 Hz. Lower values reduce CPU use; higher values improve control granularity but increase load. Recommended range: 200-500 Hz. Takes effect after a reboot.</div></details>
+      </div>`;
+  const loopTimingFields = `
+      <div class="cfg-field" style="grid-column:1/-1">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+          <span class="cfg-label">Live loop metrics</span>
+          <span class="tool-state off" id="loop-diag-state" style="font-size:.65rem;padding:.15rem .5rem;border-radius:999px;border:1px solid var(--border);color:var(--dim)">Live</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.65rem">
+          <div><div class="cfg-desc">Loop rate</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-hz">-</div></div>
+          <div><div class="cfg-desc">Period</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-period">-</div></div>
+          <div><div class="cfg-desc">Worst cycle</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-period-max">-</div></div>
+          <div><div class="cfg-desc">Exec avg</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-avg">-</div></div>
+          <div><div class="cfg-desc">Exec max</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-max">-</div></div>
+          <div><div class="cfg-desc">Missed deadlines</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-overruns">-</div></div>
+          <div><div class="cfg-desc">Counter</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-count">-</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:.55rem;margin-top:.8rem;padding-top:.75rem;border-top:1px solid var(--border)">
+          <div><div class="cfg-desc">Sensors</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-sensors">-</div></div>
+          <div><div class="cfg-desc">Sequencer</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-sequencer">-</div></div>
+          <div><div class="cfg-desc">Controllers</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-controllers">-</div></div>
+          <div><div class="cfg-desc">Actuators</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-actuators">-</div></div>
+          <div><div class="cfg-desc">Logging</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-logging">-</div></div>
+          <div><div class="cfg-desc">Status LED</div><div style="font-family:var(--font-mono);font-weight:700;color:var(--text)" id="diag-loop-led">-</div></div>
+        </div>
+        <span class="cfg-desc" style="margin-top:.75rem">Main ECU loop speed and execution timing. Worst cycle includes waiting and scheduling; missed deadlines count loop bodies that took longer than the configured period.</span>
+      </div>`;
+  const backupRestoreFields = `
+      <div class="cfg-field" style="grid-column:1/-1">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+          <span class="cfg-label">Engine configuration file</span>
+          <span class="tool-state off" id="cfg-backup-state" style="font-size:.65rem;padding:.15rem .5rem;border-radius:999px;border:1px solid var(--border);color:var(--dim)">Ready</span>
+        </div>
+        <span class="cfg-desc">
+          Download one complete engine file containing hardware, settings, sequences,
+          and calibration, or restore a previously saved file. The engine must be in
+          STANDBY (or FAULT) to restore.
+          <br><span style="color:var(--yellow)">Note: the backup is complete by design —
+          it includes the Wi-Fi AP password. Review before sharing the file.</span>
+        </span>
+        <div style="display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap">
+          <button type="button" id="cfg-backup-btn" onclick="backupConfig()">Download backup</button>
+          <label style="cursor:pointer">
+            <input type="file" id="cfg-restore-file" accept=".json" style="display:none" onchange="restoreConfig(this)">
+            <button type="button" id="cfg-restore-btn" onclick="document.getElementById('cfg-restore-file').click()">Upload &amp; restore…</button>
+          </label>
+        </div>
+        <div id="cfg-backup-msg" style="font-size:.72rem;margin-top:.45rem;display:none"></div>
+      </div>`;
+  const factoryResetFields = `
+      <div class="cfg-field" style="grid-column:1/-1">
+        <span class="cfg-label" style="color:var(--red)">Factory Reset</span>
+        <span class="cfg-desc">
+          Erases all engine settings, sequences, hardware assignments, calibration,
+          Wi-Fi password, event logs, and session logs, then reboots to the built-in
+          minimal profile. Download a complete engine file first if anything may be
+          needed later. <b style="color:var(--red)">Cannot be undone.</b>
+        </span>
+        <div style="margin-top:.6rem">
+          <button type="button" onclick="factoryReset()" class="danger" id="btn-factory-reset">Factory Reset</button>
+        </div>
+        <div id="factory-reset-msg" style="font-size:.72rem;margin-top:.45rem;display:none"></div>
+      </div>`;
+  root.innerHTML = `<div class="cfg-title">Device setup</div>` +
+    group('Engine identity','How this ECU identifies itself and its saved engine setup',identity) +
+    group('Wi-Fi access','Local browser connection settings; internet is never required',wifi) +
+    group('Appearance','Interface color palette and display theme',appearanceFields,true) +
+    group('Instrument cluster','Optional OpenTurbine serial display',clusterFields,false) +
+    group('MAVLink telemetry','Optional serial telemetry for external systems',mavFields,false) +
+    group('ECU runtime','Control-loop scheduling and device-wide execution',runtimeFields,false) +
+    group('ECU loop timing','Main ECU loop speed and execution timing diagnostics',loopTimingFields,false) +
+    group('Backup & restore','Download or restore the complete configuration file',backupRestoreFields,false,'system-backup-restore') +
+    group('Factory reset','Permanently erase all configuration and logs to restore factory defaults',factoryResetFields,false);
+  root.querySelectorAll(':scope > details').forEach(card => {
+    const title = card.querySelector('.group-title')?.textContent.trim();
+    if (openGroups.size) card.open = openGroups.has(title);
+  });
+  if (window.OTTheme?.renderPicker) {
+    window.OTTheme.renderPicker(document.getElementById('appearance-picker'));
+  }
+  if (window._lastSystemData && typeof window.updateLoopDiagnostics === 'function') {
+    window.updateLoopDiagnostics(window._lastSystemData);
+  }
+  const frBtn = document.getElementById('btn-factory-reset');
+  if (frBtn) frBtn.disabled = !['STANDBY', 'FAULT'].includes(runtimeMode);
+  const cfgRestoreBtn = document.getElementById('cfg-restore-btn');
+  if (cfgRestoreBtn) cfgRestoreBtn.disabled = !['STANDBY', 'FAULT'].includes(runtimeMode);
   ['cl_n1','cl_n2','cl_tw','cl_ow','cl_fw','cl_bw'].forEach(key => setCfgFieldHardHidden(key, !cluster.enabled));
 }
 function renderSimpleControls() {
@@ -608,7 +718,7 @@ const ALL_WORKSPACE_GROUPS = [
 ];
 const WORKSPACE_GROUPS = ALL_WORKSPACE_GROUPS
   .filter(group => CONFIG_SURFACE === 'system'
-    ? ['runtime','display'].includes(group.id)
+    ? ['display'].includes(group.id)
     : !['runtime','display'].includes(group.id))
   .map(group => ({...group, sections:group.sections.filter(title =>
     SCHEMA.some(section => section.title === title))}))

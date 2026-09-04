@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
-  <a href="/tools.html" class="active" title="Run standby-only actuator tests, backups, restore, OTA, factory reset, and dev tools.">Tools</a>
+  <a href="/tools.html" class="active" title="Run standby-only actuator tests, backups, restore, OTA, and dev tools.">Tools</a>
   <a href="/system.html" title="Configure ECU runtime, communications, display, and device-wide behavior.">System</a>
   <span id="conn" class="conn-dot disconnected"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
@@ -55,34 +55,6 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
 
   <div id="tool-area"></div>
 
-  <div class="tool-card tools-wide-card" id="loop-diag-card" title="Main ECU loop speed and execution timing. Worst cycle includes waiting and scheduling; missed deadlines count loop bodies that took longer than the configured period. Enable ECU loop timing in session logging only when you want these values written to CSV." style="margin-top:1rem">
-    <div class="tool-header">
-      <div class="tool-name">ECU Loop Timing</div>
-      <div class="tool-state off" id="loop-diag-state">Live</div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.65rem;margin-top:.45rem">
-      <div><div class="tool-desc">Loop rate</div><div style="font-family:monospace;font-weight:700" id="diag-loop-hz">-</div></div>
-      <div><div class="tool-desc">Period</div><div style="font-family:monospace;font-weight:700" id="diag-loop-period">-</div></div>
-      <div><div class="tool-desc">Worst cycle</div><div style="font-family:monospace;font-weight:700" id="diag-loop-period-max">-</div></div>
-      <div><div class="tool-desc">Exec avg</div><div style="font-family:monospace;font-weight:700" id="diag-loop-avg">-</div></div>
-      <div><div class="tool-desc">Exec max</div><div style="font-family:monospace;font-weight:700" id="diag-loop-max">-</div></div>
-      <div><div class="tool-desc">Missed deadlines</div><div style="font-family:monospace;font-weight:700" id="diag-loop-overruns">-</div></div>
-      <div><div class="tool-desc">Counter</div><div style="font-family:monospace;font-weight:700" id="diag-loop-count">-</div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(115px,1fr));gap:.55rem;margin-top:.8rem;padding-top:.75rem;border-top:1px solid var(--border)">
-      <div><div class="tool-desc">Sensors</div><div style="font-family:monospace;font-weight:700" id="diag-loop-sensors">-</div></div>
-      <div><div class="tool-desc">Sequencer</div><div style="font-family:monospace;font-weight:700" id="diag-loop-sequencer">-</div></div>
-      <div><div class="tool-desc">Controllers</div><div style="font-family:monospace;font-weight:700" id="diag-loop-controllers">-</div></div>
-      <div><div class="tool-desc">Actuators</div><div style="font-family:monospace;font-weight:700" id="diag-loop-actuators">-</div></div>
-      <div><div class="tool-desc">Logging</div><div style="font-family:monospace;font-weight:700" id="diag-loop-logging">-</div></div>
-      <div><div class="tool-desc">Status LED</div><div style="font-family:monospace;font-weight:700" id="diag-loop-led">-</div></div>
-    </div>
-  </div>
-
-  <div class="appearance-card">
-    <div id="appearance-picker"></div>
-    <div class="appearance-note">Interface theme for this device — applies instantly.</div>
-  </div>
 </main>
 
 <script>
@@ -455,26 +427,6 @@ function renderTools() {
   </div>`;
   document.getElementById('tool-area').insertAdjacentHTML('beforeend', devHtml);
 
-  // Factory reset card — always visible
-  const factoryResetHtml = `
-  <hr class="tool-divider" style="margin-top:1.4rem">
-  <div class="tool-card" id="card-factory-reset" style="border-color:var(--red);margin-top:.75rem">
-    <div class="tool-header">
-      <div class="tool-name" style="color:var(--red)">Factory Reset</div>
-      <div class="tool-state off" id="state-factory-reset">STANDBY / FAULT</div>
-    </div>
-    <div class="tool-footer">
-      <div class="tool-desc" style="color:var(--dim)">
-        Erases all engine settings, sequences, hardware assignments, calibration,
-        Wi-Fi password, event logs, and session logs, then reboots to the built-in
-        minimal profile. Download a complete engine file first if anything may be
-        needed later. <b style="color:var(--red)">Cannot be undone.</b>
-      </div>
-      <button onclick="factoryReset()" class="danger" id="btn-factory-reset">Factory Reset</button>
-    </div>
-    <div id="factory-reset-msg" style="font-size:.72rem;margin-top:.45rem;display:none"></div>
-  </div>`;
-  document.getElementById('tool-area').insertAdjacentHTML('beforeend', factoryResetHtml);
 
   // Dev mode — always-visible card so it's easy to find before the dev section appears
   const devToggleHtml = `
@@ -638,33 +590,6 @@ function refreshToggleState(tool) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────
-function updateLoopDiagnostics(d) {
-  const hz = Number(d.loop_hz);
-  const period = Number(d.loop_period_ms);
-  const periodMax = Number(d.loop_period_max_ms);
-  const avg = Number(d.loop_exec_avg_ms);
-  const max = Number(d.loop_exec_max_ms);
-  const overruns = Number(d.loop_overrun_count);
-  const count = Number(d.loop_counter);
-  const fmtMs = v => Number.isFinite(v) ? v.toFixed(3) + ' ms' : '-';
-  const set = (id, text) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = text;
-  };
-  set('diag-loop-hz', Number.isFinite(hz) ? hz.toFixed(1) + ' Hz' : '-');
-  set('diag-loop-period', Number.isFinite(period) ? period.toFixed(2) + ' ms' : '-');
-  set('diag-loop-period-max', fmtMs(periodMax));
-  set('diag-loop-avg', fmtMs(avg));
-  set('diag-loop-max', fmtMs(max));
-  set('diag-loop-overruns', Number.isFinite(overruns) ? fmtInt(overruns) : '-');
-  set('diag-loop-count', Number.isFinite(count) ? fmtInt(count) : '-');
-  set('diag-loop-sensors', fmtMs(Number(d.loop_sensors_ms)));
-  set('diag-loop-sequencer', fmtMs(Number(d.loop_sequencer_ms)));
-  set('diag-loop-controllers', fmtMs(Number(d.loop_controllers_ms)));
-  set('diag-loop-actuators', fmtMs(Number(d.loop_actuators_ms)));
-  set('diag-loop-logging', fmtMs(Number(d.loop_logging_ms)));
-  set('diag-loop-led', fmtMs(Number(d.loop_led_ms)));
-}
 
 function setState(id, text, cls) {
   const el = document.getElementById('state-' + id);
@@ -692,9 +617,6 @@ function setAllButtons(forcedOff) {
   // Cooldown start button — only standby-like and not already running
   const ecBtn = document.getElementById('btn-EXTRA_COOLDOWN');
   if (ecBtn) ecBtn.disabled = forcedOff || !inStandby || ecActive || !extraCooldownAvailable();
-  // Factory reset — standby-like only (card label says so; enforce it here)
-  const frBtn = document.getElementById('btn-factory-reset');
-  if (frBtn) frBtn.disabled = forcedOff || !inStandby;
 }
 function refreshTimedToolLockStates() {
   const cooldownLocked = !!(liveData && liveData.extra_cooldown_active);
@@ -733,7 +655,6 @@ window.applyData = function(d) {
     setAllButtons(false);
     refreshTimedToolLockStates();
   }
-  updateLoopDiagnostics(d);
 
   // Toggle state badges
   TOOLS.forEach(t => { if (t.toggleKey) refreshToggleState(t); });
@@ -1127,41 +1048,6 @@ async function backupConfig() {
     .finally(startToolsTelemetry);
 }
 
-// ── Factory reset ─────────────────────────────────────────────
-async function factoryReset() {
-  if (!await OTDialog.confirm('⚠ Factory Reset\n\nThis will permanently ERASE:\n• Engine settings and sequences\n• Hardware assignments\n• All calibration\n• Wi-Fi password\n• Event and session logs\n\nDownload a complete engine file first if you may need this setup.', {
-    title: 'Factory reset this ECU?', confirmText: 'Continue', danger: true
-  })) return;
-  const typed = await OTDialog.prompt('Type RESET to erase this ECU and reboot with built-in defaults.', {
-    title: 'Final factory-reset confirmation', confirmText: 'Erase and reset', placeholder: 'RESET'
-  });
-  if (typed !== 'RESET') {
-    alert('Factory reset cancelled. Nothing was erased.');
-    return;
-  }
-  const msg = document.getElementById('factory-reset-msg');
-  const btn = document.getElementById('btn-factory-reset');
-  if (btn) btn.disabled = true;
-  fetch('/api/factory_reset', { method: 'POST' })
-    .then(async r => {
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || d.ok === false) throw new Error(d.error || d.reason || ('HTTP ' + r.status));
-      return d;
-    })
-    .then(d => {
-      if (d.ok) {
-        if (msg) { msg.textContent = 'Reset sent — device rebooting…'; msg.style.color = 'var(--yellow)'; msg.style.display = ''; }
-        setTimeout(() => location.reload(), 8000);
-      } else {
-        if (msg) { msg.textContent = d.error || 'Reset failed'; msg.style.color = 'var(--red)'; msg.style.display = ''; }
-        if (btn) btn.disabled = false;
-      }
-    })
-    .catch(e => {
-      if (msg) { msg.textContent = 'Error: ' + e.message; msg.style.color = 'var(--red)'; msg.style.display = ''; }
-      if (btn) btn.disabled = false;
-    });
-}
 
 // ── Config restore ────────────────────────────────────────────
 function compactEngineFileForRestore(text) {

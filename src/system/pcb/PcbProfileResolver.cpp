@@ -45,7 +45,8 @@ bool purposeAcceptsAdapter(const ChannelRegistry::Channel& channel, const char* 
 
 bool applyMode(ChannelRegistry::Channel& channel,
                const PcbProfileManager::Mode& mode,
-               char* reason, size_t reasonSize) {
+               char* reason, size_t reasonSize,
+               bool seedUserInputOptions = false) {
     using Driver = ChannelRegistry::Driver;
     using Direction = ChannelRegistry::Direction;
     const char* adapter = mode.adapter;
@@ -90,10 +91,19 @@ bool applyMode(ChannelRegistry::Channel& channel,
     else return fail(reason, reasonSize, "PCB port mode is incompatible with channel direction or firmware");
 
     channel.pin = mode.gpio;
-    channel.activeHigh = mode.activeHigh;
-    channel.inverted = !mode.activeHigh;
-    channel.pullup = input && mode.pull == 1;
-    channel.pulldown = input && mode.pull == 2;
+    // GPIO routing and the electrical adapter belong to the immutable PCB
+    // profile. Polarity and internal bias belong to the engine assignment: a
+    // plain exposed GPIO may electrically be used with pull-up, pull-down, or
+    // no internal bias. Seed profile defaults for new assignments, but do not
+    // overwrite the user's saved choice every time the profile is resolved.
+    if (!input || seedUserInputOptions) {
+        channel.activeHigh = mode.activeHigh;
+        channel.inverted = !mode.activeHigh;
+    }
+    if (input && seedUserInputOptions) {
+        channel.pullup = mode.pull == 1;
+        channel.pulldown = mode.pull == 2;
+    }
     if (!input) channel.safeDemand = mode.safeDemand;
 
     if (channel.driver == Driver::I2cDigital || channel.driver == Driver::I2cAnalog ||
@@ -226,7 +236,7 @@ bool PcbProfileResolver::addProfileDefaults(ChannelRegistry& registry,
             strlcpy(channel.physicalPortId, port.id, sizeof(channel.physicalPortId));
             strlcpy(channel.physicalModeId, mode.id, sizeof(channel.physicalModeId));
             channel.safeDemand = 0.0f;
-            if (!applyMode(channel, mode, reason, reasonSize)) return false;
+            if (!applyMode(channel, mode, reason, reasonSize, true)) return false;
             if (!registry.add(channel))
                 return fail(reason, reasonSize,
                             "PCB profile default assignment could not be added");

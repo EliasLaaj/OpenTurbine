@@ -233,6 +233,27 @@ const LIVE_CONFIG_KEYS = new Set([
 let _cfgDirty = false;
 let _controllerRulesDirty = false;
 let _controllerHardwareDirty = false;
+let _systemHardwareDirty = false;
+const _systemHardwareChangedPaths = new Set();
+
+window.addEventListener('beforeunload', event => {
+  if (!_cfgDirty) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+document.addEventListener('click', async event => {
+  const link = event.target.closest?.('a[href]');
+  if (!link || !_cfgDirty || event.defaultPrevented || event.button !== 0 ||
+      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || link.target === '_blank') return;
+  const url = new URL(link.href, location.href);
+  if (url.origin !== location.origin || (url.pathname === location.pathname && url.search === location.search)) return;
+  event.preventDefault();
+  if (await OTDialog.confirm('This page has unsaved changes. Leave and discard them?',
+      {title:'Unsaved changes', confirmText:'Discard and leave', danger:true})) {
+    _clearDirty();
+    location.href = url.href;
+  }
+}, true);
 
 // ── Per-field changed-state tracking (mirrors hardware.html) ──
 let _fieldSnap = {};
@@ -291,6 +312,7 @@ function _buildChanges() {
     });
   if (_controllerRulesDirty) changes.push({key:'__simple_controls', label:'Custom controllers', was:'Saved setup', now:'Updated setup', inactive:false});
   if (_controllerHardwareDirty) changes.push({key:'__controller_hardware', label:'Controller assignments and safety enables', was:'Saved setup', now:'Updated setup', inactive:false});
+  if (_systemHardwareDirty) changes.push({key:'__system_hardware', label:'System device settings', was:'Saved setup', now:'Updated setup', inactive:false});
   return changes;
 }
 
@@ -334,6 +356,8 @@ function _clearDirty() {
   _cfgDirty = false;
   _controllerRulesDirty = false;
   _controllerHardwareDirty = false;
+  _systemHardwareDirty = false;
+  _systemHardwareChangedPaths.clear();
   const btn = document.getElementById('btn-save');
   const discard = document.getElementById('btn-discard');
   const bar = document.querySelector('.save-bar');

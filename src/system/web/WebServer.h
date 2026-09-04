@@ -16,7 +16,7 @@
 //    PATCH /api/config   → merge settings patch into ecu_config.json
 //    GET  /api/hardware  → current hardware section from ecu_config.json
 //    POST /api/hardware  → replace hardware section, validate, reboot
-//    PATCH /api/hardware → calibration-only hardware patch
+//    PATCH /api/hardware → bounded calibration or System-owned hardware patch
 //    GET  /api/ecu_config  → download full hardware+settings engine file
 //    POST /api/ecu_config → restore full hardware+settings engine file, reboot
 //    GET  /api/log       → full event recorder log

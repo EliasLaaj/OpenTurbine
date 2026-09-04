@@ -45,11 +45,6 @@ function setPumpFlowSensorEnabled(outputIndex, enabled) {
   const output = outputs[outputIndex];
   const purpose = pumpFlowPurpose(output);
   if (!output || !purpose) return;
-  if (enabled && pcbProfileActive()) {
-    alert('A PCB profile must declare and assign the pump flow-meter connection. Raw profile wiring cannot be created from this card.');
-    renderRegistryInventory();
-    return;
-  }
   let {channel} = pumpFlowInput(output);
   if (enabled && !channel) {
     if ((registryRoot().inputs || []).length >= registryCapacity('input')) {
@@ -68,6 +63,10 @@ function setPumpFlowSensorEnabled(outputIndex, enabled) {
       pullup:false, pulldown:false, pulses_per_unit:1000
     };
     registryRoot().inputs.push(channel);
+    // In PCB mode the new card immediately offers every unassigned named
+    // connector that supports pulse/frequency or analog flow measurement.
+    // Leaving the physical connection unset keeps the card visibly incomplete
+    // until the user chooses the real connector.
   } else if (!enabled && channel) {
     removePumpFlowInput(output);
   }
@@ -820,8 +819,8 @@ function shiftRegistryNumericHandlesAfterRemoval(direction, removedIndex, oldCou
       if (step.act !== undefined) step.act = shift(step.act);
   }));
   const deviceTargetKeys = ['startup_device_target','shutdown_device_target','ab_device_target','ab_shut_device_target'];
-  deviceTargetKeys.forEach(key => (cfg[key] || []).forEach(target => {
-    if (direction === 'output' && refMatches(target)) seqCount++;
+  deviceTargetKeys.forEach(key => (cfg[key] || []).forEach((target, index, targets) => {
+    targets[index] = shift(target);
   }));
     (settingsCfg.rules || []).forEach(rule => { if (rule?.actuator !== undefined) rule.actuator = shift(rule.actuator); });
   } else {

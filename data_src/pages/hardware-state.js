@@ -93,11 +93,27 @@ function mergeHardwareEdits(baseline, edited, fresh) {
     const hasEdit = Object.prototype.hasOwnProperty.call(edit, key);
     const before = base[key];
     const after = edit[key];
+    const registryRows = (key === 'inputs' || key === 'outputs') &&
+      Array.isArray(before) && Array.isArray(after) && Array.isArray(out[key]);
+    // GET /api/ecu_config can contain an older empty registry while the
+    // Hardware page has already migrated legacy sensor/actuator fields into
+    // cards. Materialize those unchanged migrated rows as well as edited rows;
+    // otherwise bindings survive the save while their channels disappear.
+    if (registryRows) {
+      out[key] = mergeHardwareRegistryRows(before, after, out[key]);
+      continue;
+    }
+    // Bindings are owned by Hardware. Preserve a concurrently returned list
+    // when nothing changed, except for the same legacy-migration case where
+    // the fresh engine file has none and the editor created them from cards.
+    if (key === 'bindings' && Array.isArray(before) && Array.isArray(after) &&
+        Array.isArray(out[key]) && JSON.stringify(before) === JSON.stringify(after) &&
+        out[key].length === 0 && after.length > 0) {
+      out[key] = cloneHardwareJson(after);
+      continue;
+    }
     if (JSON.stringify(before) === JSON.stringify(after)) continue;
     if (!hasEdit) delete out[key];
-    else if ((key === 'inputs' || key === 'outputs') &&
-             Array.isArray(before) && Array.isArray(after) && Array.isArray(out[key]))
-      out[key] = mergeHardwareRegistryRows(before, after, out[key]);
     else if (hardwarePlainObject(before) && hardwarePlainObject(after))
       out[key] = mergeHardwareEdits(before, after, out[key]);
     else out[key] = cloneHardwareJson(after);
@@ -633,8 +649,11 @@ async function setProfileSerialEnabled(group, enabled) {
     const other = group === 'cluster_serial' ? 'mavlink' : 'cluster_serial';
     await setNested(other, 'enabled', false);
   }
+  refreshAllPins();
+  updateSaveButton();
   renderHardwareWorkflowSummaries();
 }
+const setSerialEnabled = setProfileSerialEnabled;
 function setLabel(key, val) {
   if (!cfg.labels) cfg.labels = {};
   cfg.labels[key] = val;

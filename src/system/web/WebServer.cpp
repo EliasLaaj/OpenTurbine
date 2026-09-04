@@ -1057,6 +1057,35 @@ private:
     AsyncWebServerRequest* _req;
 };
 
+#if defined(OT_PLATFORM_ESP32)
+static void _scheduleRestart(const char* reason, uint32_t delayMs);
+// A complete Settings document needs a larger ArduinoJson allocation than the
+// Classic ESP32 can find while both permanent web transfer workspaces are
+// resident. Body handlers use this only after their small request has been
+// parsed into owned storage. The RX owner remains claimed, so no concurrent
+// upload can observe the temporarily lent workspace.
+class ClassicRxWorkspaceLoan {
+public:
+    ClassicRxWorkspaceLoan() {
+        if (g_webRxStorage) {
+            heap_caps_free(g_webRxStorage);
+            g_webRxStorage = nullptr;
+            _loaned = true;
+        }
+    }
+    ~ClassicRxWorkspaceLoan() {
+        if (_loaned && !g_webRxStorage) {
+            g_webRxStorage = static_cast<WebRxBuffer*>(
+                heap_caps_malloc(sizeof(WebRxBuffer), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL));
+            if (!g_webRxStorage) _scheduleRestart("web RX workspace recovery", 1000);
+        }
+    }
+    bool loaned() const { return _loaned; }
+private:
+    bool _loaned = false;
+};
+#endif
+
 // Serializes maintenance-upload state (Update handle, _assetTempFile,
 // _configRestoreFile and their owner/flag variables) between the async_tcp
 // upload handlers and the webTask tick() idle-timeout cleanup.  Without it a
@@ -2720,7 +2749,8 @@ void WebServer::_setupRoutes() {
             if (!active) {
                 if (candidateJson) free(candidateJson);
                 Config::clearStagedJsonCandidate();
-                ConfigApplyGate::release();
+                // Retain WebWriting until reboot so START cannot run with
+                // old runtime values after a newer generation was committed.
                 req->send(200, "application/json",
                           "{\"ok\":true,\"saved\":true,\"reboot\":true,\"applying\":false}");
                 _scheduleRestart("Classic settings replacement", 2000);
@@ -2815,6 +2845,9 @@ void WebServer::_setupRoutes() {
             }
             // Load current config into a document, merge patch on top, re-apply.
             // Recursive merge keeps sibling fields inside nested sections.
+#if defined(OT_PLATFORM_ESP32)
+            ClassicRxWorkspaceLoan rxWorkspaceLoan;
+#endif
             JsonDocument current;
 #if defined(OT_PLATFORM_ESP32)
             size_t currentOffset = 0;
@@ -2834,6 +2867,11 @@ void WebServer::_setupRoutes() {
                 ? deserializeJson(current, g_webTxBuf, currentLen)
                 : DeserializationError::InvalidInput;
             if (currentError != DeserializationError::Ok || current.overflowed()) {
+                Serial.printf("[Web] Settings PATCH current read failed: located=%d read=%d len=%u parse=%s overflow=%d heap=%u max=%u\n",
+                              locatedCurrent, readCurrent, static_cast<unsigned>(currentLen),
+                              currentError.c_str(), current.overflowed(),
+                              static_cast<unsigned>(ESP.getFreeHeap()),
+                              static_cast<unsigned>(ESP.getMaxAllocHeap()));
                 ConfigApplyGate::release();
                 req->send(503, "application/json",
                           "{\"ok\":false,\"error\":\"stored settings could not be read completely; retry after the page reconnects\"}");
@@ -2879,8 +2917,19 @@ void WebServer::_setupRoutes() {
                 }
             } else {
 #if defined(OT_PLATFORM_ESP32)
-                ok = Config::persistJsonCandidateReleasing(
-                    current, candidateJson, candidateLen, g_webRxBuf, sizeof(g_webRxBuf));
+                // Serialize the validated merge straight to the existing
+                // apply-stage file. This avoids needing a second 16 KiB RAM
+                // buffer beside the large Settings tree. The unified writer
+                // consumes the stage only after that tree has been released.
+                candidateLen = measureJson(current);
+                File staged = LittleFS.open("/config_apply.tmp", "w");
+                const bool stagedOk = staged && candidateLen > 0 &&
+                    serializeJson(current, staged) == candidateLen;
+                if (staged) staged.close();
+                current.clear();
+                current.shrinkToFit();
+                ok = stagedOk && Config::saveStagedJsonCandidate(candidateLen, false);
+                if (!ok) LittleFS.remove("/config_apply.tmp");
 #else
                 ok = Config::persistJsonCandidateReleasing(
                     current, candidateJson, candidateLen, g_webTxBuf, sizeof(g_webTxBuf));
@@ -2911,7 +2960,7 @@ void WebServer::_setupRoutes() {
                 current.clear();
                 current.shrinkToFit();
                 Config::clearStagedJsonCandidate();
-                ConfigApplyGate::release();
+                // Keep START locked until boot applies the committed values.
                 req->send(200, "application/json",
                           "{\"ok\":true,\"saved\":true,\"reboot\":true,\"applying\":false}");
                 _scheduleRestart("Classic settings save", 2000);
@@ -4176,7 +4225,8 @@ void WebServer::_setupRoutes() {
             _scheduleRestart("hardware config save");
         });
 
-    // PATCH /api/hardware — partial update of hardware section (calibration fields only, no reboot)
+    // PATCH /api/hardware — bounded page-owned hardware updates. Calibration
+    // applies live; System, Controllers, and Sequence patches save then reboot.
     _server.on("/api/hardware", HTTP_PATCH,
         [](AsyncWebServerRequest* req) {},
         nullptr,
@@ -4213,13 +4263,74 @@ void WebServer::_setupRoutes() {
                 req->send(400, "application/json", "{\"error\":\"bad json\"}");
                 return;
             }
-            bool calibrationOnly = true;
+#if defined(OT_PLATFORM_ESP32)
+            // ArduinoJson 7 owns these strings; lending RX after parsing
+            // leaves room for validating and serializing the complete section.
+            ClassicRxWorkspaceLoan rxWorkspaceLoan;
+#endif
+            bool patchAllowed = true;
+            bool systemPatch = false;
+            bool controllerPatch = false;
+            bool sequencePatch = false;
+            const bool hardwarePagePatch = req->hasParam("source") &&
+                req->getParam("source")->value() == "hardware";
             for (JsonPair top : patch.as<JsonObject>()) {
                 const char* topKey = top.key().c_str();
-                if (strcmp(topKey, "sensors") == 0 && top.value().is<JsonObject>()) {
+                if (hardwarePagePatch) {
+                    // The Hardware page may patch any validated hardware field,
+                    // but never browser-only capability/discovery metadata.
+                    patchAllowed = strcmp(topKey, "_platform") != 0 &&
+                                   strcmp(topKey, "_capabilities") != 0 &&
+                                   strcmp(topKey, "_i2c_discovery") != 0;
+                    if (!patchAllowed) break;
+                    continue;
+                }
+                const bool stringSystemField = strcmp(topKey, "profile_id") == 0 ||
+                                               strcmp(topKey, "profile_desc") == 0 ||
+                                               strcmp(topKey, "wifi_password") == 0;
+                if (stringSystemField) {
+                    patchAllowed = top.value().is<const char*>();
+                    systemPatch = patchAllowed;
+                } else if (strcmp(topKey, "wifi_tx_power_dbm") == 0) {
+                    patchAllowed = top.value().is<int>() || top.value().is<float>();
+                    systemPatch = patchAllowed;
+                } else if ((strcmp(topKey, "cluster_serial") == 0 || strcmp(topKey, "mavlink") == 0) &&
+                           top.value().is<JsonObject>()) {
+                    systemPatch = true;
+                    for (JsonPair field : top.value().as<JsonObject>()) {
+                        const char* key = field.key().c_str();
+                        if (strcmp(key, "enabled") != 0 && strcmp(key, "baud") != 0 &&
+                            strcmp(key, "interval_ms") != 0) {
+                            patchAllowed = false;
+                            break;
+                        }
+                    }
+                } else if ((strcmp(topKey, "controllers") == 0 || strcmp(topKey, "safety") == 0) &&
+                           top.value().is<JsonObject>()) {
+                    controllerPatch = true;
+                } else if (strcmp(topKey, "oil_loops") == 0 && top.value().is<JsonArray>()) {
+                    controllerPatch = true;
+                } else if ((strcmp(topKey, "startup_seq") == 0 || strcmp(topKey, "shutdown_seq") == 0 ||
+                            strcmp(topKey, "ab_seq") == 0 || strcmp(topKey, "ab_shut_seq") == 0 ||
+                            strcmp(topKey, "startup_delay_ms") == 0 || strcmp(topKey, "shutdown_delay_ms") == 0 ||
+                            strcmp(topKey, "ab_delay_ms") == 0 || strcmp(topKey, "ab_shut_delay_ms") == 0 ||
+                            strcmp(topKey, "startup_ignition_target") == 0 || strcmp(topKey, "shutdown_ignition_target") == 0 ||
+                            strcmp(topKey, "ab_ignition_target") == 0 || strcmp(topKey, "ab_shut_ignition_target") == 0 ||
+                            strcmp(topKey, "startup_device_target") == 0 || strcmp(topKey, "shutdown_device_target") == 0 ||
+                            strcmp(topKey, "ab_device_target") == 0 || strcmp(topKey, "ab_shut_device_target") == 0 ||
+                            strcmp(topKey, "startup_enter_actions") == 0 || strcmp(topKey, "startup_exit_actions") == 0 ||
+                            strcmp(topKey, "shutdown_enter_actions") == 0 || strcmp(topKey, "shutdown_exit_actions") == 0 ||
+                            strcmp(topKey, "ab_enter_actions") == 0 || strcmp(topKey, "ab_exit_actions") == 0 ||
+                            strcmp(topKey, "ab_shut_enter_actions") == 0 || strcmp(topKey, "ab_shut_exit_actions") == 0) &&
+                           top.value().is<JsonArray>()) {
+                    sequencePatch = true;
+                } else if ((strcmp(topKey, "custom_blocks") == 0 || strcmp(topKey, "ab_trigger") == 0) &&
+                           top.value().is<JsonObject>()) {
+                    sequencePatch = true;
+                } else if (strcmp(topKey, "sensors") == 0 && top.value().is<JsonObject>()) {
                     for (JsonPair sensor : top.value().as<JsonObject>()) {
                         const char* sensorKey = sensor.key().c_str();
-                        if (!sensor.value().is<JsonObject>()) { calibrationOnly = false; break; }
+                        if (!sensor.value().is<JsonObject>()) { patchAllowed = false; break; }
                         for (JsonPair field : sensor.value().as<JsonObject>()) {
                             const char* fieldKey = field.key().c_str();
                             bool allowed = (strcmp(sensorKey, "oil_temp") == 0 &&
@@ -4235,9 +4346,9 @@ void WebServer::_setupRoutes() {
                                         || (strcmp(sensorKey, "torque") == 0 &&
                                             (strcmp(fieldKey, "scale") == 0 ||
                                              strcmp(fieldKey, "offset") == 0));
-                            if (!allowed) { calibrationOnly = false; break; }
+                            if (!allowed) { patchAllowed = false; break; }
                         }
-                        if (!calibrationOnly) break;
+                        if (!patchAllowed) break;
                     }
                 } else if (strcmp(topKey, "actuators") == 0 && top.value().is<JsonObject>()) {
                     for (JsonPair actuator : top.value().as<JsonObject>()) {
@@ -4247,23 +4358,23 @@ void WebServer::_setupRoutes() {
                                              strcmp(actuatorKey, "igniter") == 0 ||
                                              strcmp(actuatorKey, "igniter2") == 0;
                         if (!validActuator || !actuator.value().is<JsonObject>()) {
-                            calibrationOnly = false;
+                            patchAllowed = false;
                             break;
                         }
                         for (JsonPair field : actuator.value().as<JsonObject>()) {
                             const char* fieldKey = field.key().c_str();
                             if (strcmp(fieldKey, "current_zero_v") != 0 &&
                                 strcmp(fieldKey, "current_mv_a") != 0) {
-                                calibrationOnly = false;
+                                patchAllowed = false;
                                 break;
                             }
                         }
-                        if (!calibrationOnly) break;
+                        if (!patchAllowed) break;
                     }
                 } else if (strcmp(topKey, "ab_flame") == 0 && top.value().is<JsonObject>()) {
                     for (JsonPair field : top.value().as<JsonObject>()) {
                         if (strcmp(field.key().c_str(), "threshold") != 0) {
-                            calibrationOnly = false;
+                            patchAllowed = false;
                             break;
                         }
                     }
@@ -4292,25 +4403,30 @@ void WebServer::_setupRoutes() {
                                   strcmp(key, "lever_arm_m") != 0 &&
                                   strcmp(key, "digital_threshold_raw") != 0 &&
                                   strcmp(key, "filter_alpha") != 0) {
-                            calibrationOnly = false;
+                            patchAllowed = false;
                             break;
                         }
                     }
-                    if (!hasId) calibrationOnly = false;
+                    if (!hasId) patchAllowed = false;
                 } else {
-                    calibrationOnly = false;
+                    patchAllowed = false;
                 }
-                if (!calibrationOnly) break;
+                if (!patchAllowed) break;
             }
-            if (!calibrationOnly) {
+            if (!patchAllowed || patch.as<JsonObject>().size() == 0) {
                 req->send(400, "application/json",
-                    "{\"error\":\"hardware PATCH accepts calibration fields only; use Hardware Save for topology changes\"}");
+                    "{\"error\":\"hardware PATCH contains unsupported fields; use Hardware Save for topology changes\"}");
                 return;
             }
             // Merge directly in the ArduinoJson tree. A legal hardware section
             // may exceed the small general-purpose web scratch buffers.
             JsonDocument current;
             HardwareConfig::toJson(current);
+            const bool prevSafOilT = HardwareConfig::safetyOilTempHigh;
+            const bool prevSafFP = HardwareConfig::safetyFuelPressLow;
+            const bool prevSafBatt = HardwareConfig::safetyBattLow;
+            const bool prevSafSurge = HardwareConfig::safetySurge;
+            const bool prevSafHot = HardwareConfig::safetyHotStart;
             if (patch["channel_registry_calibration"].is<JsonObject>()) {
                 JsonObjectConst cal = patch["channel_registry_calibration"].as<JsonObjectConst>();
                 const char* id = cal["id"] | "";
@@ -4357,15 +4473,40 @@ void WebServer::_setupRoutes() {
             current.shrinkToFit();
             patch.clear();
             patch.shrinkToFit();
-            if (!HardwareConfig::save()) {
+            if (controllerPatch || hardwarePagePatch) {
+                Config::sanitizeForHardware();
+                Config::autoFillNewlyEnabledSafety(prevSafOilT, prevSafFP,
+                                                   prevSafBatt, prevSafSurge, prevSafHot);
+            }
+            // Every page-owned hardware edit is made while STANDBY and the
+            // runtime settings are authoritative. Stream the two sections one
+            // at a time so Classic never has to allocate the complete unified
+            // engine file merely to preserve its settings section.
+            const bool saved = (systemPatch || controllerPatch || sequencePatch || hardwarePagePatch)
+                ? HardwareConfig::saveUnified(systemPatch || sequencePatch)
+                : HardwareConfig::save();
+            if (!saved) {
                 HardwareConfig::load();
                 ConfigApplyGate::release();
                 req->send(500, "application/json", "{\"error\":\"failed to write hardware config\"}");
                 return;
             }
-            FlightRecorder::logConfigChange("hardware.patch", 0, 0);
-            ConfigApplyGate::markReadyForCore();
-            req->send(200, "application/json", "{\"ok\":true,\"applying\":true}");
+            FlightRecorder::logConfigChange(systemPatch ? "hardware.system" :
+                                            (controllerPatch ? "hardware.controllers" :
+                                             (sequencePatch ? "hardware.sequence" :
+                                              (hardwarePagePatch ? "hardware.page" : "hardware.patch"))), 0, 0);
+            if (systemPatch || controllerPatch || sequencePatch || hardwarePagePatch) {
+                // Boot applies the saved topology. Keep START locked through
+                // the acknowledgement delay instead of exposing a startable
+                // interval immediately before a scheduled reset.
+                req->send(200, "application/json", "{\"ok\":true,\"saved\":true,\"reboot\":true}");
+                _scheduleRestart(systemPatch ? "system settings save" :
+                                 (controllerPatch ? "controller hardware save" :
+                                  (sequencePatch ? "sequence save" : "hardware page save")));
+            } else {
+                ConfigApplyGate::markReadyForCore();
+                req->send(200, "application/json", "{\"ok\":true,\"applying\":true}");
+            }
         });
 
     // GET /api/ecu_config — download full unified config (hardware + settings)

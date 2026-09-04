@@ -2246,52 +2246,30 @@ scheduleTelemetryBoot();
 // buffer and produced harmless but user-visible 409 errors during navigation.
 const _emptySeqBanner = document.getElementById('empty-seq-banner');
 if (_emptySeqBanner) _emptySeqBanner.style.display = 'none';
-// Save a small settings edit using the light PATCH path on S3. Classic has
-// less contiguous RAM after realistic browsing, so merge the edit in the
-// browser and send one complete validated settings object; firmware then
-// performs a planned reboot. All pages use this helper to keep the behaviour
-// consistent without weakening validation.
+// Save only the settings owned and changed by the current page. In particular,
+// never turn an ordinary Classic ESP32 edit into a full engine-file restore:
+// that route needs substantially more contiguous RAM and belongs exclusively
+// to System > Backup & restore.
 window.OTSaveConfigPatch = async function(patch) {
-  const merge = (target, source) => {
-    for (const [key, value] of Object.entries(source || {})) {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        if (!target[key] || typeof target[key] !== 'object' || Array.isArray(target[key])) target[key] = {};
-        merge(target[key], value);
-      } else target[key] = value;
-    }
-  };
-  let classic = false;
-  try {
-    const info = await fetch('/api/device_info', {cache:'no-store'}).then(r => r.ok ? r.json() : null);
-    classic = info?.target === 'esp32dev';
-  } catch (_) {}
-  if (!classic) {
-    const response = await fetch('/api/config', {
-      method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(patch)
-    });
-    const data = await response.json().catch(() => ({}));
-    if (response.ok || ![500, 501, 503].includes(response.status)) return {response, data};
-    // Identity can be the one request lost while Classic releases a previous
-    // response. A failed lightweight save is therefore also a safe signal to
-    // use the complete-file path; S3 normally never enters this fallback.
-  }
-  const engineResponse = await fetch('/api/ecu_config', {cache:'no-store'});
-  if (!engineResponse.ok) return {response:engineResponse, data:{error:'Could not read the current engine file'}};
-  const engine = await engineResponse.json();
-  if (!engine?.settings) return {response:engineResponse, data:{ok:false,error:'Current engine file has no settings section'}};
-  merge(engine.settings, patch);
-  // Let the large stateless download finish leaving AsyncTCP before opening
-  // the upload transaction. Retry only explicit pre-commit transport/storage
-  // failures; a successful restore immediately schedules the reboot.
-  await new Promise(resolve => setTimeout(resolve, 700));
-  let response, data;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    response = await fetch('/api/ecu_config', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(engine)
-    });
-    data = await response.json().catch(() => ({}));
-    if (response.ok || ![500, 501, 503].includes(response.status)) break;
-    await new Promise(resolve => setTimeout(resolve, 1200 + attempt * 600));
-  }
+  const response = await fetch('/api/config', {
+    method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(patch)
+  });
+  const data = await response.json().catch(() => ({}));
   return {response, data};
+};
+
+// A page can own both Hardware and Settings fields. Never race the second
+// write against a scheduled reboot, or replay an uncertain write. Keep the
+// page dirty while waiting; only a read-only status request is retried here.
+window.OTWaitForSaveRestart = async function() {
+  await new Promise(resolve => setTimeout(resolve, 8000));
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      const response = await fetch('/api/status', {cache:'no-store', signal:AbortSignal.timeout(2000)});
+      const status = response.ok ? await response.json() : null;
+      if (status && !status.config_apply_busy && ['STANDBY','FAULT'].includes(status.mode)) return;
+    } catch (_) {}
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  throw new Error('Hardware was saved, but the ECU did not reconnect. Settings remain unsaved; reconnect and retry Save.');
 };

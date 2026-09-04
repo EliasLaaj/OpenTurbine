@@ -2268,12 +2268,16 @@ function updateSideAction(tab, idx, phase, actionIdx, newAct, newValue) {
   if (!row) return;
   let needsRender = false;
   if (newAct !== null && newAct !== undefined) {
+    const previousMeta = sideActionMeta(row);
     const previousDisplay = actionDisplayValue(row, row.value);
     const meta = getEnabledActuators().find(a => String(a.target || '') === String(newAct || ''));
     if (!meta) return;
     row.act = meta.actuator;
     row.target = meta.target;
-    row.value = actionStoredValue(row, previousDisplay);
+    // A Boolean ON and a proportional 1%/100% command are not interchangeable.
+    // Preserve only transitions with the same electrical semantics; otherwise
+    // reset to the de-energized value and require a deliberate new command.
+    row.value = previousMeta?.mode === meta.mode ? actionStoredValue(row, previousDisplay) : 0;
     needsRender = true;
   }
   if (newValue !== null && newValue !== undefined) {
@@ -2570,12 +2574,13 @@ function updateSetOutput(tab, idx, newTarget, newValue) {
   const row = hwCfg[key]?.[idx]?.[0];
   if (!row) return;
   if (newTarget !== null && newTarget !== undefined) {
+    const previousMeta = sideActionMeta(row);
     const previous = actionDisplayValue(row, row.value);
     const meta = getEnabledActuators().find(item => String(item.target) === String(newTarget));
     if (!meta) return;
     row.act = meta.actuator;
     row.target = meta.target;
-    row.value = actionStoredValue(row, previous);
+    row.value = previousMeta?.mode === meta.mode ? actionStoredValue(row, previous) : 0;
     renderFast(tab);
     return;
   }
@@ -3507,17 +3512,6 @@ async function saveAll() {
     return;
   }
   ['startup','shutdown','afterburner','ab-shut'].forEach(ensureActionSlots);
-  try {
-    // Merge only this page's changes onto the latest complete engine file.
-    const latestHw = await fetchJsonWithRetry('/api/hardware');
-    const latestCfg = await fetchJsonWithRetry('/api/config');
-    hwCfg = mergeSequenceEdits(loadedHwCfg, hwCfg, latestHw);
-    cfg = mergeSequenceEdits(loadedCfg, cfg, latestCfg);
-    delete hwCfg._i2c_discovery;
-  } catch (error) {
-    setSaveStatus('Warning: Could not refresh engine file: ' + error.message);
-    return;
-  }
   const customErrors = validateCustomBlockLimits();
   if (customErrors.length) {
     setSaveStatus('Warning: Custom block setup needs attention');
@@ -3541,16 +3535,49 @@ async function saveAll() {
   setSaveStatus('Saving engine file...');
   try {
     if (typeof stopSequenceTelemetry === 'function') stopSequenceTelemetry();
-    await new Promise(resolve => setTimeout(resolve, 250));
-    const response = await fetch('/api/ecu_config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({hardware:hwCfg, settings:cfg})});
-    const result = await response.json();
-    if (!response.ok || !result.ok) {
-      setSaveStatus('Warning: Save failed: ' + (result.error || response.status));
-      return;
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const settingsPatch = mergeSequenceEdits(loadedCfg, cfg, {});
+    const hardwareKeys = [
+      'startup_seq','shutdown_seq','ab_seq','ab_shut_seq',
+      'startup_delay_ms','shutdown_delay_ms','ab_delay_ms','ab_shut_delay_ms',
+      'startup_ignition_target','shutdown_ignition_target','ab_ignition_target','ab_shut_ignition_target',
+      'startup_device_target','shutdown_device_target','ab_device_target','ab_shut_device_target',
+      'startup_enter_actions','startup_exit_actions','shutdown_enter_actions','shutdown_exit_actions',
+      'ab_enter_actions','ab_exit_actions','ab_shut_enter_actions','ab_shut_exit_actions',
+      'custom_blocks','ab_trigger'
+    ];
+    const hardwarePatch = {};
+    hardwareKeys.forEach(key => {
+      if (JSON.stringify(loadedHwCfg[key]) !== JSON.stringify(hwCfg[key]) && hwCfg[key] !== undefined)
+        hardwarePatch[key] = cloneSequenceJson(hwCfg[key]);
+    });
+    const hardwareReboot = Object.keys(hardwarePatch).length > 0;
+    if (hardwareReboot) {
+      const response = await fetch('/api/hardware?source=sequence', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(hardwarePatch)});
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false)
+        throw new Error(result.error || result.detail || `Hardware HTTP ${response.status}`);
     }
+    let settingsReboot = false;
+    if (Object.keys(settingsPatch).length) {
+      if (hardwareReboot) {
+        setSaveStatus('Sequence hardware saved — reconnecting to save page settings…');
+        await window.OTWaitForSaveRestart();
+      }
+      const settingsResponse = await fetch('/api/config', {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(settingsPatch)});
+      const settingsResult = await settingsResponse.json().catch(() => ({}));
+      if (!settingsResponse.ok || settingsResult.ok === false)
+        throw new Error(settingsResult.error || settingsResult.reason || `Settings HTTP ${settingsResponse.status}`);
+      settingsReboot = settingsResult.reboot === true;
+    }
+    const rebooting = hardwareReboot || settingsReboot;
     if (window.OTSetup) OTSetup.mark('sequence');
-    clearSequenceDirty('Saved — rebooting…');
-    if (result.reboot) startRebootCountdown();
+    clearSequenceDirty(rebooting ? 'Saved — rebooting…' : 'Saved');
+    if (rebooting) startRebootCountdown();
+    else {
+      loadedCfg = cloneSequenceJson(cfg);
+      startSequenceTelemetryForPlatform();
+    }
   } catch (error) {
     setSaveStatus('Warning: ' + error.message);
   }
@@ -3605,6 +3632,25 @@ function clearSequenceDirty(message) {
   setSaveStatus(message || 'No unsaved changes');
   updateSequenceSaveControls();
 }
+
+window.addEventListener('beforeunload', event => {
+  if (!_seqDirty) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+document.addEventListener('click', async event => {
+  const link = event.target.closest?.('a[href]');
+  if (!link || !_seqDirty || event.defaultPrevented || event.button !== 0 ||
+      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || link.target === '_blank') return;
+  const url = new URL(link.href, location.href);
+  if (url.origin !== location.origin || (url.pathname === location.pathname && url.search === location.search)) return;
+  event.preventDefault();
+  if (await OTDialog.confirm('Sequence has unsaved changes. Leave and discard them?',
+      {title:'Unsaved sequence changes', confirmText:'Discard and leave', danger:true})) {
+    clearSequenceDirty();
+    location.href = url.href;
+  }
+}, true);
 
 async function discardSequenceChanges() {
   if (!_seqDirty) return;

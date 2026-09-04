@@ -196,8 +196,13 @@ function installedBrowser() {
   for (const bit of ['p1', 'p2', 'torque', 'starter'])
     assert.equal(await page.locator(`[data-bit="${bit}"]`).count(), 1, `${bit.toUpperCase()} logging is missing from Log > Session Data`);
 
-  await navigate(`${base}/tools.html`, { waitUntil: 'domcontentloaded' });
+  await navigate(`${base}/system.html`, { waitUntil: 'domcontentloaded' });
   try {
+    await page.waitForSelector('#btn-factory-reset', {state:'attached', timeout:10000});
+    await page.locator('#btn-factory-reset').evaluate(button => {
+      for (let parent=button.parentElement; parent; parent=parent.parentElement)
+        if (parent.tagName === 'DETAILS') parent.open = true;
+    });
     await page.waitForSelector('#btn-factory-reset:not([disabled])', { timeout: 10000 });
   } catch (error) {
     const state = await page.evaluate(() => ({
@@ -206,7 +211,7 @@ function installedBrowser() {
       factoryDisabled: document.getElementById('btn-factory-reset')?.disabled,
       staleBanner: document.getElementById('telemetry-stale-banner')?.textContent || '',
     }));
-    throw new Error(`${error.message}\nTools live state=${JSON.stringify(state)}`);
+    throw new Error(`${error.message}\nSystem live state=${JSON.stringify(state)}`);
   }
   await page.locator('#btn-factory-reset').click();
   await page.locator('#ot-dialog-confirm').click();

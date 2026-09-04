@@ -1688,8 +1688,8 @@ bool Config::saveStagedJsonCandidate(size_t settingsLen,
 // the Wi-Fi driver's remaining heap while the settings candidate is resident.
 // Locate and validate the complete object first, then copy its exact bytes so
 // a malformed source can fall back without leaving a partial destination.
-static bool copyUnifiedObject(File& source, File& destination, const char* section) {
-    if (!source || !destination || !section || !section[0]) return false;
+static bool copyUnifiedObject(File& source, Print& destination, const char* section) {
+    if (!source || !section || !section[0]) return false;
     int depth = 0;
     bool inString = false;
     bool escaped = false;
@@ -1773,6 +1773,11 @@ static bool copyUnifiedObject(File& source, File& destination, const char* secti
         remaining -= got;
     }
     return true;
+}
+
+bool Config::copyStoredSettings(Print& destination) {
+    File source = LittleFS.open(PATH, "r");
+    return source && copyUnifiedObject(source, destination, SECTION);
 }
 
 bool Config::_saveSettingsJson(const char* settingsJson, size_t settingsLen,

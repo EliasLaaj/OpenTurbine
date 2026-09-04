@@ -2816,7 +2816,7 @@ bool HardwareConfig::save() {
 // Called before load() to seed all values from hardware_profile.h.
 // Static member initialisers already handle this at program start;
 // this function is used when resetting to defaults at runtime.
-bool HardwareConfig::saveUnified() {
+bool HardwareConfig::saveUnified(bool preserveStoredSettings) {
     static constexpr const char* TMP_PATH = "/ecu_config.unified.tmp";
     static constexpr const char* BAK_PATH = "/ecu_config.bak";
     if (!Config::acquireStorageWrite()) {
@@ -2836,15 +2836,21 @@ bool HardwareConfig::saveUnified() {
     JsonDocument section;
     _toDoc(section.to<JsonObject>());
     const size_t hardwareExpected = measureJson(section);
+    ok &= !section.overflowed();
     ok &= serializeJson(section, fw) == hardwareExpected;
     section.clear();
     section.shrinkToFit();
     delay(0);
 
     ok &= fw.print(",\"settings\":") == strlen(",\"settings\":");
-    Config::toJson(section);
-    const size_t settingsExpected = measureJson(section);
-    ok &= serializeJson(section, fw) == settingsExpected;
+    if (preserveStoredSettings) {
+        ok &= Config::copyStoredSettings(fw);
+    } else {
+        Config::toJson(section);
+        const size_t settingsExpected = measureJson(section);
+        ok &= !section.overflowed();
+        ok &= serializeJson(section, fw) == settingsExpected;
+    }
     ok &= fw.print('}') == 1;
     fw.close();
     section.clear();
@@ -3492,8 +3498,11 @@ bool HardwareConfig::validateJson(const JsonDocument& doc, ChannelRegistry* regi
             ownedRegistry.reset(new (std::nothrow) ChannelRegistry());
             registry = ownedRegistry.get();
         }
-        if (!registry || !registry->fromJson(doc["channel_registry"].as<JsonObjectConst>()))
-            return reject("channel registry contents");
+        if (!registry || !registry->fromJson(doc["channel_registry"].as<JsonObjectConst>())) {
+            const char* registryError = ChannelRegistry::validationError();
+            return reject(registryError && registryError[0]
+                ? registryError : "channel registry contents");
+        }
         char profileReason[128] = {};
         if (!PcbProfileResolver::resolve(*registry, profileReason, sizeof(profileReason))) {
             return reject(profileReason[0] ? profileReason : "PCB profile assignment");

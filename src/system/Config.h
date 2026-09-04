@@ -549,6 +549,8 @@ public:
     static bool persistJsonCandidateReleasing(JsonDocument& doc, char*& outJson,
                                               size_t& outLen, char* scratch = nullptr,
                                               size_t scratchLen = 0);
+    // Caller holds the storage-write lock. Preserve Settings without a JSON tree.
+    static bool copyStoredSettings(Print& destination);
     static bool applyJsonRuntimeOnly(const JsonDocument& doc, bool allowActiveLive = false,
                                      bool validateHardwareDependencies = true); // no flash write
     // Apply only the narrow Developer-Mode controller tuning surface. The web

@@ -251,6 +251,9 @@ function updateRegistryProfilePort(direction,index,value) {
   c.physical_port = portId;
   c.physical_mode = modeId;
   c.driver = PCB_ADAPTER_DRIVER[mode.adapter];
+  c.active_high = mode.active_high !== false;
+  c.pullup = mode.pull === 'up';
+  c.pulldown = mode.pull === 'down';
   if (mode.reference_mv) c.i2c_reference_mv = Number(mode.reference_mv);
   if (mode.adapter === 'i2c_adc_digital_input') {
     c.digital_threshold_raw ??= 2048;
@@ -1035,26 +1038,28 @@ function renderCommsIndicatorSummary() {
     profileAllows('cluster_serial') ? card('cluster_serial', 'OT Cluster serial',
       cluster.enabled ? `${pcbProfileActive() ? 'Fixed PCB serial connection' : `TX GPIO ${cluster.tx_pin ?? 'not set'}${(cluster.rx_pin ?? -1) >= 0 ? ` / RX GPIO ${cluster.rx_pin}` : ' / TX only'}`} / ${cluster.baud || 115200} baud` : 'External cluster telemetry link',
       clusterStatus,
-      !!cluster.enabled,
+      pcbProfileActive() ? true : (!!cluster.enabled || (cluster.tx_pin ?? -1) >= 0),
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
+         <div class="hw-field"><span class="hw-label">Cluster serial</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('cluster_serial','enabled')}" type="checkbox" ${cluster.enabled?'checked':''} onchange="setProfileSerialEnabled('cluster_serial',this.checked)"><span></span> Enable</label></div>
          ${pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical connection</span><span class="hw-desc">TX/RX wiring is fixed by the flashed PCB profile.${sharedProfileSerial?' The connector is shared with MAVLink.':''}</span></div>` : `<div class="hw-field"><span class="hw-label">Cluster TX GPIO</span><select class="${workflowDeviceFieldClass('cluster_serial','tx_pin')}" onchange="setNested('cluster_serial','tx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(cluster.tx_pin, 'out')}</select></div>
          <div class="hw-field"><span class="hw-label">Cluster RX GPIO</span><span class="hw-desc">Optional. Leave unassigned for TX-only streaming.</span><select class="${workflowDeviceFieldClass('cluster_serial','rx_pin')}" onchange="setNested('cluster_serial','rx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(cluster.rx_pin, 'in')}</select></div>`}
-         <div class="hw-field"><a href="/system.html#system-device-setup">Enable the link and set its rate on System &rarr;</a></div>
+         <div class="hw-field"><a href="/system.html#system-device-setup">Set stream rate on System &rarr;</a></div>
       </div></div>`) : '',
     profileAllows('mavlink') ? card('mavlink', 'MAVLink telemetry',
       mav.enabled ? `${pcbProfileActive() ? 'Fixed PCB serial connection' : `TX GPIO ${mav.tx_pin ?? 'not set'}`} / ${mav.baud || 57600} baud / ${mav.interval_ms || 200} ms` : 'MAVLink telemetry output',
       mavStatus,
-      !!mav.enabled,
+      pcbProfileActive() ? true : (!!mav.enabled || (mav.tx_pin ?? -1) >= 0),
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
+         <div class="hw-field"><span class="hw-label">MAVLink</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('mavlink','enabled')}" type="checkbox" ${mav.enabled?'checked':''} onchange="setProfileSerialEnabled('mavlink',this.checked)"><span></span> Enable</label></div>
          ${pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical connection</span><span class="hw-desc">TX wiring is fixed by the flashed PCB profile.${sharedProfileSerial?' The connector is shared with OT Cluster.':''}</span></div>` : `<div class="hw-field"><span class="hw-label">MAVLink TX GPIO</span><select class="${workflowDeviceFieldClass('mavlink','tx_pin')}" onchange="setNested('mavlink','tx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(mav.tx_pin, 'out')}</select></div>`}
-         <div class="hw-field"><a href="/system.html#system-device-setup">Enable the link and set its rate on System &rarr;</a></div>
+         <div class="hw-field"><a href="/system.html#system-device-setup">Set stream rate on System &rarr;</a></div>
       </div></div>`) : '',
     profileAllows('status_led') ? card('status_led', 'Status LED',
-      ledEnabled && (led.pin ?? -1) >= 0 ? `${ledType === 1 ? 'NeoPixel RGB' : 'GPIO LED'}${pcbProfileActive() ? ' / fixed PCB indicator' : ` / GPIO ${led.pin}`}` : 'Local status indicator LED',
+      ledEnabled && (led.pin ?? -1) >= 0 ? `${ledType === 1 ? 'NeoPixel RGB' : 'GPIO LED'}${pcbProfileActive() ? ' / built-in PCB indicator' : ` / GPIO ${led.pin}`}` : 'Local status indicator LED',
       ledStatus,
       pcbProfileActive() || cfg.platform !== 'esp32s3' ? true : ledEnabled,
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
-         ${pcbProfileActive() ? '<div class="hw-field"><span class="hw-label">Installed indicator</span><span class="hw-desc">LED type, GPIO, polarity, and safe-off state are fixed by the flashed PCB profile.</span></div>' : `<div class="hw-field"><span class="hw-label">Status LED</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('status_led','enabled')}" type="checkbox" ${ledEnabled?'checked':''} onchange="setStatusLedEnabled(this.checked);renderHardwareWorkflowSummaries()"><span></span> Enable</label></div>
+         ${pcbProfileActive() ? '<div class="hw-field"><span class="hw-label">Built-in indicator</span><span class="hw-desc">This card describes only the LED physically wired on the PCB. It does not reserve or restrict the labelled output connectors. Add a Warning / indicator light under Outputs to use any other compatible free output.</span></div>' : `<div class="hw-field"><span class="hw-label">Status LED</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('status_led','enabled')}" type="checkbox" ${ledEnabled?'checked':''} onchange="setStatusLedEnabled(this.checked);renderHardwareWorkflowSummaries()"><span></span> Enable</label></div>
          <div class="hw-field"><span class="hw-label">LED type</span><select class="${workflowDeviceFieldClass('status_led','type')}" onchange="setStatusLedType(+this.value);renderHardwareWorkflowSummaries()"><option value="0"${ledType===0?' selected':''}>Plain GPIO on/off</option><option value="1"${ledType===1?' selected':''}>NeoPixel RGB data LED</option></select></div>
          <div class="hw-field"><span class="hw-label">Status LED GPIO</span><select class="${workflowDeviceFieldClass('status_led','pin')}" onchange="setAct('status_led','pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(led.pin, 'status-led')}</select></div>`}
          ${ledType === 1 ? `<div class="hw-field"><span class="hw-label">NeoPixel mode</span><select class="${workflowDeviceFieldClass('status_led','mode')}" onchange="setStatusLedMode(+this.value);renderHardwareWorkflowSummaries()"><option value="0"${ledMode===0?' selected':''}>Blink pattern</option><option value="1"${ledMode===1?' selected':''}>State colors</option></select></div>` : ''}

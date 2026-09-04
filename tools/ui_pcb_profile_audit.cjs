@@ -73,7 +73,7 @@ function installedBrowser() {
         {id:'servo_pulse_2',label:'Servo / pulse input 2',connector:'J8',modes:[
           {id:'servo',adapter:'rc_pwm_input'},{id:'frequency',adapter:'pcnt_input'},{id:'digital',adapter:'digital_input'}]},
         {id:'speed_1',label:'High-speed pulse input 1',connector:'J10',modes:[{id:'speed',adapter:'pcnt_input'}]},
-        {id:'switch_1',label:'Switch input 1',connector:'J6',modes:[{id:'digital',adapter:'digital_input'}]},
+        {id:'switch_1',label:'Switch input 1',connector:'J6',modes:[{id:'digital',adapter:'digital_input',gpio:26,active_high:false,pull:'up'}]},
         {id:'servo_out_1',label:'Servo output 1',connector:'J11',modes:[{id:'servo',adapter:'servo_output'}]},
         {id:'power_out_4',label:'High-current output 4',connector:'J12',modes:[{id:'pwm',adapter:'pwm_output'},{id:'onoff',adapter:'relay_output'}]}
       ]
@@ -131,6 +131,7 @@ function installedBrowser() {
     await page.locator('#btn-edit-comms').click();
     assert.match(await page.locator('#builtin-inputs').textContent(), /Switch wiring comes from this PCB profile/);
     assert.equal(await page.locator('#f-stop-pin').isVisible(), false);
+    assert.match(await page.locator('#hardware-comms-summary').textContent(), /built-in PCB indicator/i);
 
     await page.getByRole('button',{name:'+ Add input'}).click();
     await page.getByRole('button',{name:/TOT \/ EGT/}).click();
@@ -162,12 +163,25 @@ function installedBrowser() {
     await page.getByRole('button',{name:'+ Add input'}).click();
     await page.getByRole('button',{name:/^Stop switch /}).click();
     await page.getByRole('button',{name:/Switch input 1/}).click();
+    const stopCard = page.locator('#registry-inputs .registry-card').nth(4);
+    assert.equal(await stopCard.getByText('Input bias',{exact:true}).count(), 1,
+      'profile-backed GPIO switches must expose internal pull controls');
+    const stopPullup = stopCard.getByRole('checkbox',{name:'Pull-up'});
+    assert.equal(await stopPullup.isChecked(), true);
+    await stopPullup.uncheck();
+    assert.equal(await stopCard.getByRole('checkbox',{name:'Pull-down'}).isChecked(), false,
+      'users may also leave an externally biased switch with both internal pulls disabled');
 
     await page.getByRole('button',{name:'+ Add input'}).click();
     await page.getByRole('button',{name:/^Start switch /}).click();
     assert.equal(await page.getByRole('button',{name:/ADC 1/}).count(), 1,
       'an ADC connector configured for thresholded digital use must be offered for a switch');
     await page.getByRole('button',{name:/ADC 1/}).click();
+
+    await page.getByRole('button',{name:'+ Add output'}).click();
+    await page.getByRole('button',{name:/Warning \/ indicator light/}).click();
+    assert.equal(await page.getByRole('button',{name:/High-current output 4/}).count(), 2,
+      'a PCB profile must offer every compatible mode on an unassigned output connector');
 
     const saved = await (await page.request.get(`${base}/api/hardware`)).json();
     const assigned = [...saved.channel_registry.inputs,...saved.channel_registry.outputs];
@@ -185,6 +199,17 @@ function installedBrowser() {
     assert.match(await adcSwitchCard.textContent(), /Defaults to 50%/);
     assert.equal(live.outputs[0].physical_port, 'servo_out_1');
     assert.equal(assigned.length, 1);
+
+    await page.evaluate(() => closeRegistryAddDialog());
+    const removal = await page.evaluate(() => {
+      const before = registryRoot().outputs.length;
+      removeRegistryChannel('output', 0);
+      const opened = document.getElementById('registry-remove-modal').style.display === 'flex';
+      confirmRegistryRemoveChannel();
+      return {before, opened, after:registryRoot().outputs.length};
+    });
+    assert.deepEqual(removal, {before:1, opened:true, after:0},
+      'confirming removal must delete a normal PCB-backed output after dependency cleanup');
 
     console.log('PCB profile UI audit passed: named capability-filtered ports replace raw topology and exclusive multipurpose ports stay reserved.');
   } finally {

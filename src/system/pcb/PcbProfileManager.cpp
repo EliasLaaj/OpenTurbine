@@ -714,9 +714,10 @@ bool PcbProfileManager::gpioReserved(int gpio) {
         (_catalog->hasServoOutputEnable && _catalog->servoOutputEnableGpio == gpio) ||
         (_catalog->hasSupplyVoltage && _catalog->supplyVoltageGpio == gpio))
         return true;
-    for (uint8_t i = 0; i < _catalog->portCount; ++i)
-        for (uint8_t j = 0; j < _catalog->ports[i].modeCount; ++j)
-            if (_catalog->ports[i].modes[j].gpio == gpio) return true;
+    // Labelled connector GPIOs are resources, not permanently-owned fixed
+    // functions. They are reserved by the resolved channel that actually
+    // claims the connector. Keeping every possible port mode in this list made
+    // an otherwise unused header pin unavailable for a user-added I2C/SPI bus.
     return false;
 }
 
@@ -788,6 +789,9 @@ void PcbProfileManager::toJson(JsonObject out, bool includePorts,
             const Mode& mode = port.modes[j];
             JsonObject m = modes.add<JsonObject>();
             m["id"] = mode.id; m["adapter"] = mode.adapter;
+            if (mode.gpio >= 0) m["gpio"] = mode.gpio;
+            m["active_high"] = mode.activeHigh;
+            m["pull"] = mode.pull == 1 ? "up" : mode.pull == 2 ? "down" : "none";
             if (mode.deviceId[0]) {
                 m["device"] = mode.deviceId;
                 const Device* device = findDevice(mode.deviceId);

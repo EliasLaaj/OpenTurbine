@@ -968,8 +968,7 @@ function registryStarterEnableSubcard(c) {
 function registryMinimumRunEditor(c, index) {
   const purpose = registryDerivedPurpose('output',c);
   if (purpose === 'main_fuel') return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0"><div class="registry-card-summary"><div><strong>Minimum reliable fuel-pump command</strong><div class="hw-desc">Calibrated on the <a href="/calibration.html">Calibration page</a>. It is applied inside the electrical endpoints above and does not rewrite them.</div></div></div></div>`;
-  if (purpose === 'oil_pump') return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0"><div class="registry-card-summary"><div><strong>Oil-pump minimum</strong><div class="hw-desc">The closed-loop controller minimum is configured separately in Config. It is a controller floor; the electrical endpoints above remain hardware limits.</div></div></div></div>`;
-  if (!['fuel_pump','coolant_pump','scavenge_pump','cooling_fan'].includes(purpose) || outputDriverIsOnOff(c.driver)) return '';
+  if (!['oil_pump','fuel_pump','coolant_pump','scavenge_pump','cooling_fan'].includes(purpose) || outputDriverIsOnOff(c.driver)) return '';
   const pct = Math.max(0,Math.min(100,Number(c.min_run_demand||0)*100));
   const electricalDemand = c.invert ? 1 - pct/100 : pct/100;
   let physical = '';
@@ -981,7 +980,7 @@ function registryMinimumRunEditor(c, index) {
     physical = `${Math.round(lo + electricalDemand*(hi-lo))} us pulse${c.invert ? ' (inverted)' : ''}`;
   }
   return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0">
-    <div class="registry-card-summary"><div><strong>Minimum reliable running command</strong><div class="hw-desc">A nonzero command below this value is raised to this value. The output remains fully off at 0%.</div></div></div>
+    <div class="registry-card-summary"><div><strong>Minimum reliable running command</strong><div class="hw-desc">A nonzero command below this hardware value is raised to it. The output remains fully off at 0%. An automatic oil-pressure controller may apply its own higher minimum in Config.</div></div></div>
     <div class="registry-card-editor" style="display:block"><div class="hw-grid">
       <div class="hw-field"><span class="hw-label">Minimum reliable command (%)</span><input type="number" min="0" max="100" step="0.1" value="${registryFormatValue(pct,1)}" onchange="updateRegistryChannel('output',${index},'min_run_demand',Math.max(0,Math.min(1,(+this.value||0)/100)))"></div>
       <div class="hw-field"><span class="hw-label">Calculated electrical signal</span><span class="hw-desc">Derived from the electrical endpoints; rerun or review this calibration after changing them.</span><output>${escapeHtmlText(physical || 'On / off')}</output></div>
@@ -1192,6 +1191,13 @@ function registryProfileInputTuningEditor(direction, c, index) {
   const isSwitch = registryIsSwitchRole(c.role) || ['start_switch','stop_switch'].includes(purpose);
   if (!isSwitch) return '';
   const polarity = `<div class="hw-field"><span class="hw-label">Active state</span><span class="hw-desc">Choose which electrical state means the switch or interlock is On.</span><select onchange="updateRegistryChannel('input',${index},'active_high',this.value==='1')"><option value="1"${c.active_high !== false ? ' selected' : ''}>High / above threshold is On</option><option value="0"${c.active_high === false ? ' selected' : ''}>Low / below threshold is On</option></select></div>`;
+  if (Number(c.driver) === 0 || Number(c.driver) === 2) {
+    const pullConflict = c.pullup && c.pulldown ? ' field-error' : '';
+    return `${polarity}<div class="hw-field"><span class="hw-label">Input bias</span><span class="hw-desc">Choose an internal pull-up, pull-down, or leave both off when the connected signal provides its own bias.</span><div class="hw-toggle-row">
+      <label class="hw-toggle"><input class="${pullConflict}" type="checkbox" ${c.pullup ? 'checked' : ''} onchange="updateRegistryChannel('input',${index},'pullup',this.checked)"><span></span> Pull-up</label>
+      <label class="hw-toggle"><input class="${pullConflict}" type="checkbox" ${c.pulldown ? 'checked' : ''} onchange="updateRegistryChannel('input',${index},'pulldown',this.checked)"><span></span> Pull-down</label>
+    </div></div>`;
+  }
   if (Number(c.driver) !== 9) return polarity;
   const referenceMv = Number(c.i2c_reference_mv ?? 5000);
   const thresholdV = Number(c.digital_threshold_raw ?? 2048) * referenceMv / 4095 / 1000;

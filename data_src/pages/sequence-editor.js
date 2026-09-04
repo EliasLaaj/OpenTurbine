@@ -176,12 +176,16 @@ function updateSideAction(tab, idx, phase, actionIdx, newAct, newValue) {
   if (!row) return;
   let needsRender = false;
   if (newAct !== null && newAct !== undefined) {
+    const previousMeta = sideActionMeta(row);
     const previousDisplay = actionDisplayValue(row, row.value);
     const meta = getEnabledActuators().find(a => String(a.target || '') === String(newAct || ''));
     if (!meta) return;
     row.act = meta.actuator;
     row.target = meta.target;
-    row.value = actionStoredValue(row, previousDisplay);
+    // A Boolean ON and a proportional 1%/100% command are not interchangeable.
+    // Preserve only transitions with the same electrical semantics; otherwise
+    // reset to the de-energized value and require a deliberate new command.
+    row.value = previousMeta?.mode === meta.mode ? actionStoredValue(row, previousDisplay) : 0;
     needsRender = true;
   }
   if (newValue !== null && newValue !== undefined) {
@@ -478,12 +482,13 @@ function updateSetOutput(tab, idx, newTarget, newValue) {
   const row = hwCfg[key]?.[idx]?.[0];
   if (!row) return;
   if (newTarget !== null && newTarget !== undefined) {
+    const previousMeta = sideActionMeta(row);
     const previous = actionDisplayValue(row, row.value);
     const meta = getEnabledActuators().find(item => String(item.target) === String(newTarget));
     if (!meta) return;
     row.act = meta.actuator;
     row.target = meta.target;
-    row.value = actionStoredValue(row, previous);
+    row.value = previousMeta?.mode === meta.mode ? actionStoredValue(row, previous) : 0;
     renderFast(tab);
     return;
   }

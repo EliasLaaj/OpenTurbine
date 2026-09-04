@@ -78,7 +78,7 @@ public:
         _ownedTargetCount = 0;
     }
 
-    // Called once per control tick (Core 1, ~10 ms cycle).
+    // Called once per configured control-loop tick on Core 1.
     static void evaluate() {
         auto& ed = EngineData::instance();
         const SysMode modeAtStart = ed.mode;

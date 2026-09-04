@@ -114,8 +114,11 @@ function collectPinUsage() {
   const profileActive = pcbProfileActive();
   if (profileActive) {
     const profileName = pcbProfile.name || pcbProfile.id || 'PCB profile';
+    // reserved_gpio contains only fixed functions and immutable profile buses.
+    // Assigned labelled connectors are added through their resolved registry
+    // channels, leaving unused exposed connector GPIOs available to a new bus.
     (pcbProfile.reserved_gpio || []).forEach(pin =>
-      add(pin, `${profileName} reserved GPIO`, 'pcb-reserved'));
+      add(pin, `${profileName} fixed GPIO`, 'pcb-reserved'));
   }
   // START/STOP registry channels mirror the legacy controls fields. Count
   // either representation, not both, or a valid PCB assignment is reported
@@ -156,11 +159,19 @@ function collectPinUsage() {
   }
   (cfg.di_channels || []).forEach((ch, i) => add(ch.pin, ch.label || `DI channel ${i + 1}`));
   const r = registryRoot();
+  const addProfilePortPin = (ch, direction) => {
+    if (!profileActive || !ch.physical_port || !ch.physical_mode) return false;
+    const port = (pcbProfile.ports || []).find(row => row.id === ch.physical_port);
+    const mode = port?.modes?.find(row => row.id === ch.physical_mode);
+    if (Number(mode?.gpio ?? -1) >= 0)
+      add(mode.gpio, registryDisplayName(direction, ch, ch.id || `PCB ${direction}`));
+    return true;
+  };
   (r.inputs || []).forEach(ch => {
     if (!ch || ch.installed === false) return;
-    if (profileActive && (ch.physical_port ||
-        (ch.purpose === 'battery_voltage' &&
-         pcbProfile?.fixed_functions?.supply_voltage?.available))) return;
+    if (addProfilePortPin(ch, 'input') ||
+        (profileActive && ch.purpose === 'battery_voltage' &&
+         pcbProfile?.fixed_functions?.supply_voltage?.available)) return;
     if (registryTorqueIsHx711(ch)) {
       const label = registryDisplayName('input', ch, ch.id || 'Torque');
       add(ch.pin, `${label} DOUT`);
@@ -177,7 +188,7 @@ function collectPinUsage() {
   });
   (r.outputs || []).forEach(ch => {
     if (!ch || ch.installed === false) return;
-    if (profileActive && ch.physical_port) return;
+    if (addProfilePortPin(ch, 'output')) return;
     const label = registryDisplayName('output', ch, ch.id || 'Registry output');
     add(ch.pin, label);
     const actuatorKey = registryCoreActuatorKey(ch);

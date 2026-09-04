@@ -447,11 +447,19 @@ public:
                 return false;
             }
         }
-        for (uint8_t i=0; i<inputCount; ++i) if (!validId(inputs[i].id) || !driverMatches(Input, inputs[i].driver) || !roleValid(Input, inputs[i].role) || !purposeValid(Input, inputs[i].purpose) || !semanticDriverValid(inputs[i]) || (!(inputs[i].physicalPortId[0] && inputs[i].physicalModeId[0]) && !temperatureInterfaceValid(inputs[i])) || !torqueInterfaceValid(inputs[i]) || !demandsValid(inputs[i])) return false;
+        for (uint8_t i=0; i<inputCount; ++i) if (!validId(inputs[i].id) || !driverMatches(Input, inputs[i].driver) || !roleValid(Input, inputs[i].role) || !purposeValid(Input, inputs[i].purpose) || !semanticDriverValid(inputs[i]) || (!(inputs[i].physicalPortId[0] && inputs[i].physicalModeId[0]) && !temperatureInterfaceValid(inputs[i])) || !torqueInterfaceValid(inputs[i]) || !demandsValid(inputs[i])) {
+            snprintf(_validationError, sizeof(_validationError),
+                     "Input %s has invalid role, signal type, or range", inputs[i].id);
+            return false;
+        }
         for (uint8_t i=0; i<outputCount; ++i) {
             if (!validId(outputs[i].id) || !driverMatches(Output, outputs[i].driver) ||
                 !roleValid(Output, outputs[i].role) || !purposeValid(Output, outputs[i].purpose) ||
-                !semanticDriverValid(outputs[i]) || !demandsValid(outputs[i])) return false;
+                !semanticDriverValid(outputs[i]) || !demandsValid(outputs[i])) {
+                snprintf(_validationError, sizeof(_validationError),
+                         "Output %s has invalid role, signal type, or range", outputs[i].id);
+                return false;
+            }
             if (outputs[i].hasFlowMonitor) {
                 const char* expected = (!strcmp(outputs[i].purpose, "oil_pump") ||
                                         !strcmp(outputs[i].role, "oil_pump"))
@@ -504,7 +512,12 @@ public:
                      "At most 2 NAU7802 load-cell inputs are supported");
             return false;
         }
-        for (uint8_t i=0; i<inputCount; ++i) for (uint8_t j=0; j<outputCount; ++j) if (inputs[i].pin >= 0 && inputs[i].pin == outputs[j].pin) return false;
+        for (uint8_t i=0; i<inputCount; ++i) for (uint8_t j=0; j<outputCount; ++j) if (inputs[i].pin >= 0 && inputs[i].pin == outputs[j].pin) {
+            snprintf(_validationError, sizeof(_validationError),
+                     "GPIO %d is assigned to both %s and %s",
+                     (int)inputs[i].pin, inputs[i].id, outputs[j].id);
+            return false;
+        }
         for (uint8_t i=0; i<inputCount; ++i) {
             if (inputs[i].driver < I2cDigital) continue;
             for (uint8_t j=i+1; j<inputCount; ++j)
@@ -524,7 +537,12 @@ public:
                     outputs[i].deviceChannel == outputs[j].deviceChannel) return false;
         }
         for (uint8_t i=0; i<bindingCount; ++i) {
-            if (!bindingValid(bindings[i])) return false;
+            if (!bindingValid(bindings[i])) {
+                snprintf(_validationError, sizeof(_validationError),
+                         "Binding %s refers to missing or incompatible channel %s",
+                         bindings[i].key, bindings[i].channelId);
+                return false;
+            }
             for (uint8_t j=i+1; j<bindingCount; ++j)
                 if (!strcmp(bindings[i].key, bindings[j].key)) {
                     snprintf(_validationError, sizeof(_validationError),

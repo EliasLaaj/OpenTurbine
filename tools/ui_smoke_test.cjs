@@ -52,8 +52,11 @@ function installedBrowser() {
   const page = await browser.newPage();
   page.on('pageerror', error => console.error(`Browser page error: ${error.message}`));
   page.on('dialog', async dialog => {
-    console.error(`Browser dialog: ${dialog.message()}`);
-    await dialog.dismiss();
+    if (dialog.type() === 'beforeunload') await dialog.accept();
+    else {
+      console.error(`Browser dialog: ${dialog.message()}`);
+      await dialog.dismiss();
+    }
   });
   const results = [];
   let saved;
@@ -659,7 +662,7 @@ function installedBrowser() {
     assert.equal(concurrentMerge.settings.oil_advanced.shutdown_on_underflow, false);
     assert.deepEqual(concurrentMerge.settings.rules,
       [{name:'kept',threshold:2},{name:'new'}]);
-    results.push('hardware save merges only page-owned edits and dependency cleanup onto the latest engine file');
+    results.push('hardware diff preserves concurrent unrelated edits before its page-owned save');
 
     await page.request.patch(`${base}/api/hardware`, { data: { platform: 'esp32s3' } });
     await page.evaluate(() => { _hwDirty = false; });
@@ -685,18 +688,21 @@ function installedBrowser() {
       controllers: { dynamic_idle: false },
       sensors: { n1_rpm: { enabled: false }, n2_rpm: { enabled: false } }
     } });
-    await page.goto(`${base}/tools.html`);
-    await page.waitForFunction(() => {
-      const devButton = document.querySelector('#btn-dev-mode');
-      const oilButton = document.querySelector('#btn-OIL_PRIME');
-      return devButton && !devButton.disabled && oilButton && !oilButton.disabled;
-    });
+    await page.goto(`${base}/system.html`);
+    await page.locator('#system-device-setup > details').filter({hasText:'Interface color palette and display theme'}).locator('summary').click();
+    await page.waitForSelector('#appearance-picker .ot-tile');
     assert.equal(await page.locator('#appearance-picker .ot-tile').count(), 6);
     await page.locator('#appearance-picker [data-theme-key="daylight"]').click();
     await page.waitForFunction(() => document.documentElement.dataset.theme === 'daylight');
     await page.waitForTimeout(100);
     assert.equal((await state(page)).settings.ui_theme, 'daylight');
     await page.locator('#appearance-picker [data-theme-key="carbon"]').click();
+    await page.goto(`${base}/tools.html`);
+    await page.waitForFunction(() => {
+      const devButton = document.querySelector('#btn-dev-mode');
+      const oilButton = document.querySelector('#btn-OIL_PRIME');
+      return devButton && !devButton.disabled && oilButton && !oilButton.disabled;
+    });
     assert.equal(await text(page, '#btn-dev-mode'), 'Enable Dev Mode');
     assert.equal(await page.locator('#card-TOGGLE_BENCH_MODE').isVisible(), false);
     assert.equal(await page.locator('#card-TOGGLE_SAFETY_CHECKS').isVisible(), false);
@@ -889,6 +895,10 @@ function installedBrowser() {
     assert.equal(await page.evaluate(() => hwCfg.ab_trigger.input_threshold), Math.round(72 * 4095 / 100));
     assert.equal(await page.evaluate(() => cfg.afterburner.min_n1), 50000);
     results.push('sequence editor preserves exact device IDs through reorder/removal, keeps independent delays, and edits AB gates in friendly units');
+    // This test intentionally leaves the AB edits unsaved; clear its synthetic
+    // dirty state before moving on after separately asserting dirty navigation.
+    assert.equal(await page.evaluate(() => _seqDirty), true);
+    await page.evaluate(() => clearSequenceDirty('Test navigation cleanup'));
     await page.goto(`${base}/hardware.html`);
     await page.waitForFunction(() => /Loaded|Converted/i.test(document.querySelector('#save-msg')?.textContent || ''));
     assert.equal(await page.evaluate(() => cfg.ab_trigger.input_rc_pwm), true);
@@ -1038,6 +1048,7 @@ function installedBrowser() {
       hardware: automationState.hardware
     }});
     assert.equal(response.ok(), true);
+    await page.evaluate(() => _clearDirty());
     await page.reload();
     await page.waitForSelector('#controller-overview details[data-built-in="fuel-support"]');
     assert.equal(await page.locator('#controller-overview details[open]').count(), 0);

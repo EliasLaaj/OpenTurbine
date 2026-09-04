@@ -75,11 +75,17 @@ window.applyData = function(d) {
   const locked = activeMode ? !liveRun : !!(d.config_locked ?? d.locked);
   if (locked !== isLocked && cfg.profile_id) {
     isLocked = locked;
-    renderForm();
-    _applyAllVisibility();
-    _clearDirty();
-    applyView();
-    hookValidation();
+    // The first telemetry frame can arrive after the user starts editing.
+    // A lock-status refresh must never discard those page-owned changes.
+    if (!_cfgDirty) {
+      renderForm();
+      _applyAllVisibility();
+      _clearDirty();
+      applyView();
+      hookValidation();
+    }
+    const saveButton = document.getElementById('btn-save');
+    if (saveButton) saveButton.disabled = locked || !_cfgDirty;
     runValidation();
   }
 
@@ -127,6 +133,13 @@ window.applyData = function(d) {
     }
   }
 
+  // Loop diagnostics and factory reset / restore button state
+  updateLoopDiagnostics(d);
+  const frBtn = document.getElementById('btn-factory-reset');
+  if (frBtn) frBtn.disabled = !['STANDBY', 'FAULT'].includes(runtimeMode);
+  const cfgRestoreBtn = document.getElementById('cfg-restore-btn');
+  if (cfgRestoreBtn) cfgRestoreBtn.disabled = !['STANDBY', 'FAULT'].includes(runtimeMode);
+
   // Dev Mode button label
 };
 window.applyData._configExtended = true;
@@ -143,8 +156,293 @@ fetch('/api/status', { cache:'no-store' })
   .then(response => response.ok ? response.json() : null)
   .then(status => { if (status) window.applyData(status); })
   .catch(() => {});
+if (CONFIG_SURFACE === 'system') {
+  setInterval(pollSystemTelemetry, 2000);
+  pollSystemTelemetry();
+}
 }
 document.addEventListener('DOMContentLoaded', installConfigTelemetryExtension, { once:true });
+
+function updateLoopDiagnostics(d) {
+  if (!d) return;
+  const hz = Number(d.loop_hz);
+  const period = Number(d.loop_period_ms);
+  const periodMax = Number(d.loop_period_max_ms);
+  const avg = Number(d.loop_exec_avg_ms);
+  const max = Number(d.loop_exec_max_ms);
+  const overruns = Number(d.loop_overrun_count);
+  const count = Number(d.loop_counter);
+  const fmtMs = v => Number.isFinite(v) ? v.toFixed(3) + ' ms' : '-';
+  const fmtInt = v => Number.isFinite(v) ? v.toLocaleString() : '-';
+  const set = (id, text) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  };
+  set('diag-loop-hz', Number.isFinite(hz) ? hz.toFixed(1) + ' Hz' : '-');
+  set('diag-loop-period', Number.isFinite(period) ? period.toFixed(2) + ' ms' : '-');
+  set('diag-loop-period-max', fmtMs(periodMax));
+  set('diag-loop-avg', fmtMs(avg));
+  set('diag-loop-max', fmtMs(max));
+  set('diag-loop-overruns', Number.isFinite(overruns) ? fmtInt(overruns) : '-');
+  set('diag-loop-count', Number.isFinite(count) ? fmtInt(count) : '-');
+  set('diag-loop-sensors', fmtMs(Number(d.loop_sensors_ms)));
+  set('diag-loop-sequencer', fmtMs(Number(d.loop_sequencer_ms)));
+  set('diag-loop-controllers', fmtMs(Number(d.loop_controllers_ms)));
+  set('diag-loop-actuators', fmtMs(Number(d.loop_actuators_ms)));
+  set('diag-loop-logging', fmtMs(Number(d.loop_logging_ms)));
+  set('diag-loop-led', fmtMs(Number(d.loop_led_ms)));
+  const stateEl = document.getElementById('loop-diag-state');
+  if (stateEl && Number.isFinite(hz) && hz > 0) {
+    stateEl.textContent = 'Live';
+    stateEl.style.color = 'var(--green)';
+    stateEl.style.borderColor = 'var(--green)';
+  }
+}
+window.updateLoopDiagnostics = updateLoopDiagnostics;
+
+async function factoryReset() {
+  if (typeof runtimeMode !== 'undefined' && runtimeMode !== 'STANDBY' && runtimeMode !== 'FAULT') {
+    alert('Factory reset is only permitted in STANDBY or FAULT.');
+    return;
+  }
+  if (!await OTDialog.confirm('⚠ Factory Reset\n\nThis will permanently ERASE:\n• Engine settings and sequences\n• Hardware assignments\n• All calibration\n• Wi-Fi password\n• Event and session logs\n\nDownload a complete engine file first if you may need this setup.', {
+    title: 'Factory reset this ECU?', confirmText: 'Continue', danger: true
+  })) return;
+  const typed = await OTDialog.prompt('Type RESET to erase this ECU and reboot with built-in defaults.', {
+    title: 'Final factory-reset confirmation', confirmText: 'Erase and reset', placeholder: 'RESET'
+  });
+  if (typed !== 'RESET') {
+    alert('Factory reset cancelled. Nothing was erased.');
+    return;
+  }
+  const msg = document.getElementById('factory-reset-msg');
+  const btn = document.getElementById('btn-factory-reset');
+  if (btn) btn.disabled = true;
+  fetch('/api/factory_reset', { method: 'POST' })
+    .then(async r => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || d.reason || ('HTTP ' + r.status));
+      return d;
+    })
+    .then(d => {
+      if (d.ok) {
+        if (msg) { msg.textContent = 'Reset sent — device rebooting…'; msg.style.color = 'var(--yellow)'; msg.style.display = ''; }
+        setTimeout(() => location.reload(), 8000);
+      } else {
+        if (msg) { msg.textContent = d.error || 'Reset failed'; msg.style.color = 'var(--red)'; msg.style.display = ''; }
+        if (btn) btn.disabled = false;
+      }
+    })
+    .catch(e => {
+      if (msg) { msg.textContent = 'Reset request failed: ' + e.message; msg.style.color = 'var(--red)'; msg.style.display = ''; }
+      if (btn) btn.disabled = false;
+    });
+}
+
+function compactEngineFileForRestore(text) {
+  const root = JSON.parse(text);
+  const registry = root?.hardware?.channel_registry;
+  const defaults = {
+    pulses_per_unit:1,
+    analog_zero_mv:0, analog_mv_per_unit:1000, analog_divider:1,
+    digital_threshold_raw:2048, digital_hysteresis_raw:64,
+    torque_interface:0, hx711_clk:-1, hx711_scale:1, hx711_zero:0,
+    temp_interface:0, spi_clk:-1, spi_cs:-1, spi_miso:-1, spi_mosi:-1,
+    tc_type:'K', temp_resolution:10, ntc_beta:3950, ntc_r0:10000,
+    ntc_r_fixed:10000, ntc_pullup:true,
+    safe_demand:0, force_safe_on_fault:false, min_run_demand:0,
+    pwm_freq_hz:5000, pwm_res_bits:10,
+    invert:false, pullup:false, pulldown:false,
+    has_current:false, current_pin:-1, current_mv_a:100,
+    current_zero_v:1.65, current_max_a:0,
+    has_flow_monitor:false, minimum_flow_l_min:0
+  };
+  for (const channel of [...(registry?.inputs || []), ...(registry?.outputs || [])]) {
+    if (!channel || typeof channel !== 'object') continue;
+    for (const [key, value] of Object.entries(defaults)) {
+      if (Object.is(channel[key], value)) delete channel[key];
+    }
+  }
+  return JSON.stringify(root);
+}
+
+async function backupConfig() {
+  const msg = document.getElementById('cfg-backup-msg');
+  const state = document.getElementById('cfg-backup-state');
+  const fetchEngineFile = async () => {
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const cfgRes = await fetch('/api/ecu_config', { cache:'no-store' });
+        if (!cfgRes.ok) throw new Error('HTTP ' + cfgRes.status);
+        return JSON.parse(await cfgRes.text());
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 700 * (attempt + 1)));
+      }
+    }
+    throw lastError || new Error('No response');
+  };
+  fetchEngineFile()
+    .then(async cfg => {
+      const dataRes = await fetch('/api/data');
+      const live = dataRes.ok ? await dataRes.json() : {};
+      return [cfg, live];
+    })
+    .then(([cfg, live]) => {
+      cfg._backup_meta = {
+        timestamp:    new Date().toISOString(),
+        fw_version:   live.fw_version || 'unknown',
+        profile:      (cfg.hardware || {}).profile_id || 'unknown',
+        uptime_s:     live.uptime_s  || 0
+      };
+      const blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
+      const ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const profile = String(cfg._backup_meta.profile || 'OpenTurbine')
+        .replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'OpenTurbine';
+      const profilePart = /^openturbine$/i.test(profile) ? '' : profile + '_';
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'OpenTurbine_' + profilePart + ts + '.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      if (state) {
+        state.textContent = 'Download started';
+        state.className   = 'tool-state done';
+      }
+      if (msg) {
+        msg.textContent = 'Download started. Confirm the complete engine file appears in Downloads before relying on it.';
+        msg.style.color = 'var(--green)';
+        msg.style.display = '';
+      }
+      setTimeout(() => {
+        if (state) {
+          state.textContent = 'Ready';
+          state.className   = 'tool-state off';
+        }
+        if (msg) msg.style.display = 'none';
+      }, 3000);
+    })
+    .catch(e => {
+      if (msg) {
+        msg.textContent = 'Backup failed: ' + e.message;
+        msg.style.color = 'var(--red)';
+        msg.style.display = '';
+      }
+    });
+}
+window.backupConfig = backupConfig;
+
+async function restoreConfig(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const msg = document.getElementById('cfg-backup-msg');
+  const btn = document.getElementById('cfg-restore-btn');
+  const state = document.getElementById('cfg-backup-state');
+  if (typeof runtimeMode !== 'undefined' && !['STANDBY', 'FAULT'].includes(runtimeMode)) {
+    alert('Engine must be in STANDBY (or FAULT) to restore an engine file.');
+    input.value = '';
+    return;
+  }
+  if (!await OTDialog.confirm('Restore complete engine file from "' + file.name + '"?\n\nThis replaces hardware assignments, settings, sequences, calibration, profile/Wi-Fi details, and runtime statistics, then reboots. Current event and session logs remain on this ECU.\n\nDownload the current engine file first if it may be needed.', {
+    title: 'Restore complete engine file?', confirmText: 'Restore and reboot', danger: true
+  })) {
+    input.value = '';
+    return;
+  }
+  if (btn) btn.disabled = true;
+  if (state) {
+    state.textContent = 'Restoring…';
+    state.className   = 'tool-state active';
+  }
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const postRestore = async () => {
+      const payload = compactEngineFileForRestore(ev.target.result);
+      try {
+        return await fetch('/api/ecu_config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload
+        });
+      } catch (error) {
+        if (state) state.textContent = 'Checking after ECU restart…';
+        let sawDisconnect = false;
+        for (let attempt = 0; attempt < 45; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          try {
+            const status = await fetch('/api/status', {cache:'no-store'});
+            if (status.ok && sawDisconnect) {
+              return new Response(JSON.stringify({ok:true,reboot:true,recovered:true}), {
+                status:200, headers:{'Content-Type':'application/json'}
+              });
+            }
+          } catch (_) {
+            sawDisconnect = true;
+          }
+        }
+        throw new Error(sawDisconnect
+          ? 'The ECU restarted but did not reconnect. Rejoin its Wi-Fi and verify the engine file before trying again.'
+          : 'The restore response was lost. The file was not sent again because repeating a restore may reboot the ECU twice. Reconnect and verify the current engine file.');
+      }
+    };
+    postRestore()
+    .then(async r => {
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.ok === false) throw new Error(d.error || d.reason || ('HTTP ' + r.status));
+      return d;
+    })
+    .then(d => {
+      if (d.ok) {
+        if (state) {
+          state.textContent = 'Done — rebooting…';
+          state.className   = 'tool-state done';
+        }
+        if (msg) {
+          msg.textContent = 'Config restored. Device is rebooting.';
+          msg.style.color = 'var(--green)';
+          msg.style.display = '';
+        }
+      } else {
+        throw new Error(d.error || 'Unknown error');
+      }
+    })
+    .catch(e => {
+      if (state) {
+        state.textContent = 'Error';
+        state.className   = 'tool-state fault';
+      }
+      if (msg) {
+        msg.textContent = 'Restore failed: ' + e.message;
+        msg.style.color = 'var(--red)';
+        msg.style.display = '';
+      }
+      if (btn) btn.disabled = false;
+    });
+    input.value = '';
+  };
+  reader.readAsText(file);
+}
+window.restoreConfig = restoreConfig;
+
+let _systemTelemetryInFlight = false;
+async function pollSystemTelemetry() {
+  if (CONFIG_SURFACE !== 'system' || _systemTelemetryInFlight || document.hidden) return;
+  _systemTelemetryInFlight = true;
+  try {
+    const r = await fetch('/api/data', { cache: 'no-store' });
+    if (r.ok) {
+      const d = await r.json();
+      window._lastSystemData = d;
+      if (window.applyData) window.applyData(d);
+      else updateLoopDiagnostics(d);
+    }
+  } catch (_) {}
+  finally {
+    _systemTelemetryInFlight = false;
+  }
+}
 
 function applyDeveloperLiveFields() {
   const liveRun = runtimeMode === 'RUNNING' && runtimeDevMode;

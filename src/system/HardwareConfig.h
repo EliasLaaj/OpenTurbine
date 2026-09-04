@@ -544,7 +544,7 @@ public:
     static bool save();                      // write current values → ecu_config.json hardware section
     // Atomically write current Hardware and Settings while holding only one
     // large JSON section in heap at a time.
-    static bool saveUnified();
+    static bool saveUnified(bool preserveStoredSettings = false);
     // Resolve a stable registry output ID to the runtime actuator adapter.
     // Core-owned and fully generic outputs use the same caller-facing model.
     static int8_t outputActuatorForId(const char* id);

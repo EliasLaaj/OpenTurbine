@@ -665,6 +665,8 @@ async function saveHardware() {
       <thead><tr><th>Setting</th><th>Was</th><th>Now</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+  const confirmButton = document.getElementById('save-recap-confirm-btn');
+  if (confirmButton) confirmButton.disabled = false;
   modal.style.display = 'flex';
 }
 
@@ -688,39 +690,21 @@ async function _doSave() {
   let timeout = null;
   let savePosted = false;
   try {
-    // Full engine-file validation briefly needs the largest contiguous heap
-    // block used by the web UI. Release Hardware live telemetry before the
-    // file GET/POST instead of making the ECU evict it mid-restore.
+    // Hardware owns this page. Release live telemetry, then send only the
+    // hardware document to its dedicated validator/save endpoint; firmware
+    // performs dependency cleanup and persists the unified file atomically.
     stopHardwareTelemetry();
     await new Promise(resolve => setTimeout(resolve, 250));
     const saveCfg = {...cfg};
     delete saveCfg._i2c_discovery;
-    // Save the complete engine file through the flash-backed restore path.
-    // Hardware may legitimately exceed the ECU's small RAM request buffer
-    // when sequences contain many side actions or sensors use calibration
-    // curves. Refresh settings here so a long-open Hardware tab cannot restore
-    // stale controller tuning from its load-time snapshot.
-    const latestResponse = await fetch('/api/ecu_config', {cache:'no-store'});
-    if (!latestResponse.ok) throw new Error('could not refresh the current engine file');
-    const latestEngine = await latestResponse.json();
-    if (!latestEngine.hardware || typeof latestEngine.hardware !== 'object')
-      throw new Error('current engine file has no hardware section');
-    if (!latestEngine.settings || typeof latestEngine.settings !== 'object')
-      throw new Error('current engine file has no settings section');
-    const mergedHardware = mergeHardwareEdits(_loadedHardwareCfg, saveCfg, latestEngine.hardware);
-    const mergedSettings = mergeHardwareSettingsCleanup(_loadedSettingsCfg, settingsCfg, latestEngine.settings);
-    mergedSettings.profile_id = mergedHardware.profile_id;
-    // This immutable identity is injected by GET /api/hardware and is required
-    // when validating files for an official/custom PCB, even if an older
-    // committed file predates persistence of the identity object.
-    if (saveCfg._pcb_profile) mergedHardware._pcb_profile = cloneHardwareJson(saveCfg._pcb_profile);
+    const hardwarePatch = mergeHardwareEdits(_loadedHardwareCfg, saveCfg, {});
     started = Date.now();
     timeout = setTimeout(() => controller.abort(), 8000);
     savePosted = true;
-    const r = await fetch('/api/ecu_config?source=hardware', {
-      method: 'POST',
+    const r = await fetch('/api/hardware?source=hardware', {
+      method: 'PATCH',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({hardware:mergedHardware, settings:mergedSettings}),
+      body: JSON.stringify(hardwarePatch),
       signal: controller.signal
     });
     clearTimeout(timeout);
@@ -759,10 +743,11 @@ async function _doSave() {
 }
 
 function friendlyHardwareSaveError(response) {
-  const detail = String(response?.detail || '').toLowerCase();
+  const rawDetail = String(response?.detail || '').trim();
+  const detail = rawDetail.toLowerCase();
   const map = [
     ['malformed json', 'The browser produced incomplete setup data. Reload Hardware, repeat the change, and try again.'],
-    ['channel registry', 'One of the installed device cards has an invalid or incomplete purpose, signal type, GPIO, or range. Open the red device card below and complete its setup.'],
+    ['channel registry', rawDetail || 'One of the installed device cards has an invalid or incomplete purpose, signal type, GPIO, or range.'],
     ['hardware dependencies', 'An enabled controller or safety needs hardware that is no longer fitted. Open Controllers, disable the unavailable item, or restore its required device.'],
     ['sequence references', 'A sequence or custom action still refers to a removed device. Open Sequence, fix the unavailable block or action, and save it before retrying Hardware.'],
     ['platform pins', 'A GPIO, electrical range, or sensor interface is not valid for this ESP32 board. Check the red device card and Requirements section.'],

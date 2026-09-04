@@ -493,8 +493,25 @@ async function saveConfig() {
     });
   });
 
-  // Run hard validation first (errors block save entirely)
-  if (!await validateBeforeSave(cfg)) return;
+  // Safety/controller cross-checks belong to Controllers. System has only
+  // device fields and ordinary HTML range constraints; do not force unrelated
+  // engine safety acknowledgements for a Wi-Fi name or loop-rate change.
+  if (CONFIG_SURFACE === 'controllers' && !await validateBeforeSave(cfg)) return;
+  if (CONFIG_SURFACE === 'system') {
+    const invalid = document.querySelector('#cfg-form input:invalid, #cfg-form select:invalid');
+    if (invalid) {
+      invalid.reportValidity();
+      invalid.focus();
+      return;
+    }
+    if (_systemHardwareChangedPaths.has('wifi_password')) {
+      const password = String(hwCfg.wifi_password ?? '');
+      if (password && (new TextEncoder().encode(password).length < 8 || new TextEncoder().encode(password).length > 63)) {
+        alert('Wi-Fi password must be empty for an open network, or 8–63 UTF-8 bytes.');
+        return;
+      }
+    }
+  }
 
   // Build the change list for the recap
   const changes = _buildChanges();
@@ -535,42 +552,72 @@ function _cancelSaveRecap() {
   if (cb) cb.disabled = false;
 }
 
-async function _saveUnifiedControllerChanges(payload, saveMsg, confirmButton) {
-  const merge = (target, patch) => {
-    for (const [key, value] of Object.entries(patch || {})) {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        if (!target[key] || typeof target[key] !== 'object' || Array.isArray(target[key])) target[key] = {};
-        merge(target[key], value);
-      } else target[key] = value;
-    }
-  };
+async function _saveControllerChanges(payload, saveMsg, confirmButton) {
   if (typeof stopGlobalTelemetry === 'function') stopGlobalTelemetry();
-  await new Promise(resolve => setTimeout(resolve, 200));
-  const latestResponse = await fetch('/api/ecu_config', {cache:'no-store'});
-  if (!latestResponse.ok) throw new Error('could not refresh the current engine file');
-  const engine = await latestResponse.json();
-  if (!engine.hardware || !engine.settings) throw new Error('current engine file is incomplete');
-  merge(engine.settings, payload);
-  if (CONFIG_SURFACE === 'controllers') {
-    engine.hardware.controllers = JSON.parse(JSON.stringify(hwCfg.controllers || {}));
-    engine.hardware.safety = JSON.parse(JSON.stringify(hwCfg.safety || {}));
-    engine.hardware.oil_loops = JSON.parse(JSON.stringify(hwCfg.oil_loops || []));
-  } else if (CONFIG_SURFACE === 'system') {
-    for (const key of ['profile_id','profile_desc','wifi_password','wifi_tx_power_dbm','cluster_serial','mavlink']) {
-      if (hwCfg[key] !== undefined) engine.hardware[key] = JSON.parse(JSON.stringify(hwCfg[key]));
-    }
-    engine.settings.profile_id = engine.hardware.profile_id;
-  }
-  const response = await fetch('/api/ecu_config?source=controllers', {
-    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(engine)
+  await new Promise(resolve => setTimeout(resolve, 150));
+  const hardwarePatch = {
+    controllers: JSON.parse(JSON.stringify(hwCfg.controllers || {})),
+    safety: JSON.parse(JSON.stringify(hwCfg.safety || {})),
+    oil_loops: JSON.parse(JSON.stringify(hwCfg.oil_loops || []))
+  };
+  const response = await fetch('/api/hardware?source=controllers', {
+    method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(hardwarePatch)
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || result.ok === false) throw new Error(result.detail || result.error || `HTTP ${response.status}`);
+  // Finish the Hardware reboot before sending the second page-owned write.
+  if (Object.keys(payload).length) {
+    saveMsg.textContent = 'Hardware saved — reconnecting to save page settings…';
+    await window.OTWaitForSaveRestart();
+    if (typeof window.OTSaveConfigPatch !== 'function')
+      throw new Error('Shared save support did not load; reload this page and retry');
+    const {response: settingsResponse, data} = await window.OTSaveConfigPatch(payload);
+    if (!settingsResponse?.ok || data?.ok === false)
+      throw new Error(data?.error || data?.reason || `Settings HTTP ${settingsResponse?.status || 0}`);
+  }
   _clearDirty();
   saveMsg.textContent = '✓ Saved — ECU rebooting…';
   saveMsg.style.color = 'var(--green)';
   if (confirmButton) confirmButton.disabled = true;
   setTimeout(() => { location.href = CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'; }, 12000);
+}
+
+async function _saveSystemChanges(payload, saveMsg, confirmButton) {
+  if (typeof stopGlobalTelemetry === 'function') stopGlobalTelemetry();
+  await new Promise(resolve => setTimeout(resolve, 150));
+  let settingsReboot = false;
+  if (_systemHardwareDirty) {
+    const hardwarePatch = {};
+    for (const path of _systemHardwareChangedPaths) {
+      const value = getPath(hwCfg, path.split('.'));
+      if (value !== undefined) setPath(hardwarePatch, path.split('.'), value);
+    }
+    const response = await fetch('/api/hardware?source=system', {
+      method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(hardwarePatch)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.ok === false)
+      throw new Error(result.detail || result.error || `Hardware HTTP ${response.status}`);
+  }
+  if (Object.keys(payload).length) {
+    if (_systemHardwareDirty) {
+      saveMsg.textContent = 'Hardware saved — reconnecting to save page settings…';
+      await window.OTWaitForSaveRestart();
+    }
+    if (typeof window.OTSaveConfigPatch !== 'function')
+      throw new Error('Shared save support did not load; reload this page and retry');
+    const {response, data} = await window.OTSaveConfigPatch(payload);
+    if (!response?.ok || data?.ok === false)
+      throw new Error(data?.error || data?.reason || `Settings HTTP ${response?.status || 0}`);
+    settingsReboot = data?.reboot === true;
+  }
+  const rebooting = _systemHardwareDirty || settingsReboot;
+  _clearDirty();
+  saveMsg.textContent = rebooting ? '✓ Saved — ECU rebooting…' : '✓ Saved';
+  saveMsg.style.color = 'var(--green)';
+  if (confirmButton) confirmButton.disabled = rebooting;
+  if (rebooting) setTimeout(() => { location.href = '/system.html'; }, 12000);
+  else if (typeof startTelemetryBoot === 'function') startTelemetryBoot();
 }
 
 // Stage 2: user confirmed — actually send to device.
@@ -602,7 +649,16 @@ function _doSave() {
     payload.controller_schema = Number(cfg.controller_schema || 1);
   }
   if (_controllerHardwareDirty) {
-    _saveUnifiedControllerChanges(payload, saveMsg, cb).catch(error => {
+    _saveControllerChanges(payload, saveMsg, cb).catch(error => {
+      saveMsg.textContent = '✗ ' + (error?.message || error);
+      saveMsg.style.color = '#f55';
+      if (cb) cb.disabled = false;
+      if (typeof startTelemetryBoot === 'function') startTelemetryBoot();
+    });
+    return;
+  }
+  if (_systemHardwareDirty) {
+    _saveSystemChanges(payload, saveMsg, cb).catch(error => {
       saveMsg.textContent = '✗ ' + (error?.message || error);
       saveMsg.style.color = '#f55';
       if (cb) cb.disabled = false;
@@ -637,6 +693,13 @@ function _doSave() {
       hookValidation();
       applyDeveloperLiveFields();
       runValidation();
+      if (d.reboot) {
+        saveMsg.textContent = '✓ Saved — ECU rebooting…';
+        saveMsg.style.color = 'var(--green)';
+        if (cb) cb.disabled = true;
+        setTimeout(() => { location.href = CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'; }, 12000);
+        return;
+      }
       saveMsg.textContent = (d.warn ? 'Saved — ' + d.warn :
         (d.persist === 'deferred_until_safe'
           ? '✓ Live update queued — saves permanently after STOP'

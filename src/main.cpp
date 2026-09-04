@@ -4484,12 +4484,10 @@ void setup() {
         commandConfiguredIgnitionOutput(Config::relightOutputId, (uint8_t)Config::relightIgnitionTarget, true);
     });
 
-    // Web maintenance tick on Core 0 — independent FreeRTOS task
-    // Stack needs to hold char buf[5120] + ArduinoJson + call frames from webTask tick
-    // Priority 8: high enough to time-share Core 0 with async_tcp (prio 10)
-    // instead of being fully preempted during file serving. Keeps WS updates
-    // regular even when the browser is fetching pages.
-    if (xTaskCreatePinnedToCore(webTask, "web", 12288, nullptr, 8, nullptr, 0) != pdPASS) {
+    // Keep filesystem/network maintenance on Core 0 with AsyncTCP. Its measured
+    // working stack is below 4 KiB; 5 KiB retains measured margin while still
+    // fitting after a maximum Classic PCB profile has been loaded.
+    if (xTaskCreatePinnedToCore(webTask, "web", 5120, nullptr, 8, nullptr, 0) != pdPASS) {
         Serial.println("[OT] ERROR: web task allocation failed; network controls and log draining unavailable");
     }
 

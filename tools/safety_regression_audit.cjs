@@ -883,7 +883,8 @@ expect('fixed web workspaces reserve once and fail into START lockout',
   web.includes('using WebRxBuffer = char[16384]') &&
   web.includes('using WebTxBuffer = char[16384]') &&
   web.includes('using WebTxBuffer = char[12288]') &&
-  (web.match(/heap_caps_malloc\(sizeof\(WebRxBuffer\)/g) || []).length === 1 &&
+  (web.match(/heap_caps_malloc\(sizeof\(WebRxBuffer\)/g) || []).length === 2 &&
+  web.includes('class ClassicRxWorkspaceLoan') &&
   (web.match(/heap_caps_malloc\(sizeof\(WebTxBuffer\)/g) || []).length === 1 &&
   web.includes('Web service memory reservation failed; reboot or reflash before START') &&
   main.includes('const bool webServerReady = WebServer::begin()') &&
@@ -918,20 +919,16 @@ expect('afterburner flame availability accepts local and shared-I2C detector ada
   hwConfig.includes('c.driver == ChannelRegistry::I2cDigital || c.driver == ChannelRegistry::I2cAnalog') &&
   hwConfig.includes('ChannelRegistry::channelAddressable(c)') &&
   hwConfig.includes('hasAbFlame = true'));
-expect('hardware full-engine save refreshes and three-way merges concurrent browser edits',
+expect('hardware saves a recursive page-owned patch without restoring unrelated settings',
   hardwareState.includes('function mergeHardwareEdits(') &&
   hardwareState.includes('function mergeHardwareRegistryRows(') &&
   hardwareState.includes("(key === 'inputs' || key === 'outputs')") &&
-  hardwareState.includes('_loadedSettingsCfg = cloneHardwareJson(settingsCfg)') &&
-  hardwareSave.includes("fetch('/api/ecu_config', {cache:'no-store'})") &&
-  hardwareSave.includes('mergeHardwareEdits(_loadedHardwareCfg, saveCfg, latestEngine.hardware)') &&
-  hardwareState.includes('function mergeHardwareSettingsCleanup(') &&
-  hardwareState.includes('removedRuleKeys.has(JSON.stringify(rule))') &&
-  hardwareSave.includes('mergeHardwareSettingsCleanup(_loadedSettingsCfg, settingsCfg, latestEngine.settings)') &&
-  hardwareSave.includes("fetch('/api/ecu_config?source=hardware'") &&
-  hardwareSave.includes('mergedSettings.profile_id = mergedHardware.profile_id') &&
-  hardwareSave.includes('JSON.stringify({hardware:mergedHardware, settings:mergedSettings})') &&
-  web.includes('if (configurationEditorSave)') &&
+  hardwareSave.includes('mergeHardwareEdits(_loadedHardwareCfg, saveCfg, {})') &&
+  hardwareSave.includes("fetch('/api/hardware?source=hardware'") &&
+  hardwareSave.includes("method: 'PATCH'") &&
+  hardwareSave.includes('JSON.stringify(hardwarePatch)') &&
+  !hardwareSave.includes("fetch('/api/ecu_config?source=hardware'") &&
+  web.includes('const bool hardwarePagePatch') &&
   web.includes('Config::autoFillNewlyEnabledSafety(prevSafOilT, prevSafFP'));
 expect('hardware reboot recap includes every editable registry calibration and routing field',
   hardwareSave.includes("['i2c_address','device_channel'].includes(key)) return driver >= 8") &&
@@ -1022,8 +1019,8 @@ expect('calibration settings save only changed fields and cannot overwrite a sta
   calibrationHtml.includes('window.OTSaveConfigPatch(patch)') &&
   webApp.includes("fetch('/api/config', {") &&
   webApp.includes("method:'PATCH'") &&
-  webApp.includes("const engineResponse = await fetch('/api/ecu_config', {cache:'no-store'});") &&
-  webApp.includes('merge(engine.settings, patch);') &&
+  !webApp.includes("const engineResponse = await fetch('/api/ecu_config', {cache:'no-store'});") &&
+  !webApp.includes('merge(engine.settings, patch);') &&
   !calibrationHtml.includes("fetch('/api/config').then"));
 expect('session logging settings patch only their owned fields',
   logHtml.includes('const patch = {') &&
@@ -1032,13 +1029,23 @@ expect('session logging settings patch only their owned fields',
   logHtml.includes('window.OTSaveConfigPatch(patch)'));
 expect('coolant pressure offers the same local and shared-I2C analog adapters as other pressure sensors',
   hardwareCatalog.includes("{value:'coolant_pressure',label:'Coolant pressure',role:'pressure',drivers:[1,9]"));
-expect('atomic sequence saves preserve unrelated settings changed after the page was loaded',
+expect('sequence saves send only page-owned setting and hardware patches',
   sequenceHtml.includes('loadedHwCfg = cloneSequenceJson(hwCfg)') &&
   sequenceHtml.includes('loadedCfg = cloneSequenceJson(cfg)') &&
-  sequenceHtml.includes("fetchJsonWithRetry('/api/hardware')") &&
-  sequenceHtml.includes("fetchJsonWithRetry('/api/config')") &&
-  sequenceHtml.includes('mergeSequenceEdits(loadedHwCfg, hwCfg, latestHw)') &&
-  sequenceHtml.includes('mergeSequenceEdits(loadedCfg, cfg, latestCfg)'));
+  sequenceHtml.includes("fetch('/api/config', {method:'PATCH'") &&
+  sequenceHtml.includes("fetch('/api/hardware?source=sequence', {method:'PATCH'") &&
+  sequenceHtml.includes('mergeSequenceEdits(loadedCfg, cfg, {})') &&
+  !sequenceHtml.includes("fetch('/api/ecu_config', {method:'POST'"));
+expect('sequence endpoint-type changes cannot reinterpret Boolean commands as proportional demands',
+  sequenceHtml.includes("previousMeta?.mode === meta.mode ? actionStoredValue(row, previousDisplay) : 0") &&
+  sequenceHtml.includes("previousMeta?.mode === meta.mode ? actionStoredValue(row, previous) : 0"));
+expect('controller topology changes initialize semantically new output values safely',
+  configHtml.includes('rule.on_value = 0;') &&
+  configHtml.includes('if (previousTarget && target && wasRelay !== isRelay)'));
+expect('all configuration editors protect unsaved changes during navigation',
+  sequenceHtml.includes("window.addEventListener('beforeunload', event => {") &&
+  configHtml.includes("window.addEventListener('beforeunload', event => {") &&
+  hardwareHtml.includes("window.addEventListener('beforeunload', event => {"));
 expect('generic shared-I2C channels are first-class custom-block and simple-control channels',
   sequenceHtml.includes('if (!registryChannelInstalled(c)) return;') &&
   sequenceHtml.includes('if (registryInputCoreBound(c)) return;') &&

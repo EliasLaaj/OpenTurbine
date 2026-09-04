@@ -296,8 +296,11 @@ function collectPinUsage() {
   const profileActive = pcbProfileActive();
   if (profileActive) {
     const profileName = pcbProfile.name || pcbProfile.id || 'PCB profile';
+    // reserved_gpio contains only fixed functions and immutable profile buses.
+    // Assigned labelled connectors are added through their resolved registry
+    // channels, leaving unused exposed connector GPIOs available to a new bus.
     (pcbProfile.reserved_gpio || []).forEach(pin =>
-      add(pin, `${profileName} reserved GPIO`, 'pcb-reserved'));
+      add(pin, `${profileName} fixed GPIO`, 'pcb-reserved'));
   }
   // START/STOP registry channels mirror the legacy controls fields. Count
   // either representation, not both, or a valid PCB assignment is reported
@@ -338,11 +341,19 @@ function collectPinUsage() {
   }
   (cfg.di_channels || []).forEach((ch, i) => add(ch.pin, ch.label || `DI channel ${i + 1}`));
   const r = registryRoot();
+  const addProfilePortPin = (ch, direction) => {
+    if (!profileActive || !ch.physical_port || !ch.physical_mode) return false;
+    const port = (pcbProfile.ports || []).find(row => row.id === ch.physical_port);
+    const mode = port?.modes?.find(row => row.id === ch.physical_mode);
+    if (Number(mode?.gpio ?? -1) >= 0)
+      add(mode.gpio, registryDisplayName(direction, ch, ch.id || `PCB ${direction}`));
+    return true;
+  };
   (r.inputs || []).forEach(ch => {
     if (!ch || ch.installed === false) return;
-    if (profileActive && (ch.physical_port ||
-        (ch.purpose === 'battery_voltage' &&
-         pcbProfile?.fixed_functions?.supply_voltage?.available))) return;
+    if (addProfilePortPin(ch, 'input') ||
+        (profileActive && ch.purpose === 'battery_voltage' &&
+         pcbProfile?.fixed_functions?.supply_voltage?.available)) return;
     if (registryTorqueIsHx711(ch)) {
       const label = registryDisplayName('input', ch, ch.id || 'Torque');
       add(ch.pin, `${label} DOUT`);
@@ -359,7 +370,7 @@ function collectPinUsage() {
   });
   (r.outputs || []).forEach(ch => {
     if (!ch || ch.installed === false) return;
-    if (profileActive && ch.physical_port) return;
+    if (addProfilePortPin(ch, 'output')) return;
     const label = registryDisplayName('output', ch, ch.id || 'Registry output');
     add(ch.pin, label);
     const actuatorKey = registryCoreActuatorKey(ch);
@@ -830,11 +841,27 @@ function mergeHardwareEdits(baseline, edited, fresh) {
     const hasEdit = Object.prototype.hasOwnProperty.call(edit, key);
     const before = base[key];
     const after = edit[key];
+    const registryRows = (key === 'inputs' || key === 'outputs') &&
+      Array.isArray(before) && Array.isArray(after) && Array.isArray(out[key]);
+    // GET /api/ecu_config can contain an older empty registry while the
+    // Hardware page has already migrated legacy sensor/actuator fields into
+    // cards. Materialize those unchanged migrated rows as well as edited rows;
+    // otherwise bindings survive the save while their channels disappear.
+    if (registryRows) {
+      out[key] = mergeHardwareRegistryRows(before, after, out[key]);
+      continue;
+    }
+    // Bindings are owned by Hardware. Preserve a concurrently returned list
+    // when nothing changed, except for the same legacy-migration case where
+    // the fresh engine file has none and the editor created them from cards.
+    if (key === 'bindings' && Array.isArray(before) && Array.isArray(after) &&
+        Array.isArray(out[key]) && JSON.stringify(before) === JSON.stringify(after) &&
+        out[key].length === 0 && after.length > 0) {
+      out[key] = cloneHardwareJson(after);
+      continue;
+    }
     if (JSON.stringify(before) === JSON.stringify(after)) continue;
     if (!hasEdit) delete out[key];
-    else if ((key === 'inputs' || key === 'outputs') &&
-             Array.isArray(before) && Array.isArray(after) && Array.isArray(out[key]))
-      out[key] = mergeHardwareRegistryRows(before, after, out[key]);
     else if (hardwarePlainObject(before) && hardwarePlainObject(after))
       out[key] = mergeHardwareEdits(before, after, out[key]);
     else out[key] = cloneHardwareJson(after);
@@ -1370,8 +1397,11 @@ async function setProfileSerialEnabled(group, enabled) {
     const other = group === 'cluster_serial' ? 'mavlink' : 'cluster_serial';
     await setNested(other, 'enabled', false);
   }
+  refreshAllPins();
+  updateSaveButton();
   renderHardwareWorkflowSummaries();
 }
+const setSerialEnabled = setProfileSerialEnabled;
 function setLabel(key, val) {
   if (!cfg.labels) cfg.labels = {};
   cfg.labels[key] = val;
@@ -2680,8 +2710,7 @@ function registryStarterEnableSubcard(c) {
 function registryMinimumRunEditor(c, index) {
   const purpose = registryDerivedPurpose('output',c);
   if (purpose === 'main_fuel') return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0"><div class="registry-card-summary"><div><strong>Minimum reliable fuel-pump command</strong><div class="hw-desc">Calibrated on the <a href="/calibration.html">Calibration page</a>. It is applied inside the electrical endpoints above and does not rewrite them.</div></div></div></div>`;
-  if (purpose === 'oil_pump') return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0"><div class="registry-card-summary"><div><strong>Oil-pump minimum</strong><div class="hw-desc">The closed-loop controller minimum is configured separately in Config. It is a controller floor; the electrical endpoints above remain hardware limits.</div></div></div></div>`;
-  if (!['fuel_pump','coolant_pump','scavenge_pump','cooling_fan'].includes(purpose) || outputDriverIsOnOff(c.driver)) return '';
+  if (!['oil_pump','fuel_pump','coolant_pump','scavenge_pump','cooling_fan'].includes(purpose) || outputDriverIsOnOff(c.driver)) return '';
   const pct = Math.max(0,Math.min(100,Number(c.min_run_demand||0)*100));
   const electricalDemand = c.invert ? 1 - pct/100 : pct/100;
   let physical = '';
@@ -2693,7 +2722,7 @@ function registryMinimumRunEditor(c, index) {
     physical = `${Math.round(lo + electricalDemand*(hi-lo))} us pulse${c.invert ? ' (inverted)' : ''}`;
   }
   return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0">
-    <div class="registry-card-summary"><div><strong>Minimum reliable running command</strong><div class="hw-desc">A nonzero command below this value is raised to this value. The output remains fully off at 0%.</div></div></div>
+    <div class="registry-card-summary"><div><strong>Minimum reliable running command</strong><div class="hw-desc">A nonzero command below this hardware value is raised to it. The output remains fully off at 0%. An automatic oil-pressure controller may apply its own higher minimum in Config.</div></div></div>
     <div class="registry-card-editor" style="display:block"><div class="hw-grid">
       <div class="hw-field"><span class="hw-label">Minimum reliable command (%)</span><input type="number" min="0" max="100" step="0.1" value="${registryFormatValue(pct,1)}" onchange="updateRegistryChannel('output',${index},'min_run_demand',Math.max(0,Math.min(1,(+this.value||0)/100)))"></div>
       <div class="hw-field"><span class="hw-label">Calculated electrical signal</span><span class="hw-desc">Derived from the electrical endpoints; rerun or review this calibration after changing them.</span><output>${escapeHtmlText(physical || 'On / off')}</output></div>
@@ -2904,6 +2933,13 @@ function registryProfileInputTuningEditor(direction, c, index) {
   const isSwitch = registryIsSwitchRole(c.role) || ['start_switch','stop_switch'].includes(purpose);
   if (!isSwitch) return '';
   const polarity = `<div class="hw-field"><span class="hw-label">Active state</span><span class="hw-desc">Choose which electrical state means the switch or interlock is On.</span><select onchange="updateRegistryChannel('input',${index},'active_high',this.value==='1')"><option value="1"${c.active_high !== false ? ' selected' : ''}>High / above threshold is On</option><option value="0"${c.active_high === false ? ' selected' : ''}>Low / below threshold is On</option></select></div>`;
+  if (Number(c.driver) === 0 || Number(c.driver) === 2) {
+    const pullConflict = c.pullup && c.pulldown ? ' field-error' : '';
+    return `${polarity}<div class="hw-field"><span class="hw-label">Input bias</span><span class="hw-desc">Choose an internal pull-up, pull-down, or leave both off when the connected signal provides its own bias.</span><div class="hw-toggle-row">
+      <label class="hw-toggle"><input class="${pullConflict}" type="checkbox" ${c.pullup ? 'checked' : ''} onchange="updateRegistryChannel('input',${index},'pullup',this.checked)"><span></span> Pull-up</label>
+      <label class="hw-toggle"><input class="${pullConflict}" type="checkbox" ${c.pulldown ? 'checked' : ''} onchange="updateRegistryChannel('input',${index},'pulldown',this.checked)"><span></span> Pull-down</label>
+    </div></div>`;
+  }
   if (Number(c.driver) !== 9) return polarity;
   const referenceMv = Number(c.i2c_reference_mv ?? 5000);
   const thresholdV = Number(c.digital_threshold_raw ?? 2048) * referenceMv / 4095 / 1000;
@@ -3184,6 +3220,9 @@ function updateRegistryProfilePort(direction,index,value) {
   c.physical_port = portId;
   c.physical_mode = modeId;
   c.driver = PCB_ADAPTER_DRIVER[mode.adapter];
+  c.active_high = mode.active_high !== false;
+  c.pullup = mode.pull === 'up';
+  c.pulldown = mode.pull === 'down';
   if (mode.reference_mv) c.i2c_reference_mv = Number(mode.reference_mv);
   if (mode.adapter === 'i2c_adc_digital_input') {
     c.digital_threshold_raw ??= 2048;
@@ -3968,26 +4007,28 @@ function renderCommsIndicatorSummary() {
     profileAllows('cluster_serial') ? card('cluster_serial', 'OT Cluster serial',
       cluster.enabled ? `${pcbProfileActive() ? 'Fixed PCB serial connection' : `TX GPIO ${cluster.tx_pin ?? 'not set'}${(cluster.rx_pin ?? -1) >= 0 ? ` / RX GPIO ${cluster.rx_pin}` : ' / TX only'}`} / ${cluster.baud || 115200} baud` : 'External cluster telemetry link',
       clusterStatus,
-      !!cluster.enabled,
+      pcbProfileActive() ? true : (!!cluster.enabled || (cluster.tx_pin ?? -1) >= 0),
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
+         <div class="hw-field"><span class="hw-label">Cluster serial</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('cluster_serial','enabled')}" type="checkbox" ${cluster.enabled?'checked':''} onchange="setProfileSerialEnabled('cluster_serial',this.checked)"><span></span> Enable</label></div>
          ${pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical connection</span><span class="hw-desc">TX/RX wiring is fixed by the flashed PCB profile.${sharedProfileSerial?' The connector is shared with MAVLink.':''}</span></div>` : `<div class="hw-field"><span class="hw-label">Cluster TX GPIO</span><select class="${workflowDeviceFieldClass('cluster_serial','tx_pin')}" onchange="setNested('cluster_serial','tx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(cluster.tx_pin, 'out')}</select></div>
          <div class="hw-field"><span class="hw-label">Cluster RX GPIO</span><span class="hw-desc">Optional. Leave unassigned for TX-only streaming.</span><select class="${workflowDeviceFieldClass('cluster_serial','rx_pin')}" onchange="setNested('cluster_serial','rx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(cluster.rx_pin, 'in')}</select></div>`}
-         <div class="hw-field"><a href="/system.html#system-device-setup">Enable the link and set its rate on System &rarr;</a></div>
+         <div class="hw-field"><a href="/system.html#system-device-setup">Set stream rate on System &rarr;</a></div>
       </div></div>`) : '',
     profileAllows('mavlink') ? card('mavlink', 'MAVLink telemetry',
       mav.enabled ? `${pcbProfileActive() ? 'Fixed PCB serial connection' : `TX GPIO ${mav.tx_pin ?? 'not set'}`} / ${mav.baud || 57600} baud / ${mav.interval_ms || 200} ms` : 'MAVLink telemetry output',
       mavStatus,
-      !!mav.enabled,
+      pcbProfileActive() ? true : (!!mav.enabled || (mav.tx_pin ?? -1) >= 0),
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
+         <div class="hw-field"><span class="hw-label">MAVLink</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('mavlink','enabled')}" type="checkbox" ${mav.enabled?'checked':''} onchange="setProfileSerialEnabled('mavlink',this.checked)"><span></span> Enable</label></div>
          ${pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical connection</span><span class="hw-desc">TX wiring is fixed by the flashed PCB profile.${sharedProfileSerial?' The connector is shared with OT Cluster.':''}</span></div>` : `<div class="hw-field"><span class="hw-label">MAVLink TX GPIO</span><select class="${workflowDeviceFieldClass('mavlink','tx_pin')}" onchange="setNested('mavlink','tx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(mav.tx_pin, 'out')}</select></div>`}
-         <div class="hw-field"><a href="/system.html#system-device-setup">Enable the link and set its rate on System &rarr;</a></div>
+         <div class="hw-field"><a href="/system.html#system-device-setup">Set stream rate on System &rarr;</a></div>
       </div></div>`) : '',
     profileAllows('status_led') ? card('status_led', 'Status LED',
-      ledEnabled && (led.pin ?? -1) >= 0 ? `${ledType === 1 ? 'NeoPixel RGB' : 'GPIO LED'}${pcbProfileActive() ? ' / fixed PCB indicator' : ` / GPIO ${led.pin}`}` : 'Local status indicator LED',
+      ledEnabled && (led.pin ?? -1) >= 0 ? `${ledType === 1 ? 'NeoPixel RGB' : 'GPIO LED'}${pcbProfileActive() ? ' / built-in PCB indicator' : ` / GPIO ${led.pin}`}` : 'Local status indicator LED',
       ledStatus,
       pcbProfileActive() || cfg.platform !== 'esp32s3' ? true : ledEnabled,
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
-         ${pcbProfileActive() ? '<div class="hw-field"><span class="hw-label">Installed indicator</span><span class="hw-desc">LED type, GPIO, polarity, and safe-off state are fixed by the flashed PCB profile.</span></div>' : `<div class="hw-field"><span class="hw-label">Status LED</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('status_led','enabled')}" type="checkbox" ${ledEnabled?'checked':''} onchange="setStatusLedEnabled(this.checked);renderHardwareWorkflowSummaries()"><span></span> Enable</label></div>
+         ${pcbProfileActive() ? '<div class="hw-field"><span class="hw-label">Built-in indicator</span><span class="hw-desc">This card describes only the LED physically wired on the PCB. It does not reserve or restrict the labelled output connectors. Add a Warning / indicator light under Outputs to use any other compatible free output.</span></div>' : `<div class="hw-field"><span class="hw-label">Status LED</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('status_led','enabled')}" type="checkbox" ${ledEnabled?'checked':''} onchange="setStatusLedEnabled(this.checked);renderHardwareWorkflowSummaries()"><span></span> Enable</label></div>
          <div class="hw-field"><span class="hw-label">LED type</span><select class="${workflowDeviceFieldClass('status_led','type')}" onchange="setStatusLedType(+this.value);renderHardwareWorkflowSummaries()"><option value="0"${ledType===0?' selected':''}>Plain GPIO on/off</option><option value="1"${ledType===1?' selected':''}>NeoPixel RGB data LED</option></select></div>
          <div class="hw-field"><span class="hw-label">Status LED GPIO</span><select class="${workflowDeviceFieldClass('status_led','pin')}" onchange="setAct('status_led','pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(led.pin, 'status-led')}</select></div>`}
          ${ledType === 1 ? `<div class="hw-field"><span class="hw-label">NeoPixel mode</span><select class="${workflowDeviceFieldClass('status_led','mode')}" onchange="setStatusLedMode(+this.value);renderHardwareWorkflowSummaries()"><option value="0"${ledMode===0?' selected':''}>Blink pattern</option><option value="1"${ledMode===1?' selected':''}>State colors</option></select></div>` : ''}
@@ -4242,11 +4283,6 @@ function setPumpFlowSensorEnabled(outputIndex, enabled) {
   const output = outputs[outputIndex];
   const purpose = pumpFlowPurpose(output);
   if (!output || !purpose) return;
-  if (enabled && pcbProfileActive()) {
-    alert('A PCB profile must declare and assign the pump flow-meter connection. Raw profile wiring cannot be created from this card.');
-    renderRegistryInventory();
-    return;
-  }
   let {channel} = pumpFlowInput(output);
   if (enabled && !channel) {
     if ((registryRoot().inputs || []).length >= registryCapacity('input')) {
@@ -4265,6 +4301,10 @@ function setPumpFlowSensorEnabled(outputIndex, enabled) {
       pullup:false, pulldown:false, pulses_per_unit:1000
     };
     registryRoot().inputs.push(channel);
+    // In PCB mode the new card immediately offers every unassigned named
+    // connector that supports pulse/frequency or analog flow measurement.
+    // Leaving the physical connection unset keeps the card visibly incomplete
+    // until the user chooses the real connector.
   } else if (!enabled && channel) {
     removePumpFlowInput(output);
   }
@@ -5017,8 +5057,8 @@ function shiftRegistryNumericHandlesAfterRemoval(direction, removedIndex, oldCou
       if (step.act !== undefined) step.act = shift(step.act);
   }));
   const deviceTargetKeys = ['startup_device_target','shutdown_device_target','ab_device_target','ab_shut_device_target'];
-  deviceTargetKeys.forEach(key => (cfg[key] || []).forEach(target => {
-    if (direction === 'output' && refMatches(target)) seqCount++;
+  deviceTargetKeys.forEach(key => (cfg[key] || []).forEach((target, index, targets) => {
+    targets[index] = shift(target);
   }));
     (settingsCfg.rules || []).forEach(rule => { if (rule?.actuator !== undefined) rule.actuator = shift(rule.actuator); });
   } else {
@@ -6545,6 +6585,8 @@ async function saveHardware() {
       <thead><tr><th>Setting</th><th>Was</th><th>Now</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
+  const confirmButton = document.getElementById('save-recap-confirm-btn');
+  if (confirmButton) confirmButton.disabled = false;
   modal.style.display = 'flex';
 }
 
@@ -6568,39 +6610,21 @@ async function _doSave() {
   let timeout = null;
   let savePosted = false;
   try {
-    // Full engine-file validation briefly needs the largest contiguous heap
-    // block used by the web UI. Release Hardware live telemetry before the
-    // file GET/POST instead of making the ECU evict it mid-restore.
+    // Hardware owns this page. Release live telemetry, then send only the
+    // hardware document to its dedicated validator/save endpoint; firmware
+    // performs dependency cleanup and persists the unified file atomically.
     stopHardwareTelemetry();
     await new Promise(resolve => setTimeout(resolve, 250));
     const saveCfg = {...cfg};
     delete saveCfg._i2c_discovery;
-    // Save the complete engine file through the flash-backed restore path.
-    // Hardware may legitimately exceed the ECU's small RAM request buffer
-    // when sequences contain many side actions or sensors use calibration
-    // curves. Refresh settings here so a long-open Hardware tab cannot restore
-    // stale controller tuning from its load-time snapshot.
-    const latestResponse = await fetch('/api/ecu_config', {cache:'no-store'});
-    if (!latestResponse.ok) throw new Error('could not refresh the current engine file');
-    const latestEngine = await latestResponse.json();
-    if (!latestEngine.hardware || typeof latestEngine.hardware !== 'object')
-      throw new Error('current engine file has no hardware section');
-    if (!latestEngine.settings || typeof latestEngine.settings !== 'object')
-      throw new Error('current engine file has no settings section');
-    const mergedHardware = mergeHardwareEdits(_loadedHardwareCfg, saveCfg, latestEngine.hardware);
-    const mergedSettings = mergeHardwareSettingsCleanup(_loadedSettingsCfg, settingsCfg, latestEngine.settings);
-    mergedSettings.profile_id = mergedHardware.profile_id;
-    // This immutable identity is injected by GET /api/hardware and is required
-    // when validating files for an official/custom PCB, even if an older
-    // committed file predates persistence of the identity object.
-    if (saveCfg._pcb_profile) mergedHardware._pcb_profile = cloneHardwareJson(saveCfg._pcb_profile);
+    const hardwarePatch = mergeHardwareEdits(_loadedHardwareCfg, saveCfg, {});
     started = Date.now();
     timeout = setTimeout(() => controller.abort(), 8000);
     savePosted = true;
-    const r = await fetch('/api/ecu_config?source=hardware', {
-      method: 'POST',
+    const r = await fetch('/api/hardware?source=hardware', {
+      method: 'PATCH',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({hardware:mergedHardware, settings:mergedSettings}),
+      body: JSON.stringify(hardwarePatch),
       signal: controller.signal
     });
     clearTimeout(timeout);
@@ -6639,10 +6663,11 @@ async function _doSave() {
 }
 
 function friendlyHardwareSaveError(response) {
-  const detail = String(response?.detail || '').toLowerCase();
+  const rawDetail = String(response?.detail || '').trim();
+  const detail = rawDetail.toLowerCase();
   const map = [
     ['malformed json', 'The browser produced incomplete setup data. Reload Hardware, repeat the change, and try again.'],
-    ['channel registry', 'One of the installed device cards has an invalid or incomplete purpose, signal type, GPIO, or range. Open the red device card below and complete its setup.'],
+    ['channel registry', rawDetail || 'One of the installed device cards has an invalid or incomplete purpose, signal type, GPIO, or range.'],
     ['hardware dependencies', 'An enabled controller or safety needs hardware that is no longer fitted. Open Controllers, disable the unavailable item, or restore its required device.'],
     ['sequence references', 'A sequence or custom action still refers to a removed device. Open Sequence, fix the unavailable block or action, and save it before retrying Hardware.'],
     ['platform pins', 'A GPIO, electrical range, or sensor interface is not valid for this ESP32 board. Check the red device card and Requirements section.'],
