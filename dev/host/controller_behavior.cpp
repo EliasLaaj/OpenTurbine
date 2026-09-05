@@ -1,4 +1,5 @@
 #include "../../src/engine/controllers/PowerTurbineGovernor.h"
+#include "../../src/engine/controllers/ThrottleCommandLatch.h"
 #include "../../src/hal/AdcThreshold.h"
 #include "../../src/hal/i2c/LossRecheck.h"
 #include "../../src/system/ChannelRegistry.h"
@@ -23,6 +24,13 @@ static void resetData() {
 }
 
 int main() {
+    // A one-shot sequence command must survive the slew controller publishing
+    // its first partial ramp step back into the shared demand field. A real
+    // external change, especially STOP, replaces the retained target.
+    assert(std::fabs(ThrottleCommandLatch::retain(0.2525f, 0.0f, 0.0f) - 0.2525f) < 0.0001f);
+    assert(std::fabs(ThrottleCommandLatch::retain(0.01f, 0.01f, 0.2525f) - 0.2525f) < 0.0001f);
+    assert(ThrottleCommandLatch::retain(0.0f, 0.01f, 0.2525f) == 0.0f);
+
     // PWM validation follows the ESP32 timer's real 80 MHz timing budget,
     // preserving every achievable user-selected pair without accepting a
     // configuration that can only fail when the driver attaches at boot.

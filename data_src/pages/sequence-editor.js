@@ -628,9 +628,9 @@ async function removeBlock(tab, idx) {
   renderFast(tab);
 }
 
-function addBlock(tab) {
+function addBlock(tab, selectedValue = '') {
   const sel   = document.getElementById('add-' + tab + '-sel');
-  const selected = sel.value;
+  const selected = selectedValue || sel.value;
   if (!selected) return;
   const [bname, presetTarget = ''] = selected.split('::');
   const key = seqKey(tab);
@@ -653,6 +653,39 @@ function addBlock(tab) {
     }];
   }
   renderFast(tab);
+}
+
+function closeBlockPicker() {
+  const dialog = document.getElementById('block-picker-dlg');
+  if (dialog) dialog.style.display = 'none';
+}
+function openBlockPicker(tab) {
+  const select = document.getElementById('add-' + tab + '-sel');
+  const dialog = document.getElementById('block-picker-dlg');
+  const list = document.getElementById('block-picker-list');
+  if (!select || !dialog || !list) return;
+  const names = {startup:'Startup',shutdown:'Shutdown',afterburner:'Afterburner light-up','ab-shut':'Afterburner light-off'};
+  document.getElementById('block-picker-title').textContent = `Add ${names[tab] || ''} block`;
+  list.innerHTML = '';
+  Array.from(select.options).filter(option => option.value && !option.disabled).forEach(option => {
+    const value = option.value;
+    const bname = value.split('::')[0];
+    const def = BLOCKS[bname] || customBlocks[bname] || {};
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'block-picker-option';
+    const title = document.createElement('strong');
+    title.textContent = option.textContent.replace(/^\[[^\]]+\]\s*/, '');
+    const detail = document.createElement('small');
+    const kind = option.textContent.match(/^\[([^\]]+)\]/)?.[1] || 'BLOCK';
+    detail.textContent = `${kind} — ${def.desc || 'Add this block to the sequence.'}`;
+    button.append(title, detail);
+    button.addEventListener('click', () => { closeBlockPicker(); addBlock(tab, value); });
+    list.appendChild(button);
+  });
+  if (!list.children.length) list.textContent = 'No blocks are currently available for the fitted hardware.';
+  dialog.style.display = 'flex';
+  list.querySelector('button')?.focus();
 }
 
 const _typeLabel = {while:'WHILE', action:'ACTION', wait:'WAIT', check:'CHECK'};

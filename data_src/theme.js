@@ -172,6 +172,24 @@
     return overlay;
   };
 
+  // Shared by pages that save Hardware followed by Settings. Sequence and
+  // Hardware intentionally do not load the dashboard app.js bundle.
+  window.OTWaitForSaveRestart = async function () {
+    await new Promise(function (resolve) { setTimeout(resolve, 8000); });
+    for (var attempt = 0; attempt < 30; attempt++) {
+      try {
+        var controller = new AbortController();
+        var timeout = setTimeout(function () { controller.abort(); }, 2000);
+        var response = await fetch('/api/status', {cache:'no-store', signal:controller.signal});
+        clearTimeout(timeout);
+        var status = response.ok ? await response.json() : null;
+        if (status && !status.config_apply_busy && ['STANDBY','FAULT'].includes(status.mode)) return;
+      } catch (_) {}
+      await new Promise(function (resolve) { setTimeout(resolve, 1000); });
+    }
+    throw new Error('Hardware was saved, but the ECU did not reconnect. Settings remain unsaved; reconnect and retry Save.');
+  };
+
   apply(get());
   // Classic ESP32 cannot reliably serve four cold browser requests in
   // parallel. theme.js is the one parser-blocking bootstrap; it then loads

@@ -1740,12 +1740,9 @@ bool validatePlatformPins(const JsonDocument& doc,
                 if (glowType == 2) {
                     const int fuelPin = item["fuel_pin"] | -1;
                     const int fuelType = item["fuel_type"] | 0;
-                    const bool registryFuel =
-                        registryHasPurpose(parsedRegistry, ChannelRegistry::Output, "pilot_fuel");
                     if (fuelType < 0 || fuelType > 2) return false;
-                    if (!registryFuel &&
-                        (fuelPin < 0 || !outputGpioAllowed(fuelPin) ||
-                         fuelPin == stopPin || fuelPin == startPin)) return false;
+                    if (fuelPin < 0 || !outputGpioAllowed(fuelPin) ||
+                        fuelPin == stopPin || fuelPin == startPin) return false;
                     if (!intRange(item, "fuel_delay_ms", 0, 3600000) ||
                         !intRange(item, "fuel_min_us", 500, 2500) ||
                         !intRange(item, "fuel_max_us", 500, 2500) ||
@@ -4468,20 +4465,6 @@ void HardwareConfig::_fromDoc(const JsonDocument& doc) {
                     glowPlugActiveH = !c->inverted;
                 }
             }
-        }
-        for (uint8_t i = 0; i < channelRegistry.outputCount; ++i) {
-            const auto& c = channelRegistry.outputs[i];
-            if (!c.installed || strcmp(c.purpose, "pilot_fuel")) continue;
-            // The registry card is the sole wet-glow fuel endpoint. Suppress
-            // any stale nested GPIO mirror so one command cannot energize two
-            // physical outputs, and derive On/percentage semantics from the
-            // actual selected driver.
-            wetGlowFuelPin = -1;
-            wetGlowFuelType = (c.driver == ChannelRegistry::Relay ||
-                               c.driver == ChannelRegistry::I2cRelay) ? 0
-                              : c.driver == ChannelRegistry::Pwm ? 1 : 2;
-            wetGlowFuelActiveH = !c.inverted;
-            break;
         }
         const auto* starterEnable = bound("starter_enable_output", ChannelRegistry::Output);
         if (!starterEnable) starterEnable = byIdOrRole(ChannelRegistry::Output, "starter_enable", nullptr);

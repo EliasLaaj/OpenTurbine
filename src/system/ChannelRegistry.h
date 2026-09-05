@@ -288,9 +288,6 @@ public:
         float ignitionHoldDemand = 0.3f;
         bool ignitionWaitUntilHot = false;
         uint32_t ignitionHotTimeoutMs = 30000;
-        char pairedOutputId[20] = {}; // optional pilot-fuel output owned while this ignition device is on
-        uint32_t pairedOutputDelayMs = 8000;
-        float pairedOutputDemand = 1.0f;
         bool hasFlowMonitor = false;
         float minimumFlow = 0.0f;  // L/min; applies to oil/scavenge pump outputs
         char flowInputId[20] = {}; // optional when exactly one compatible input exists
@@ -940,10 +937,7 @@ private:
                  c.ignitionPreheatMs <= 3600000UL &&
                  isfinite(c.ignitionPeakDemand) && c.ignitionPeakDemand >= 0.0f && c.ignitionPeakDemand <= 1.0f &&
                  isfinite(c.ignitionHoldDemand) && c.ignitionHoldDemand >= 0.0f && c.ignitionHoldDemand <= 1.0f &&
-                 c.ignitionHotTimeoutMs >= 100UL && c.ignitionHotTimeoutMs <= 3600000UL &&
-                 (!c.pairedOutputId[0] || validId(c.pairedOutputId)) &&
-                 c.pairedOutputDelayMs <= 3600000UL &&
-                 isfinite(c.pairedOutputDemand) && c.pairedOutputDemand >= 0.0f && c.pairedOutputDemand <= 1.0f)) &&
+                 c.ignitionHotTimeoutMs >= 100UL && c.ignitionHotTimeoutMs <= 3600000UL)) &&
                (!c.hasFlowMonitor ||
                 (c.direction == Output &&
                  (!strcmp(c.purpose, "oil_pump") || !strcmp(c.purpose, "scavenge_pump") ||
@@ -1169,9 +1163,6 @@ private:
                 o["ignition_hold_demand"] = c.ignitionHoldDemand;
                 o["ignition_wait_hot"] = c.ignitionWaitUntilHot;
                 o["ignition_hot_timeout_ms"] = c.ignitionHotTimeoutMs;
-                if (c.pairedOutputId[0]) o["paired_output"] = c.pairedOutputId;
-                o["paired_output_delay_ms"] = c.pairedOutputDelayMs;
-                o["paired_output_demand"] = c.pairedOutputDemand;
             }
             if (c.hasFlowMonitor) {
                 o["has_flow_monitor"] = true;
@@ -1225,9 +1216,7 @@ private:
                 !o["ignition_dwell_ms"].isNull() || !o["ignition_rest_ms"].isNull() ||
                 !o["ignition_coil_sat_a"].isNull() || !o["ignition_preheat_ms"].isNull() ||
                 !o["ignition_peak_demand"].isNull() || !o["ignition_hold_demand"].isNull() ||
-                !o["ignition_wait_hot"].isNull() || !o["ignition_hot_timeout_ms"].isNull() ||
-                !o["paired_output"].isNull() || !o["paired_output_delay_ms"].isNull() ||
-                !o["paired_output_demand"].isNull();
+                !o["ignition_wait_hot"].isNull() || !o["ignition_hot_timeout_ms"].isNull();
             c.ignitionMode = o["ignition_mode"] | 0;
             if (c.driver == Relay || c.driver == I2cRelay) c.ignitionMode = 0;
             c.ignitionDwellMs = constrain(o["ignition_dwell_ms"] | 6, 1, 200);
@@ -1238,9 +1227,6 @@ private:
             c.ignitionHoldDemand = constrain(o["ignition_hold_demand"] | 0.3f, 0.0f, 1.0f);
             c.ignitionWaitUntilHot = o["ignition_wait_hot"] | false;
             c.ignitionHotTimeoutMs = constrain((uint32_t)(o["ignition_hot_timeout_ms"] | 30000UL), (uint32_t)100, (uint32_t)3600000);
-            strlcpy(c.pairedOutputId, o["paired_output"] | "", sizeof(c.pairedOutputId));
-            c.pairedOutputDelayMs = constrain((uint32_t)(o["paired_output_delay_ms"] | 8000UL), (uint32_t)0, (uint32_t)3600000);
-            c.pairedOutputDemand = constrain(o["paired_output_demand"] | 1.0f, 0.0f, 1.0f);
             c.hasFlowMonitor = o["has_flow_monitor"] | false; c.minimumFlow = o["minimum_flow_l_min"] | 0.0f;
             strlcpy(c.flowInputId, o["flow_input"] | "", sizeof(c.flowInputId));
             if (c.pullup) c.pulldown = false;

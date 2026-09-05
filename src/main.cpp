@@ -852,21 +852,6 @@ static void validateSequences(bool report) {
     checkTargetReferences(hw.abSeq, hw.abSeqLen, hw.abDeviceTarget);
     checkTargetReferences(hw.abShutSeq, hw.abShutSeqLen, hw.abShutDeviceTarget);
 
-    for (uint8_t i = 0; i < hw.channelRegistry.outputCount; ++i) {
-        const auto& ignition = hw.channelRegistry.outputs[i];
-        if (!ignition.installed || !ignition.ignitionProfileConfigured ||
-            !ignition.pairedOutputId[0]) continue;
-        const auto* paired = hw.channelRegistry.find(ignition.pairedOutputId,
-                                                     ChannelRegistry::Output);
-        if (!paired || !paired->installed || paired->mirrorOf[0] ||
-            strcmp(paired->purpose, "pilot_fuel") ||
-            !ChannelRegistry::channelAddressable(*paired)) {
-            addIssue(ignition.name[0] ? ignition.name : ignition.id,
-                     "Paired start-fuel output is missing or incompatible - restore it or choose another output",
-                     false);
-        }
-    }
-
     // Windmilling oil protection is an independent built-in owner. Preserve a
     // missing explicit reference for repair, and require a choice when more
     // than one independent pump is fitted instead of silently driving the

@@ -151,7 +151,7 @@ const REGISTRY_OUTPUT_PURPOSES=[
   {value:'valve',label:'Valve / actuator',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
   {value:'ab_valve',label:'Afterburner fuel shutoff valve',role:'valve',drivers:[4,11],group:'Valves and auxiliaries'},
   {value:'air_starter',label:'Air-starter valve / actuator',role:'starter',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
-  {value:'pilot_fuel',label:'Start-fuel valve',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
+  {value:'pilot_fuel',label:'Pilot fuel',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
   {value:'purge_valve',label:'Air / fuel purge valve',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
   {value:'drain_valve',label:'Electric drain valve',role:'valve',drivers:[4,5,6,11],group:'Valves and auxiliaries'},
   {value:'nozzle_actuator',label:'Variable nozzle actuator',role:'prop_pitch',drivers:[5,6],group:'Valves and auxiliaries'},
@@ -266,7 +266,7 @@ const REGISTRY_OUTPUT_PRESETS=[
   {group:'Engine actuators',role:'ab_igniter',label:'AB igniter',id:'ab_igniter',name:'AB Igniter',driver:4},
   {group:'Engine actuators',role:'glow_plug',label:'Glow plug',id:'glow_plug',name:'Glow Plug',driver:5},
   {group:'Engine actuators',purpose:'air_starter',role:'starter',label:'Air starter',id:'air_starter',name:'Air Starter',driver:4},
-  {group:'Engine actuators',purpose:'pilot_fuel',role:'valve',label:'Start-fuel solenoid',id:'pilot_fuel',name:'Start Fuel',driver:4},
+  {group:'Engine actuators',purpose:'pilot_fuel',role:'valve',label:'Pilot fuel',id:'pilot_fuel',name:'Pilot Fuel',driver:4},
   {group:'Engine actuators',purpose:'purge_valve',role:'valve',label:'Air / fuel purge valve',id:'purge_valve',name:'Purge Valve',driver:4},
   {group:'Engine actuators',purpose:'drain_valve',role:'valve',label:'Electric drain valve',id:'drain_valve',name:'Drain Valve',driver:4},
   {group:'Engine actuators',purpose:'nozzle_actuator',role:'prop_pitch',label:'Variable nozzle actuator',id:'nozzle_actuator',name:'Nozzle Actuator',driver:6},
@@ -345,7 +345,7 @@ const REGISTRY_PRESET_HELP = {
     bleed_valve:'Compressor bleed valve controlled by startup/shutdown sequence blocks, direct commands, or a user controller.',
     ab_valve:'Normally closed valve that admits fuel to the afterburner manifold during light-up and closes on stop or fault.',
     air_starter:'Solenoid that admits compressed air to an air starter.',
-    pilot_fuel:'Start-fuel solenoid used only during ignition/startup.',
+    pilot_fuel:'Independent pilot-fuel pump or valve available to Sequence and Controllers. It is separate from the pilot-fuel hardware built into a wet glow plug.',
     purge_valve:'Air or fuel purge valve used to clear the manifold during startup or shutdown.',
     drain_valve:'Electric drain valve that can be opened or closed by sequence blocks and control rules.',
     nozzle_actuator:'Proportional variable exhaust-nozzle actuator.',
@@ -658,6 +658,10 @@ function registryTemperatureIsDigital(c) {
   return String(c?.role || '') === 'temperature' && [1,2,3,5].includes(iface);
 }
 function registrySignalTypeEditor(direction, c, index, driverClass) {
+  if (direction === 'input' && registryTemperatureIsDigital(c)) {
+    const signal = Number(c.temp_interface) === 5 ? 'Digital / OneWire' : 'Digital / SPI';
+    return `<div class="hw-field"><span class="hw-label">Signal type</span><span class="hw-desc">Set by the selected digital temperature-sensor interface.</span><select class="${driverClass}" disabled><option selected>${signal}</option></select></div>`;
+  }
   return `<div class="hw-field"><span class="hw-label">Signal type</span><span class="hw-desc">The electrical signal connected to this device.</span><select class="${driverClass}" onchange="updateRegistryChannel('${direction}',${index},'driver',+this.value)">${registryDriverOptions(direction, c.driver, c.role, registryDerivedPurpose(direction,c))}</select></div>`;
 }
 function registryInputPinLabel(c) {
@@ -873,9 +877,6 @@ function ensureRegistryIgnitionProfileDefaults(c, actKey) {
   c.ignition_hold_demand ??= purpose === 'glow_plug' ? Number(legacyGlow.hold_pct ?? 30) / 100 : .3;
   c.ignition_wait_hot ??= purpose === 'glow_plug' ? !!legacyGlow.wait_until_hot : false;
   c.ignition_hot_timeout_ms ??= 30000;
-  c.paired_output ??= '';
-  c.paired_output_delay_ms ??= Number(act.fuel_delay_ms ?? 8000);
-  c.paired_output_demand ??= Math.max(0, Math.min(1, Number(act.fuel_demand_pct ?? 100) / 100));
 }
 function registryCurrentEditor(direction, c, index) {
   if (direction !== 'output') return '';
@@ -935,24 +936,30 @@ function registryIgniterSubcards(c, index, actKey) {
 function registryGlowSubcards(c, index) {
   const actKey = registryCoreActuatorKey(c);
   ensureRegistryIgnitionProfileDefaults(c, actKey);
-  const pilots = (registryRoot().outputs || []).filter(row =>
-    row !== c && !String(row?.mirror_of || '') && registryDerivedPurpose('output', row) === 'pilot_fuel');
-  const selectedPilot = String(c.paired_output || '');
-  const selectedExists = pilots.some(row => String(row.id || '') === selectedPilot);
-  const pilotOptions = `${selectedPilot && !selectedExists ? `<option value="${escapeHtmlText(selectedPilot)}" selected>Missing output: ${escapeHtmlText(selectedPilot)}</option>` : ''}<option value=""${!selectedPilot?' selected':''}>None — plain glow plug</option>${pilots.map(row=>`<option value="${escapeHtmlText(row.id)}"${String(row.id)===selectedPilot?' selected':''}>${escapeHtmlText(registryDisplayName('output',row,row.id))}</option>`).join('')}`;
+  const act = ensureActuatorObject('glow_plug');
+  const wet = Number(act.type || 0) === 2;
+  const fuelType = Number(act.fuel_type || 0);
+  const fuelDelayS = Math.max(0, Number(act.fuel_delay_ms ?? 8000) / 1000);
   const relay = outputDriverIsOnOff(c.driver);
   return `<div class="hw-item-card registry-subcard" style="grid-column:1/-1;margin:.35rem 0 0">
-    <div class="registry-card-summary"><div><strong>Ignition behavior for this glow plug</strong><div class="hw-desc">This profile follows this exact device wherever a sequence or subsystem uses it. A paired start-fuel output makes it a wet glow plug.</div></div></div>
+    <div class="registry-card-summary"><div><strong>Glow-plug type and ignition behavior</strong><div class="hw-desc">Wet glow includes its own pilot-fuel hardware in this device. A separately added Pilot Fuel output remains independent.</div></div></div>
     <div class="registry-card-editor" style="display:block"><div class="hw-grid">
+      <div class="hw-field"><span class="hw-label">Glow-plug type</span><span class="hw-desc">Wet glow turns on its own pilot fuel after the configured delay whenever the glow plug is commanded on.</span><select onchange="setRegistryGlowType(+this.value)"><option value="0"${!wet?' selected':''}>Normal glow plug</option><option value="2"${wet?' selected':''}>Wet glow plug</option></select></div>
       <div class="hw-field"><span class="hw-label">Preheat duration (ms)</span><span class="hw-desc">Time for Glow Preheat to ramp this plug before holding.</span><input type="number" min="0" max="3600000" step="100" value="${Number(c.ignition_preheat_ms)}" oninput="updateRegistryChannel('output',${index},'ignition_preheat_ms',+this.value)"></div>
       ${relay ? '' : `<div class="hw-field"><span class="hw-label">Peak command (%)</span><span class="hw-desc">Highest command reached at the end of the preheat ramp.</span><input type="number" min="0" max="100" value="${Math.round(Number(c.ignition_peak_demand)*100)}" oninput="updateRegistryChannel('output',${index},'ignition_peak_demand',+this.value/100)"></div>
       <div class="hw-field"><span class="hw-label">Hold command (%)</span><span class="hw-desc">Command retained after preheat until another owner turns this plug off.</span><input type="number" min="0" max="100" value="${Math.round(Number(c.ignition_hold_demand)*100)}" oninput="updateRegistryChannel('output',${index},'ignition_hold_demand',+this.value/100)"></div>`}
       <div class="hw-field"><span class="hw-label">Hot confirmation</span><span class="hw-desc">Optionally wait for this device's own current feedback after the preheat ramp.</span><label class="hw-toggle"><input type="checkbox" ${c.ignition_wait_hot?'checked':''} ${c.has_current?'':'disabled'} onchange="updateRegistryChannel('output',${index},'ignition_wait_hot',this.checked)"><span></span> Wait until hot</label></div>
       ${c.ignition_wait_hot ? `<div class="hw-field"><span class="hw-label">Hot-confirm timeout (ms)</span><span class="hw-desc">Abort startup if this plug does not reach its ready-current condition in time.</span><input type="number" min="100" max="3600000" step="100" value="${Number(c.ignition_hot_timeout_ms)}" oninput="updateRegistryChannel('output',${index},'ignition_hot_timeout_ms',+this.value)"></div>` : ''}
-      <div class="hw-field"><span class="hw-label">Paired start-fuel output</span><span class="hw-desc">None makes this a plain glow plug. Choose one exact fitted output for wet-glow pilot fuel; it is not shared silently with other plugs.</span><select onchange="updateRegistryChannel('output',${index},'paired_output',this.value)">${pilotOptions}</select></div>
-      ${selectedPilot ? `<div class="hw-field"><span class="hw-label">Pilot-fuel delay (ms)</span><span class="hw-desc">Delay after this glow plug is commanded on before its paired fuel output starts.</span><input type="number" min="0" max="3600000" value="${Number(c.paired_output_delay_ms)}" oninput="updateRegistryChannel('output',${index},'paired_output_delay_ms',+this.value)"></div>
-      <div class="hw-field"><span class="hw-label">Pilot-fuel command (%)</span><span class="hw-desc">Relay outputs turn on for any nonzero value; PWM/servo outputs use the percentage.</span><input type="number" min="0" max="100" value="${Math.round(Number(c.paired_output_demand)*100)}" oninput="updateRegistryChannel('output',${index},'paired_output_demand',+this.value/100)"></div>` : ''}
     </div></div>
+    ${wet ? `<div class="registry-card-editor" style="display:block;margin-top:.65rem"><div class="registry-card-summary"><div><strong>Wet-glow pilot fuel</strong><div class="hw-desc">This output belongs only to this wet glow plug and follows its command automatically.</div></div></div><div class="hw-grid">
+      <div class="hw-field"><span class="hw-label">Pilot-fuel GPIO</span><span class="hw-desc">GPIO driving the wet glow plug's own pilot-fuel pump or valve.</span><select onchange="setAct('glow_plug','fuel_pin',+this.value)">${buildPinOptions(Number(act.fuel_pin ?? -1),'out')}</select></div>
+      <div class="hw-field"><span class="hw-label">Pilot-fuel signal</span><select onchange="setRegistryWetGlowFuelType(+this.value)"><option value="0"${fuelType===0?' selected':''}>Relay / on-off</option><option value="1"${fuelType===1?' selected':''}>PWM</option><option value="2"${fuelType===2?' selected':''}>Servo / ESC</option></select></div>
+      <div class="hw-field"><span class="hw-label">Active state</span><select onchange="setAct('glow_plug','fuel_active_h',this.value==='1')"><option value="1"${act.fuel_active_h!==false?' selected':''}>Active high</option><option value="0"${act.fuel_active_h===false?' selected':''}>Active low</option></select></div>
+      <div class="hw-field"><span class="hw-label">Pilot-fuel delay (seconds)</span><span class="hw-desc">Time from wet glow activation until its pilot fuel turns on.</span><input type="number" min="0" max="3600" step="0.1" value="${registryFormatValue(fuelDelayS,1)}" oninput="setRegistryWetGlowDelaySeconds(+this.value)"></div>
+      ${fuelType===1 ? `<div class="hw-field"><span class="hw-label">PWM frequency (Hz)</span><input type="number" min="1" max="100000" value="${Number(act.fuel_freq_hz ?? 1000)}" oninput="setAct('glow_plug','fuel_freq_hz',+this.value)"></div><div class="hw-field"><span class="hw-label">PWM resolution (bits)</span><input type="number" min="8" max="14" value="${Number(act.fuel_res_bits ?? 10)}" oninput="setAct('glow_plug','fuel_res_bits',+this.value)"></div><div class="hw-field"><span class="hw-label">Minimum PWM duty (%)</span><input type="number" min="0" max="100" step="0.1" value="${Number(act.fuel_pwm_min_pct ?? 0)}" oninput="setAct('glow_plug','fuel_pwm_min_pct',+this.value)"></div><div class="hw-field"><span class="hw-label">Maximum PWM duty (%)</span><input type="number" min="0" max="100" step="0.1" value="${Number(act.fuel_pwm_max_pct ?? 100)}" oninput="setAct('glow_plug','fuel_pwm_max_pct',+this.value)"></div>` : ''}
+      ${fuelType===2 ? `<div class="hw-field"><span class="hw-label">Minimum pulse (µs)</span><input type="number" min="500" max="2500" value="${Number(act.fuel_min_us ?? 1000)}" oninput="setAct('glow_plug','fuel_min_us',+this.value)"></div><div class="hw-field"><span class="hw-label">Maximum pulse (µs)</span><input type="number" min="500" max="2500" value="${Number(act.fuel_max_us ?? 2000)}" oninput="setAct('glow_plug','fuel_max_us',+this.value)"></div>` : ''}
+      ${fuelType!==0 ? `<div class="hw-field"><span class="hw-label">Pilot-fuel command (%)</span><span class="hw-desc">Demand applied after the delay.</span><input type="number" min="0" max="100" step="0.1" value="${Number(act.fuel_demand_pct ?? 100)}" oninput="setAct('glow_plug','fuel_demand_pct',+this.value)"></div>` : ''}
+    </div></div>` : ''}
   </div>`;
 }
 function registryStarterEnableSubcard(c) {

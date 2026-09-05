@@ -31,6 +31,10 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 - Every save path that reboots the ECU now shows the shared reconnect overlay.
 
 ### Fixed
+- Restored Wet Glow as a first-class Hardware output choice. It now creates and
+  pairs the glow element and Pilot Fuel output automatically; Pilot Fuel is also
+  clearly available as an independent pump/valve output for Sequence and
+  Controllers.
 - Setup Tool 0.7.2 no longer silently selects an older cached package when it
   starts while connected to an ECU Wi-Fi network without internet. Online
   checks prefer the immutable latest-release asset; an explicitly colocated

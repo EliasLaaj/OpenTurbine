@@ -269,7 +269,8 @@ async function optionDisabled(page, selector, value) {
     assert.match(sensorInterfaceUx.totEditor, /MAX6675/);
     assert.match(sensorInterfaceUx.totEditor, /MAX31856/);
     assert.doesNotMatch(sensorInterfaceUx.totEditor, /DS18B20/);
-    assert.match(sensorInterfaceUx.totSignalEditor, /TLA2528 (?:analog|ADC)/);
+    assert.match(sensorInterfaceUx.totSignalEditor, /Digital \/ SPI/);
+    assert.match(sensorInterfaceUx.totSignalEditor, /select[^>]*disabled/i);
     assert.match(sensorInterfaceUx.totEditor, /Sensor interface/);
     assert.match(sensorInterfaceUx.torqueEditor, /HX711 SCK GPIO/);
     assert.match(sensorInterfaceUx.torqueEditor, /Sensor interface/);

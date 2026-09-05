@@ -124,6 +124,10 @@ function registryStatus(c) {
       (engineActuatorPurpose || ['ab_valve','pilot_fuel'].includes(purpose)) &&
       Number(c.safe_demand || 0) !== 0)
     return {kind:'error', text:'Core engine outputs must initialize Off'};
+  if (direction === 'output' && actKey === 'glow_plug' &&
+      Number(cfg.actuators?.glow_plug?.type || 0) === 2 &&
+      Number(cfg.actuators?.glow_plug?.fuel_pin ?? -1) < 0)
+    return {kind:'error', text:'Wet-glow pilot-fuel GPIO required'};
   const dedicatedCurrent = ['oil_pump','glow_plug','igniter','igniter2'].includes(actKey) ? ensureActuatorObject(actKey) : null;
   const currentEnabled = dedicatedCurrent ? !!dedicatedCurrent.has_current : !!c.has_current;
   const currentPin = dedicatedCurrent ? dedicatedCurrent.current_pin : c.current_pin;
@@ -134,17 +138,6 @@ function registryStatus(c) {
     if (!registryPinIsAdc(currentPin)) return {kind:'error', text:'Current pin must be ADC'};
     if (Number(currentMvA ?? 0) <= 0) return {kind:'error', text:'Current mV/A invalid'};
     if (Number(currentZeroV ?? 0) < 0 || Number(currentZeroV ?? 0) > 3.3) return {kind:'error', text:'Current zero invalid'};
-  }
-  if (direction === 'output' && c.paired_output) {
-    const paired = (registryRoot().outputs || []).find(row =>
-      String(row?.id || '') === String(c.paired_output) &&
-      !String(row?.mirror_of || '') && registryDerivedPurpose('output', row) === 'pilot_fuel');
-    if (!['igniter','ab_igniter','glow_plug'].includes(purpose))
-      return {kind:'error', text:'Only an ignition device may own a paired start-fuel output'};
-    if (!paired) return {kind:'error', text:'Paired start-fuel output is missing or incompatible'};
-    const otherOwner = (registryRoot().outputs || []).find(row => row !== c &&
-      String(row?.paired_output || '') === String(c.paired_output));
-    if (otherOwner) return {kind:'error', text:`Start-fuel output is already paired with ${registryDisplayName('output',otherOwner,otherOwner.id)}`};
   }
   if (direction === 'output' && c.has_flow_monitor) {
     const inputPurpose = purpose === 'oil_pump' ? 'oil_flow' : purpose === 'scavenge_pump' ? 'scavenge_flow' : '';

@@ -222,7 +222,7 @@ An ESP32 GPIO can provide only a logic command. Use an interface rated for the r
 <tr><td>Valve / solenoid</td><td>Bleed or other on/off valve through a rated driver.</td></tr>
 <tr><td>Afterburner valve / pump</td><td>Dedicated afterburner fuel shutoff and delivery outputs used by AB sequences.</td></tr>
 <tr><td>Air starter</td><td>Air-start valve through an on/off driver.</td></tr>
-<tr><td>Start-fuel solenoid</td><td>Dedicated light-off fuel valve for an applicable combustion system.</td></tr>
+<tr><td>Pilot fuel</td><td>Independent pilot-fuel pump or valve available to sequencing and controllers, including wet-glow pairing.</td></tr>
 <tr><td>Air / fuel purge valve</td><td>Valve that can be placed in a custom safe sequence.</td></tr>
 <tr><td>Electric drain valve</td><td>Open/close output available to startup/shutdown sequences, simple Controllers and standby Tools tests. Configure its physical polarity or endpoints in Hardware.</td></tr>
 <tr><td>Variable nozzle / propeller pitch</td><td>Proportional servo/ESC output, or deliberate fine/coarse relay pitch; propeller pitch can be the N2 governor's controlled output.</td></tr>

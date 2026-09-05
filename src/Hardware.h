@@ -409,14 +409,11 @@ namespace Hardware {
     static constexpr uint8_t REG_OUTPUT_PRIMARY_OIL_LOOP = 0x40;
     inline uint8_t g_registryOutputMeta[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     inline uint32_t g_registryOutputCurrentLastMs = 0;
-    inline uint32_t g_ignitionPairSinceMs[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
-    inline bool g_pairedOutputOwned[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     inline uint32_t g_registryIgnitionPhaseMs[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     inline bool g_registryIgnitionActive[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     inline bool g_registryIgnitionCharging[ChannelRegistry::MAX_OUTPUT_CHANNELS] = {};
     struct RegistryOutputPlan {
         int8_t starterEnable = -1, airStarter = -1;
-        int8_t pilotFuel = -1;
         int8_t coolingFan = -1, scavengePump = -1, fuelPump = -1;
     };
     inline RegistryOutputPlan g_registryOutputPlan;
@@ -1065,8 +1062,6 @@ namespace Hardware {
     inline void buildRegistryOutputPlan() {
         auto& reg = HardwareConfig::channelRegistry;
         g_registryOutputPlan = RegistryOutputPlan{};
-        uint8_t pilotFuelCount = 0;
-        int8_t solePilotFuel = -1;
         for (uint8_t i = 0; i < reg.outputCount; ++i) {
             const auto& c = reg.outputs[i];
             const uint8_t kind = registryOutputKind(c);
@@ -1090,14 +1085,7 @@ namespace Hardware {
                 else if (kind == REG_OUTPUT_SCAVENGE_PUMP) g_registryOutputPlan.scavengePump = (int8_t)i;
                 else if (kind == REG_OUTPUT_FUEL_PUMP) g_registryOutputPlan.fuelPump = (int8_t)i;
             }
-            // Device-local wet-glow pairing is preferred.  The old shared
-            // pilot-fuel path is safe only when there is exactly one candidate.
-            if (kind == REG_OUTPUT_PILOT_FUEL) {
-                ++pilotFuelCount;
-                solePilotFuel = (int8_t)i;
-            }
         }
-        if (pilotFuelCount == 1) g_registryOutputPlan.pilotFuel = solePilotFuel;
     }
 
     inline float registryOutputMinimum(int8_t index, float demand) {
@@ -1209,18 +1197,10 @@ namespace Hardware {
 
     inline void updateRegistryOutputs() {
         auto& reg = HardwareConfig::channelRegistry;
-        auto& hw = HardwareConfig::instance();
         auto& ed = EngineData::instance();
         const uint32_t nowMs = millis();
         const bool sampleAuxCurrent = !g_registryOutputCurrentLastMs ||
                                       nowMs - g_registryOutputCurrentLastMs >= 10UL;
-        bool hasDeviceLocalPair = false;
-        for (uint8_t i = 0; i < reg.outputCount; ++i)
-            if (reg.outputs[i].installed && reg.outputs[i].ignitionProfileConfigured &&
-                reg.outputs[i].pairedOutputId[0]) {
-                hasDeviceLocalPair = true;
-                break;
-            }
         for (uint8_t i = 0; i < reg.outputCount; ++i) {
             const auto& c = reg.outputs[i];
             const uint8_t meta = g_registryOutputMeta[i];
@@ -1228,11 +1208,6 @@ namespace Hardware {
             if ((meta & REG_OUTPUT_PRIMARY_OIL_LOOP) && ed.mode != SysMode::RUNNING &&
                 reg.ownsCoreOutput(c))
                 ed.registryOutputDemand[i] = constrain(ed.oilPumpPct / 100.0f, 0.0f, 1.0f);
-            const bool wetGlowOwned =
-                kind == REG_OUTPUT_PILOT_FUEL && i == g_registryOutputPlan.pilotFuel &&
-                hw.hasGlowPlug && hw.glowPlugType == 2 && !hasDeviceLocalPair;
-            if (wetGlowOwned)
-                ed.registryOutputDemand[i] = constrain(ed.wetGlowFuelDemand, 0.0f, 1.0f);
             if (c.driver == ChannelRegistry::I2cRelay) {
                 const bool coreOwner = reg.ownsCoreOutput(c);
                 switch (kind) {
@@ -1296,47 +1271,6 @@ namespace Hardware {
             } else if (!mirroredCoreCurrent && (!c.hasCurrent || c.currentPin < 0)) {
                 ed.registryOutputCurrentAmps[i] = 0.0f;
                 ed.registryOutputCurrentHealthy[i] = false;
-            }
-        }
-        // Device-local wet-glow pairing is an explicit temporary owner of the
-        // selected pilot-fuel output. Each glow plug has its own delay and
-        // demand; missing IDs remain unresolved and never fall back to another
-        // fuel output. A paired output is released to Off on the first tick
-        // after its last requesting glow plug turns off.
-        float pairedDemand[ChannelRegistry::MAX_OUTPUT_CHANNELS];
-        for (uint8_t i = 0; i < ChannelRegistry::MAX_OUTPUT_CHANNELS; ++i) pairedDemand[i] = -1.0f;
-        for (uint8_t i = 0; i < reg.outputCount; ++i) {
-            const auto& ignition = reg.outputs[i];
-            if (!ignition.installed || !ignition.ignitionProfileConfigured ||
-                strcmp(ignition.purpose, "glow_plug") || !ignition.pairedOutputId[0]) {
-                g_ignitionPairSinceMs[i] = 0;
-                continue;
-            }
-            const auto* paired = reg.find(ignition.pairedOutputId, ChannelRegistry::Output);
-            if (!paired || !paired->installed || paired->mirrorOf[0] ||
-                strcmp(paired->purpose, "pilot_fuel")) {
-                g_ignitionPairSinceMs[i] = 0;
-                continue;
-            }
-            const uint8_t pairedIndex = (uint8_t)(paired - reg.outputs);
-            const bool ignitionOn = RelayDemand::requested(
-                OutputActivity::logicalDemand(ignition, i, ed));
-            if (!ignitionOn) {
-                g_ignitionPairSinceMs[i] = 0;
-                continue;
-            }
-            if (!g_ignitionPairSinceMs[i]) g_ignitionPairSinceMs[i] = nowMs;
-            if (nowMs - g_ignitionPairSinceMs[i] < ignition.pairedOutputDelayMs) continue;
-            pairedDemand[pairedIndex] = max(pairedDemand[pairedIndex],
-                constrain(ignition.pairedOutputDemand, 0.0f, 1.0f));
-        }
-        for (uint8_t i = 0; i < reg.outputCount; ++i) {
-            if (pairedDemand[i] >= 0.0f) {
-                ed.registryOutputDemand[i] = pairedDemand[i];
-                g_pairedOutputOwned[i] = true;
-            } else if (g_pairedOutputOwned[i]) {
-                ed.registryOutputDemand[i] = 0.0f;
-                g_pairedOutputOwned[i] = false;
             }
         }
         for (uint8_t i = 0; i < reg.outputCount; ++i)
@@ -2844,10 +2778,12 @@ namespace Hardware {
         requireReady(hw.hasGlowPlug,
                      hw.glowPlugOutputType == 1 ? (IActuator*)&g_actGlowPlugRelay : (IActuator*)&g_actGlowPlug,
                      "glow_plug", "Glow plug");
-        requireReady(hw.hasGlowPlug && hw.glowPlugType == 2,
-                     g_actWetGlowFuel,
-                     "pilot_fuel",
-                     "Wet-glow fuel");
+        if (hw.hasGlowPlug && hw.glowPlugType == 2 &&
+            (!g_actWetGlowFuel || !g_actWetGlowFuel->isReady())) {
+            ed.hardwareReady = false;
+            snprintf(ed.hardwareFault, sizeof(ed.hardwareFault),
+                     "Wet-glow fuel output failed to initialize");
+        }
         if (hw.hasPropPitch) {
             ed.propPitchDemand = propPitchParkDemand();
             if (g_actPropPitch) g_actPropPitch->set(ed.propPitchDemand);
@@ -3045,8 +2981,7 @@ namespace Hardware {
                 g_actGlowPlugRelay.setOn(RelayDemand::requested(glowDemand));
             else
                 g_actGlowPlug.set(glowDemand);
-            const bool registryWetGlowFuel = g_registryOutputPlan.pilotFuel >= 0;
-            if (hw.glowPlugType == 2 && (g_actWetGlowFuel || registryWetGlowFuel)) {
+            if (hw.glowPlugType == 2 && g_actWetGlowFuel) {
                 static bool s_wetGlowActive = false;
                 static unsigned long s_wetGlowOnMs = 0;
                 bool commandOn = RelayDemand::requested(glowDemand);

@@ -7,7 +7,7 @@
 <style>html,body{background:#101012;color:#f5f5f7}html[data-theme="ember"],html[data-theme="ember"] body{background:#14110d}html[data-theme="slate"],html[data-theme="slate"] body{background:#101416}html[data-theme="midnight"],html[data-theme="midnight"] body{background:#0e1120}html[data-theme="contrast"],html[data-theme="contrast"] body{background:#000}html[data-theme="daylight"],html[data-theme="daylight"] body{background:#f4f2ee;color:#1b1917}@keyframes otFailsafeReveal{to{visibility:visible}}html:not(.ot-theme-ready) body{visibility:hidden;animation:otFailsafeReveal 0s 8s forwards}</style>
 <title>OpenTurbine - Sequence</title>
 <script>try{var t=localStorage.getItem('ot_theme');if(t&&/^[a-z]+$/.test(t))document.documentElement.setAttribute('data-theme',t);}catch(e){}
-document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260901f',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260901f');s.text=c;document.head.appendChild(s);},{once:true});</script>
+document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new XMLHttpRequest();x.open('GET','/theme.js?v=20260905b',false);x.send(null);if(x.status>=200&&x.status<300)c=x.responseText;}catch(e){}if(!c){document.documentElement.classList.add('ot-theme-ready');return}var s=document.createElement('script');s.setAttribute('data-ot-version','20260905b');s.text=c;document.head.appendChild(s);},{once:true});</script>
 <style>
 #seq-validation-banner { margin-bottom: .6rem; }
 .seq-val-error, .seq-val-warn {
@@ -45,6 +45,11 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   border-radius: 999px; color: #ff6270; background: rgba(220,50,50,.10);
   font-size: .62rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
 }
+.block-picker-list{display:grid;grid-template-columns:minmax(0,1fr);gap:.55rem;overflow-x:hidden;overflow-y:auto;padding:.15rem;max-height:62vh}
+.block-picker-option{display:block;width:100%;min-width:0;max-width:100%;text-align:left;white-space:normal;overflow:hidden;overflow-wrap:anywhere;min-height:68px;padding:.65rem .75rem;text-transform:none;letter-spacing:0}
+.block-picker-option strong,.block-picker-option small{display:block;max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.block-picker-option strong{font-size:.78rem;color:var(--text)}
+.block-picker-option small{margin-top:.2rem;font-size:.67rem;line-height:1.4;color:var(--dim);font-weight:400}
 </style>
 </head>
 <body>
@@ -78,20 +83,20 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
 <div id="tab-startup">
   <div class="block-list" id="list-startup"></div>
   <div class="add-row" style="margin-top:.75rem">
-    <select id="add-startup-sel" aria-label="Startup block to add" title="Choose the next startup action or wait condition to add." onchange="updateBlockPreview('startup')"></select>
-    <button class="add-btn" onclick="addBlock('startup')">+ Add block</button>
+    <select id="add-startup-sel" hidden aria-label="Startup block to add" title="Available startup blocks."></select>
+    <button class="add-btn" onclick="openBlockPicker('startup')">+ Add block</button>
     <button class="add-btn" onclick="openCustomBlockDialog('startup')">+ Custom block</button>
   </div>
-  <div id="preview-startup" style="font-size:.72rem;color:var(--dim);margin-top:.35rem;min-height:1.4rem;line-height:1.5"></div>
+  <div id="preview-startup" hidden></div>
 </div>
 <div id="tab-shutdown" style="display:none">
   <div class="block-list" id="list-shutdown"></div>
   <div class="add-row" style="margin-top:.75rem">
-    <select id="add-shutdown-sel" onchange="updateBlockPreview('shutdown')"></select>
-    <button class="add-btn" onclick="addBlock('shutdown')">+ Add block</button>
+    <select id="add-shutdown-sel" hidden aria-label="Shutdown block to add" title="Available shutdown blocks."></select>
+    <button class="add-btn" onclick="openBlockPicker('shutdown')">+ Add block</button>
     <button class="add-btn" onclick="openCustomBlockDialog('shutdown')">+ Custom block</button>
   </div>
-  <div id="preview-shutdown" style="font-size:.72rem;color:var(--dim);margin-top:.35rem;min-height:1.4rem;line-height:1.5"></div>
+  <div id="preview-shutdown" hidden></div>
 </div>
 <div id="tab-afterburner" style="display:none">
   <div class="ab-criteria-box" style="margin-bottom:.85rem">
@@ -157,11 +162,11 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   </p>
   <div class="block-list" id="list-afterburner"></div>
   <div class="add-row" style="margin-top:.75rem">
-    <select id="add-afterburner-sel" onchange="updateBlockPreview('afterburner')"></select>
-    <button class="add-btn" onclick="addBlock('afterburner')">+ Add block</button>
+    <select id="add-afterburner-sel" hidden aria-label="Afterburner light-up block to add" title="Available afterburner light-up blocks."></select>
+    <button class="add-btn" onclick="openBlockPicker('afterburner')">+ Add block</button>
     <button class="add-btn" onclick="openCustomBlockDialog('afterburner')">+ Custom block</button>
   </div>
-  <div id="preview-afterburner" style="font-size:.72rem;color:var(--dim);margin-top:.35rem;min-height:1.4rem;line-height:1.5"></div>
+  <div id="preview-afterburner" hidden></div>
 
   <!-- Light Off section -->
   <div class="ab-section-hdr" style="margin-top:1.75rem">Light Off Sequence</div>
@@ -171,11 +176,18 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   </p>
   <div class="block-list" id="list-ab-shut"></div>
   <div class="add-row" style="margin-top:.75rem">
-    <select id="add-ab-shut-sel" onchange="updateBlockPreview('ab-shut')"></select>
-    <button class="add-btn" onclick="addBlock('ab-shut')">+ Add block</button>
+    <select id="add-ab-shut-sel" hidden aria-label="Afterburner light-off block to add" title="Available afterburner light-off blocks."></select>
+    <button class="add-btn" onclick="openBlockPicker('ab-shut')">+ Add block</button>
     <button class="add-btn" onclick="openCustomBlockDialog('ab-shut')">+ Custom block</button>
   </div>
-  <div id="preview-ab-shut" style="font-size:.72rem;color:var(--dim);margin-top:.35rem;min-height:1.4rem;line-height:1.5"></div>
+  <div id="preview-ab-shut" hidden></div>
+</div>
+
+<div id="block-picker-dlg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:220;align-items:center;justify-content:center;padding:1rem">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;width:min(760px,96vw);max-height:88vh;display:flex;flex-direction:column;gap:.75rem">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem"><div><h3 id="block-picker-title" style="margin:0;font-size:.95rem">Add block</h3><div style="font-size:.7rem;color:var(--dim);margin-top:.2rem">Click a block to add it to the end of this sequence.</div></div><button type="button" onclick="closeBlockPicker()" aria-label="Close block picker">Close</button></div>
+    <div id="block-picker-list" class="block-picker-list"></div>
+  </div>
 </div>
 
 <!-- Custom block dialog -->

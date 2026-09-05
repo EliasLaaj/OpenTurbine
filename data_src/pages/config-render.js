@@ -68,7 +68,7 @@ function controllerChannelName(row) {
   const purposeNames = {
     throttle:'Throttle Input', idle:'Idle Input', n1_speed:'N1 Speed', n2_speed:'N2 Speed',
     oil_pressure:'Oil Pressure', main_fuel:'Main Fuel Metering', oil_pump:'Oil Pump',
-    prop_pitch:'Propeller Pitch', ab_pump:'Afterburner Fuel Pump'
+    prop_pitch:'Propeller Pitch', ab_pump:'Afterburner Fuel Pump', pilot_fuel:'Pilot Fuel'
   };
   const raw = String(row.name || '').trim();
   const internalLooking = !raw || raw === 'Main Fuel Pump' || raw === String(row.id || '') ||

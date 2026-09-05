@@ -434,7 +434,7 @@ async function goto(page, route, waitSelector) {
     assert.doesNotMatch(n1PullbackWithoutTrip, /hard N1 shutdown/);
     results.push('config warns about unsafe shaft, hot-start and windmilling-oil relationships');
     await goto(page, 'controllers.html', '#cf-tot_limit');
-    assert.equal(await page.locator('#dev-mode-tools-link').getAttribute('href'), '/tools.html?v=20260901f#card-dev-mode');
+    assert.equal(await page.locator('#dev-mode-tools-link').getAttribute('href'), '/tools.html?v=20260905b#card-dev-mode');
     assert.equal(await page.locator('#btn-dev-mode').count(), 0,
       'Config must not bypass the guarded Developer Mode control on Tools');
     assert.equal(await shown(page, '[data-built-in="afterburner"]'), true,

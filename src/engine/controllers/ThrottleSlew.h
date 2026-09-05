@@ -4,6 +4,7 @@
 #include "../../system/Config.h"
 #include "../../system/HardwareConfig.h"
 #include "../../system/FeedbackRequirements.h"
+#include "ThrottleCommandLatch.h"
 #include <Arduino.h>
 
 // ============================================================
@@ -66,6 +67,7 @@ public:
         // does not dip to zero when RUNNING is entered after the Spool block.
         // reset() still starts from 0 and is used at power-up initialisation.
         _current = constrain(EngineData::instance().throttleDemand, 0.0f, 1.0f);
+        _requested = _current;
         _lastMs  = millis();
     }
 
@@ -78,7 +80,11 @@ public:
         if (dt <= 0.0f) dt = 0.001f;
         else if (dt > 0.05f) dt = 0.05f;
 
-        float target = constrain(ed.throttleDemand, 0.0f, 1.0f);
+        // throttleDemand is both the command mailbox and the published slewed
+        // value. Preserve a one-shot sequence target when the next loop sees
+        // our own partial ramp step; genuine external changes replace it.
+        _requested = ThrottleCommandLatch::retain(ed.throttleDemand, _current, _requested);
+        float target = _requested;
         bool protectionActive = false;
         // Dry Bench Mode intentionally permits actuator travel without fitted
         // feedback. In normal operation this interlock must still prevent a
@@ -192,6 +198,7 @@ public:
 
     void reset() override {
         _current = 0;
+        _requested = 0;
         _lastMs  = millis();
         _lastP1 = _lastP2 = _lastTorque = 0.0f;
         _p1Rate = _p2Rate = _torqueRate = 0.0f;
@@ -208,6 +215,7 @@ public:
 
 private:
     float         _current = 0;
+    float         _requested = 0;
     unsigned long _lastMs  = 0;
     float _lastP1 = 0.0f, _lastP2 = 0.0f, _lastTorque = 0.0f;
     float _p1Rate = 0.0f, _p2Rate = 0.0f, _torqueRate = 0.0f;

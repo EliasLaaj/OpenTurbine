@@ -288,17 +288,16 @@ function updateRegistryChannel(direction, index, key, value) {
   if (key === 'ignition_mode') value = Math.max(0, Math.min(2, Math.round(Number(value) || 0)));
   if (key === 'ignition_dwell_ms' || key === 'ignition_rest_ms') value = Math.max(1, Math.min(200, Math.round(Number(value) || 1)));
   if (key === 'ignition_coil_sat_a') value = Math.max(0.001, Math.min(1000, Number(value) || 8));
-  if (key === 'ignition_preheat_ms' || key === 'paired_output_delay_ms') value = Math.max(0, Math.min(3600000, Math.round(Number(value) || 0)));
+  if (key === 'ignition_preheat_ms') value = Math.max(0, Math.min(3600000, Math.round(Number(value) || 0)));
   if (key === 'ignition_hot_timeout_ms') value = Math.max(100, Math.min(3600000, Math.round(Number(value) || 30000)));
-  if (key === 'ignition_peak_demand' || key === 'ignition_hold_demand' || key === 'paired_output_demand') value = Math.max(0, Math.min(1, Number(value) || 0));
+  if (key === 'ignition_peak_demand' || key === 'ignition_hold_demand') value = Math.max(0, Math.min(1, Number(value) || 0));
   if (key === 'ignition_wait_hot') value = !!value;
-  if (key === 'paired_output') value = String(value || '');
   if (key === 'minimum_flow_l_min') value = Math.max(0.001, Number(value) || 0.1);
   if (key === 'safe_demand') value = Math.max(0, Math.min(1, Number(value) || 0));
   if (key === 'min_run_demand') value = Math.max(0, Math.min(1, Number(value) || 0));
   if (key === 'min' || key === 'max') value = Number.isFinite(Number(value)) ? Number(value) : 0;
   c[key] = value;
-  if (key.startsWith('ignition_') || key.startsWith('paired_output')) {
+  if (key.startsWith('ignition_')) {
     // Once any device-local ignition field is edited, persist the complete
     // profile so the remaining values cannot silently fall back to globals.
     c.ignition_mode ??= 0;
@@ -310,9 +309,6 @@ function updateRegistryChannel(direction, index, key, value) {
     c.ignition_hold_demand ??= .3;
     c.ignition_wait_hot ??= false;
     c.ignition_hot_timeout_ms ??= 30000;
-    c.paired_output ??= '';
-    c.paired_output_delay_ms ??= 8000;
-    c.paired_output_demand ??= 1;
     const actKey = registryCoreActuatorKey(c);
     if (actKey === 'igniter' || actKey === 'igniter2') {
       const act = ensureActuatorObject(actKey);
@@ -321,11 +317,6 @@ function updateRegistryChannel(direction, index, key, value) {
       act.dwell_ms = c.ignition_dwell_ms;
       act.rest_ms = c.ignition_rest_ms;
       act.coil_sat_a = c.ignition_coil_sat_a;
-    } else if (actKey === 'glow_plug') {
-      const act = ensureActuatorObject(actKey);
-      act.type = c.paired_output ? 2 : 0;
-      act.fuel_delay_ms = c.paired_output_delay_ms;
-      act.fuel_demand_pct = c.paired_output_demand * 100;
     }
   }
   if (direction === 'input' && registryTemperatureIsSpi(c) &&
@@ -334,7 +325,7 @@ function updateRegistryChannel(direction, index, key, value) {
   dirty(); updateSaveButton();
   if (['pin','current_pin','spi_clk','spi_cs','spi_miso','spi_mosi','hx711_clk',
        'pullup','pulldown','active_high','invert','ntc_pullup','has_current','has_flow_monitor',
-       'min_run_demand','force_safe_on_fault','ignition_mode','ignition_wait_hot','paired_output'].includes(key)) renderRegistryInventory();
+       'min_run_demand','force_safe_on_fault','ignition_mode','ignition_wait_hot'].includes(key)) renderRegistryInventory();
 }
 function syncRegistryTorqueAdapter(c) {
   if (!cfg.sensors) cfg.sensors = {};
@@ -526,10 +517,12 @@ function renderRegistryAddCatalog() {
     <div class="registry-add-group-title">${escapeHtmlText(group.name)}</div>
     <div class="registry-add-group-grid">${group.rows.map(({p, i}) => {
       const purpose = p.purpose || registryDerivedPurpose(_registryAddDirection, p);
+      const requiredSlots = 1;
       const alreadyInstalled = registryPurposeIsSingleton(_registryAddDirection, purpose) &&
         (r[_registryAddDirection + 's'] || []).some(c => registryDerivedPurpose(_registryAddDirection, c) === purpose);
-      const disabled = used >= max || alreadyInstalled;
-      const detail = alreadyInstalled ? 'Already installed' : (used >= max ? 'Capacity full' :
+      const capacityFull = used + requiredSlots > max;
+      const disabled = capacityFull || alreadyInstalled;
+      const detail = alreadyInstalled ? 'Already installed' : (capacityFull ? (requiredSlots > 1 ? 'Capacity full — needs 2 free output slots' : 'Capacity full') :
         (pcbProfileActive() ? 'Choose a compatible PCB connector' :
           (Number(p.temp_interface) === 2 ? 'MAX31855 K-type default' : `${driverName(p.driver)} default`)));
       const description = registryPresetDescription(_registryAddDirection, p);
@@ -548,7 +541,9 @@ function selectRegistryAddPreset(index) {
   const r = registryRoot();
   const rows = r[_registryAddDirection + 's'];
   const max = registryCapacity(_registryAddDirection);
-  if (rows.length >= max) return registryAddError(`Registry capacity is full (${rows.length}/${max}). Remove an unused ${_registryAddDirection} first.`);
+  const requiredSlots = 1;
+  if (rows.length + requiredSlots > max)
+    return registryAddError(`Registry capacity is full (${rows.length}/${max}). Remove an unused ${_registryAddDirection} first.`);
   const purpose = preset.purpose || registryDerivedPurpose(_registryAddDirection,preset);
   const existing = rows.filter(c=>registryDerivedPurpose(_registryAddDirection,c)===purpose).length;
   if (existing > 0 && registryPurposeIsSingleton(_registryAddDirection, purpose))
@@ -591,6 +586,9 @@ function createRegistryChannelFromPreset(index, pcbChoice, bareGpio = false) {
   if (!preset) return;
   const r = registryRoot();
   const rows = r[_registryAddDirection + 's'];
+  const requiredSlots = 1;
+  if (rows.length + requiredSlots > registryCapacity(_registryAddDirection))
+    return registryAddError('Registry capacity is full.');
   const purpose = preset.purpose || registryDerivedPurpose(_registryAddDirection,preset);
   const existing = rows.filter(c=>registryDerivedPurpose(_registryAddDirection,c)===purpose).length;
   const name = existing > 0 && purpose !== 'generic' ? `${preset.name} ${existing + 1}` : preset.name;
@@ -642,6 +640,28 @@ function createRegistryChannelFromPreset(index, pcbChoice, bareGpio = false) {
   _registryEditOpen.add(registryEditKey(_registryAddDirection, rows.length - 1));
   renderRegistryInventory();
   dirty(); updateSaveButton(); applyActuatorVisibility();
+}
+function setRegistryGlowType(type) {
+  const act = ensureActuatorObject('glow_plug');
+  act.type = Number(type) === 2 ? 2 : 0;
+  if (act.type === 2) {
+    act.fuel_pin ??= -1; act.fuel_type ??= 0; act.fuel_active_h ??= true;
+    act.fuel_delay_ms ??= 8000; act.fuel_demand_pct ??= 100;
+    act.fuel_min_us ??= 1000; act.fuel_max_us ??= 2000;
+    act.fuel_freq_hz ??= 1000; act.fuel_res_bits ??= 10;
+    act.fuel_pwm_min_pct ??= 0; act.fuel_pwm_max_pct ??= 100;
+  }
+  dirty(); updateSaveButton(); refreshAllPins(); renderRegistryInventory();
+}
+function setRegistryWetGlowFuelType(type) {
+  const act = ensureActuatorObject('glow_plug');
+  act.fuel_type = Math.max(0, Math.min(2, Math.round(Number(type) || 0)));
+  dirty(); updateSaveButton(); renderRegistryInventory();
+}
+function setRegistryWetGlowDelaySeconds(seconds) {
+  const act = ensureActuatorObject('glow_plug');
+  act.fuel_delay_ms = Math.round(Math.max(0, Math.min(3600, Number(seconds) || 0)) * 1000);
+  dirty(); updateSaveButton();
 }
 function resetRegistryPurposeDefaults(direction, purpose) {
   if (direction !== 'output') return;
@@ -711,11 +731,6 @@ function registryRemovalImpact(direction, id) {
   const handle = idx >= 0 ? (direction === 'input' ? 80 + idx : 64 + idx) : -999;
   const bindCount = r.bindings.filter(b => b.channel === id).length;
   if (bindCount) impact.push(`${bindCount} registry binding(s)`);
-  if (direction === 'output') {
-    const pairedOwners = (r.outputs || []).filter(out =>
-      String(out?.paired_output || '') === String(id || ''));
-    if (pairedOwners.length) impact.push(`${pairedOwners.length} wet-glow pilot-fuel pairing(s) will need repair`);
-  }
   const loopCount = (cfg.oil_loops || []).filter(l => l && (l.pressure_input === id || l.pump_output === id)).length;
   if (loopCount) impact.push(`${loopCount} oil loop definition(s)`);
   const seqKeys = ['startup_enter_actions','startup_exit_actions','shutdown_enter_actions','shutdown_exit_actions','ab_enter_actions','ab_exit_actions','ab_shut_enter_actions','ab_shut_exit_actions'];
@@ -765,8 +780,6 @@ function cleanupRegistryReferences(direction, id) {
   r.bindings = r.bindings.filter(b => b.channel !== id);
   if (direction === 'output') (r.outputs || []).forEach(out => {
     if (String(out?.mirror_of || '') === String(id || '')) delete out.mirror_of;
-    // Keep paired_output stable so the owning ignition card shows the missing
-    // device and can be repaired. Never silently select another fuel output.
   });
   cfg.oil_loops = (cfg.oil_loops || []).filter(l => !(l && (refMatches(l.pressure_input) || refMatches(l.pump_output))));
   // Sequence side actions and custom sequence blocks keep stable string IDs.
@@ -865,9 +878,9 @@ function duplicateRegistryChannel(index) {
   copy.has_flow_monitor = false;
   copy.minimum_flow_l_min = 0;
   copy.flow_input = '';
-  // A duplicated ignition device may reuse its tuning, but it must never
-  // silently share the source device's pilot-fuel output.
-  copy.paired_output = '';
+  delete copy.paired_output;
+  delete copy.paired_output_delay_ms;
+  delete copy.paired_output_demand;
   r.outputs.push(copy);
   _registryEditOpen.add(registryEditKey('output', r.outputs.length - 1));
   renderRegistryInventory();

@@ -236,9 +236,10 @@ expect('relay-style igniters expose and retain only simple on-off behavior',
   hardwareCatalog.includes('This relay-style output is a simple on/off igniter') &&
   hardwareSave.includes('c.ignition_mode = 0') &&
   hardwareSave.includes('Simple on/off (relay capability)'));
-expect('wet-glow registry fuel replaces rather than duplicates the nested GPIO',
-  hwConfig.includes('wetGlowFuelPin = -1') && hwConfig.includes('strcmp(c.purpose, "pilot_fuel")') &&
-  hardwareSave.includes("registryDerivedPurpose('output', c) === 'pilot_fuel'"));
+expect('wet-glow pilot fuel remains a dedicated nested GPIO independent of registry Pilot Fuel',
+  !hwConfig.includes('The registry card is the sole wet-glow fuel endpoint') &&
+  hwConfig.includes('!addPin(item["fuel_pin"] | -1)') &&
+  hardwareSave.includes("requirePin(cfg.actuators.glow_plug, 'fuel_pin', 'Wet Glow Fuel')"));
 expect('native pre-start safety inputs use their asserted physical level',
   main.includes('START blocked by DI ch%d') &&
   main.includes('channel.activeModes & (1u << (int)SysMode::STARTUP)') &&
@@ -356,11 +357,12 @@ expect('repeatable general typed sensors remain first-class registry inputs',
   hardwareHtml.includes('General pressure') &&
   hardwareHtml.includes('General flow') &&
   hardwareHtml.includes('General current'));
-expect('each glow plug owns the behavior used by its exact sequence target',
+expect('glow output owns sequence behavior and exposes its compound wet-glow hardware',
   main.includes('output->ignitionHoldDemand') &&
   main.includes('const float demand = on ? _onDemand : 0.0f') &&
-  hardwareCatalog.includes('Ignition behavior for this glow plug') &&
-  hardwareCatalog.includes('Paired start-fuel output') &&
+  hardwareCatalog.includes('Glow-plug type and ignition behavior') &&
+  hardwareCatalog.includes('Wet-glow pilot fuel') &&
+  hardwareCatalog.includes('Pilot-fuel GPIO') &&
   !configHtml.includes('Shared preheat profile used by Glow Preheat sequence blocks'));
 expect('windmilling oil protection is explicit opt-in and cannot drive a pump while disabled',
   configCpp.includes('standbyOilEnabled   = false') &&
@@ -776,10 +778,10 @@ expect('accepted STOP and fault transitions cut hazardous hardware before sensor
   hardware.includes('Oil, scavenge and cooling outputs are deliberately left') &&
   main.includes('if (writePhysical) Hardware::cutHazardousOutputsNow();') &&
   main.indexOf('checkStopSwitch();') < main.indexOf('Hardware::updateSensors();'));
-expect('standalone start fuel is not overwritten by wet-glow ownership',
-  hardware.includes('const bool wetGlowOwned') &&
-  hardware.includes('hw.hasGlowPlug && hw.glowPlugType == 2') &&
-  !hardware.includes('if (!strcmp(c.purpose, "pilot_fuel") ||\n                !strcmp(c.purpose, "wet_glow_fuel"))'));
+expect('standalone pilot fuel is never commandeered by wet-glow ownership',
+  !hardware.includes('const bool wetGlowOwned') &&
+  !hardware.includes('g_registryOutputPlan.pilotFuel') &&
+  hardware.includes('hw.glowPlugType == 2 && g_actWetGlowFuel'));
 expect('wet-glow registry fuel has one supported pilot-fuel purpose and owner',
   !hardware.includes('REG_OUTPUT_WET_GLOW_FUEL') &&
   !hardware.includes('g_registryOutputPlan.wetGlowFuel') &&
@@ -833,9 +835,10 @@ expect('auxiliary actuator limits follow the explicit primary owner instead of r
   hardware.includes('Use the explicit core owner, never the') &&
   !hardware.includes('kind == REG_OUTPUT_COOLING_FAN && g_registryOutputPlan.coolingFan < 0') &&
   channelRegistry.includes('Several %s outputs are fitted; select one primary device'));
-expect('shared wet-glow pilot fuel is used only when exactly one candidate exists',
-  hardware.includes('if (pilotFuelCount == 1) g_registryOutputPlan.pilotFuel = solePilotFuel') &&
-  hardware.includes('Device-local wet-glow pairing is preferred'));
+expect('wet glow uses only its dedicated actuator while pilot fuel remains independent',
+  !hardware.includes('pilotFuelCount') &&
+  !hardware.includes('pairedOutputOwned') &&
+  hardware.includes('Wet-glow fuel output failed to initialize'));
 expect('normal sequence ignition cleanup is exact while emergency cuts remain category-wide',
   sequenceIgnition.includes('sequenceIgnitionMask') &&
   sequenceIgnition.includes('RulesEngine::applyActuatorDemand') &&
@@ -1240,8 +1243,8 @@ expect('PWM timing is constrained by real timer capability in firmware and Hardw
   hardwareRegistryView.includes('PWM timing is not achievable'));
 expect('glow PWM has one canonical timing authority while wet-glow fuel keeps its independent timer',
   hardwareCatalog.includes('PWM carrier frequency (Hz)') &&
-  hardwareCatalog.includes('paired_output_delay_ms') &&
-  hardwareCatalog.includes('Pilot-fuel delay (ms)') &&
+  hardwareCatalog.includes('Pilot-fuel delay (seconds)') &&
+  hardwareCatalog.includes("setAct('glow_plug','fuel_freq_hz'") &&
   !hardwareCatalog.includes("setAct('glow_plug','freq_hz'"));
 expect('web START timeout cancels unclaimed work and the ECU discards every canceled request',
   commandQueue.includes('claimPendingResult(uint32_t requestId)') &&

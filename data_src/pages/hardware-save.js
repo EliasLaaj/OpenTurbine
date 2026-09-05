@@ -53,8 +53,6 @@ function _registryFieldLabel(key) {
     ignition_coil_sat_a:'Coil saturation current', ignition_preheat_ms:'Device preheat duration',
     ignition_peak_demand:'Glow peak command', ignition_hold_demand:'Glow hold command',
     ignition_wait_hot:'Wait for hot confirmation', ignition_hot_timeout_ms:'Hot-confirm timeout',
-    paired_output:'Paired start-fuel output', paired_output_delay_ms:'Pilot-fuel delay',
-    paired_output_demand:'Pilot-fuel command',
     has_flow_monitor:'Flow monitoring', minimum_flow_l_min:'Minimum oil flow', flow_input:'Flow sensor'
   })[key] || key.replace(/_/g, ' ');
 }
@@ -143,8 +141,7 @@ function _registryEffectiveValue(key, value) {
     minimum_flow_l_min:0, flow_input:'', ignition_mode:0, ignition_dwell_ms:6,
     ignition_rest_ms:3, ignition_coil_sat_a:8, ignition_preheat_ms:10000,
     ignition_peak_demand:.8, ignition_hold_demand:.3, ignition_wait_hot:false,
-    ignition_hot_timeout_ms:30000, paired_output:'', paired_output_delay_ms:8000,
-    paired_output_demand:1
+    ignition_hot_timeout_ms:30000
   };
   return Object.prototype.hasOwnProperty.call(defaults, key) ? defaults[key] : value;
 }
@@ -380,6 +377,13 @@ function _releaseInactivePinConflicts() {
 async function saveHardware() {
   _releaseInactivePinConflicts();
   syncSharedSpiChannels();
+  // v2.3 briefly stored wet-glow links on registry outputs. Wet glow now owns
+  // dedicated pilot-fuel hardware, so retire those links during the next save.
+  (registryRoot().outputs || []).forEach(channel => {
+    delete channel.paired_output;
+    delete channel.paired_output_delay_ms;
+    delete channel.paired_output_demand;
+  });
   // Firmware string capacities are byte based. HTML maxlength counts UTF-16
   // characters, so accented text and symbols can otherwise pass the browser
   // check and be rejected only after the user reviews the save.
@@ -522,9 +526,7 @@ async function saveHardware() {
     if (item?.enabled && !registryOwned) requirePin(item, 'pin', label);
   }
   if (cfg.actuators?.glow_plug?.enabled && Number(cfg.actuators.glow_plug.type || 0) === 2) {
-    const registryFuel = (registryRoot().outputs || []).some(c =>
-      registryDerivedPurpose('output', c) === 'pilot_fuel');
-    if (!registryFuel) requirePin(cfg.actuators.glow_plug, 'fuel_pin', 'Wet Glow Fuel');
+    requirePin(cfg.actuators.glow_plug, 'fuel_pin', 'Wet Glow Fuel');
   }
   for (const [key, label] of [['tot','TOT'], ['tit','TIT']]) {
     const item = cfg.sensors?.[key];

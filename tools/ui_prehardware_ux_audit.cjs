@@ -116,9 +116,9 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(gs, /Calibrate/i);
     assert.match(gs, /not physical verification/i);
     assert.doesNotMatch(gs, /completed on this browser/i);
-    assert.equal(await page.locator('#getting-started-banner a[href="/hardware.html?v=20260901f"]').count(), 1);
-    assert.equal(await page.locator('#getting-started-banner a[href="/controllers.html?v=20260901f"]').count(), 1);
-    assert.equal(await page.locator('#getting-started-banner a[href="/calibration.html?v=20260901f"]').count(), 1);
+    assert.equal(await page.locator('#getting-started-banner a[href="/hardware.html?v=20260905b"]').count(), 1);
+    assert.equal(await page.locator('#getting-started-banner a[href="/controllers.html?v=20260905b"]').count(), 1);
+    assert.equal(await page.locator('#getting-started-banner a[href="/calibration.html?v=20260905b"]').count(), 1);
     await page.evaluate(() => localStorage.setItem('openturbine_setup_progress_v1',
       JSON.stringify({ hardware: Date.now(), tools: Date.now() })));
     await page.reload();
@@ -214,22 +214,55 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     // Outputs may legitimately be multi-instance (series valves, redundant
     // pumps, auxiliary starters, etc.). A full test inventory can still make
     // every catalog entry unavailable because the channel capacity is real.
-    for (const label of ['Main fuel pump', 'Starter', 'Starter enable', 'Fuel shutoff', 'Igniter', 'AB igniter', 'Afterburner fuel shutoff valve', 'Afterburner fuel pump', 'Glow plug', 'Prop pitch', 'Relay output', 'PWM output']) {
+    for (const label of ['Main fuel pump', 'Starter', 'Starter enable', 'Fuel shutoff', 'Igniter', 'AB igniter', 'Afterburner fuel shutoff valve', 'Afterburner fuel pump', 'Glow plug', 'Pilot fuel', 'Prop pitch', 'Relay output', 'PWM output']) {
       assert.doesNotMatch(outputAddChoices[label]?.detail || '', /already installed/i);
       if (outputAddChoices[label]?.disabled) assert.match(outputAddChoices[label]?.detail || '', /capacity full/i);
     }
     assert.match(outputAddChoices['Afterburner fuel pump']?.description || '', /afterburner manifold/i);
     assert.match(outputAddChoices['Afterburner fuel shutoff valve']?.description || '', /admits fuel|normally closed/i);
+    assert.match(outputAddChoices['Glow plug']?.description || '', /hot-surface ignition/i);
+    assert.match(outputAddChoices['Pilot fuel']?.description || '', /Sequence and Controllers.*separate from.*wet glow plug/i);
     await page.locator('#registry-add-modal button[onclick="closeRegistryAddDialog()"]' ).click();
     assert.equal(await page.locator('#registry-inputs .registry-card[data-registry-id="oil_flow"]').count(), 0);
     const oilPumpCard = page.locator('#registry-outputs .registry-card[data-registry-id="oil_pump"]');
     await oilPumpCard.locator('button', {hasText:'Edit'}).click();
     assert.match((await oilPumpCard.textContent()).trim(), /Flow sensing & monitoring.*Main oil-pump flow sensor.*Pulses \/ litre.*Minimum flow.*Safety & Limits.*Oil Pressure Safety/is);
     assert.match((await oilPumpCard.textContent()).trim(), /Current sensing.*Calibration page/is);
-    assert.equal(await oilPumpCard.locator('a[href="/controllers.html?v=20260901f#cf-oil_mm"]').count(), 1);
-    assert.equal(await oilPumpCard.locator('a[href="/controllers.html?v=20260901f#cf-so_en"]').count(), 1);
-    assert.equal(await oilPumpCard.locator('a[href="/sequence.html?v=20260901f#tab-startup"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/controllers.html?v=20260905b#cf-oil_mm"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/controllers.html?v=20260905b#cf-so_en"]').count(), 1);
+    assert.equal(await oilPumpCard.locator('a[href="/sequence.html?v=20260905b#tab-startup"]').count(), 1);
     results.push('add-device catalog reserves singleton checks for sensors while multi-instance outputs and pump-owned monitoring remain clear');
+
+    const savedHardware = await page.evaluate(() => structuredClone(cfg));
+    await page.evaluate(() => {
+      cfg.channel_registry = {version:1, bindings:[], inputs:[], outputs:[], input_capacity:16, output_capacity:16};
+      cfg.actuators ||= {};
+      renderRegistryInventory();
+    });
+    await page.locator('button[onclick="addRegistryChannel(\'output\')"]').click();
+    await page.getByRole('button', {name:/^Glow plug /}).click();
+    await page.evaluate(() => {
+      setRegistryGlowType(2);
+      setRegistryWetGlowDelaySeconds(3.5);
+    });
+    const wetGlow = await page.evaluate(() => ({
+      outputs: cfg.channel_registry.outputs.map(({id,name,purpose}) => ({id,name,purpose})),
+      legacyType: cfg.actuators.glow_plug.type,
+      fuelPin: cfg.actuators.glow_plug.fuel_pin,
+      fuelDelayMs: cfg.actuators.glow_plug.fuel_delay_ms
+    }));
+    assert.equal(wetGlow.outputs.length, 1);
+    assert.deepEqual(wetGlow.outputs.map(row => row.purpose), ['glow_plug']);
+    assert.equal(wetGlow.legacyType, 2);
+    assert.equal(wetGlow.fuelPin, -1);
+    assert.equal(wetGlow.fuelDelayMs, 3500);
+    assert.match(await text(page, '#registry-outputs'), /Glow Plug.*Glow-plug type.*Wet glow plug.*Wet-glow pilot fuel.*Pilot-fuel GPIO.*Pilot-fuel delay \(seconds\)/is);
+    await page.evaluate(saved => {
+      Object.keys(cfg).forEach(key => delete cfg[key]);
+      Object.assign(cfg, saved);
+      renderRegistryInventory();
+    }, savedHardware);
+    results.push('Glow plug selects normal or wet mode in one card with dedicated delayed pilot-fuel hardware');
 
     const multiPumpFlow = await page.evaluate(() => {
       cfg.channel_registry = {version:1, bindings:[], inputs:[
@@ -1112,7 +1145,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.match(await throttleCard.textContent(), /RC pulse calibration.*1075.*1925.*Calibration page.*authoritative/is);
     assert.equal(await throttleCard.locator('input[oninput*="updateRegistryRangeField"]').count(), 0,
       'Hardware must not expose RC endpoints that the ECU does not consume');
-    assert.ok(await throttleCard.locator('a[href="/calibration.html?v=20260901f#throttle-cal-row"]').count() >= 1);
+    assert.ok(await throttleCard.locator('a[href="/calibration.html?v=20260905b#throttle-cal-row"]').count() >= 1);
     results.push('canonical RC operator endpoints have one visible authority on the Calibration page');
 
     await reset(page);

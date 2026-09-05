@@ -46,6 +46,14 @@ function configuredRegistryOutput(d, purposes, ids = []) {
   return outputs.find(ch => ch && idSet.has(String(ch.id || ''))) ||
     outputs.find(ch => ch && purposeSet.has(String(ch.purpose || '')));
 }
+function configuredOutputDemand(channel, fallbackDemand = 0) {
+  const legacy = Number(fallbackDemand);
+  const registry = Number(channel?.demand);
+  return Math.max(0, Math.min(1, Math.max(
+    Number.isFinite(legacy) ? legacy : 0,
+    Number.isFinite(registry) ? registry : 0
+  )));
+}
 function registryOutputIsRelay(ch) {
   const driver = Number(ch?.driver);
   return driver === 4 || driver === 11; // native GPIO relay or TCA9554 I2C relay
@@ -505,7 +513,11 @@ function applyData(d) {
   if (oilCard && d.has_oil_press !== undefined) oilCard.style.display = d.has_oil_press ? '' : 'none';
   setText('oil-demand-val', d.oil_demand !== undefined ? toDispPress(Number(d.oil_demand)).toFixed(2) : '—');
   const baseThrottle = d.throttle_demand !== undefined ? Number(d.throttle_demand) : undefined;
-  const effectiveThrottle = d.throttle_effective !== undefined ? Number(d.throttle_effective) : baseThrottle;
+  const throttleChannel = configuredRegistryOutput(d, 'main_fuel', ['main_fuel','main_fuel_output','throttle']);
+  const legacyThrottle = d.throttle_effective !== undefined ? Number(d.throttle_effective) : baseThrottle;
+  const effectiveThrottle = legacyThrottle !== undefined
+    ? configuredOutputDemand(throttleChannel, legacyThrottle)
+    : (throttleChannel ? configuredOutputDemand(throttleChannel) : undefined);
   clearBinaryStateText('throttle-demand');
   setText('throttle-demand', effectiveThrottle !== undefined
     ? (effectiveThrottle * 100).toFixed(1) + '%' : '—');
@@ -532,7 +544,7 @@ function applyData(d) {
   }
   if (d.oil_pct !== undefined) {
     const oilChannel = configuredRegistryOutput(d, 'oil_pump', ['oil_pump','oil_pump_main']);
-    const oilPct = Math.max(0, Math.min(100, Number(d.oil_pct)));
+    const oilPct = configuredOutputDemand(oilChannel, Number(d.oil_pct) / 100) * 100;
     const oilRelay = oilChannel ? registryOutputIsRelay(oilChannel) : false;
     if (oilRelay) setBinaryStateText('oil-pct', relayDemandActive(oilPct / 100));
     else {
@@ -1309,9 +1321,7 @@ function applyData(d) {
     const updateConfiguredDemand = ({purposes, ids, fallbackDemand, binaryActive, fallbackRelay = true,
       valueId, unitId, barId, onLabel = 'ON', offLabel = 'OFF'}) => {
       const channel = configuredRegistryOutput(d, purposes, ids);
-      // Dedicated telemetry is the live core command; registry demand is only
-      // a fallback because native core outputs need not mirror that array.
-      const demand = Math.max(0, Math.min(1, Number(fallbackDemand ?? channel?.demand ?? 0)));
+      const demand = configuredOutputDemand(channel, fallbackDemand);
       const relay = channel ? registryOutputIsRelay(channel) : fallbackRelay;
       const active = relay ? relayDemandActive(demand)
         : (binaryActive === undefined ? relayTwoPositionHigh(demand) : !!binaryActive);
@@ -1331,16 +1341,17 @@ function applyData(d) {
     if (advStarter) {
       advStarter.style.display = d.has_starter ? '' : 'none';
       if (d.has_starter && d.starter_demand !== undefined) {
-        const pct = Math.round(Number(d.starter_demand) * 100);
         const channel = configuredRegistryOutput(d, 'starter', ['starter','main_starter','starter_main']);
+        const demand = configuredOutputDemand(channel, d.starter_demand);
+        const pct = Math.round(demand * 100);
         const relay = channel ? registryOutputIsRelay(channel) : actuatorIsRelay(d.starter_type);
-        if (relay) setBinaryStateText('starter-pct', relayDemandActive(Number(d.starter_demand)));
+        if (relay) setBinaryStateText('starter-pct', relayDemandActive(demand));
         else {
           clearBinaryStateText('starter-pct');
           setText('starter-pct', pct);
         }
         setText('starter-unit', relay ? '' : '%');
-        setGaugeBar('starter-gauge-bar', relay ? (relayDemandActive(Number(d.starter_demand)) ? 100 : 0) : pct);
+        setGaugeBar('starter-gauge-bar', relay ? (relayDemandActive(demand) ? 100 : 0) : pct);
         const gauge = document.getElementById('starter-gauge-bar')?.parentElement;
         if (gauge) gauge.style.display = relay ? 'none' : 'inline-block';
       }
@@ -1349,25 +1360,37 @@ function applyData(d) {
     const advStarterEn = document.getElementById('adv-starter-en');
     if (advStarterEn) {
       advStarterEn.style.display = d.has_starter_en ? '' : 'none';
-      if (d.has_starter_en) setBinaryStateText('starter-en-state', !!d.starter_enabled);
+      if (d.has_starter_en) {
+        const channel = configuredRegistryOutput(d, 'starter_enable', ['starter_enable','starter_enable_main']);
+        setBinaryStateText('starter-en-state', relayDemandActive(configuredOutputDemand(channel, d.starter_enabled ? 1 : 0)));
+      }
     }
 
     const advFuelSol = document.getElementById('adv-fuel-sol');
     if (advFuelSol) {
       advFuelSol.style.display = d.has_fuel_sol ? '' : 'none';
-      if (d.has_fuel_sol) setBinaryStateText('fuel-sol-state', d.fuel_sol_open, 'OPEN', 'CLOSED');
+      if (d.has_fuel_sol) {
+        const channel = configuredRegistryOutput(d, 'fuel_shutoff', ['fuel_shutoff','main_fuel_shutoff','fuel_sol']);
+        setBinaryStateText('fuel-sol-state', relayDemandActive(configuredOutputDemand(channel, d.fuel_sol_open ? 1 : 0)), 'OPEN', 'CLOSED');
+      }
     }
 
     const advIgniter = document.getElementById('adv-igniter');
     if (advIgniter) {
       advIgniter.style.display = d.has_igniter ? '' : 'none';
-      if (d.has_igniter) setBinaryStateText('igniter-state', !!d.igniter_on);
+      if (d.has_igniter) {
+        const channel = configuredRegistryOutput(d, 'igniter', ['igniter','igniter_main']);
+        setBinaryStateText('igniter-state', relayDemandActive(configuredOutputDemand(channel, d.igniter_on ? 1 : 0)));
+      }
     }
 
     const advIgniter2 = document.getElementById('adv-igniter2');
     if (advIgniter2) {
       advIgniter2.style.display = d.has_igniter2 ? '' : 'none';
-      if (d.has_igniter2) setBinaryStateText('igniter2-state', !!d.igniter2_on);
+      if (d.has_igniter2) {
+        const channel = configuredRegistryOutput(d, 'ab_igniter', ['ab_igniter','igniter2']);
+        setBinaryStateText('igniter2-state', relayDemandActive(configuredOutputDemand(channel, d.igniter2_on ? 1 : 0)));
+      }
     }
 
     const advGlow = document.getElementById('adv-glow');
@@ -1376,13 +1399,17 @@ function applyData(d) {
       if (d.has_glow_plug && d.glow_plug_pct !== undefined) {
         const glowChannel = configuredRegistryOutput(d, 'glow_plug', ['glow_plug','glow_plug_main']);
         const relay = glowChannel ? registryOutputIsRelay(glowChannel) : Number(d.glow_plug_output_type || 0) === 1;
-        if (relay) setBinaryStateText('glow-pct', relayDemandActive(Number(d.glow_plug_pct) / 100));
+        // Set Output actions address the configured registry channel while
+        // dedicated glow blocks use the legacy core demand. Reflect whichever
+        // command is actually active so an energized plug never reads OFF.
+        const glowDemand = configuredOutputDemand(glowChannel, Number(d.glow_plug_pct) / 100);
+        if (relay) setBinaryStateText('glow-pct', relayDemandActive(glowDemand));
         else {
           clearBinaryStateText('glow-pct');
-          setText('glow-pct', Math.round(d.glow_plug_pct));
+          setText('glow-pct', Math.round(glowDemand * 100));
         }
         setText('glow-unit', relay ? '' : '%');
-        setGaugeBar('glow-gauge-bar', relay ? (relayDemandActive(Number(d.glow_plug_pct) / 100) ? 100 : 0) : d.glow_plug_pct);
+        setGaugeBar('glow-gauge-bar', relay ? (relayDemandActive(glowDemand) ? 100 : 0) : glowDemand * 100);
         const glowGauge = document.getElementById('glow-gauge-bar')?.parentElement;
         if (glowGauge) glowGauge.style.display = relay ? 'none' : 'inline-block';
         const wetGlowFuel = document.getElementById('wet-glow-fuel-wrap');
@@ -1420,15 +1447,16 @@ function applyData(d) {
     if (advPitch) {
       advPitch.style.display = d.has_prop_pitch ? '' : 'none';
       if (d.has_prop_pitch && d.prop_pitch_demand !== undefined) {
-        const pct = Math.round(d.prop_pitch_demand * 100);
         const channel = configuredRegistryOutput(d, 'prop_pitch', ['prop_pitch','prop_pitch_main']);
+        const demand = configuredOutputDemand(channel, d.prop_pitch_demand);
+        const pct = Math.round(demand * 100);
         const relay = channel ? registryOutputIsRelay(channel) : actuatorIsRelay(d.prop_pitch_type);
         // Binary prop-pitch outputs are coarse/fine solenoids, not generic
         // on/off loads. Proportional servo/PWM installations retain 0-100%.
         clearBinaryStateText('pitch-pct');
-        setText('pitch-pct', relay ? (relayTwoPositionHigh(d.prop_pitch_demand) ? 'COARSE' : 'FINE') : pct);
+        setText('pitch-pct', relay ? (relayTwoPositionHigh(demand) ? 'COARSE' : 'FINE') : pct);
         setText('pitch-unit', relay ? '' : '%');
-        setGaugeBar('pitch-gauge-bar', relay ? (relayTwoPositionHigh(d.prop_pitch_demand) ? 100 : 0) : pct);
+        setGaugeBar('pitch-gauge-bar', relay ? (relayTwoPositionHigh(demand) ? 100 : 0) : pct);
         const gauge = document.getElementById('pitch-gauge-bar')?.parentElement;
         if (gauge) gauge.style.display = relay ? 'none' : 'inline-block';
       }
@@ -1438,16 +1466,17 @@ function applyData(d) {
     if (advFp2) {
       advFp2.style.display = d.has_fuel_pump2 ? '' : 'none';
       if (d.has_fuel_pump2 && d.fuel_pump2_demand !== undefined) {
-        const pct = Math.round(d.fuel_pump2_demand * 100);
         const channel = configuredRegistryOutput(d, 'fuel_pump', ['fuel_pump','fuel_pump2']);
+        const demand = configuredOutputDemand(channel, d.fuel_pump2_demand);
+        const pct = Math.round(demand * 100);
         const relay = channel ? registryOutputIsRelay(channel) : actuatorIsRelay(d.fuel_pump2_type);
-        if (relay) setBinaryStateText('fp2-pct', relayDemandActive(Number(d.fuel_pump2_demand)));
+        if (relay) setBinaryStateText('fp2-pct', relayDemandActive(demand));
         else {
           clearBinaryStateText('fp2-pct');
           setText('fp2-pct', pct);
         }
         setText('fp2-unit', relay ? '' : '%');
-        setGaugeBar('fp2-gauge-bar', relay ? (relayDemandActive(Number(d.fuel_pump2_demand)) ? 100 : 0) : pct);
+        setGaugeBar('fp2-gauge-bar', relay ? (relayDemandActive(demand) ? 100 : 0) : pct);
         const gauge = document.getElementById('fp2-gauge-bar')?.parentElement;
         if (gauge) gauge.style.display = relay ? 'none' : 'inline-block';
       }
@@ -1467,7 +1496,10 @@ function applyData(d) {
     const advAir = document.getElementById('adv-airstarter');
     if (advAir) {
       advAir.style.display = d.has_airstarter ? '' : 'none';
-      if (d.has_airstarter) setBinaryStateText('airstarter-state', !!d.airstarter_open, 'OPEN', 'CLOSED');
+      if (d.has_airstarter) {
+        const channel = configuredRegistryOutput(d, 'air_starter', ['air_starter','airstarter_sol']);
+        setBinaryStateText('airstarter-state', relayDemandActive(configuredOutputDemand(channel, d.airstarter_open ? 1 : 0)), 'OPEN', 'CLOSED');
+      }
     }
 
     const advScav = document.getElementById('adv-scavenge');
@@ -1506,9 +1538,11 @@ function applyData(d) {
         el.classList.add(tone);
         el.title = title;
       };
-      setAbState('ab-sol-state', d.ab_sol_open ? 'VALVE OPEN' : 'VALVE CLOSED',
-        d.ab_sol_open ? 'binary-state-active' : 'binary-state-inactive',
-        'Afterburner fuel valve — ' + (d.ab_sol_open ? 'OPEN' : 'closed'));
+      const abValveChannel = configuredRegistryOutput(d, 'ab_valve', ['ab_solenoid','ab_sol','ab_valve']);
+      const abValveOpen = relayDemandActive(configuredOutputDemand(abValveChannel, d.ab_sol_open ? 1 : 0));
+      setAbState('ab-sol-state', abValveOpen ? 'VALVE OPEN' : 'VALVE CLOSED',
+        abValveOpen ? 'binary-state-active' : 'binary-state-inactive',
+        'Afterburner fuel valve — ' + (abValveOpen ? 'OPEN' : 'closed'));
       setAbState('ab-arm-state', d.ab_arm_switch_on ? 'ARMED' : 'OFF',
         d.ab_arm_switch_on ? 'ab-state-caution' : 'binary-state-inactive',
         'AB arm switch — ' + (d.ab_arm_switch_on ? 'ARMED' : 'off'));
@@ -1525,7 +1559,7 @@ function applyData(d) {
              : (abExpectFlame ? 'AB flame — NOT DETECTED while lit' : 'AB flame — no flame')));
       if (d.ab_pump_demand !== undefined) {
         const channel = configuredRegistryOutput(d, 'ab_pump', ['ab_pump','ab_pump_main']);
-        const demand = Math.max(0, Math.min(1, Number(d.ab_pump_demand)));
+        const demand = configuredOutputDemand(channel, d.ab_pump_demand);
         const relay = channel ? registryOutputIsRelay(channel) : false;
         const pct = Math.round(demand * 100);
         if (relay) setBinaryStateText('ab-pump-demand', relayDemandActive(demand));
@@ -2256,20 +2290,4 @@ window.OTSaveConfigPatch = async function(patch) {
   });
   const data = await response.json().catch(() => ({}));
   return {response, data};
-};
-
-// A page can own both Hardware and Settings fields. Never race the second
-// write against a scheduled reboot, or replay an uncertain write. Keep the
-// page dirty while waiting; only a read-only status request is retried here.
-window.OTWaitForSaveRestart = async function() {
-  await new Promise(resolve => setTimeout(resolve, 8000));
-  for (let attempt = 0; attempt < 30; attempt++) {
-    try {
-      const response = await fetch('/api/status', {cache:'no-store', signal:AbortSignal.timeout(2000)});
-      const status = response.ok ? await response.json() : null;
-      if (status && !status.config_apply_busy && ['STANDBY','FAULT'].includes(status.mode)) return;
-    } catch (_) {}
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  throw new Error('Hardware was saved, but the ECU did not reconnect. Settings remain unsaved; reconnect and retry Save.');
 };

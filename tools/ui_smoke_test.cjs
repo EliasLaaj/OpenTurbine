@@ -322,6 +322,41 @@ function installedBrowser() {
     for (const id of ['oil-output-gauge-bar','starter-gauge-bar','glow-gauge-bar','pitch-gauge-bar','fp2-gauge-bar','ab-pump-gauge-bar']) {
       assert.equal(await page.locator(`#${id}`).evaluate(el => getComputedStyle(el.parentElement).display), 'none');
     }
+    await page.request.post(`${base}/__sim/data`, { data: {
+      throttle_demand:0, throttle_effective:0, oil_pct:0, starter_demand:0,
+      starter_enabled:false, fuel_sol_open:false, igniter_on:false, igniter2_on:false,
+      glow_plug_pct:0, bleed_valve_open:false, bleed_valve_demand:0,
+      prop_pitch_demand:0, fuel_pump2_demand:0, cool_fan_on:false, cool_fan_demand:0,
+      airstarter_open:false, oil_scavenge_on:false, oil_scavenge_demand:0,
+      ab_sol_open:false, ab_pump_demand:0,
+      registry_outputs: [
+        {id:'main_fuel',purpose:'main_fuel',driver:5,demand:.77},
+        {id:'oil_pump',purpose:'oil_pump',driver:11,demand:1},
+        {id:'starter',purpose:'starter',driver:11,demand:1},
+        {id:'starter_enable',purpose:'starter_enable',driver:11,demand:1},
+        {id:'fuel_shutoff',purpose:'fuel_shutoff',driver:11,demand:1},
+        {id:'igniter',purpose:'igniter',driver:11,demand:1},
+        {id:'ab_igniter',purpose:'ab_igniter',driver:11,demand:1},
+        {id:'glow_plug',purpose:'glow_plug',driver:11,demand:1},
+        {id:'bleed_valve',purpose:'bleed_valve',driver:11,demand:1},
+        {id:'prop_pitch',purpose:'prop_pitch',driver:11,demand:1},
+        {id:'fuel_pump',purpose:'fuel_pump',driver:11,demand:1},
+        {id:'cooling_fan',purpose:'cooling_fan',driver:11,demand:1},
+        {id:'air_starter',purpose:'air_starter',driver:11,demand:1},
+        {id:'scavenge_pump',purpose:'scavenge_pump',driver:11,demand:1},
+        {id:'ab_solenoid',purpose:'ab_valve',driver:11,demand:1},
+        {id:'ab_pump',purpose:'ab_pump',driver:11,demand:1}
+      ]
+    } });
+    await page.waitForFunction(() => document.getElementById('throttle-demand')?.textContent === '77.0%');
+    assert.equal(await text(page, '#throttle-demand'), '77.0%');
+    for (const id of ['oil-pct','starter-pct','starter-en-state','igniter-state','igniter2-state',
+      'glow-pct','fp2-pct','coolfan-state','scavenge-state','ab-pump-demand'])
+      assert.equal(await text(page, `#${id}`), 'ON');
+    for (const id of ['fuel-sol-state','bleed-state','airstarter-state'])
+      assert.equal(await text(page, `#${id}`), 'OPEN');
+    assert.equal(await text(page, '#pitch-pct'), 'COARSE');
+    assert.equal(await text(page, '#ab-sol-state'), 'VALVE OPEN');
     await scenario(page, 'full');
     results.push('dashboard actuator values, compact bars, and relay states follow configured output hardware');
     results.push('dashboard throttle inhibit warning follows selected EGT source, including TIT-primary setups');
@@ -418,7 +453,7 @@ function installedBrowser() {
     assert.equal(await page.locator('#fault-desc-text').evaluate(el =>
       ['anywhere', 'break-word'].includes(getComputedStyle(el).overflowWrap)), true);
     for (const route of ['/log.html', '/calibration.html', '/controllers.html', '/tools.html'])
-      assert.equal(await page.locator(`#fault-card a[href="${route}?v=20260901f"]`).count(), 1);
+      assert.equal(await page.locator(`#fault-card a[href="${route}?v=20260905b"]`).count(), 1);
     results.push('fault scenario exposes the current diagnosis and direct investigation routes');
 
     await scenario(page, 'full');
@@ -549,7 +584,7 @@ function installedBrowser() {
     await page.evaluate(() => closeRegistryAddDialog());
     await page.evaluate(() => addRegistryChannel('output'));
     const outputCatalog = await text(page, '#registry-add-catalog');
-    for (const label of ['Coolant pump', 'Air starter', 'Start-fuel solenoid',
+    for (const label of ['Coolant pump', 'Air starter', 'Pilot fuel',
       'Air / fuel purge valve', 'Variable nozzle actuator']) {
       assert.match(outputCatalog, new RegExp(label.replace(/[()]/g, '\\$&')));
     }
@@ -745,11 +780,38 @@ function installedBrowser() {
     } });
     await page.goto(`${base}/sequence.html`);
     await page.waitForFunction(() => document.body.textContent.includes('Oil Pump On'));
+    await page.evaluate(() => { window.__blockPickerSnapshot = JSON.parse(JSON.stringify(hwCfg)); });
+    await page.locator('#tab-startup .add-btn', {hasText:'Add block'}).click();
+    assert.equal(await page.locator('#block-picker-dlg').isVisible(), true);
+    assert.ok(await page.locator('#block-picker-list .block-picker-option').count() > 3);
+    for (const viewport of [{width:1000,height:800}, {width:390,height:844}]) {
+      await page.setViewportSize(viewport);
+      assert.equal(await page.locator('#block-picker-list').evaluate(list =>
+        list.scrollWidth <= list.clientWidth + 1 && Array.from(list.children).every(choice =>
+          choice.scrollWidth <= choice.clientWidth + 1 && choice.clientWidth >= list.clientWidth - 10)), true);
+    }
+    await page.setViewportSize({width:1280,height:720});
+    await page.locator('#block-picker-list .block-picker-option', {hasText:'Timed Delay'}).click();
+    assert.equal(await page.evaluate(() => hwCfg.startup_seq.at(-1)), 'TimedDelay');
+    assert.equal(await page.evaluate(() => typeof window.OTWaitForSaveRestart), 'function');
+    await page.evaluate(() => {
+      hwCfg = window.__blockPickerSnapshot;
+      delete window.__blockPickerSnapshot;
+      render('startup', lastIdleRaw);
+      populateAddSelects();
+    });
     const unifiedOutputBlock = await page.evaluate(() => {
       const snapshot = JSON.parse(JSON.stringify(hwCfg));
+      hwCfg.channel_registry.outputs.push({
+        id:'pilot_fuel', name:'Pilot Fuel', purpose:'pilot_fuel', role:'valve',
+        driver:4, pin:18, min:0, max:1, safe_demand:0, installed:true
+      });
+      populateAddSelects();
       const select = document.querySelector('#add-startup-sel');
       const option = Array.from(select.options).find(row => row.value.startsWith('SetOutput::'));
       if (!option) return {available:false};
+      const pilotAction = getEnabledActuators().find(action => action.target === 'pilot_fuel');
+      const pilotOption = Array.from(select.options).some(row => row.value === 'SetOutput::pilot_fuel');
       select.value = option.value;
       const expectedTarget = option.value.split('::')[1];
       addBlock('startup');
@@ -761,7 +823,8 @@ function installedBrowser() {
         block:hwCfg.startup_seq[index],
         target:action?.target || '',
         expectedTarget,
-        professionalLabel:/^Set\s+\S/.test(label)
+        professionalLabel:/^Set\s+\S/.test(label),
+        pilotAvailable:!!pilotAction && pilotOption
       };
       hwCfg = snapshot;
       render('startup', lastIdleRaw);
@@ -770,8 +833,9 @@ function installedBrowser() {
     });
     assert.deepEqual(unifiedOutputBlock, {
       available:true, block:'SetOutput', target:unifiedOutputBlock.expectedTarget,
-      expectedTarget:unifiedOutputBlock.expectedTarget, professionalLabel:true
+      expectedTarget:unifiedOutputBlock.expectedTarget, professionalLabel:true, pilotAvailable:true
     });
+    results.push('sequence block picker adds one clicked choice directly and the shared reboot wait is available');
     results.push('sequence offers one editable Set Output action per fitted device and stores its exact physical target');
     const stableDeviceBinding = await page.evaluate(() => {
       const snapshot = JSON.parse(JSON.stringify(hwCfg));
@@ -999,6 +1063,7 @@ function installedBrowser() {
         ? { id: 'lamp_dimmer_knob', name: 'Lamp Dimmer', purpose: 'generic', role: 'generic', driver: 1, pin: 37, min: 400, max: 3600, installed: true }
         : channel),
       outputs: automationState.hardware.channel_registry.outputs.concat([
+        { id: 'pilot_fuel', name: 'Pilot Fuel', purpose: 'pilot_fuel', role: 'valve', driver: 4, pin: 18, min: 0, max: 1, installed: true },
         { id: 'warning_lamp_pwm', name: 'Warning Lamp', purpose: 'generic', role: 'generic', driver: 5, pin: 38, min: 0, max: 1, installed: true }
       ])
     } } });
@@ -1043,7 +1108,15 @@ function installedBrowser() {
     await simpleCard.getByRole('button', {name:'Delete controller'}).click();
     assert.equal(await page.locator('#controller-overview [data-controller-output="warning_lamp_pwm"]').count(), 0);
     assert.ok(await page.locator('#new-controller-output option[value="warning_lamp_pwm"]').count());
-    results.push('Controllers uses expandable local output definitions, creates from an unowned output, maps fitted inputs, and deletes cleanly');
+    assert.ok(await page.locator('#new-controller-output option[value="pilot_fuel"]').count());
+    if (!(await creator.evaluate(el => el.open))) await creator.locator(':scope > summary').click();
+    await creator.locator('#new-controller-output').selectOption('pilot_fuel');
+    await creator.getByRole('button', {name:'Create controller', exact:true}).click();
+    const pilotCard = page.locator('#controller-overview [data-controller-output="pilot_fuel"]');
+    assert.equal(await pilotCard.count(), 1);
+    if (!(await pilotCard.evaluate(el => el.open))) await pilotCard.locator(':scope > summary').click();
+    await pilotCard.getByRole('button', {name:'Delete controller'}).click();
+    results.push('Controllers uses expandable local output definitions, including Pilot Fuel, and creates, maps, and deletes them cleanly');
 
     response = await page.request.post(`${base}/api/ecu_config`, {data:{
       settings: automationState.settings,

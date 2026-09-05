@@ -40,6 +40,12 @@ for fname in os.listdir(SRC):
     # Classic LittleFS space. They are not part of the browser contract.
     if os.path.splitext(fname)[1] == ".html":
         data = re.sub(rb"<!--(?!\[if\b).*?-->", b"", data, flags=re.DOTALL | re.IGNORECASE)
+    elif os.path.splitext(fname)[1] == ".js":
+        # Standalone source comments remain in data_src for maintainers, but
+        # are not part of the browser contract and consume scarce Classic
+        # LittleFS space. Only remove complete comment lines; inline tokens,
+        # strings, regexes, and executable code remain byte-for-byte intact.
+        data = re.sub(rb"(?m)^[ \t]*//[^\r\n]*(?:\r?\n|$)", b"", data)
     with open(tmp_path, "wb") as raw_out:
         with gzip.GzipFile(filename="", mode="wb", fileobj=raw_out,
                            compresslevel=9, mtime=0) as f_out:
