@@ -1,0 +1,86 @@
+{
+  "firmware": "2.2.2",
+  "passed": 8,
+  "total": 8,
+  "rows": [
+    {
+      "name": "standby assist test auto-stops",
+      "ok": true,
+      "detail": {
+        "http": 200,
+        "peak_us": 1198,
+        "final_us": 1000,
+        "response": {
+          "ok": true
+        }
+      }
+    },
+    {
+      "name": "StarterSpin repeats ON/OFF pulses",
+      "ok": true,
+      "detail": {
+        "transitions": 10,
+        "min_us": 999,
+        "max_us": 1200
+      }
+    },
+    {
+      "name": "assist threshold latches normal starter control",
+      "ok": true,
+      "detail": {
+        "normal_us": 1599,
+        "post_drop_min_us": 1599
+      }
+    },
+    {
+      "name": "STOP cuts starter output",
+      "ok": true,
+      "detail": {
+        "pulse_us": 1000,
+        "tester": {
+          "us": 1000,
+          "hz": 50.0,
+          "duty": 0.05,
+          "level": 1
+        },
+        "mode": "SHUTDOWN"
+      }
+    },
+    {
+      "name": "P1 pressure Automatic Idle response",
+      "ok": true,
+      "detail": {
+        "low_peak": 0.9,
+        "high_final": 0.118,
+        "above_limit": 0.115
+      }
+    },
+    {
+      "name": "P2 pressure Automatic Idle response",
+      "ok": true,
+      "detail": {
+        "low_peak": 0.9,
+        "high_final": 0.12,
+        "above_limit": 0.115
+      }
+    },
+    {
+      "name": "simple limiter reaches configured floor at full threshold",
+      "ok": true,
+      "detail": {
+        "unrestricted": 0.903,
+        "p1": 2.3,
+        "at_full": 0.2
+      }
+    },
+    {
+      "name": "predictive limiter acts before present value reaches threshold",
+      "ok": true,
+      "detail": {
+        "p1": 0.43,
+        "baseline": 0.878,
+        "predicted_output": 0.2
+      }
+    }
+  ]
+}

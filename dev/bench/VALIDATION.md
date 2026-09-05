@@ -30,6 +30,53 @@ superseded EGT-rate and old configuration behavior are not v2 requirements.
 
 Legend: ✅ pass · ⚠️ anomaly/concern · ❌ bug · ⏭️ not physically testable
 
+## v2.2.2 ESP32-S3 release-candidate qualification — 2026-09-05
+
+- ✅ The exact ESP32-S3 image (`build_id 2453e51295e85291`, firmware
+  SHA-256 `0C5CB721CD8C6AD93328343B3D04BAFEAC884BF103A6A6F1D6DEBCE1F533B547`)
+  was built with the pinned production toolchain, flashed with its matching
+  LittleFS image and verified live on the 16 MB bench module using the universal
+  8 MB partition layout. The 1,642,544-byte firmware leaves 1,503,184 bytes of
+  OTA headroom; static DRAM, IRAM and RTC slow-memory headroom are 149,912,
+  278,528 and 7,640 bytes respectively.
+- ✅ With the Classic ESP32 running OTBench 0.9, the final S3 candidate passed
+  the ten-profile physical web/HIL matrix (`ten_build_webui_hil_20260904_232258.json`),
+  10/10 hard-safety cases (`phase2_safety_hil_20260904_234401.json`), 8/8 starter
+  and pressure-control cases (`v2_controls_hil_20260904_234724.json`), and 13/13
+  controller/rule/safety priority cases (`interaction_hil_20260904_235323.json`).
+- ✅ Afterburner coordination passed 3/3, shutdown/scavenge ownership passed
+  4/4, live/deferred configuration and FinalStop behavior passed 5/5, session
+  logging passed 2/2, and physical TCA9554/TLA2528/NAU7802 behavior passed 13/13
+  (`afterburner_limp_hil_20260904_235440.json`,
+  `shutdown_output_ownership_hil_20260904_235616.json`,
+  `finalstop_live_config_hil_20260904_235718.json`,
+  `session_logger_hil_20260904_235929.json`, and
+  `i2c_devices_hil_20260905_000115.json`).
+- ✅ The corrected explicit-controller causal plant profile passed 5/5
+  (`plant_hil_20260905_085724.json`): safe standby, physical-output-driven
+  startup through RUNNING, operator demand raising physical fuel and shaft
+  speed, 180 seconds/828 samples with zero transport or status errors and no
+  added loop overruns, and physical STOP cutting all combustion outputs.
+  A first run exposed an obsolete harness assumption that schema-1 profiles
+  retain hidden throttle ownership; the harness now installs and later removes
+  the explicit Main Fuel controller required by the released model.
+- ✅ Ten consecutive hardware-save warm reboots preserved exact configuration
+  identity and recovered AP/DHCP/API service in 2.7–2.9 seconds each
+  (`reboot_recovery_hil_20260905_085254.json`). Page-scoped save, sequence
+  add/save/reboot/restore and 24-page navigation audits passed. Two full
+  ten-minute realistic browser sessions each completed 38 connected page loads,
+  two persisted saves and an engine-file round trip; their only assertion was
+  obsolete bookkeeping of successfully retried bounded `/api/config` 503
+  responses. After restricting that classification to retryable configuration
+  GETs only, the targeted session rerun passed with all settings restored.
+- ✅ All 12 files served by the final S3 DUT are byte-identical to the release
+  assets. The final unit is in STANDBY with no fault and zero fuel, ignition,
+  starter, oil, afterburner or throttle demand; OTBench independently reports
+  every captured output at its safe state.
+- ⚠️ This is controlled dry-bench qualification. It does not replace powered
+  driver/load, real thermocouple and bridge sensors, plumbing, EMI, brownout,
+  vibration, emergency-stop installation, combustion or engine validation.
+
 ## v2.2.2 Classic release-candidate qualification — 2026-09-04
 
 - ✅ The exact ESP32 Classic image (`build_id c477e5aa8648d325`, SHA-256

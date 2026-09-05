@@ -1,0 +1,880 @@
+{
+  "run_id": "20260904_232258",
+  "firmware": "2.2.2",
+  "firmware_after": "2.2.2",
+  "firmware_match": true,
+  "backup_path": "dev/bench/results/ten_build_backup_20260904_232258.json",
+  "results": [
+    {
+      "id": "hil_minimal_timer_turbojet",
+      "name": "Minimal timer turbojet",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "throttle ADC input sweep",
+          "ok": true,
+          "detail": "85->4095"
+        },
+        {
+          "name": "throttle calibration save",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "oil prime command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "oil prime physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 0, 'hz': 0.0, 'duty': 1.0, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "fuel solenoid command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "fuel solenoid physical output",
+          "ok": true,
+          "detail": "FUEL_SOL {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "igniter command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "igniter physical output",
+          "ok": true,
+          "detail": "IGNITER {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "main fuel/throttle servo command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "main fuel/throttle servo physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1499, 'hz': 50.0, 'duty': 0.075, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "minimum reliable fuel command save",
+          "ok": true,
+          "detail": "saved=14"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 1747, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.087, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'O"
+        }
+      ],
+      "error": null,
+      "duration_s": 55.46
+    },
+    {
+      "id": "hil_single_shaft_tot_oil",
+      "name": "Single shaft with N1, TOT and oil loop",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "throttle ADC input sweep",
+          "ok": true,
+          "detail": "61->4093"
+        },
+        {
+          "name": "throttle calibration save",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "N1 PCNT input",
+          "ok": true,
+          "detail": "6000->12000"
+        },
+        {
+          "name": "TOT thermocouple simulator",
+          "ok": true,
+          "detail": "180->560"
+        },
+        {
+          "name": "oil pressure calibration path",
+          "ok": true,
+          "detail": "raw 617->2888, bar 0.49->2.32"
+        },
+        {
+          "name": "oil prime command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "oil prime physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 0, 'hz': 0.0, 'duty': 1.0, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "fuel solenoid command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "fuel solenoid physical output",
+          "ok": true,
+          "detail": "FUEL_SOL {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "igniter command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "igniter physical output",
+          "ok": true,
+          "detail": "IGNITER {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "main fuel/throttle servo command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "main fuel/throttle servo physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1499, 'hz': 50.0, 'duty': 0.075, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "minimum reliable fuel command save",
+          "ok": true,
+          "detail": "saved=14"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 1746, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.087, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'O"
+        }
+      ],
+      "error": null,
+      "duration_s": 63.38
+    },
+    {
+      "id": "hil_rc_generic_rules",
+      "name": "RC/generic automation I/O",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "throttle ADC input sweep",
+          "ok": true,
+          "detail": "82->4095"
+        },
+        {
+          "name": "throttle calibration save",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "generic RC registry input",
+          "ok": true,
+          "detail": "0->0.9"
+        },
+        {
+          "name": "oil prime command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "oil prime physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 0, 'hz': 0.0, 'duty': 1.0, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "fuel solenoid command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "fuel solenoid physical output",
+          "ok": true,
+          "detail": "FUEL_SOL {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "igniter command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "igniter physical output",
+          "ok": true,
+          "detail": "IGNITER {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "main fuel/throttle servo command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "main fuel/throttle servo physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1498, 'hz': 50.0, 'duty': 0.075, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "minimum reliable fuel command save",
+          "ok": true,
+          "detail": "saved=14"
+        },
+        {
+          "name": "generic relay output command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "generic relay output physical output",
+          "ok": true,
+          "detail": "STARTER_EN {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.7"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 1743, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.087, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'O"
+        }
+      ],
+      "error": null,
+      "duration_s": 62.68
+    },
+    {
+      "id": "hil_free_turbine_prop_servo",
+      "name": "Free turbine governor with servo prop pitch",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "throttle ADC input sweep",
+          "ok": true,
+          "detail": "68->4095"
+        },
+        {
+          "name": "throttle calibration save",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "N1 PCNT input",
+          "ok": true,
+          "detail": "5660->12000"
+        },
+        {
+          "name": "N2 PCNT input",
+          "ok": true,
+          "detail": "4411->10000"
+        },
+        {
+          "name": "oil prime command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "oil prime physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 0, 'hz': 0.0, 'duty': 1.0, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "fuel solenoid command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "fuel solenoid physical output",
+          "ok": true,
+          "detail": "FUEL_SOL {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "igniter command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "igniter physical output",
+          "ok": true,
+          "detail": "IGNITER {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "prop pitch servo command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "prop pitch servo physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1549, 'hz': 50.0, 'duty': 0.077, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 2000, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.1, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'OIL"
+        }
+      ],
+      "error": null,
+      "duration_s": 58.68
+    },
+    {
+      "id": "hil_turboprop_pwm_coolant",
+      "name": "Turboprop PWM pitch plus coolant pump/temp",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "N1 PCNT input",
+          "ok": true,
+          "detail": "6176->11707"
+        },
+        {
+          "name": "N2 PCNT input",
+          "ok": true,
+          "detail": "4285->10500"
+        },
+        {
+          "name": "coolant temp registry calibration",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'applying': True}; 47.948->116.003"
+        },
+        {
+          "name": "fuel solenoid command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "fuel solenoid physical output",
+          "ok": true,
+          "detail": "FUEL_SOL {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "igniter command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "igniter physical output",
+          "ok": true,
+          "detail": "IGNITER {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "main fuel/throttle servo command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "main fuel/throttle servo physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1498, 'hz': 50.0, 'duty': 0.075, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "minimum reliable fuel command save",
+          "ok": true,
+          "detail": "saved=14"
+        },
+        {
+          "name": "prop pitch PWM command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "prop pitch PWM physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 110, 'hz': 5000.0, 'duty': 0.55, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "coolant pump relay command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "coolant pump relay physical output",
+          "ok": true,
+          "detail": "STARTER_EN {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.7"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 1139, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.057, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'O"
+        }
+      ],
+      "error": null,
+      "duration_s": 65.92
+    },
+    {
+      "id": "hil_afterburning_turbojet",
+      "name": "Afterburning turbojet",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "throttle ADC input sweep",
+          "ok": true,
+          "detail": "51->4095"
+        },
+        {
+          "name": "throttle calibration save",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "N1 PCNT input",
+          "ok": true,
+          "detail": "5625->13170"
+        },
+        {
+          "name": "TOT thermocouple simulator",
+          "ok": true,
+          "detail": "180->560"
+        },
+        {
+          "name": "oil prime command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "oil prime physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 0, 'hz': 0.0, 'duty': 1.0, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "main fuel/throttle servo command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "main fuel/throttle servo physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1499, 'hz': 50.0, 'duty': 0.075, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "minimum reliable fuel command save",
+          "ok": true,
+          "detail": "saved=14"
+        },
+        {
+          "name": "AB solenoid command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "AB solenoid physical output",
+          "ok": true,
+          "detail": "FUEL_SOL {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "AB pump relay command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "AB pump relay physical output",
+          "ok": true,
+          "detail": "STARTER_EN {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 1138, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.057, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'O"
+        }
+      ],
+      "error": null,
+      "duration_s": 58.27
+    },
+    {
+      "id": "hil_air_start_pilot_purge",
+      "name": "Air start with pilot gas and purge valve",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "throttle ADC input sweep",
+          "ok": true,
+          "detail": "77->4095"
+        },
+        {
+          "name": "throttle calibration save",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "N1 PCNT input",
+          "ok": true,
+          "detail": "6363->11707"
+        },
+        {
+          "name": "oil prime command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "oil prime physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 0, 'hz': 0.0, 'duty': 1.0, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "main fuel/throttle servo command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "main fuel/throttle servo physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1500, 'hz': 50.0, 'duty': 0.075, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "minimum reliable fuel command save",
+          "ok": true,
+          "detail": "saved=14"
+        },
+        {
+          "name": "air starter solenoid command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "air starter solenoid physical output",
+          "ok": true,
+          "detail": "STARTER_EN {'level': 0}; pin_seen=True tel_seen=False max_registry_demand=1"
+        },
+        {
+          "name": "pilot fuel output command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "pilot fuel output physical output",
+          "ok": true,
+          "detail": "FUEL_SOL {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.7"
+        },
+        {
+          "name": "purge valve output command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "purge valve output physical output",
+          "ok": true,
+          "detail": "IGNITER {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.7"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 1139, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.057, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'O"
+        }
+      ],
+      "error": null,
+      "duration_s": 65.13
+    },
+    {
+      "id": "hil_dwell_igniter_wet_glow",
+      "name": "Dwell igniter and wet glow plug",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "throttle ADC input sweep",
+          "ok": true,
+          "detail": "73->4095"
+        },
+        {
+          "name": "throttle calibration save",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "N1 PCNT input",
+          "ok": true,
+          "detail": "6666->12000"
+        },
+        {
+          "name": "oil prime command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "oil prime physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 0, 'hz': 0.0, 'duty': 1.0, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "dwell igniter command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "dwell igniter telemetry active",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "main fuel/throttle servo command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "main fuel/throttle servo physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1499, 'hz': 50.0, 'duty': 0.075, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "minimum reliable fuel command save",
+          "ok": true,
+          "detail": "saved=14"
+        },
+        {
+          "name": "wet glow relay command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "wet glow relay physical output",
+          "ok": true,
+          "detail": "STARTER_EN {'level': 0}; pin_seen=True tel_seen=False max_registry_demand=1"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 1138, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.057, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'O"
+        }
+      ],
+      "error": null,
+      "duration_s": 61.27
+    },
+    {
+      "id": "hil_oil_switch_safety",
+      "name": "Oil switch safety without analog oil pressure",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "throttle ADC input sweep",
+          "ok": true,
+          "detail": "103->4095"
+        },
+        {
+          "name": "throttle calibration save",
+          "ok": true,
+          "detail": ""
+        },
+        {
+          "name": "N1 PCNT input",
+          "ok": true,
+          "detail": "5806->11428"
+        },
+        {
+          "name": "low-oil switch DI input",
+          "ok": true,
+          "detail": "False->True"
+        },
+        {
+          "name": "oil prime command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "oil prime physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 0, 'hz': 0.0, 'duty': 1.0, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "fuel solenoid command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "fuel solenoid physical output",
+          "ok": true,
+          "detail": "FUEL_SOL {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=1"
+        },
+        {
+          "name": "igniter command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "igniter physical output",
+          "ok": true,
+          "detail": "IGNITER {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "main fuel/throttle servo command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "main fuel/throttle servo physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1499, 'hz': 50.0, 'duty': 0.075, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "minimum reliable fuel command save",
+          "ok": true,
+          "detail": "saved=14"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 1138, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.057, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'O"
+        }
+      ],
+      "error": null,
+      "duration_s": 56.69
+    },
+    {
+      "id": "hil_analog_rpm_servo_start_en",
+      "name": "Analog RPM converter with servo starter enable",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "N1 analog converter input",
+          "ok": true,
+          "detail": "7311->48014"
+        },
+        {
+          "name": "oil prime command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "oil prime physical output",
+          "ok": true,
+          "detail": "OILPUMP_OUT {'us': 0, 'hz': 0.0, 'duty': 1.0, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "fuel solenoid command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "fuel solenoid physical output",
+          "ok": true,
+          "detail": "FUEL_SOL {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "igniter command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "igniter physical output",
+          "ok": true,
+          "detail": "IGNITER {'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "servo starter enable command accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True}"
+        },
+        {
+          "name": "servo starter enable physical output",
+          "ok": true,
+          "detail": "THROTTLE_OUT {'us': 1999, 'hz': 50.0, 'duty': 0.1, 'level': 1}; pin_seen=True tel_seen=True max_registry_demand=0.0"
+        },
+        {
+          "name": "bench start accepted",
+          "ok": true,
+          "detail": "HTTP 200 {'ok': True, 'started': True, 'request_id': 1}"
+        },
+        {
+          "name": "bench startup run reaches active states",
+          "ok": true,
+          "detail": "startup=True running=True"
+        },
+        {
+          "name": "bench startup drives at least one output",
+          "ok": true,
+          "detail": "{'THROTTLE_OUT_us': 999, 'THROTTLE_OUT_hz': 50.0, 'THROTTLE_OUT_duty': 0.05, 'THROTTLE_OUT_level': 1, 'STARTER_OUT_us': 0, 'STARTER_OUT_hz': 0.0, 'STARTER_OUT_duty': 0.0, 'STARTER_OUT_level': 0, 'OILPUMP_OUT_us': 0, 'OIL"
+        }
+      ],
+      "error": null,
+      "duration_s": 53.74
+    }
+  ],
+  "restored": true
+}

@@ -1,0 +1,88 @@
+{
+  "timestamp": "2026-09-04T23:54:40",
+  "firmware": "2.2.2",
+  "firmware_after": "2.2.2",
+  "firmware_match": true,
+  "rows": [
+    {
+      "name": "AFTERBURNER_OFFSET_REACHES_PHYSICAL_MAIN_FUEL_OUTPUT",
+      "ok": true,
+      "detail": {
+        "command": {
+          "ok": true
+        },
+        "baseline_effective": 0.1,
+        "baseline_pulse": {
+          "us": 1099,
+          "hz": 50.0,
+          "duty": 0.055,
+          "level": 1
+        },
+        "ab_offset": 0.2,
+        "ab_pulse": {
+          "us": 1294,
+          "hz": 50.0,
+          "duty": 0.065,
+          "level": 1
+        },
+        "ab_solenoid": {
+          "level": 1
+        },
+        "ab_pump": {
+          "level": 1
+        }
+      }
+    },
+    {
+      "name": "REDUCED_POWER_CAP_INCLUDES_AFTERBURNER_MAIN_FUEL_OFFSET",
+      "ok": true,
+      "detail": {
+        "command": {
+          "ok": true
+        },
+        "throttle_effective": 0.1,
+        "ab_mode": "Running",
+        "ab_offset": 0,
+        "capped_pulse": {
+          "us": 1100,
+          "hz": 50.0,
+          "duty": 0.055,
+          "level": 1
+        },
+        "ab_solenoid": {
+          "level": 0
+        },
+        "ab_pump": {
+          "level": 0
+        }
+      }
+    },
+    {
+      "name": "PHYSICAL_STOP_CUTS_AFTERBURNER_AND_MAIN_COMBUSTION",
+      "ok": true,
+      "detail": {
+        "event": "Seq: FinalStop",
+        "throttle": {
+          "us": 999,
+          "hz": 50.0,
+          "duty": 0.05,
+          "level": 1
+        },
+        "ab_solenoid": {
+          "level": 0
+        },
+        "fuel_shutoff": {
+          "level": 0
+        },
+        "telemetry": {
+          "ab_sol_open": false,
+          "ab_pump_demand": 0,
+          "ab_fuel_offset": 0,
+          "mode": "SHUTDOWN"
+        }
+      }
+    }
+  ],
+  "restored": true,
+  "error": null
+}

@@ -1,0 +1,137 @@
+{
+  "repetitions_requested": 10,
+  "rows": [
+    {
+      "iteration": 1,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.781,
+      "boot_before": 55,
+      "boot_after": 56,
+      "configuration_identity": true
+    },
+    {
+      "iteration": 2,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.781,
+      "boot_before": 56,
+      "boot_after": 57,
+      "configuration_identity": true
+    },
+    {
+      "iteration": 3,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.813,
+      "boot_before": 57,
+      "boot_after": 58,
+      "configuration_identity": true
+    },
+    {
+      "iteration": 4,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.844,
+      "boot_before": 58,
+      "boot_after": 59,
+      "configuration_identity": true
+    },
+    {
+      "iteration": 5,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.89,
+      "boot_before": 59,
+      "boot_after": 60,
+      "configuration_identity": true
+    },
+    {
+      "iteration": 6,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.781,
+      "boot_before": 60,
+      "boot_after": 61,
+      "configuration_identity": true
+    },
+    {
+      "iteration": 7,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.797,
+      "boot_before": 61,
+      "boot_after": 62,
+      "configuration_identity": true
+    },
+    {
+      "iteration": 8,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.906,
+      "boot_before": 62,
+      "boot_after": 63,
+      "configuration_identity": true
+    },
+    {
+      "iteration": 9,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.875,
+      "boot_before": 63,
+      "boot_after": 64,
+      "configuration_identity": true
+    },
+    {
+      "iteration": 10,
+      "ok": true,
+      "post_code": 200,
+      "post_response": {
+        "ok": true,
+        "reboot": true
+      },
+      "api_recovery_s": 2.735,
+      "boot_before": 64,
+      "boot_after": 65,
+      "configuration_identity": true
+    }
+  ],
+  "configuration_identity": true,
+  "passed": true
+}

@@ -120,6 +120,27 @@ def main() -> int:
     try:
         runner.apply_profile({"id": "closed_loop_plant", "build": build})
         config_patch = {
+            # Schema 1 deliberately has no hidden operator-to-fuel owner. The
+            # causal plant profile must install the same explicit Main Fuel
+            # mapped-input controller that a user creates on Controllers;
+            # otherwise FuelPumpIdle's 12% startup demand remains the last
+            # legitimate owner after RUNNING entry and the throttle stimulus
+            # cannot affect physical fuel.
+            "rules": [{
+                "enabled": True, "kind": 1, "op": 0,
+                "threshold": 0, "on_value": 1, "off_value": 0,
+                "hysteresis": 0, "input_min": 0, "input_max": 1,
+                # Main-fuel controller persistence canonicalizes its lower
+                # bound to the calibrated pump-spin threshold.
+                "output_min": 0.12, "output_max": 1,
+                "target_source_type": 0, "target_source": "",
+                "target_fixed": 0, "target_low": 0, "target_high": 1,
+                "target_input_min": 0, "target_input_max": 1,
+                "response_gain": 0.02, "integral_gain": 0.005,
+                "deadband": 0.01, "mode_mask": 4,
+                "name": "Main Fuel", "source": "operator_throttle",
+                "target": "main_fuel",
+            }],
             "engine": {"min_rpm": 20000},
             "calibration": {
                 "oil_poly": {"a": 0, "b": 0, "c": round(6.0 / 4095.0, 8),

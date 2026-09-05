@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-09-04T23:59:29",
+  "firmware": "2.2.2",
+  "rows": [
+    {
+      "name": "NO_FIELDS_CREATES_NO_SESSION_FILE",
+      "ok": true,
+      "before_path": "",
+      "after_path": ""
+    },
+    {
+      "name": "ENABLED_LOGGING_DEFERS_FLASH_AND_STAYS_RESPONSIVE",
+      "ok": true,
+      "active_path": "",
+      "completed_path": "/logs/session_1.csv",
+      "csv_lines": 53,
+      "header_ok": true,
+      "header": "t_ms,mode,n1_rpm,thr_pct,loop_hz,loop_period_max_ms,loop_exec_avg_ms,loop_exec_max_ms,loop_overrun_count",
+      "web_samples": 43,
+      "max_active_loop_exec_ms": 2.772,
+      "max_recorded_loop_exec_ms": 6.299,
+      "max_queued_rows": 30,
+      "logger_healthy": true,
+      "dropped_rows": 0
+    }
+  ],
+  "restored": true,
+  "error": null
+}

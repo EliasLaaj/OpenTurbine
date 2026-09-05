@@ -183,6 +183,12 @@ class TenBuildRunner:
                 return
             for key, value in changed.items():
                 if key not in original:
+                    # ArduinoJson omits empty arrays such as `rules` from the
+                    # compact settings response. If a campaign installs that
+                    # collection, absence in the baseline means restore it to
+                    # an explicit empty array rather than leaving test data.
+                    if isinstance(value, list):
+                        destination[key] = []
                     continue
                 if isinstance(value, dict) and isinstance(original[key], dict):
                     child = destination.setdefault(key, {})
