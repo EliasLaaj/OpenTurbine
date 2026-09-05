@@ -476,10 +476,10 @@ const BLOCKS = {
     label:'Set Main Fuel for Idle', type:'action', badgeClass:'badge-action',
     visibleIf: hw => actuatorHasProportionalOutput('throttle'),
     condition: null, timeout_action:null,
-    desc:'Sets fuel demand from the configured idle input. Its calibrated 0–100% travel maps from the minimum reliable fuel output up to Max%, whether the signal is analog, RC pulse, or a profiled PCB input. If no idle input is fitted, the calibrated minimum is used as fixed idle. Completes immediately.',
+    desc:'Sets fuel demand from the configured idle input. Its calibrated 0–100% travel maps from the minimum reliable fuel output up to Max%, whether the signal is analog, RC pulse, or a profiled PCB input. If no idle input is fitted, Max% is used as the fixed idle. This becomes the running idle floor when Automatic Idle and an idle input are not equipped. Completes immediately.',
     params:[
-      {key:'fp_idle_max_pct', label:'Maximum idle metering output', unit:'%', type:'float', min:0, max:100, step:0.5, def:18, configKey:'fp_idle_max_pct',
-        desc:'Upper end of the idle-input range. With no idle input fitted, the calibrated minimum metering output is used instead.'},
+      {key:'fp_idle_max_pct', label:'Maximum / fixed idle metering output', unit:'%', type:'float', min:0, max:100, step:0.5, def:50, configKey:'fp_idle_max_pct',
+        desc:'Upper end of the idle-input range. With no idle input fitted, this is the fixed idle demand. Nonzero values are constrained between the calibrated minimum reliable output and this idle limit.'},
     ]
   },
   ModifiedIdle: {
@@ -1799,13 +1799,13 @@ function buildFinalStateCard(tab, seq, idleRaw) {
       applySideActionsToState(tab, i, 'enter', state);
       if (bname === 'FuelPumpIdle') {
         const mn = cfg?.throttle?.fuel_pump_min_pct ?? 0;
-        const mx = paramVals['FuelPumpIdle.fp_idle_max_pct'] ?? 18;
+        const mx = paramVals['FuelPumpIdle.fp_idle_max_pct'] ?? 50;
         state.throttle = `${mn}-${mx}%  (minimum reliable output to idle maximum; position set by idle input)`;
       }
       if (bname === 'ModifiedIdle') {
         const mul = paramVals['ModifiedIdle.modified_idle_multiplier'] ?? 1.0;
         const mn  = cfg?.throttle?.fuel_pump_min_pct ?? 0;
-        const mx  = cfg?.throttle?.idle_max_pct ?? 18;
+        const mx  = cfg?.throttle?.idle_max_pct ?? 50;
         state.throttle = `${mn}-${mx}% x${mul}  (reset to 0 on RUNNING)`;
       }
       if (bname === 'Spool') {
@@ -1831,7 +1831,7 @@ function buildFinalStateCard(tab, seq, idleRaw) {
     if (seq.includes('SafetyHold')) {
       const mn = cfg?.throttle?.fuel_pump_min_pct ?? 0;
       const mx = paramVals['FuelPumpIdle.fp_idle_max_pct']
-              ?? cfg?.throttle?.idle_max_pct ?? 18;
+              ?? cfg?.throttle?.idle_max_pct ?? 50;
       if (idleRaw != null) {
         const norm = Math.max(0, Math.min(1, idleRaw / 4095));
         const pct  = (mn + norm * (mx - mn)).toFixed(1);

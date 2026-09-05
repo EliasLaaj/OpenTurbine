@@ -1,5 +1,6 @@
 #include "../../src/engine/controllers/PowerTurbineGovernor.h"
 #include "../../src/engine/controllers/ThrottleCommandLatch.h"
+#include "../../src/engine/controllers/IdleFuelFloor.h"
 #include "../../src/hal/AdcThreshold.h"
 #include "../../src/hal/i2c/LossRecheck.h"
 #include "../../src/system/ChannelRegistry.h"
@@ -24,6 +25,19 @@ static void resetData() {
 }
 
 int main() {
+    // A physical idle potentiometer selects a live absolute floor between the
+    // pump's calibrated minimum and configured maximum idle output. Main
+    // throttle authority remains unchanged above that floor.
+    assert(std::fabs(IdleFuelFloor::fromOperator(0.0f, 0.2525f, 0.50f) - 0.2525f) < 0.0001f);
+    assert(std::fabs(IdleFuelFloor::fromOperator(0.5f, 0.2525f, 0.50f) - 0.37625f) < 0.0001f);
+    assert(std::fabs(IdleFuelFloor::fromOperator(1.0f, 0.2525f, 0.50f) - 0.50f) < 0.0001f);
+    assert(std::fabs(IdleFuelFloor::apply(0.30f, 0.40f) - 0.40f) < 0.0001f);
+    assert(std::fabs(IdleFuelFloor::apply(0.70f, 0.40f) - 0.70f) < 0.0001f);
+    assert(std::fabs(IdleFuelFloor::fromOperator(0.5f, 0.50f, 0.25f) - 0.50f) < 0.0001f);
+    assert(IdleFuelFloor::boundedNonzero(0.0f, 0.25f, 0.50f) == 0.0f);
+    assert(std::fabs(IdleFuelFloor::boundedNonzero(0.10f, 0.25f, 0.50f) - 0.25f) < 0.0001f);
+    assert(std::fabs(IdleFuelFloor::boundedNonzero(0.75f, 0.25f, 0.50f) - 0.50f) < 0.0001f);
+
     // A one-shot sequence command must survive the slew controller publishing
     // its first partial ramp step back into the shared demand field. A real
     // external change, especially STOP, replaces the retained target.

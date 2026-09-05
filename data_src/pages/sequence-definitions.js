@@ -156,10 +156,10 @@ const BLOCKS = {
     label:'Set Main Fuel for Idle', type:'action', badgeClass:'badge-action',
     visibleIf: hw => actuatorHasProportionalOutput('throttle'),
     condition: null, timeout_action:null,
-    desc:'Sets fuel demand from the configured idle input. Its calibrated 0–100% travel maps from the minimum reliable fuel output up to Max%, whether the signal is analog, RC pulse, or a profiled PCB input. If no idle input is fitted, the calibrated minimum is used as fixed idle. Completes immediately.',
+    desc:'Sets fuel demand from the configured idle input. Its calibrated 0–100% travel maps from the minimum reliable fuel output up to Max%, whether the signal is analog, RC pulse, or a profiled PCB input. If no idle input is fitted, Max% is used as the fixed idle. This becomes the running idle floor when Automatic Idle and an idle input are not equipped. Completes immediately.',
     params:[
-      {key:'fp_idle_max_pct', label:'Maximum idle metering output', unit:'%', type:'float', min:0, max:100, step:0.5, def:18, configKey:'fp_idle_max_pct',
-        desc:'Upper end of the idle-input range. With no idle input fitted, the calibrated minimum metering output is used instead.'},
+      {key:'fp_idle_max_pct', label:'Maximum / fixed idle metering output', unit:'%', type:'float', min:0, max:100, step:0.5, def:50, configKey:'fp_idle_max_pct',
+        desc:'Upper end of the idle-input range. With no idle input fitted, this is the fixed idle demand. Nonzero values are constrained between the calibrated minimum reliable output and this idle limit.'},
     ]
   },
   ModifiedIdle: {

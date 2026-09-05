@@ -153,7 +153,7 @@ int   Config::shutdownFinalStopTimeoutMs=10000;
 
 float Config::throttleRampUpMs      = 600;
 float Config::throttleRampDownMs    = 800;
-float Config::throttleIdleMaxPct    = 18;
+float Config::throttleIdleMaxPct    = 50;
 float Config::fuelPumpMinPct        = 0;   // 0 = not calibrated; measured via the fuel-pump min-spin calibration
 float Config::throttleExpo          = 0.0f;  // 0 = linear by default
 bool  Config::pullbackN1Enabled     = true;

@@ -569,7 +569,7 @@ and a disengagement limit. Feedback loss clears controller and rate state.
     "ramp_up_ms": 600,
     "ramp_down_ms": 800,
     "fuel_pump_min_pct": 0,
-    "idle_max_pct": 18,
+    "idle_max_pct": 50,
     "expo": 0
   },
   "dynamic_idle": {

@@ -16,6 +16,7 @@
 #include "FeedbackControlMath.h"
 #include "HardwareConfig.h"
 #include "../engine/EngineData.h"
+#include "../engine/controllers/IdleFuelFloor.h"
 
 class RulesEngine {
 public:
@@ -153,15 +154,37 @@ public:
                 FeedbackControlMath::reset(_feedbackState[i]);
             }
 
-            // Automatic Idle is a floor, not a competing fuel owner. Combine
-            // the user's current Main Fuel request with the floor calculated
-            // this tick. Do not use baseDemand here: releaseOwnedTargets()
-            // restores the previous non-rule demand before controllers run,
-            // so that value can contain yesterday's idle floor and prevent a
-            // pressure/RPM controller from ever backing down.
-            if (r.actuator == THROTTLE && HardwareConfig::hasDynamicIdle &&
-                ed.mode == SysMode::RUNNING)
-                demand = max(demand, (float)ed.dynamicIdleFloorDemand);
+            // Automatic Idle is a floor, and a selected physical idle input is
+            // the equivalent manual floor under the normal Main Fuel request.
+            // When Automatic Idle is fitted, its selected N1/N2/P1/P2 feedback owns
+            // the floor. Otherwise a configured, healthy idle potentiometer
+            // continuously maps the calibrated reliable pump minimum through
+            // the configured maximum normal-idle output. The throttle remains
+            // free to command above either floor.
+            //
+            // Do not use baseDemand here: releaseOwnedTargets() restores the
+            // previous non-rule demand before controllers run, so that value
+            // can contain yesterday's idle floor and prevent an idle source
+            // from backing down.
+            if (r.actuator == THROTTLE && ed.mode == SysMode::RUNNING) {
+                float idleFloor = 0.0f;
+                if (HardwareConfig::hasDynamicIdle) {
+                    idleFloor = ed.dynamicIdleFloorDemand;
+                } else if (_sensorUsable(IDLE_INPUT, ed)) {
+                    idleFloor = IdleFuelFloor::fromOperator(
+                        _readSensor(IDLE_INPUT, ed),
+                        Config::fuelPumpMinPct / 100.0f,
+                        Config::throttleIdleMaxPct / 100.0f);
+                } else {
+                    // With no automatic or physical idle source, carry the
+                    // fixed value selected by the startup FuelPumpIdle block.
+                    idleFloor = IdleFuelFloor::boundedNonzero(
+                        ed.sequencerIdleDemand,
+                        Config::fuelPumpMinPct / 100.0f,
+                        Config::throttleIdleMaxPct / 100.0f);
+                }
+                demand = IdleFuelFloor::apply(demand, idleFloor);
+            }
 
             // Sequence and built-in subsystem requests share auxiliary
             // outputs with optional user controllers. Either owner may ask

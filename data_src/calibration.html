@@ -1174,7 +1174,7 @@ window.applyData = function(d) {
       ? (hasIdleSignal ? Math.max(0, Math.min(1, (idleUs - rcMin) / (rcMax - rcMin))) : null)
       : Math.max(0, Math.min(1, ((d.idle_input_raw ?? rcMin) - rcMin) / (rcMax - rcMin)));
     const idleThLo = cfg.throttle?.fuel_pump_min_pct ?? 0;
-    const idleThHi = cfg.throttle?.idle_max_pct ?? 18;
+    const idleThHi = cfg.throttle?.idle_max_pct ?? 50;
     setText('cal-idle-thr', idleNorm === null ? '—' : (idleThLo + idleNorm * (idleThHi - idleThLo)).toFixed(1) + '%');
   }
 

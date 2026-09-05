@@ -2905,6 +2905,7 @@ static void enterStandby() {
     _buzzerPattern = 0;  // silence any buzzer
     ed.mode               = ed.faultLatched ? SysMode::FAULT : SysMode::STANDBY;
     ed.throttleDemand     = 0;
+    ed.sequencerIdleDemand = 0;
     ed.finalCoreFuelDemand = 0;
     ed.propPitchDemand    = Hardware::propPitchParkDemand();
     ed.abPumpDemand       = 0;
@@ -3615,6 +3616,7 @@ static void handleCommand(const OTPacket& pkt) {
                     break;
                 }
                 ed.mode = SysMode::STARTUP;
+                ed.sequencerIdleDemand = 0.0f;
                 ed.fuelAdmitted = false;
                 ed.combustionAttempted = false;
                 ed.thermallyLoaded = false;

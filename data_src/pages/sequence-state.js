@@ -510,13 +510,13 @@ function buildFinalStateCard(tab, seq, idleRaw) {
       applySideActionsToState(tab, i, 'enter', state);
       if (bname === 'FuelPumpIdle') {
         const mn = cfg?.throttle?.fuel_pump_min_pct ?? 0;
-        const mx = paramVals['FuelPumpIdle.fp_idle_max_pct'] ?? 18;
+        const mx = paramVals['FuelPumpIdle.fp_idle_max_pct'] ?? 50;
         state.throttle = `${mn}-${mx}%  (minimum reliable output to idle maximum; position set by idle input)`;
       }
       if (bname === 'ModifiedIdle') {
         const mul = paramVals['ModifiedIdle.modified_idle_multiplier'] ?? 1.0;
         const mn  = cfg?.throttle?.fuel_pump_min_pct ?? 0;
-        const mx  = cfg?.throttle?.idle_max_pct ?? 18;
+        const mx  = cfg?.throttle?.idle_max_pct ?? 50;
         state.throttle = `${mn}-${mx}% x${mul}  (reset to 0 on RUNNING)`;
       }
       if (bname === 'Spool') {
@@ -542,7 +542,7 @@ function buildFinalStateCard(tab, seq, idleRaw) {
     if (seq.includes('SafetyHold')) {
       const mn = cfg?.throttle?.fuel_pump_min_pct ?? 0;
       const mx = paramVals['FuelPumpIdle.fp_idle_max_pct']
-              ?? cfg?.throttle?.idle_max_pct ?? 18;
+              ?? cfg?.throttle?.idle_max_pct ?? 50;
       if (idleRaw != null) {
         const norm = Math.max(0, Math.min(1, idleRaw / 4095));
         const pct  = (mn + norm * (mx - mn)).toFixed(1);

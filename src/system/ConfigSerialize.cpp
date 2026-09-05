@@ -523,7 +523,7 @@ void Config::_applyDefaults() {
     cooldownUseStarter = true; cooldownUseOilPump = true;
     cooldownStarterPct = 40.0f; cooldownOilPct = 30.0f; cooldownOilPressureTarget = 2.0f;
     throttleRampUpMs = 600; throttleRampDownMs = 800;
-    throttleIdleMaxPct = 18; throttleExpo = 0.0f;
+    throttleIdleMaxPct = 50; throttleExpo = 0.0f;
     fuelPumpMinPct = 0;
     pullbackN1Enabled = true; pullbackN2Enabled = false; pullbackEgtEnabled = true;
     pullbackP1Enabled = false; pullbackP2Enabled = false; pullbackTorqueEnabled = false;

@@ -8,9 +8,10 @@
 // ============================================================
 //  FuelPumpIdle — set throttle / fuel ESC from idle input channel
 //
-//  ACTION block: reads idleInputRaw (0–4095), maps it linearly
-//  through [Config::fuelPumpMinPct, maxPct], and writes the
-//  result to ed.throttleDemand. Completes in one tick.
+//  ACTION block: when an idle input is fitted, maps its calibrated
+//  travel through [Config::fuelPumpMinPct, maxPct]. With no idle
+//  input, maxPct is the fixed sequencer idle demand. The selected
+//  result is also retained as the no-input RUNNING idle fallback.
 //
 //  The low end is the calibrated fuel-pump minimum-spin percentage.
 //  maxPct is set from Config::throttleIdleMaxPct (the unified idle ceiling)
@@ -18,7 +19,7 @@
 // ============================================================
 class FuelPumpIdle : public IBlock {
 public:
-    float maxPct = 18.0f;   // throttle % when idle input is at maximum
+    float maxPct = 50.0f;   // input high end, or fixed idle when no input is fitted
 
     const char* name() override { return "FuelPumpIdle"; }
 
@@ -27,21 +28,26 @@ public:
         _inputFault = HardwareConfig::hasIdleInput && !ed.idleInputValid && !ed.benchMode;
         if (_inputFault) {
             ed.throttleDemand = 0.0f;
+            ed.sequencerIdleDemand = 0.0f;
             setWaitReason("Idle input unhealthy");
             return;
         }
-        float norm;
-        if (HardwareConfig::idleInputRcPwm) {
-            norm = ed.rcIdleValid ? ed.rcIdleNorm : 0.0f;
-        } else {
-            int range = Config::idleMaxRaw - Config::idleMinRaw;
-            norm = range == 0 ? 0.0f :
-                constrain((ed.idleInputRaw - Config::idleMinRaw) / (float)range, 0.0f, 1.0f);
-        }
         float minPct = constrain(Config::fuelPumpMinPct, 0.0f, 100.0f);
         float topPct = constrain(maxPct, minPct, 100.0f);
-        float pct  = minPct + norm * (topPct - minPct);
+        float pct = topPct;
+        if (HardwareConfig::hasIdleInput) {
+            float norm;
+            if (HardwareConfig::idleInputRcPwm) {
+                norm = ed.rcIdleValid ? ed.rcIdleNorm : 0.0f;
+            } else {
+                int range = Config::idleMaxRaw - Config::idleMinRaw;
+                norm = range == 0 ? 0.0f :
+                    constrain((ed.idleInputRaw - Config::idleMinRaw) / (float)range, 0.0f, 1.0f);
+            }
+            pct = minPct + norm * (topPct - minPct);
+        }
         ed.throttleDemand = constrain(pct / 100.0f, 0.0f, 1.0f);
+        ed.sequencerIdleDemand = ed.throttleDemand;
     }
 
     BlockResult tick() override {

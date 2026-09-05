@@ -117,6 +117,7 @@ struct EngineData {
     // ── Actuator demands (written by controllers/sequencer) ───
     volatile float    throttleDemand  = 0;      // 0.0–1.0  main fuel/throttle ESC
     volatile float    dynamicIdleFloorDemand = 0; // current built-in Automatic Idle minimum
+    volatile float    sequencerIdleDemand = 0; // last Set Main Fuel for Idle result for RUNNING fallback
     volatile float    finalCoreFuelDemand = 0; // previous tick after rules/protection; excludes AB
     volatile float    mainFuelAppliedDemand = 0; // command last written to the physical main-fuel output
     volatile float    fuelPump2Demand = 0;      // 0.0–1.0  independent variable fuel pump
