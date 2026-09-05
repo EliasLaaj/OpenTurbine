@@ -31,6 +31,10 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 - Every save path that reboots the ECU now shows the shared reconnect overlay.
 
 ### Fixed
+- Setup Tool 0.7.2 no longer silently selects an older cached package when it
+  starts while connected to an ECU Wi-Fi network without internet. Online
+  checks prefer the immutable latest-release asset; an explicitly colocated
+  package remains available as the offline fallback.
 - Renaming an ECU no longer creates a false Hardware/Settings profile mismatch.
   Complete uploaded engine files still reject crossed identities.
 - Disabled optional cluster hardware stays out of the installed-device summary

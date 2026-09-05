@@ -183,6 +183,19 @@ func TestPackageDownloadRejectsPlainHTTP(t *testing.T) {
 	}
 }
 
+func TestRecommendedPackageURLsPreferResolvedRelease(t *testing.T) {
+	resolved := "https://github.com/example/OpenTurbine/releases/download/v2.3.0/OpenTurbine_Recommended.zip"
+	got := recommendedPackageURLs(defaultPackageURL, resolved)
+	if len(got) != 2 || got[0] != resolved || got[1] != defaultPackageURL {
+		t.Fatalf("download order = %v; want immutable release URL before stable latest URL", got)
+	}
+	custom := "https://downloads.example.test/custom.zip"
+	got = recommendedPackageURLs(custom, "")
+	if len(got) != 1 || got[0] != custom {
+		t.Fatalf("custom package URL changed unexpectedly: %v", got)
+	}
+}
+
 func TestManifestCompatibilityUsesMinimumToolVersion(t *testing.T) {
 	base := Manifest{
 		Version:                 "2.0.0",
@@ -197,7 +210,7 @@ func TestManifestCompatibilityUsesMinimumToolVersion(t *testing.T) {
 	if err := validateManifestCompatibility(base); err != nil {
 		t.Fatalf("newer client must accept an older compatible baseline: %v", err)
 	}
-	base.MinimumSetupToolVersion = "0.7.2"
+	base.MinimumSetupToolVersion = "0.7.3"
 	if err := validateManifestCompatibility(base); err == nil {
 		t.Fatal("client must reject a package that requires a newer setup tool")
 	}

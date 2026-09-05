@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	appVersion                  = "0.7.1"
+	appVersion                  = "0.7.2"
 	packageCompatibilityVersion = "0.7.0"
 	requiredPackageSchema       = 4
 	appTitle                    = "OpenTurbine Setup Tool"
@@ -2176,43 +2176,23 @@ func (a *App) ensurePackageWithProgress(progress func(string, int)) (*Package, e
 		filepath.Join(base, "OpenTurbine_Recommended.zip"),
 		filepath.Join(base, "package", "OpenTurbine_Recommended.zip"),
 	}
-	cacheCandidates := []string{
-		filepath.Join(a.workDir, "packages", "OpenTurbine_Recommended.zip"),
-		filepath.Join(a.workDir, "OpenTurbine_Recommended.zip"),
-	}
+	var localFallback *Package
+	var localFallbackErr error
 	for _, c := range localCandidates {
-		if !fileExists(c) {
-			continue
-		}
-		if progress != nil {
-			progress("Checking downloaded OpenTurbine package.", 28)
-		}
-		pkg, err := loadPackageFromZip(c)
-		if err == nil {
-			if _, eerr := findEsptool(pkg); eerr == nil {
-				a.packageReady = pkg
-				return pkg, nil
-			} else {
-				return nil, fmt.Errorf("the local OpenTurbine package is missing tools\\esptool.exe, needed for clean USB installation: %w", eerr)
-			}
-		}
-		return nil, fmt.Errorf("the local OpenTurbine package could not be opened: %w", err)
-	}
-	var cached *Package
-	for _, c := range cacheCandidates {
 		if !fileExists(c) {
 			continue
 		}
 		pkg, err := loadPackageFromZip(c)
 		if err != nil {
-			_ = os.Remove(c)
+			localFallbackErr = fmt.Errorf("the local OpenTurbine package could not be opened: %w", err)
 			continue
 		}
 		if _, err := findEsptool(pkg); err != nil {
-			_ = os.Remove(c)
+			pkg.cleanup()
+			localFallbackErr = fmt.Errorf("the local OpenTurbine package is missing tools\\esptool.exe, needed for clean USB installation: %w", err)
 			continue
 		}
-		cached = pkg
+		localFallback = pkg
 		break
 	}
 	if fileExists(filepath.Join(base, "package", "manifest.json")) {
@@ -2253,14 +2233,20 @@ func (a *App) ensurePackageWithProgress(progress func(string, int)) (*Package, e
 	}
 	usedURL, downloadErr := downloadRecommendedPackage(url, dst, downloadProgress)
 	if downloadErr != nil {
-		if cached != nil {
+		if localFallback != nil {
 			if progress != nil {
-				progress("Could not check GitHub; using the previously downloaded package.", 80)
+				progress("GitHub unavailable; using the package placed beside this Setup Tool ("+packageVersion(localFallback)+").", 80)
 			}
-			a.packageReady = cached
-			return cached, nil
+			a.packageReady = localFallback
+			return localFallback, nil
 		}
-		return nil, fmt.Errorf("could not download OpenTurbine_Recommended.zip from GitHub Releases after trying the release URL, GitHub API asset lookup, and retries. Details: %w", downloadErr)
+		if localFallbackErr != nil {
+			return nil, fmt.Errorf("could not download the latest OpenTurbine package, and the local fallback is invalid: %v; download details: %w", localFallbackErr, downloadErr)
+		}
+		return nil, fmt.Errorf("could not download the latest OpenTurbine_Recommended.zip from GitHub Releases. Reconnect to normal internet Wi-Fi and reopen the Setup Tool; a cached older release is never installed silently. Details: %w", downloadErr)
+	}
+	if localFallback != nil {
+		localFallback.cleanup()
 	}
 	if progress != nil {
 		progress("Checking downloaded OpenTurbine package checksum.", 78)
@@ -2289,13 +2275,14 @@ func (a *App) ensurePackageWithProgress(progress func(string, int)) (*Package, e
 
 func downloadRecommendedPackage(configuredURL, dst string,
 	progress func(done, total int64)) (string, error) {
-	urls := []string{strings.TrimSpace(configuredURL)}
+	configuredURL = strings.TrimSpace(configuredURL)
+	resolvedURL := ""
 	if strings.EqualFold(strings.TrimSpace(configuredURL), defaultPackageURL) {
-		if resolved, err := githubLatestReleaseAssetURL("OpenTurbine_Recommended.zip"); err == nil &&
-			resolved != "" && !strings.EqualFold(resolved, configuredURL) {
-			urls = append(urls, resolved)
+		if resolved, err := githubLatestReleaseAssetURL("OpenTurbine_Recommended.zip"); err == nil {
+			resolvedURL = resolved
 		}
 	}
+	urls := recommendedPackageURLs(configuredURL, resolvedURL)
 	var failures []string
 	for _, candidate := range urls {
 		for attempt := 1; attempt <= 3; attempt++ {
@@ -2308,6 +2295,17 @@ func downloadRecommendedPackage(configuredURL, dst string,
 		}
 	}
 	return "", errors.New(strings.Join(failures, "; "))
+}
+
+func recommendedPackageURLs(configuredURL, resolvedURL string) []string {
+	configuredURL = strings.TrimSpace(configuredURL)
+	resolvedURL = strings.TrimSpace(resolvedURL)
+	// Prefer the immutable tag-specific URL returned by GitHub's API. The
+	// stable /releases/latest URL can remain cached briefly after publication.
+	if resolvedURL != "" && !strings.EqualFold(resolvedURL, configuredURL) {
+		return []string{resolvedURL, configuredURL}
+	}
+	return []string{configuredURL}
 }
 
 func githubLatestReleaseAssetURL(name string) (string, error) {
