@@ -136,6 +136,10 @@ async function saveAll() {
 }
 
 function startRebootCountdown() {
+  if (typeof window.OTShowRebootOverlay === 'function') {
+    window.OTShowRebootOverlay({returnPath:'/sequence.html'});
+    return;
+  }
   const overlay = document.getElementById('reboot-overlay');
   const count = document.getElementById('reboot-count');
   overlay?.classList.add('show');

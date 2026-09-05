@@ -981,6 +981,8 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     assert.equal(await page.locator('#cf-cl_en').count(), 0, 'cluster transmission must have one System enable');
     assert.equal(await page.locator('#cf-cl_n1').isVisible(), false, 'cluster thresholds stay hidden when cluster hardware is disabled');
     await goto(page, 'hardware.html', '#hardware-comms-summary');
+    assert.doesNotMatch(await text(page, '#hardware-comms-summary'), /OT Cluster serial/i,
+      'disabled OT Cluster must stay out of the normal installed-device summary');
     await page.locator('#btn-edit-comms').click();
     assert.match(await text(page, '#hardware-comms-summary'), /Cluster TX GPIO|Cluster RX GPIO|TX-only/i);
     assert.ok(await page.locator('#hardware-comms-summary option[value="-1"]').count() >= 1);
@@ -1140,11 +1142,13 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     });
     await goto(page, 'tools.html', '#tool-area');
     assert.match(await text(page, '#cfg-version-mismatch-banner'), /schema mismatch|review/i);
-    assert.match(await text(page, '#card-WEB-ASSETS'), /without erasing config or logs/i);
-    assert.match(await text(page, '#manual-update-tools'), /Download and verify a complete engine file/i);
-    await goto(page, 'system.html', '#system-device-setup');
+    await goto(page, 'system.html', '#manual-update-tools');
+    assert.match(await text(page, '#manual-update-tools'), /Web UI assets.*configuration and logs are retained/is);
+    assert.equal(await page.locator('#ota-file').count(), 1);
+    assert.equal(await page.locator('#assets-files').count(), 1);
     assert.match(await page.locator('body').evaluate(() => backupConfig.toString()), /Download started.*Confirm the complete engine file appears in Downloads/s);
     await goto(page, 'tools.html', '#tool-area');
+    assert.equal(await page.locator('#manual-update-tools').count(), 0);
     assert.equal(await visible(page, '#card-TOGGLE_BENCH_MODE'), false);
     await patchData(page, { dev_mode: true });
     await page.waitForFunction(() => {
@@ -1152,7 +1156,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
       return !!el && getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0;
     }, null, { timeout: 3000 });
     assert.equal(await visible(page, '#card-TOGGLE_BENCH_MODE'), true);
-    results.push('tools page surfaces schema/version warnings and gates bench mode behind dev mode');
+    results.push('System owns manual firmware/web updates while Tools gates bench mode behind dev mode');
 
     await reset(page);
     await scenario(page, 'fault');

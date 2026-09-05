@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" class="active" title="Edit startup, shutdown, and afterburner transitions and block timings.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
-  <a href="/tools.html" title="Run standby commissioning, actuator tests, software updates, and developer controls.">Tools</a>
+  <a href="/tools.html" title="Run standby commissioning, actuator tests, and developer controls.">Tools</a>
   <a href="/system.html" title="Configure ECU behavior and communications; manage backups, diagnostics, and reset.">System</a>
   <span id="conn" class="conn-dot disconnected" title="WebSocket"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
@@ -3584,6 +3584,10 @@ async function saveAll() {
 }
 
 function startRebootCountdown() {
+  if (typeof window.OTShowRebootOverlay === 'function') {
+    window.OTShowRebootOverlay({returnPath:'/sequence.html'});
+    return;
+  }
   const overlay = document.getElementById('reboot-overlay');
   const count = document.getElementById('reboot-count');
   overlay?.classList.add('show');

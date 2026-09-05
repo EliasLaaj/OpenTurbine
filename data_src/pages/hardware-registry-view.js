@@ -1038,7 +1038,7 @@ function renderCommsIndicatorSummary() {
     profileAllows('cluster_serial') ? card('cluster_serial', 'OT Cluster serial',
       cluster.enabled ? `${pcbProfileActive() ? 'Fixed PCB serial connection' : `TX GPIO ${cluster.tx_pin ?? 'not set'}${(cluster.rx_pin ?? -1) >= 0 ? ` / RX GPIO ${cluster.rx_pin}` : ' / TX only'}`} / ${cluster.baud || 115200} baud` : 'External cluster telemetry link',
       clusterStatus,
-      pcbProfileActive() ? true : (!!cluster.enabled || (cluster.tx_pin ?? -1) >= 0),
+      !!cluster.enabled,
       `<div class="registry-card-editor" style="display:block"><div class="hw-grid">
          <div class="hw-field"><span class="hw-label">Cluster serial</span><label class="hw-toggle"><input class="${workflowDeviceFieldClass('cluster_serial','enabled')}" type="checkbox" ${cluster.enabled?'checked':''} onchange="setProfileSerialEnabled('cluster_serial',this.checked)"><span></span> Enable</label></div>
          ${pcbProfileActive() ? `<div class="hw-field"><span class="hw-label">Physical connection</span><span class="hw-desc">TX/RX wiring is fixed by the flashed PCB profile.${sharedProfileSerial?' The connector is shared with MAVLink.':''}</span></div>` : `<div class="hw-field"><span class="hw-label">Cluster TX GPIO</span><select class="${workflowDeviceFieldClass('cluster_serial','tx_pin')}" onchange="setNested('cluster_serial','tx_pin',+this.value);renderHardwareWorkflowSummaries()">${buildPinOptions(cluster.tx_pin, 'out')}</select></div>

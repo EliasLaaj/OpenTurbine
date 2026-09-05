@@ -525,8 +525,11 @@ async function saveConfig() {
   const body     = document.getElementById('save-recap-body');
   const subtitle = document.getElementById('save-recap-subtitle');
   const inactiveChanges = changes.filter(change => change.inactive);
+  const renamedWifi = _systemHardwareChangedPaths.has('profile_id')
+    ? String(hwCfg.profile_id || 'OpenTurbine').trim() || 'OpenTurbine' : '';
   subtitle.textContent = changes.length + ' field' + (changes.length > 1 ? 's' : '') +
     ' will be updated on the device.' +
+    (renamedWifi ? ` Saving will restart the ECU and change its Wi-Fi network name to “${renamedWifi}”. Reconnect to that network afterward.` : '') +
     (inactiveChanges.length
       ? ` ${inactiveChanges.length} amber-marked value${inactiveChanges.length === 1 ? ' is' : 's are'} being saved for future hardware and will remain inactive for now.`
       : '');
@@ -579,7 +582,7 @@ async function _saveControllerChanges(payload, saveMsg, confirmButton) {
   saveMsg.textContent = '✓ Saved — ECU rebooting…';
   saveMsg.style.color = 'var(--green)';
   if (confirmButton) confirmButton.disabled = true;
-  setTimeout(() => { location.href = CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'; }, 12000);
+  window.OTShowRebootOverlay?.({returnPath:CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'});
 }
 
 async function _saveSystemChanges(payload, saveMsg, confirmButton) {
@@ -612,11 +615,13 @@ async function _saveSystemChanges(payload, saveMsg, confirmButton) {
     settingsReboot = data?.reboot === true;
   }
   const rebooting = _systemHardwareDirty || settingsReboot;
+  const nextWifiName = _systemHardwareChangedPaths.has('profile_id')
+    ? String(hwCfg.profile_id || 'OpenTurbine').trim() || 'OpenTurbine' : '';
   _clearDirty();
   saveMsg.textContent = rebooting ? '✓ Saved — ECU rebooting…' : '✓ Saved';
   saveMsg.style.color = 'var(--green)';
   if (confirmButton) confirmButton.disabled = rebooting;
-  if (rebooting) setTimeout(() => { location.href = '/system.html'; }, 12000);
+  if (rebooting) window.OTShowRebootOverlay?.({nextWifiName, returnPath:'/system.html'});
   else if (typeof startTelemetryBoot === 'function') startTelemetryBoot();
 }
 
@@ -697,7 +702,7 @@ function _doSave() {
         saveMsg.textContent = '✓ Saved — ECU rebooting…';
         saveMsg.style.color = 'var(--green)';
         if (cb) cb.disabled = true;
-        setTimeout(() => { location.href = CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'; }, 12000);
+        window.OTShowRebootOverlay?.({returnPath:CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'});
         return;
       }
       saveMsg.textContent = (d.warn ? 'Saved — ' + d.warn :

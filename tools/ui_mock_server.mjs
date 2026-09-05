@@ -559,10 +559,11 @@ const server = http.createServer(async (req, res) => {
       }
       state.hardware = req.method === 'POST' ? body : merge(state.hardware, body);
       syncDataFromHardware(state.data, state.hardware, state.settings);
-      if (req.method === 'POST' && state.hardware.profile_id) {
+      const pageSource = url.searchParams.get('source');
+      if ((req.method === 'POST' || pageSource === 'system' || pageSource === 'hardware') && state.hardware.profile_id) {
         state.settings.profile_id = state.hardware.profile_id;
       }
-      return sendJson(res, 200, { ok: true, reboot: req.method === 'POST' });
+      return sendJson(res, 200, { ok: true, reboot: req.method === 'POST' || !!pageSource });
     }
     if (req.method === 'POST' && url.pathname === '/api/ecu_config') {
       const body = await bodyJson(req);

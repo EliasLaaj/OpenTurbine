@@ -227,7 +227,7 @@ async function factoryReset() {
     .then(d => {
       if (d.ok) {
         if (msg) { msg.textContent = 'Reset sent — device rebooting…'; msg.style.color = 'var(--yellow)'; msg.style.display = ''; }
-        setTimeout(() => location.reload(), 8000);
+        window.OTShowRebootOverlay?.({returnPath:'/system.html'});
       } else {
         if (msg) { msg.textContent = d.error || 'Reset failed'; msg.style.color = 'var(--red)'; msg.style.display = ''; }
         if (btn) btn.disabled = false;
@@ -404,6 +404,7 @@ async function restoreConfig(input) {
           msg.style.color = 'var(--green)';
           msg.style.display = '';
         }
+        window.OTShowRebootOverlay?.({returnPath:'/system.html'});
       } else {
         throw new Error(d.error || 'Unknown error');
       }
@@ -1140,6 +1141,131 @@ function revealConfigDeepLink() {
   document.querySelectorAll('.deep-link-target').forEach(el => el.classList.remove('deep-link-target'));
   revealTarget.classList.add('deep-link-target');
   requestAnimationFrame(() => revealTarget.scrollIntoView({ behavior:'smooth', block:'center' }));
+}
+
+function systemMaintenanceAllowed() {
+  return ['STANDBY', 'FAULT'].includes(runtimeMode);
+}
+
+function startSystemOTA(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  if (!systemMaintenanceAllowed()) {
+    alert('Engine must be in STANDBY (or FAULT) before flashing firmware.');
+    input.value = '';
+    return;
+  }
+  const btn = document.getElementById('ota-btn');
+  const state = document.getElementById('ota-state');
+  const track = document.getElementById('ota-prog-track');
+  const fill = document.getElementById('ota-prog-fill');
+  const msg = document.getElementById('ota-msg');
+  btn.disabled = true;
+  track.style.display = '';
+  state.textContent = 'Uploading…';
+  msg.style.display = 'none';
+  const form = new FormData();
+  form.append('firmware', file, file.name);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/update');
+  xhr.upload.onprogress = event => {
+    if (!event.lengthComputable) return;
+    const pct = Math.round(event.loaded / event.total * 100);
+    fill.style.width = pct + '%';
+    state.textContent = 'Uploading ' + pct + '%';
+  };
+  const fail = message => {
+    state.textContent = 'Error'; state.className = 'maintenance-state fault';
+    msg.textContent = message; msg.style.color = 'var(--red)'; msg.style.display = '';
+    btn.disabled = false;
+  };
+  xhr.onload = () => {
+    try {
+      const result = JSON.parse(xhr.responseText);
+      if (!result.ok) throw new Error(result.error || 'Unknown error');
+      fill.style.width = '100%';
+      state.textContent = 'Done — rebooting…'; state.className = 'maintenance-state done';
+      msg.textContent = 'Firmware updated. Reconnect to the ECU Wi-Fi after it restarts.';
+      msg.style.color = 'var(--green)'; msg.style.display = '';
+      window.OTShowRebootOverlay?.({returnPath:'/system.html'});
+    } catch (error) { fail('Firmware update failed: ' + error.message); }
+  };
+  xhr.onerror = () => fail('Network error — reconnect to the ECU and try again.');
+  xhr.send(form);
+  input.value = '';
+}
+
+function startSystemWebAssetsUpdate(input) {
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  if (!systemMaintenanceAllowed()) {
+    alert('Engine must be in STANDBY (or FAULT) before updating web assets.');
+    input.value = '';
+    return;
+  }
+  const required = ['calibration.html.gz','controllers.html.gz','hardware.html.gz','index.html.gz',
+    'log.html.gz','sequence.html.gz','app.js.gz','style.css.gz','system.html.gz',
+    'theme.js.gz','ui_dialog.js.gz','tools.html.gz'];
+  const names = new Set(files.map(file => file.name));
+  const missing = required.filter(name => !names.has(name));
+  const invalid = files.filter(file => !required.includes(file.name));
+  if (missing.length || invalid.length || files.length !== required.length) {
+    alert('Choose exactly the twelve generated data/*.gz web assets.\n\nMissing: ' +
+      (missing.join(', ') || 'none') + '\nUnexpected: ' +
+      (invalid.map(file => file.name).join(', ') || 'none'));
+    input.value = '';
+    return;
+  }
+  const btn = document.getElementById('assets-btn');
+  const state = document.getElementById('assets-state');
+  const track = document.getElementById('assets-prog-track');
+  const fill = document.getElementById('assets-prog-fill');
+  const msg = document.getElementById('assets-msg');
+  btn.disabled = true;
+  track.style.display = '';
+  state.textContent = 'Uploading…';
+  msg.style.display = 'none';
+  const ordered = required.map(name => files.find(file => file.name === name));
+  const totalBytes = ordered.reduce((sum, file) => sum + file.size, 0);
+  let completedBytes = 0;
+  const fail = message => {
+    state.textContent = 'Error'; state.className = 'maintenance-state fault';
+    msg.textContent = message; msg.style.color = 'var(--red)'; msg.style.display = '';
+    btn.disabled = false;
+  };
+  const sendNext = (index, offset = 0) => {
+    const file = ordered[index];
+    const end = Math.min(offset + 8192, file.size);
+    const chunk = file.slice(offset, end);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/web_asset_chunk?name=' + encodeURIComponent(file.name) +
+      '&offset=' + offset + '&final=' + (end === file.size ? '1' : '0'));
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = event => {
+      if (!event.lengthComputable) return;
+      const pct = Math.round((completedBytes + Math.min(event.loaded, chunk.size)) / totalBytes * 100);
+      fill.style.width = pct + '%';
+      state.textContent = 'Uploading ' + pct + '%';
+    };
+    xhr.onload = () => {
+      try {
+        const result = JSON.parse(xhr.responseText);
+        if (!result.ok) throw new Error(result.error || 'Unknown error');
+        completedBytes += chunk.size;
+        if (end < file.size) return sendNext(index, end);
+        if (index + 1 < ordered.length) return sendNext(index + 1);
+        fill.style.width = '100%';
+        state.textContent = 'Done — rebooting…'; state.className = 'maintenance-state done';
+        msg.textContent = 'Web pages updated; configuration and logs were retained.';
+        msg.style.color = 'var(--green)'; msg.style.display = '';
+        window.OTShowRebootOverlay?.({returnPath:'/system.html'});
+      } catch (error) { fail('Web asset update failed: ' + error.message); }
+    };
+    xhr.onerror = () => fail('Network error — reconnect and select the complete asset set again.');
+    xhr.send(chunk);
+  };
+  sendNext(0);
+  input.value = '';
 }
 
 document.addEventListener('DOMContentLoaded', () => {

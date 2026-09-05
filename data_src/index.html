@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
-  <a href="/tools.html" title="Run standby commissioning, actuator tests, software updates, and developer controls.">Tools</a>
+  <a href="/tools.html" title="Run standby commissioning, actuator tests, and developer controls.">Tools</a>
   <a href="/system.html" title="Configure ECU behavior and communications; manage backups, diagnostics, and reset.">System</a>
   <span id="conn" class="conn-dot disconnected" title="WebSocket"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
@@ -101,7 +101,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <strong>⚠ Engine Name Mismatch — Engine operations locked</strong>
     The hardware and settings sections in <code>ecu_config.json</code> identify different engines.
     The ECU will not run with mixed engine data.<br>
-    <b>How to fix:</b> restore one complete engine file from <a href="/tools.html" style="color:var(--yellow)">Tools</a>,
+    <b>How to fix:</b> restore one complete engine file from <a href="/system.html" style="color:var(--yellow)">System</a>,
     or save the Hardware page to synchronize its engine name into settings.
   </div>
   <div id="profile-error" class="error-banner" style="display:none">Engine name mismatch — engine operations locked</div>

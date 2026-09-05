@@ -649,8 +649,11 @@ async function saveHardware() {
   const modal    = document.getElementById('save-recap-modal');
   const body     = document.getElementById('save-recap-body');
   const subtitle = document.getElementById('save-recap-subtitle');
+  const renamedWifi = (cfg.profile_id || 'OpenTurbine').trim() || 'OpenTurbine';
+  const profileWillChange = renamedWifi !== (_loadedProfileId || 'OpenTurbine');
   subtitle.textContent = changes.length + ' field' + (changes.length > 1 ? 's' : '') +
     ' changed. Hardware saves require a reboot — the device will restart.' +
+    (profileWillChange ? ` Its Wi-Fi network name will change to “${renamedWifi}”; reconnect to that network afterward.` : '') +
     (idleSourceWillChange ? ' Review the highlighted Automatic Idle feedback-source fallback before continuing.' : '');
 
   let rows = changes.map(c =>
@@ -768,6 +771,10 @@ function friendlyHardwareSaveError(response) {
 }
 
 function showRebootOverlay(nextWifiName = '') {
+  if (typeof window.OTShowRebootOverlay === 'function') {
+    window.OTShowRebootOverlay({nextWifiName, returnPath:location.pathname});
+    return;
+  }
   const ov = document.getElementById('reboot-overlay');
   ov.style.display = 'flex';
   let secs = 12;

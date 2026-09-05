@@ -235,6 +235,7 @@ let _controllerRulesDirty = false;
 let _controllerHardwareDirty = false;
 let _systemHardwareDirty = false;
 const _systemHardwareChangedPaths = new Set();
+const _systemHardwareOriginalValues = new Map();
 
 window.addEventListener('beforeunload', event => {
   if (!_cfgDirty) return;
@@ -312,7 +313,26 @@ function _buildChanges() {
     });
   if (_controllerRulesDirty) changes.push({key:'__simple_controls', label:'Custom controllers', was:'Saved setup', now:'Updated setup', inactive:false});
   if (_controllerHardwareDirty) changes.push({key:'__controller_hardware', label:'Controller assignments and safety enables', was:'Saved setup', now:'Updated setup', inactive:false});
-  if (_systemHardwareDirty) changes.push({key:'__system_hardware', label:'System device settings', was:'Saved setup', now:'Updated setup', inactive:false});
+  if (_systemHardwareDirty) {
+    for (const path of _systemHardwareChangedPaths) {
+      const original = _systemHardwareOriginalValues.get(path);
+      const current = getPath(hwCfg, path.split('.'));
+      const labels = {
+        profile_id:'Engine / Wi-Fi name', profile_desc:'Engine description',
+        wifi_password:'Wi-Fi access password', wifi_tx_power_dbm:'Wi-Fi transmit power',
+        'cluster_serial.enabled':'Instrument cluster', 'cluster_serial.baud':'Instrument cluster baud rate',
+        'cluster_serial.interval_ms':'Instrument cluster update interval',
+        'mavlink.enabled':'MAVLink telemetry', 'mavlink.baud':'MAVLink baud rate',
+        'mavlink.interval_ms':'MAVLink update interval'
+      };
+      const display = value => path === 'wifi_password'
+        ? (value ? 'Protected network' : 'Open network')
+        : typeof value === 'boolean' ? (value ? 'Enabled' : 'Disabled')
+        : String(value ?? '(empty)');
+      changes.push({key:'__system_hardware_' + path, label:labels[path] || path,
+        was:display(original), now:display(current), inactive:false});
+    }
+  }
   return changes;
 }
 
@@ -358,6 +378,7 @@ function _clearDirty() {
   _controllerHardwareDirty = false;
   _systemHardwareDirty = false;
   _systemHardwareChangedPaths.clear();
+  _systemHardwareOriginalValues.clear();
   const btn = document.getElementById('btn-save');
   const discard = document.getElementById('btn-discard');
   const bar = document.querySelector('.save-bar');

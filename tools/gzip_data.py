@@ -60,4 +60,4 @@ with open(marker_tmp, "w", encoding="ascii", newline="\n") as marker:
     marker.write(digest.hexdigest() + "\n")
 os.replace(marker_tmp, os.path.join(DST, ".assets_complete"))
 
-print("Done. Flash with uploadfs once, or choose all generated data/*.gz files in Tools > Web UI Assets Update.")
+print("Done. Flash with uploadfs once, or choose all generated data/*.gz files in System > Maintenance > Manual firmware & web update.")

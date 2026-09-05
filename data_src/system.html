@@ -21,6 +21,7 @@ main{max-width:1380px;padding:1.1rem 1.5rem 5.5rem}
 .cfg-search-wrap{position:relative}.cfg-search{width:100%;height:48px;padding:.65rem 5.2rem .65rem 2.7rem!important;border-color:var(--border-light);background:var(--bg);font-family:var(--font-ui);font-size:.92rem}.cfg-search:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent)}.cfg-search-icon{position:absolute;left:.95rem;top:50%;transform:translateY(-50%);color:var(--dim);font-size:1rem;pointer-events:none}.cfg-search-key{position:absolute;right:.75rem;top:50%;transform:translateY(-50%);font:600 .68rem var(--font-mono);color:var(--dim);border:1px solid var(--border);border-radius:4px;padding:.08rem .35rem}
 .cfg-toolbar{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-top:.7rem}.cfg-filters{display:flex;gap:.35rem;overflow:auto}.cfg-filter{min-height:34px;padding:.28rem .72rem;border-radius:999px;font-size:.68rem;white-space:nowrap;text-transform:none;letter-spacing:.01em}.cfg-filter.active{background:var(--accent);border-color:var(--accent);color:#271306}.cfg-result-count{margin-left:auto;font-size:.72rem;color:var(--dim)}
 .config-group{display:block;margin-bottom:.75rem;border:1px solid var(--border);border-radius:13px;background:var(--surface);overflow:hidden}.config-group.group-changed{border-color:var(--yellow);box-shadow:0 0 0 2px color-mix(in srgb,var(--yellow) 16%,transparent)}.config-group>summary{display:flex;align-items:center;gap:.65rem;min-height:78px;padding:.85rem 1rem;cursor:pointer;list-style:none;user-select:none}.config-group>summary::-webkit-details-marker{display:none}.config-group>summary:hover{background:color-mix(in srgb,var(--surface-3) 45%,transparent)}.group-heading{display:block;min-width:0;flex:1}.group-title,.group-desc{display:block}.group-title{font-size:.88rem;font-weight:750}.group-desc{font-size:.72rem;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.group-meta{font-size:.68rem;color:var(--dim);white-space:nowrap}.group-chevron{font-size:1.15rem;color:var(--dim);transition:transform .15s}.config-group[open] .group-chevron{transform:rotate(90deg)}.group-content{padding:0 .8rem .8rem;border-top:1px solid var(--border)}
+.system-category{display:block;margin-bottom:1rem;border:1px solid var(--border-light);border-radius:14px;background:linear-gradient(145deg,var(--surface),var(--surface-2));overflow:hidden}.system-category>summary{display:flex;align-items:center;gap:.7rem;padding:1rem 1.1rem;cursor:pointer;list-style:none}.system-category>summary::-webkit-details-marker{display:none}.system-category[open]>.group-chevron{transform:rotate(90deg)}.system-category-body{padding:0 .8rem .8rem;border-top:1px solid var(--border)}.system-subcard-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;padding-top:.8rem}.system-subcard-grid>.config-group{margin:0;align-self:start}.system-maintenance-card{grid-column:1/-1}.maintenance-upload{display:flex;align-items:flex-start;justify-content:space-between;gap:.8rem;flex-wrap:wrap}.maintenance-upload-copy{flex:1;min-width:220px}.maintenance-progress{height:4px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:.6rem}.maintenance-progress-fill{height:100%;width:0;background:var(--accent);transition:width .15s}.maintenance-state{font-size:.65rem;color:var(--dim);border:1px solid var(--border);border-radius:999px;padding:.15rem .5rem}.maintenance-state.done{color:var(--green);border-color:var(--green)}.maintenance-state.fault{color:var(--red);border-color:var(--red)}@media(max-width:850px){.system-subcard-grid{grid-template-columns:1fr}.system-maintenance-card{grid-column:auto}}
 .cfg-section{background:transparent;border:0;border-radius:0;padding:.85rem .25rem .2rem;margin:0}.cfg-section+.cfg-section{border-top:1px solid var(--border)}.cfg-title{font-size:.72rem;color:var(--text-2);margin:0 0 .65rem;display:flex;align-items:center;gap:.45rem}.cfg-title-count{font-size:.63rem;color:var(--dim);font-weight:500;letter-spacing:0;text-transform:none}.cfg-grid{grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:.65rem}
 .cfg-field{position:relative;gap:.38rem;padding:.75rem;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);transition:border-color .15s,opacity .15s,transform .15s}.cfg-field:hover{border-color:var(--border-light)}.cfg-field.search-hit{border-color:color-mix(in srgb,var(--accent) 65%,var(--border));box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 18%,transparent)}.cfg-field-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.65rem;min-width:0}.cfg-label{font-size:.68rem;color:var(--text-2);letter-spacing:.055em;min-height:1.05rem;min-width:0}.cfg-field input,.cfg-field select{min-height:42px;font-size:.86rem;background:var(--bg)}.cfg-field input[type=checkbox]{width:22px;height:22px;min-height:22px;align-self:flex-start}.cfg-help{font-size:.69rem;color:var(--dim)}.cfg-help summary{cursor:pointer;display:inline;color:var(--dim);list-style:none}.cfg-help summary::-webkit-details-marker{display:none}.cfg-help summary::before{content:'ⓘ ';color:var(--accent)}.cfg-help[open] summary{color:var(--text-2)}.cfg-desc{padding-top:.35rem;font-size:.72rem;line-height:1.45}.field-level{flex:0 0 auto;font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;color:var(--blue)}.cfg-empty{padding:2.5rem 1rem;text-align:center;border:1px dashed var(--border-light);border-radius:12px;color:var(--dim)}
 .cfg-field.cfg-field-inactive{border-color:color-mix(in srgb,var(--yellow) 58%,var(--border));box-shadow:inset 3px 0 0 color-mix(in srgb,var(--yellow) 68%,transparent);background:color-mix(in srgb,var(--yellow) 4%,var(--surface-2))}.cfg-field.cfg-field-inactive:not(.inactive-editable){opacity:.62}.cfg-inactive-badge{display:none;flex:0 0 auto;padding:.08rem .36rem;border:1px solid color-mix(in srgb,var(--yellow) 55%,transparent);border-radius:999px;color:var(--yellow);font-size:.55rem;font-weight:750;letter-spacing:.055em;text-transform:uppercase}.cfg-field.cfg-field-inactive .cfg-inactive-badge{display:inline-flex}.cfg-inactive-note{display:none;color:var(--yellow);font-size:.65rem;line-height:1.35}.cfg-field.cfg-field-inactive .cfg-inactive-note{display:block}.cfg-field.cfg-field-inactive.inactive-editable{opacity:1;border-color:color-mix(in srgb,var(--yellow) 82%,var(--border));box-shadow:inset 3px 0 0 var(--yellow),0 0 0 1px color-mix(in srgb,var(--yellow) 10%,transparent)}
@@ -51,7 +52,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
-  <a href="/tools.html" title="Run standby commissioning, actuator tests, software updates, and developer controls.">Tools</a>
+  <a href="/tools.html" title="Run standby commissioning, actuator tests, and developer controls.">Tools</a>
   <a href="/system.html" class="active ot-nav-system" title="Configure ECU behavior and communications; manage backups, diagnostics, and reset.">System</a>
   <span id="conn" class="conn-dot disconnected"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
@@ -358,6 +359,7 @@ let _controllerRulesDirty = false;
 let _controllerHardwareDirty = false;
 let _systemHardwareDirty = false;
 const _systemHardwareChangedPaths = new Set();
+const _systemHardwareOriginalValues = new Map();
 
 window.addEventListener('beforeunload', event => {
   if (!_cfgDirty) return;
@@ -435,7 +437,26 @@ function _buildChanges() {
     });
   if (_controllerRulesDirty) changes.push({key:'__simple_controls', label:'Custom controllers', was:'Saved setup', now:'Updated setup', inactive:false});
   if (_controllerHardwareDirty) changes.push({key:'__controller_hardware', label:'Controller assignments and safety enables', was:'Saved setup', now:'Updated setup', inactive:false});
-  if (_systemHardwareDirty) changes.push({key:'__system_hardware', label:'System device settings', was:'Saved setup', now:'Updated setup', inactive:false});
+  if (_systemHardwareDirty) {
+    for (const path of _systemHardwareChangedPaths) {
+      const original = _systemHardwareOriginalValues.get(path);
+      const current = getPath(hwCfg, path.split('.'));
+      const labels = {
+        profile_id:'Engine / Wi-Fi name', profile_desc:'Engine description',
+        wifi_password:'Wi-Fi access password', wifi_tx_power_dbm:'Wi-Fi transmit power',
+        'cluster_serial.enabled':'Instrument cluster', 'cluster_serial.baud':'Instrument cluster baud rate',
+        'cluster_serial.interval_ms':'Instrument cluster update interval',
+        'mavlink.enabled':'MAVLink telemetry', 'mavlink.baud':'MAVLink baud rate',
+        'mavlink.interval_ms':'MAVLink update interval'
+      };
+      const display = value => path === 'wifi_password'
+        ? (value ? 'Protected network' : 'Open network')
+        : typeof value === 'boolean' ? (value ? 'Enabled' : 'Disabled')
+        : String(value ?? '(empty)');
+      changes.push({key:'__system_hardware_' + path, label:labels[path] || path,
+        was:display(original), now:display(current), inactive:false});
+    }
+  }
   return changes;
 }
 
@@ -481,6 +502,7 @@ function _clearDirty() {
   _controllerHardwareDirty = false;
   _systemHardwareDirty = false;
   _systemHardwareChangedPaths.clear();
+  _systemHardwareOriginalValues.clear();
   const btn = document.getElementById('btn-save');
   const discard = document.getElementById('btn-discard');
   const bar = document.querySelector('.save-bar');
@@ -1012,6 +1034,8 @@ function removeControllerOilLoop(index) {
   markControllerHardwareDirty();
 }
 function setSystemHardware(path, value) {
+  if (!_systemHardwareOriginalValues.has(path))
+    _systemHardwareOriginalValues.set(path, getPath(hwCfg, path.split('.')));
   setPath(hwCfg, path.split('.'), value);
   _systemHardwareDirty = true;
   _systemHardwareChangedPaths.add(path);
@@ -1031,6 +1055,7 @@ function renderSystemSetup() {
   const cluster = hwCfg.cluster_serial || {};
   const mav = hwCfg.mavlink || {};
   const group = (title, desc, body, open=true, id='') => `<details${id?` id="${id}"`:''} class="config-group"${open?' open':''}><summary><span class="group-heading"><span class="group-title">${title}</span><span class="group-desc">${desc}</span></span><span class="group-chevron" aria-hidden="true">›</span></summary><div class="group-content"><div class="cfg-section"><div class="cfg-grid">${body}</div></div></div></details>`;
+  const category = (title, desc, body, open=false, id='') => `<details${id?` id="${id}"`:''} class="system-category"${open?' open':''}><summary><span class="group-heading"><span class="group-title">${title}</span><span class="group-desc">${desc}</span></span><span class="group-chevron" aria-hidden="true">›</span></summary><div class="system-category-body"><div class="system-subcard-grid">${body}</div></div></details>`;
   const identity = `
       <label class="cfg-field"><span class="cfg-label">Engine / Wi-Fi name</span><span class="cfg-desc">Identifies this engine and names its ECU access point.</span><input id="system-engine-name" maxlength="63" value="${esc(hwCfg.profile_id || 'OpenTurbine')}" onchange="setSystemHardware('profile_id',this.value.trim()||'OpenTurbine')"></label>
       <label class="cfg-field"><span class="cfg-label">Engine description</span><span class="cfg-desc">A short name or note used to distinguish this ECU and its saved engine file.</span><input id="system-engine-description" maxlength="63" value="${esc(hwCfg.profile_desc || '')}" onchange="setSystemHardware('profile_desc',this.value)"></label>`;
@@ -1121,17 +1146,30 @@ function renderSystemSetup() {
         </div>
         <div id="factory-reset-msg" style="font-size:.72rem;margin-top:.45rem;display:none"></div>
       </div>`;
-  root.innerHTML = `<div class="cfg-title">Device setup</div>` +
-    group('Engine identity','How this ECU identifies itself and its saved engine setup',identity) +
-    group('Wi-Fi access','Local browser connection settings; internet is never required',wifi) +
-    group('Appearance','Interface color palette and display theme',appearanceFields,true) +
-    group('Instrument cluster','Optional OpenTurbine serial display',clusterFields,false) +
-    group('MAVLink telemetry','Optional serial telemetry for external systems',mavFields,false) +
-    group('ECU runtime','Control-loop scheduling and device-wide execution',runtimeFields,false) +
-    group('ECU loop timing','Main ECU loop speed and execution timing diagnostics',loopTimingFields,false,'loop-diag-card') +
-    group('Backup & restore','Download or restore the complete configuration file',backupRestoreFields,false,'system-backup-restore') +
-    group('Factory reset','Permanently erase all configuration and logs to restore factory defaults',factoryResetFields,false,'card-factory-reset');
-  root.querySelectorAll(':scope > details').forEach(card => {
+  const manualUpdateFields = `
+      <div class="cfg-field" style="grid-column:1/-1">
+        <div class="maintenance-upload"><div class="maintenance-upload-copy"><span class="cfg-label">Firmware image</span><span class="cfg-desc">Upload a matching compiled <code>firmware.bin</code>. Firmware and web pages are separate; use the complete asset update below when the dashboard changed.</span></div><span id="ota-state" class="maintenance-state">Ready</span><label><input type="file" id="ota-file" accept=".bin" hidden onchange="startSystemOTA(this)"><button type="button" id="ota-btn" onclick="document.getElementById('ota-file').click()">Choose .bin</button></label></div>
+        <div id="ota-prog-track" class="maintenance-progress" style="display:none"><div id="ota-prog-fill" class="maintenance-progress-fill"></div></div><div id="ota-msg" class="cfg-desc" style="display:none;margin-top:.45rem"></div>
+      </div>
+      <div class="cfg-field" style="grid-column:1/-1">
+        <div class="maintenance-upload"><div class="maintenance-upload-copy"><span class="cfg-label">Web UI assets</span><span class="cfg-desc">Upload all twelve generated <code>data/*.gz</code> files together. Configuration and logs are retained.</span></div><span id="assets-state" class="maintenance-state">Ready</span><label><input type="file" id="assets-files" accept=".gz" multiple hidden onchange="startSystemWebAssetsUpdate(this)"><button type="button" id="assets-btn" onclick="document.getElementById('assets-files').click()">Choose .gz files</button></label></div>
+        <div id="assets-prog-track" class="maintenance-progress" style="display:none"><div id="assets-prog-fill" class="maintenance-progress-fill"></div></div><div id="assets-msg" class="cfg-desc" style="display:none;margin-top:.45rem"></div>
+      </div>`;
+  root.innerHTML =
+    category('Identity & access','Engine name, Wi-Fi connection, and dashboard appearance',
+      group('Engine identity','Name used by the dashboard, Wi-Fi AP, and saved engine file',identity,true) +
+      group('Wi-Fi access','Password and radio settings for the local ECU network',wifi,false) +
+      group('Appearance','Interface color palette and display theme',appearanceFields,false),true,'system-identity-access') +
+    category('Connections & runtime','External telemetry links and ECU execution diagnostics',
+      group('Instrument cluster','Optional OpenTurbine serial display',clusterFields,false) +
+      group('MAVLink telemetry','Optional serial telemetry for external systems',mavFields,false) +
+      group('ECU runtime','Control-loop scheduling and device-wide execution',runtimeFields,false) +
+      group('ECU loop timing','Main ECU loop speed and execution timing diagnostics',loopTimingFields,false,'loop-diag-card'),false,'system-connections-runtime') +
+    category('Maintenance','Backups, advanced updates, and recovery actions',
+      group('Backup & restore','Download or restore the complete configuration file',backupRestoreFields,false,'system-backup-restore') +
+      group('Manual firmware & web update','Advanced update controls for matching compiled files',manualUpdateFields,false,'manual-update-tools') +
+      group('Factory reset','Permanently erase all configuration and logs to restore factory defaults',factoryResetFields,false,'card-factory-reset'),false,'system-maintenance');
+  root.querySelectorAll('details.config-group').forEach(card => {
     const title = card.querySelector('.group-title')?.textContent.trim();
     if (openGroups.size) card.open = openGroups.has(title);
   });
@@ -2402,8 +2440,11 @@ async function saveConfig() {
   const body     = document.getElementById('save-recap-body');
   const subtitle = document.getElementById('save-recap-subtitle');
   const inactiveChanges = changes.filter(change => change.inactive);
+  const renamedWifi = _systemHardwareChangedPaths.has('profile_id')
+    ? String(hwCfg.profile_id || 'OpenTurbine').trim() || 'OpenTurbine' : '';
   subtitle.textContent = changes.length + ' field' + (changes.length > 1 ? 's' : '') +
     ' will be updated on the device.' +
+    (renamedWifi ? ` Saving will restart the ECU and change its Wi-Fi network name to “${renamedWifi}”. Reconnect to that network afterward.` : '') +
     (inactiveChanges.length
       ? ` ${inactiveChanges.length} amber-marked value${inactiveChanges.length === 1 ? ' is' : 's are'} being saved for future hardware and will remain inactive for now.`
       : '');
@@ -2456,7 +2497,7 @@ async function _saveControllerChanges(payload, saveMsg, confirmButton) {
   saveMsg.textContent = '✓ Saved — ECU rebooting…';
   saveMsg.style.color = 'var(--green)';
   if (confirmButton) confirmButton.disabled = true;
-  setTimeout(() => { location.href = CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'; }, 12000);
+  window.OTShowRebootOverlay?.({returnPath:CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'});
 }
 
 async function _saveSystemChanges(payload, saveMsg, confirmButton) {
@@ -2489,11 +2530,13 @@ async function _saveSystemChanges(payload, saveMsg, confirmButton) {
     settingsReboot = data?.reboot === true;
   }
   const rebooting = _systemHardwareDirty || settingsReboot;
+  const nextWifiName = _systemHardwareChangedPaths.has('profile_id')
+    ? String(hwCfg.profile_id || 'OpenTurbine').trim() || 'OpenTurbine' : '';
   _clearDirty();
   saveMsg.textContent = rebooting ? '✓ Saved — ECU rebooting…' : '✓ Saved';
   saveMsg.style.color = 'var(--green)';
   if (confirmButton) confirmButton.disabled = rebooting;
-  if (rebooting) setTimeout(() => { location.href = '/system.html'; }, 12000);
+  if (rebooting) window.OTShowRebootOverlay?.({nextWifiName, returnPath:'/system.html'});
   else if (typeof startTelemetryBoot === 'function') startTelemetryBoot();
 }
 
@@ -2574,7 +2617,7 @@ function _doSave() {
         saveMsg.textContent = '✓ Saved — ECU rebooting…';
         saveMsg.style.color = 'var(--green)';
         if (cb) cb.disabled = true;
-        setTimeout(() => { location.href = CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'; }, 12000);
+        window.OTShowRebootOverlay?.({returnPath:CONFIG_SURFACE === 'system' ? '/system.html' : '/controllers.html'});
         return;
       }
       saveMsg.textContent = (d.warn ? 'Saved — ' + d.warn :
@@ -2849,7 +2892,7 @@ async function factoryReset() {
     .then(d => {
       if (d.ok) {
         if (msg) { msg.textContent = 'Reset sent — device rebooting…'; msg.style.color = 'var(--yellow)'; msg.style.display = ''; }
-        setTimeout(() => location.reload(), 8000);
+        window.OTShowRebootOverlay?.({returnPath:'/system.html'});
       } else {
         if (msg) { msg.textContent = d.error || 'Reset failed'; msg.style.color = 'var(--red)'; msg.style.display = ''; }
         if (btn) btn.disabled = false;
@@ -3026,6 +3069,7 @@ async function restoreConfig(input) {
           msg.style.color = 'var(--green)';
           msg.style.display = '';
         }
+        window.OTShowRebootOverlay?.({returnPath:'/system.html'});
       } else {
         throw new Error(d.error || 'Unknown error');
       }
@@ -3762,6 +3806,131 @@ function revealConfigDeepLink() {
   document.querySelectorAll('.deep-link-target').forEach(el => el.classList.remove('deep-link-target'));
   revealTarget.classList.add('deep-link-target');
   requestAnimationFrame(() => revealTarget.scrollIntoView({ behavior:'smooth', block:'center' }));
+}
+
+function systemMaintenanceAllowed() {
+  return ['STANDBY', 'FAULT'].includes(runtimeMode);
+}
+
+function startSystemOTA(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  if (!systemMaintenanceAllowed()) {
+    alert('Engine must be in STANDBY (or FAULT) before flashing firmware.');
+    input.value = '';
+    return;
+  }
+  const btn = document.getElementById('ota-btn');
+  const state = document.getElementById('ota-state');
+  const track = document.getElementById('ota-prog-track');
+  const fill = document.getElementById('ota-prog-fill');
+  const msg = document.getElementById('ota-msg');
+  btn.disabled = true;
+  track.style.display = '';
+  state.textContent = 'Uploading…';
+  msg.style.display = 'none';
+  const form = new FormData();
+  form.append('firmware', file, file.name);
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/update');
+  xhr.upload.onprogress = event => {
+    if (!event.lengthComputable) return;
+    const pct = Math.round(event.loaded / event.total * 100);
+    fill.style.width = pct + '%';
+    state.textContent = 'Uploading ' + pct + '%';
+  };
+  const fail = message => {
+    state.textContent = 'Error'; state.className = 'maintenance-state fault';
+    msg.textContent = message; msg.style.color = 'var(--red)'; msg.style.display = '';
+    btn.disabled = false;
+  };
+  xhr.onload = () => {
+    try {
+      const result = JSON.parse(xhr.responseText);
+      if (!result.ok) throw new Error(result.error || 'Unknown error');
+      fill.style.width = '100%';
+      state.textContent = 'Done — rebooting…'; state.className = 'maintenance-state done';
+      msg.textContent = 'Firmware updated. Reconnect to the ECU Wi-Fi after it restarts.';
+      msg.style.color = 'var(--green)'; msg.style.display = '';
+      window.OTShowRebootOverlay?.({returnPath:'/system.html'});
+    } catch (error) { fail('Firmware update failed: ' + error.message); }
+  };
+  xhr.onerror = () => fail('Network error — reconnect to the ECU and try again.');
+  xhr.send(form);
+  input.value = '';
+}
+
+function startSystemWebAssetsUpdate(input) {
+  const files = Array.from(input.files || []);
+  if (!files.length) return;
+  if (!systemMaintenanceAllowed()) {
+    alert('Engine must be in STANDBY (or FAULT) before updating web assets.');
+    input.value = '';
+    return;
+  }
+  const required = ['calibration.html.gz','controllers.html.gz','hardware.html.gz','index.html.gz',
+    'log.html.gz','sequence.html.gz','app.js.gz','style.css.gz','system.html.gz',
+    'theme.js.gz','ui_dialog.js.gz','tools.html.gz'];
+  const names = new Set(files.map(file => file.name));
+  const missing = required.filter(name => !names.has(name));
+  const invalid = files.filter(file => !required.includes(file.name));
+  if (missing.length || invalid.length || files.length !== required.length) {
+    alert('Choose exactly the twelve generated data/*.gz web assets.\n\nMissing: ' +
+      (missing.join(', ') || 'none') + '\nUnexpected: ' +
+      (invalid.map(file => file.name).join(', ') || 'none'));
+    input.value = '';
+    return;
+  }
+  const btn = document.getElementById('assets-btn');
+  const state = document.getElementById('assets-state');
+  const track = document.getElementById('assets-prog-track');
+  const fill = document.getElementById('assets-prog-fill');
+  const msg = document.getElementById('assets-msg');
+  btn.disabled = true;
+  track.style.display = '';
+  state.textContent = 'Uploading…';
+  msg.style.display = 'none';
+  const ordered = required.map(name => files.find(file => file.name === name));
+  const totalBytes = ordered.reduce((sum, file) => sum + file.size, 0);
+  let completedBytes = 0;
+  const fail = message => {
+    state.textContent = 'Error'; state.className = 'maintenance-state fault';
+    msg.textContent = message; msg.style.color = 'var(--red)'; msg.style.display = '';
+    btn.disabled = false;
+  };
+  const sendNext = (index, offset = 0) => {
+    const file = ordered[index];
+    const end = Math.min(offset + 8192, file.size);
+    const chunk = file.slice(offset, end);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/web_asset_chunk?name=' + encodeURIComponent(file.name) +
+      '&offset=' + offset + '&final=' + (end === file.size ? '1' : '0'));
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.upload.onprogress = event => {
+      if (!event.lengthComputable) return;
+      const pct = Math.round((completedBytes + Math.min(event.loaded, chunk.size)) / totalBytes * 100);
+      fill.style.width = pct + '%';
+      state.textContent = 'Uploading ' + pct + '%';
+    };
+    xhr.onload = () => {
+      try {
+        const result = JSON.parse(xhr.responseText);
+        if (!result.ok) throw new Error(result.error || 'Unknown error');
+        completedBytes += chunk.size;
+        if (end < file.size) return sendNext(index, end);
+        if (index + 1 < ordered.length) return sendNext(index + 1);
+        fill.style.width = '100%';
+        state.textContent = 'Done — rebooting…'; state.className = 'maintenance-state done';
+        msg.textContent = 'Web pages updated; configuration and logs were retained.';
+        msg.style.color = 'var(--green)'; msg.style.display = '';
+        window.OTShowRebootOverlay?.({returnPath:'/system.html'});
+      } catch (error) { fail('Web asset update failed: ' + error.message); }
+    };
+    xhr.onerror = () => fail('Network error — reconnect and select the complete asset set again.');
+    xhr.send(chunk);
+  };
+  sendNext(0);
+  input.value = '';
 }
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -689,7 +689,7 @@ function installedBrowser() {
       sensors: { n1_rpm: { enabled: false }, n2_rpm: { enabled: false } }
     } });
     await page.goto(`${base}/system.html`);
-    await page.locator('#system-device-setup > details').filter({hasText:'Interface color palette and display theme'}).locator('summary').click();
+    await page.locator('#system-device-setup details.config-group').filter({hasText:'Interface color palette and display theme'}).locator('summary').click();
     await page.waitForSelector('#appearance-picker .ot-tile');
     assert.equal(await page.locator('#appearance-picker .ot-tile').count(), 6);
     await page.locator('#appearance-picker [data-theme-key="daylight"]').click();
@@ -697,6 +697,7 @@ function installedBrowser() {
     await page.waitForTimeout(100);
     assert.equal((await state(page)).settings.ui_theme, 'daylight');
     await page.locator('#appearance-picker [data-theme-key="carbon"]').click();
+    assert.match(await text(page, '#manual-update-tools'), /Web UI assets.*configuration and logs are retained/is);
     results.push('appearance is owned by System and persists the selected ECU theme');
     await page.goto(`${base}/tools.html`);
     await page.waitForFunction(() => {
@@ -714,7 +715,6 @@ function installedBrowser() {
     assert.match(await text(page, '#card-IDLE_TEST'), /main fuel metering.*minimum reliable output \(10%\)/i);
     await page.request.post(`${base}/__sim/data`, { data: { dev_mode: true } });
     await waitShown(page, '#card-TOGGLE_BENCH_MODE', true);
-    assert.match(await text(page, '#card-WEB-ASSETS'), /without erasing config or logs/);
     await page.locator('#btn-OIL_PRIME').click();
     await page.waitForSelector('#ot-app-dialog.show');
     assert.match(await page.locator('#ot-dialog-message').textContent(), /energize.*5 s[\s\S]*safe test state[\s\S]*moving hardware is clear/i);
@@ -1083,6 +1083,7 @@ function installedBrowser() {
     assert.equal(await fuelSupportCard.locator('#cf-di_dd').getAttribute('min'), '0');
     results.push('Controller subcards start collapsed and Idle keeps its enable, fuel range, and source-relevant settings together');
 
+    await scenario(page, 'minimal');
     await page.goto(`${base}/system.html`);
     await page.waitForSelector('#system-device-setup');
     assert.equal(await page.locator('.cfg-search-wrap').isVisible(), false);
@@ -1101,12 +1102,15 @@ function installedBrowser() {
     assert.equal(await page.locator('#system-backup-restore').count(), 1);
     assert.equal(await page.locator('#loop-diag-card').count(), 1);
     assert.equal(await page.locator('#card-factory-reset').count(), 1);
+    assert.equal(await page.locator('#manual-update-tools').count(), 1);
+    assert.equal(await page.locator('#system-device-setup > .system-category').count(), 3);
     assert.match(await text(page, '#card-factory-reset'), /PCB profile is preserved/);
     await page.goto(`${base}/tools.html`);
     assert.equal(await page.locator('#system-backup-restore').count(), 0);
     assert.equal(await page.locator('#loop-diag-card').count(), 0);
     assert.equal(await page.locator('#card-factory-reset').count(), 0);
-    results.push('System owns backup, loop diagnostics, and reset while Tools stays focused on commissioning');
+    assert.equal(await page.locator('#manual-update-tools').count(), 0);
+    results.push('System groups identity, runtime, updates, backup, diagnostics, and reset while Tools stays focused on commissioning');
 
     await page.goto(`${base}/system.html`);
     await page.waitForSelector('#system-device-setup');

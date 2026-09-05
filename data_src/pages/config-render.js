@@ -510,6 +510,8 @@ function removeControllerOilLoop(index) {
   markControllerHardwareDirty();
 }
 function setSystemHardware(path, value) {
+  if (!_systemHardwareOriginalValues.has(path))
+    _systemHardwareOriginalValues.set(path, getPath(hwCfg, path.split('.')));
   setPath(hwCfg, path.split('.'), value);
   _systemHardwareDirty = true;
   _systemHardwareChangedPaths.add(path);
@@ -529,6 +531,7 @@ function renderSystemSetup() {
   const cluster = hwCfg.cluster_serial || {};
   const mav = hwCfg.mavlink || {};
   const group = (title, desc, body, open=true, id='') => `<details${id?` id="${id}"`:''} class="config-group"${open?' open':''}><summary><span class="group-heading"><span class="group-title">${title}</span><span class="group-desc">${desc}</span></span><span class="group-chevron" aria-hidden="true">›</span></summary><div class="group-content"><div class="cfg-section"><div class="cfg-grid">${body}</div></div></div></details>`;
+  const category = (title, desc, body, open=false, id='') => `<details${id?` id="${id}"`:''} class="system-category"${open?' open':''}><summary><span class="group-heading"><span class="group-title">${title}</span><span class="group-desc">${desc}</span></span><span class="group-chevron" aria-hidden="true">›</span></summary><div class="system-category-body"><div class="system-subcard-grid">${body}</div></div></details>`;
   const identity = `
       <label class="cfg-field"><span class="cfg-label">Engine / Wi-Fi name</span><span class="cfg-desc">Identifies this engine and names its ECU access point.</span><input id="system-engine-name" maxlength="63" value="${esc(hwCfg.profile_id || 'OpenTurbine')}" onchange="setSystemHardware('profile_id',this.value.trim()||'OpenTurbine')"></label>
       <label class="cfg-field"><span class="cfg-label">Engine description</span><span class="cfg-desc">A short name or note used to distinguish this ECU and its saved engine file.</span><input id="system-engine-description" maxlength="63" value="${esc(hwCfg.profile_desc || '')}" onchange="setSystemHardware('profile_desc',this.value)"></label>`;
@@ -619,17 +622,30 @@ function renderSystemSetup() {
         </div>
         <div id="factory-reset-msg" style="font-size:.72rem;margin-top:.45rem;display:none"></div>
       </div>`;
-  root.innerHTML = `<div class="cfg-title">Device setup</div>` +
-    group('Engine identity','How this ECU identifies itself and its saved engine setup',identity) +
-    group('Wi-Fi access','Local browser connection settings; internet is never required',wifi) +
-    group('Appearance','Interface color palette and display theme',appearanceFields,true) +
-    group('Instrument cluster','Optional OpenTurbine serial display',clusterFields,false) +
-    group('MAVLink telemetry','Optional serial telemetry for external systems',mavFields,false) +
-    group('ECU runtime','Control-loop scheduling and device-wide execution',runtimeFields,false) +
-    group('ECU loop timing','Main ECU loop speed and execution timing diagnostics',loopTimingFields,false,'loop-diag-card') +
-    group('Backup & restore','Download or restore the complete configuration file',backupRestoreFields,false,'system-backup-restore') +
-    group('Factory reset','Permanently erase all configuration and logs to restore factory defaults',factoryResetFields,false,'card-factory-reset');
-  root.querySelectorAll(':scope > details').forEach(card => {
+  const manualUpdateFields = `
+      <div class="cfg-field" style="grid-column:1/-1">
+        <div class="maintenance-upload"><div class="maintenance-upload-copy"><span class="cfg-label">Firmware image</span><span class="cfg-desc">Upload a matching compiled <code>firmware.bin</code>. Firmware and web pages are separate; use the complete asset update below when the dashboard changed.</span></div><span id="ota-state" class="maintenance-state">Ready</span><label><input type="file" id="ota-file" accept=".bin" hidden onchange="startSystemOTA(this)"><button type="button" id="ota-btn" onclick="document.getElementById('ota-file').click()">Choose .bin</button></label></div>
+        <div id="ota-prog-track" class="maintenance-progress" style="display:none"><div id="ota-prog-fill" class="maintenance-progress-fill"></div></div><div id="ota-msg" class="cfg-desc" style="display:none;margin-top:.45rem"></div>
+      </div>
+      <div class="cfg-field" style="grid-column:1/-1">
+        <div class="maintenance-upload"><div class="maintenance-upload-copy"><span class="cfg-label">Web UI assets</span><span class="cfg-desc">Upload all twelve generated <code>data/*.gz</code> files together. Configuration and logs are retained.</span></div><span id="assets-state" class="maintenance-state">Ready</span><label><input type="file" id="assets-files" accept=".gz" multiple hidden onchange="startSystemWebAssetsUpdate(this)"><button type="button" id="assets-btn" onclick="document.getElementById('assets-files').click()">Choose .gz files</button></label></div>
+        <div id="assets-prog-track" class="maintenance-progress" style="display:none"><div id="assets-prog-fill" class="maintenance-progress-fill"></div></div><div id="assets-msg" class="cfg-desc" style="display:none;margin-top:.45rem"></div>
+      </div>`;
+  root.innerHTML =
+    category('Identity & access','Engine name, Wi-Fi connection, and dashboard appearance',
+      group('Engine identity','Name used by the dashboard, Wi-Fi AP, and saved engine file',identity,true) +
+      group('Wi-Fi access','Password and radio settings for the local ECU network',wifi,false) +
+      group('Appearance','Interface color palette and display theme',appearanceFields,false),true,'system-identity-access') +
+    category('Connections & runtime','External telemetry links and ECU execution diagnostics',
+      group('Instrument cluster','Optional OpenTurbine serial display',clusterFields,false) +
+      group('MAVLink telemetry','Optional serial telemetry for external systems',mavFields,false) +
+      group('ECU runtime','Control-loop scheduling and device-wide execution',runtimeFields,false) +
+      group('ECU loop timing','Main ECU loop speed and execution timing diagnostics',loopTimingFields,false,'loop-diag-card'),false,'system-connections-runtime') +
+    category('Maintenance','Backups, advanced updates, and recovery actions',
+      group('Backup & restore','Download or restore the complete configuration file',backupRestoreFields,false,'system-backup-restore') +
+      group('Manual firmware & web update','Advanced update controls for matching compiled files',manualUpdateFields,false,'manual-update-tools') +
+      group('Factory reset','Permanently erase all configuration and logs to restore factory defaults',factoryResetFields,false,'card-factory-reset'),false,'system-maintenance');
+  root.querySelectorAll('details.config-group').forEach(card => {
     const title = card.querySelector('.group-title')?.textContent.trim();
     if (openGroups.size) card.open = openGroups.has(title);
   });

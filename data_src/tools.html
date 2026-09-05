@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <a href="/calibration.html" title="Calibrate fitted analog, servo, pressure, temperature, current, and flow inputs.">Calibration</a>
   <a href="/sequence.html" title="Edit startup, shutdown, afterburner sequences, block timings, and control rules.">Sequence</a>
   <a href="/log.html" title="View fault/event history and per-run CSV session logs.">Log</a>
-  <a href="/tools.html" class="active" title="Run standby commissioning, actuator tests, software updates, and developer controls.">Tools</a>
+  <a href="/tools.html" class="active" title="Run standby commissioning, actuator tests, and developer controls.">Tools</a>
   <a href="/system.html" title="Configure ECU behavior and communications; manage backups, diagnostics, and reset.">System</a>
   <span id="conn" class="conn-dot disconnected"></span><span id="conn-label" class="conn-label">Disconnected</span>
 </nav>
@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <div id="tools-page-head" class="page-heading">
     <div class="page-heading-main">
       <h1 class="page-title">Tools</h1>
-      <p class="page-subtitle">STANDBY/FAULT commissioning, actuator tests, software updates, and developer controls.</p>
+      <p class="page-subtitle">STANDBY/FAULT commissioning, actuator tests, and developer controls.</p>
     </div>
     <div class="page-heading-actions">
       <button id="btn-test-settings" onclick="openTestSettings()" title="Edit actuator-test durations, output levels, and the shared safety confirmation preference.">Tool settings</button>
@@ -316,66 +316,6 @@ function renderTools() {
     </div>
   </div>`;
   }
-
-  // ── Manual update tools ─────────────────────────────────────
-  // Keep raw firmware/assets upload available without placing developer-facing
-  // file selection in the normal user path. The Windows setup tool performs
-  // both halves together and is the safer default.
-  html += `<hr class="tool-divider">
-  <details id="manual-update-tools" style="margin:.75rem 0">
-    <summary style="cursor:pointer;color:var(--dim);font-size:.78rem;font-weight:700;padding:.55rem .2rem">Manual firmware and web update (advanced)</summary>
-    <div style="font-size:.72rem;color:var(--dim);line-height:1.5;margin:.25rem 0 .65rem">
-      For normal updates, use <b style="color:var(--text)">OpenTurbine Setup Tool → Update and keep my setup</b>.
-      The controls below are for developers who already have matching compiled files for this exact ESP32 target.
-      Download and verify a complete engine file before a manual firmware upload.
-    </div>
-  <div class="tool-card" id="card-OTA" title="Upload firmware only. Upload web UI assets separately when dashboard pages also change.">
-    <div class="tool-header">
-      <div class="tool-name">OTA Firmware Update</div>
-      <div class="tool-state off" id="ota-state">Ready</div>
-    </div>
-    <div class="prog-track" id="ota-prog-track" style="display:none">
-      <div class="prog-fill running" id="ota-prog-fill" style="width:0%"></div>
-    </div>
-    <div class="tool-footer" style="margin-top:.5rem">
-      <div class="tool-desc" style="flex:1">
-        Upload a compiled firmware <code>.bin</code> file directly from your device.
-        This updates firmware only; web pages are stored in LittleFS and must be uploaded separately.
-        Works over Wi-Fi AP — no internet needed. ESP32 reboots automatically.
-      </div>
-      <label style="cursor:pointer">
-        <input type="file" id="ota-file" accept=".bin" style="display:none" onchange="startOTA(this)">
-        <button onclick="document.getElementById('ota-file').click()" id="ota-btn">Choose .bin</button>
-      </label>
-    </div>
-    <div id="ota-msg" style="font-size:.72rem;margin-top:.45rem;display:none"></div>
-  </div>`;
-
-  // Web UI asset update. This uploads only page assets rather than replacing
-  // the LittleFS partition, so configuration and logs remain on the device.
-  html += `<hr class="tool-divider">
-  <div class="tool-card" id="card-WEB-ASSETS" title="Upload generated web pages without replacing stored settings or logs.">
-    <div class="tool-header">
-      <div class="tool-name">Web UI Assets Update</div>
-      <div class="tool-state off" id="assets-state">Ready</div>
-    </div>
-    <div class="prog-track" id="assets-prog-track" style="display:none">
-      <div class="prog-fill running" id="assets-prog-fill" style="width:0%"></div>
-    </div>
-    <div class="tool-footer" style="margin-top:.5rem">
-      <div class="tool-desc" style="flex:1">
-        Updates the dashboard pages without erasing config or logs.
-        First run <code>tools/gzip_data.py</code>, then select all twelve generated
-        <code>data/*.gz</code> files. Requires idle STANDBY with no active outputs.
-      </div>
-      <label style="cursor:pointer">
-        <input type="file" id="assets-files" accept=".gz" multiple style="display:none" onchange="startWebAssetsUpdate(this)">
-        <button onclick="document.getElementById('assets-files').click()" id="assets-btn">Choose .gz files</button>
-      </label>
-    </div>
-    <div id="assets-msg" style="font-size:.72rem;margin-top:.45rem;display:none"></div>
-  </div>
-  </details>`;
 
   document.getElementById('tool-area').innerHTML = html;
 

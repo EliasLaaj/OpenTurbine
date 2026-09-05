@@ -120,6 +120,58 @@
     THEMES: THEMES
   };
 
+  // Shared by every page, including the lightweight Hardware and Sequence
+  // pages that intentionally do not load the dashboard telemetry script.
+  window.OTShowRebootOverlay = function (options) {
+    options = options || {};
+    var nextWifiName = String(options.nextWifiName || '');
+    var returnPath = options.returnPath || location.pathname || '/';
+    var seconds = Math.max(3, Number(options.seconds || 12));
+    var esc = function (value) {
+      return String(value).replace(/[&<>"']/g, function (ch) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+      });
+    };
+    var overlay = document.getElementById('reboot-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'reboot-overlay';
+      document.body.appendChild(overlay);
+    }
+    overlay.className = 'rebooting-overlay show';
+    overlay.innerHTML = '<div class="spinner"></div><div>Device rebooting — reconnecting…</div>' +
+      '<div id="reboot-wifi-note" style="font-size:.82rem;color:var(--text);max-width:32rem;text-align:center;line-height:1.45"></div>' +
+      '<div id="reboot-timer" style="font-size:.85rem;color:var(--dim)"></div>';
+    var note = overlay.querySelector('#reboot-wifi-note');
+    var timer = overlay.querySelector('#reboot-timer');
+    var target = 'http://192.168.4.1' + returnPath;
+    note.innerHTML = nextWifiName
+      ? 'Wi-Fi name changed. Connect to <strong>' + esc(nextWifiName) + '</strong>, then open <a href="' + target + '" style="color:var(--accent)">192.168.4.1</a>.'
+      : 'Keep this page open while the ECU restarts. If it does not reconnect, open <a href="' + target + '" style="color:var(--accent)">192.168.4.1</a>.';
+    if (window._otRebootOverlayTimer) clearInterval(window._otRebootOverlayTimer);
+    var remaining = seconds;
+    timer.textContent = 'Reconnecting in ~' + remaining + 's…';
+    window._otRebootOverlayTimer = setInterval(function () {
+      remaining--;
+      timer.textContent = remaining > 0 ? 'Reconnecting in ~' + remaining + 's…' : 'Reconnecting…';
+      if (remaining > 0) return;
+      clearInterval(window._otRebootOverlayTimer);
+      window._otRebootOverlayTimer = null;
+      if (nextWifiName) {
+        timer.textContent = 'Connect to Wi-Fi “' + nextWifiName + '”, then reopen 192.168.4.1.';
+        return;
+      }
+      var poll = setInterval(function () {
+        fetch('/api/status', {cache:'no-store'}).then(function (response) {
+          if (!response.ok) return;
+          clearInterval(poll);
+          location.href = returnPath;
+        }).catch(function () {});
+      }, 1000);
+    }, 1000);
+    return overlay;
+  };
+
   apply(get());
   // Classic ESP32 cannot reliably serve four cold browser requests in
   // parallel. theme.js is the one parser-blocking bootstrap; it then loads

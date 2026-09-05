@@ -4300,6 +4300,7 @@ void WebServer::_setupRoutes() {
             bool systemPatch = false;
             bool controllerPatch = false;
             bool sequencePatch = false;
+            bool profileRenamePatch = false;
             const bool hardwarePagePatch = req->hasParam("source") &&
                 req->getParam("source")->value() == "hardware";
             for (JsonPair top : patch.as<JsonObject>()) {
@@ -4319,6 +4320,8 @@ void WebServer::_setupRoutes() {
                 if (stringSystemField) {
                     patchAllowed = top.value().is<const char*>();
                     systemPatch = patchAllowed;
+                    if (patchAllowed && strcmp(topKey, "profile_id") == 0)
+                        profileRenamePatch = true;
                 } else if (strcmp(topKey, "wifi_tx_power_dbm") == 0) {
                     patchAllowed = top.value().is<int>() || top.value().is<float>();
                     systemPatch = patchAllowed;
@@ -4510,8 +4513,14 @@ void WebServer::_setupRoutes() {
             // runtime settings are authoritative. Stream the two sections one
             // at a time so Classic never has to allocate the complete unified
             // engine file merely to preserve its settings section.
+            // A display/Wi-Fi rename is one identity change, not an engine-file
+            // replacement. Serialize the live Settings section in that case so
+            // its profile_id follows the validated Hardware profile atomically.
+            // Full uploaded engine files keep their strict cross-profile check.
+            const bool preserveStoredSettings = (systemPatch || sequencePatch) &&
+                                                !profileRenamePatch;
             const bool saved = (systemPatch || controllerPatch || sequencePatch || hardwarePagePatch)
-                ? HardwareConfig::saveUnified(systemPatch || sequencePatch)
+                ? HardwareConfig::saveUnified(preserveStoredSettings)
                 : HardwareConfig::save();
             if (!saved) {
                 HardwareConfig::load();
