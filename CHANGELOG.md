@@ -10,6 +10,35 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-09-05
+
+### Added
+- Page-owned Hardware, Controllers, System, and Sequence saves preserve
+  concurrent calibration and unrelated configuration changes instead of
+  replacing the complete engine file.
+- Physical PCB profiles can supply protected fixed-function resources while
+  user-managed turbine channels remain editable through the same registry.
+- System now groups identity, connectivity, runtime, backup, update, and
+  recovery controls into focused subcards.
+
+### Changed
+- Manual firmware and complete web-asset updates now live under System >
+  Maintenance; Tools remains focused on commissioning and actuator tests.
+- Engine/Wi-Fi renames explicitly identify the new network name before saving
+  and synchronize Hardware and Settings identity atomically across reboot.
+- Wi-Fi security uses clear Open network / Password protected states with
+  direct actions to add, change, or remove the access password.
+- Every save path that reboots the ECU now shows the shared reconnect overlay.
+
+### Fixed
+- Renaming an ECU no longer creates a false Hardware/Settings profile mismatch.
+  Complete uploaded engine files still reject crossed identities.
+- Disabled optional cluster hardware stays out of the installed-device summary
+  until the user opens the device editor.
+- Classic ESP32 and ESP32-S3 page saves, warm reboot recovery, configuration
+  restore, navigation, controls, logging, and physical safety paths were
+  requalified on the dual-board bench.
+
 ## [2.2.2] — 2026-09-01
 
 ### Changed

@@ -2,7 +2,7 @@
 
 This document describes the OpenTurbine 2.0 package and setup workflow. A v2
 release package must contain firmware and web assets built from the same commit
-and must report version `2.2.2` during post-install verification.
+and must report version `2.3.0` during post-install verification.
 
 The Windows setup tool provides two deliberately distinct paths: **Clean install
 / reinstall** erases a blank or previously used board over USB, while **Update

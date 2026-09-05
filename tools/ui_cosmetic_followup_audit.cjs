@@ -46,12 +46,26 @@ async function text(page, selector) {
     await page.goto(`${base}/system.html`);
     await page.waitForSelector('#system-device-setup');
     assert.equal(await page.locator('#system-device-setup > .system-category').count(), 3);
+    assert.equal(await page.locator('#system-identity-access .system-subcard-grid').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length), 1);
+    await page.locator('#system-wifi-access > summary').click();
+    assert.match(await text(page, '#system-wifi-access-state'), /Open network.*Add Wi-Fi password/is);
+    assert.equal(await page.locator('#system-wifi-open-action').count(), 0);
+    assert.equal(await page.locator('#system-wifi-password-editor').isVisible(), false);
+    await page.locator('#system-wifi-password-action').click();
+    assert.equal(await page.locator('#system-wifi-password-editor').isVisible(), true);
+    await page.locator('#system-wifi-password').fill('sanity-password');
+    await page.locator('#system-wifi-password').dispatchEvent('change');
+    assert.match(await text(page, '#system-wifi-access-state'), /Password protected.*new password ready to save/is);
+    assert.equal(await page.locator('#system-wifi-open-action').count(), 1);
+    await page.locator('#system-wifi-open-action').click();
+    assert.match(await text(page, '#system-wifi-access-state'), /Open network.*Add Wi-Fi password/is);
     assert.match(await text(page, '#system-device-setup'), /Identity & access.*Connections & runtime.*Maintenance/is);
     assert.equal(await page.locator('#manual-update-tools #ota-file').count(), 1);
     assert.equal(await page.locator('#manual-update-tools #assets-files').count(), 1);
 
+    await page.evaluate(() => { _clearDirty(); renderSystemSetup(); });
     const identity = page.locator('details.config-group').filter({hasText:'Name used by the dashboard'});
-    await identity.locator('summary').click();
+    if (!await identity.evaluate(element => element.open)) await identity.locator('summary').click();
     await page.locator('#system-engine-name').fill('sanity-renamed-engine');
     await page.locator('#system-engine-name').dispatchEvent('change');
     const dirty = await page.evaluate(() => ({

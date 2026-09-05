@@ -1,6 +1,6 @@
 <h1 align="center">OpenTurbine</h1>
 
-<p align="center">OpenTurbine 2.2.2 — open-source ESP32 turbine ECU with guided Windows setup and a browser-based dashboard.</p>
+<p align="center">OpenTurbine 2.3.0 — open-source ESP32 turbine ECU with guided Windows setup and a browser-based dashboard.</p>
 
 <p align="center">
   <a href="https://github.com/elia179/OpenTurbine-ESP32-Gas-Turbine-ECU/releases/latest/download/OpenTurbineSetupTool.exe"><strong>Download for Windows</strong></a>

@@ -509,6 +509,7 @@ function removeControllerOilLoop(index) {
   hwCfg.controllers.oil_loop = !!hwCfg.oil_loops?.some(loop => loop.enabled !== false);
   markControllerHardwareDirty();
 }
+// OT_SYSTEM_ONLY_BEGIN
 function setSystemHardware(path, value) {
   if (!_systemHardwareOriginalValues.has(path))
     _systemHardwareOriginalValues.set(path, getPath(hwCfg, path.split('.')));
@@ -522,10 +523,16 @@ function setSystemHardware(path, value) {
   // the pre-edit snapshot (notably on the slower Classic page load path).
   _updateWorkspaceState();
 }
+function revealSystemWifiPassword() {
+  const editor = document.getElementById('system-wifi-password-editor');
+  const input = document.getElementById('system-wifi-password');
+  if (editor) editor.style.display = '';
+  input?.focus();
+}
 function renderSystemSetup() {
   const root = document.getElementById('system-device-setup');
   if (!root || CONFIG_SURFACE !== 'system') return;
-  const openGroups = new Set(Array.from(root.querySelectorAll(':scope > details[open] .group-title'))
+  const openGroups = new Set(Array.from(root.querySelectorAll('details.config-group[open] > summary .group-title'))
     .map(node => node.textContent.trim()));
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const cluster = hwCfg.cluster_serial || {};
@@ -535,9 +542,12 @@ function renderSystemSetup() {
   const identity = `
       <label class="cfg-field"><span class="cfg-label">Engine / Wi-Fi name</span><span class="cfg-desc">Identifies this engine and names its ECU access point.</span><input id="system-engine-name" maxlength="63" value="${esc(hwCfg.profile_id || 'OpenTurbine')}" onchange="setSystemHardware('profile_id',this.value.trim()||'OpenTurbine')"></label>
       <label class="cfg-field"><span class="cfg-label">Engine description</span><span class="cfg-desc">A short name or note used to distinguish this ECU and its saved engine file.</span><input id="system-engine-description" maxlength="63" value="${esc(hwCfg.profile_desc || '')}" onchange="setSystemHardware('profile_desc',this.value)"></label>`;
+  const wifiPassword = String(hwCfg.wifi_password || '');
+  const wifiIsOpen = !wifiPassword;
+  const wifiPasswordPending = !wifiIsOpen && wifiPassword !== '__KEEP_PASSWORD__';
   const wifi = `
-      <label class="cfg-field"><span class="cfg-label">New Wi-Fi password</span><span class="cfg-desc">Leave untouched to keep the saved password. Use 8–63 characters, or choose Open network below.</span><input type="password" autocomplete="new-password" maxlength="63" placeholder="Saved password unchanged" onchange="if(this.value)setSystemHardware('wifi_password',this.value)"></label>
-      <div class="cfg-field"><span class="cfg-label">Wi-Fi access</span><button type="button" class="danger" onclick="setSystemHardware('wifi_password','')">Use open network</button><span class="cfg-desc">An open network remains allowed, but anyone nearby who joins it can access ECU controls.</span></div>
+      <div class="cfg-field" id="system-wifi-access-state"><span class="cfg-label">Wi-Fi access</span><span class="wifi-access-state${wifiIsOpen?' open':''}">${wifiIsOpen?'Open network':'Password protected'}${wifiPasswordPending?' — new password ready to save':''}</span><span class="cfg-desc">${wifiIsOpen?'Anyone nearby can join this ECU network and access its controls. Add a password if the installation requires restricted access.':'A password is required before a device can join this ECU network.'}</span><div class="wifi-access-actions"><button type="button" id="system-wifi-password-action" onclick="revealSystemWifiPassword()">${wifiIsOpen?'Add Wi-Fi password':'Change password'}</button>${wifiIsOpen?'':`<button type="button" id="system-wifi-open-action" onclick="setSystemHardware('wifi_password','')">Use open network</button>`}</div></div>
+      <label class="cfg-field" id="system-wifi-password-editor" style="display:none"><span class="cfg-label">${wifiIsOpen?'Add Wi-Fi password':'New Wi-Fi password'}</span><span class="cfg-desc">Enter 8–63 characters. The network security changes after Save and reboot.</span><input id="system-wifi-password" type="password" autocomplete="new-password" minlength="8" maxlength="63" placeholder="8–63 characters" onchange="if(this.value)setSystemHardware('wifi_password',this.value)"></label>
       <label class="cfg-field"><span class="cfg-label">Wi-Fi transmit power (dBm)</span><span class="cfg-desc">Use only as much radio power as the installation needs.</span><input id="system-wifi-tx-power" type="number" min="2" max="20" step="1" value="${Number(hwCfg.wifi_tx_power_dbm ?? 8)}" onchange="setSystemHardware('wifi_tx_power_dbm',+this.value)"></label>`;
   const clusterFields = `
       <div class="cfg-field"><span class="cfg-label">Instrument-cluster link</span><label><input type="checkbox" ${cluster.enabled?'checked':''} onchange="setSystemHardware('cluster_serial.enabled',this.checked)"> Enabled</label><span class="cfg-desc">${(cluster.tx_pin??-1)>=0?`TX GPIO ${cluster.tx_pin}${(cluster.rx_pin??-1)>=0?` / RX GPIO ${cluster.rx_pin}`:' / one-way'}`:'Assign its serial GPIO on Hardware first.'}</span><span class="cfg-desc">The default stream is chosen automatically from fitted primary sensors and actuators: N1 plus any configured N2, EGT/TIT, oil, fuel, electrical, torque/thrust and output data. With RX connected, a compatible cluster may request all or a named subset at runtime; field selection is therefore not duplicated in this ECU page.</span></div>
@@ -634,7 +644,7 @@ function renderSystemSetup() {
   root.innerHTML =
     category('Identity & access','Engine name, Wi-Fi connection, and dashboard appearance',
       group('Engine identity','Name used by the dashboard, Wi-Fi AP, and saved engine file',identity,true) +
-      group('Wi-Fi access','Password and radio settings for the local ECU network',wifi,false) +
+      group('Wi-Fi access','Password and radio settings for the local ECU network',wifi,false,'system-wifi-access') +
       group('Appearance','Interface color palette and display theme',appearanceFields,false),true,'system-identity-access') +
     category('Connections & runtime','External telemetry links and ECU execution diagnostics',
       group('Instrument cluster','Optional OpenTurbine serial display',clusterFields,false) +
@@ -661,6 +671,7 @@ function renderSystemSetup() {
   if (cfgRestoreBtn) cfgRestoreBtn.disabled = !['STANDBY', 'FAULT'].includes(runtimeMode);
   ['cl_n1','cl_n2','cl_tw','cl_ow','cl_fw','cl_bw'].forEach(key => setCfgFieldHardHidden(key, !cluster.enabled));
 }
+// OT_SYSTEM_ONLY_END
 function renderSimpleControls() {
   const root = document.getElementById('simple-controls');
   if (!root || CONFIG_SURFACE !== 'controllers') return;
@@ -1315,7 +1326,7 @@ function renderForm(preserveControllerOpenState = false) {
     (CONFIG_SURFACE === 'controllers' ? '<section id="simple-controls" class="cfg-section" data-always-visible="1" data-section="Custom controllers"></section>' : '') +
     safetyGroupsHtml +
     '<div id="cfg-empty" class="cfg-empty" hidden>No settings match this search and filter.</div>';
-  renderSystemSetup();
+  if (typeof renderSystemSetup === 'function') renderSystemSetup();
   renderSimpleControls();
   // Controller cards are the workspace itself. Build them only after the
   // generated field sections and editable definitions exist so their local

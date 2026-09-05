@@ -9,6 +9,7 @@ keeps the existing browser/audit behavior deterministic.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -99,6 +100,13 @@ def assemble(output_name: str, shell_name: str, script_names: tuple[str, ...]) -
     scripts = []
     for name in script_names:
         body = (PAGES / name).read_text(encoding="utf-8").rstrip()
+        if shell_name == "config.shell.html" and effective_surface != "system":
+            body = re.sub(
+                r"\n?// OT_SYSTEM_ONLY_BEGIN\n.*?// OT_SYSTEM_ONLY_END\n?",
+                "\n",
+                body,
+                flags=re.DOTALL,
+            ).rstrip()
         scripts.append(f"// Source: data_src/pages/{name}\n{body}")
     surface_bootstrap = ""
     if shell_name == "config.shell.html":

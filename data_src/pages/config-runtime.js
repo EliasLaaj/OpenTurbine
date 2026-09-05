@@ -1143,6 +1143,7 @@ function revealConfigDeepLink() {
   requestAnimationFrame(() => revealTarget.scrollIntoView({ behavior:'smooth', block:'center' }));
 }
 
+// OT_SYSTEM_ONLY_BEGIN
 function systemMaintenanceAllowed() {
   return ['STANDBY', 'FAULT'].includes(runtimeMode);
 }
@@ -1267,6 +1268,7 @@ function startSystemWebAssetsUpdate(input) {
   sendNext(0);
   input.value = '';
 }
+// OT_SYSTEM_ONLY_END
 
 document.addEventListener('DOMContentLoaded', () => {
 (async () => {
