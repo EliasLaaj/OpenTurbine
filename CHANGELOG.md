@@ -10,6 +10,23 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-09-06
+
+### Changed
+- Dashboard and Calibration now receive every live numerical, binary, input,
+  output, health, and raw-sensor value in one compact 3 Hz telemetry frame.
+- Rare descriptive text is revisioned separately, and 30-second dashboard
+  sparklines are sampled and rendered entirely in the browser at 1 Hz.
+- Calibration presents ESP ADC inputs as measurable millivolts while retaining
+  microseconds for RC signals and native counts for digital load cells.
+- Live percentages retain meaningful tenth-percent resolution.
+
+### Fixed
+- Calibration capture tools reuse the shared compact stream instead of issuing
+  repeated full telemetry downloads.
+- Compact telemetry now includes afterburner flame raw data and explicit RC
+  pulse-width aliases required by the Calibration page.
+
 ## [2.3.0] — 2026-09-05
 
 ### Added
