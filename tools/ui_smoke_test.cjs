@@ -118,8 +118,8 @@ function installedBrowser() {
     assert.equal(compactRender.idle, '17.0');
     assert.match(compactRender.switches, /Start Switch\s*OFF.*Stop Switch\s*OFF/s);
     const compactV2 = await page.evaluate(() => {
-      const v = Array(72).fill(0);
-      Object.assign(v, {0:12345, 4:654, 6:123, 7:101, 17:42, 20:37, 25:33, 37:15000});
+      const v = Array(73).fill(0);
+      Object.assign(v, {0:12345, 4:654, 6:123, 7:101, 15:1520, 16:1610, 17:423, 20:376, 25:335, 37:15000, 72:777});
       const prior = {
         registry_inputs:[{id:'pressure_test'}],
         registry_outputs:[{id:'starter_test'}]
@@ -129,7 +129,7 @@ function installedBrowser() {
         f:(2 ** 3) + (2 ** 5) + (2 ** 18) + (2 ** 20),
         g:(2 ** 26) + (2 ** 27) + (2 ** 29) + (2 ** 31),
         io:1, ih:1, oo:1, oh:1, di:5,
-        iv:[12.34], ir:[2048], ov:[67], oc:[12],
+        iv:[12.345], ir:[2048], ov:[674], oc:[12],
         am:2, sq:[3,8], u:99, bc:4, rr:1, lg:2, lq:3, lc:0, tr:7
       }, prior);
       return {
@@ -140,15 +140,18 @@ function installedBrowser() {
         starterOn:decoded.starter_enabled, igniterOn:decoded.igniter_on,
         hardwareReady:decoded.hardware_ready, loggerHealthy:decoded.session_logger_healthy,
         limitedStart:decoded.limited_start_allowed, seq:[decoded.seq_block_idx,decoded.seq_block_total],
+        throttleUs:decoded.throttle_input_us, idleUs:decoded.idle_input_us,
+        abFlameRaw:decoded.ab_flame_raw,
         input:decoded.registry_inputs[0], output:decoded.registry_outputs[0]
       };
     });
     assert.deepEqual(compactV2, {
-      mode:'STARTUP', n1:12345, tot:654, oil:1.23, p1:1.01, throttle:.42,
-      fuel:.37, starter:.33, maxN1:15000, n1Healthy:true, starterOn:true,
+      mode:'STARTUP', n1:12345, tot:654, oil:1.23, p1:1.01, throttle:.423,
+      fuel:.376, starter:.335, maxN1:15000, n1Healthy:true, starterOn:true,
       igniterOn:true, hardwareReady:true, loggerHealthy:true, limitedStart:true,
-      seq:[3,8], input:{id:'pressure_test',value:12.34,raw:2048,healthy:true},
-      output:{id:'starter_test',demand:.67,current_amps:1.2,current_healthy:true}
+      seq:[3,8], throttleUs:1520, idleUs:1610, abFlameRaw:777,
+      input:{id:'pressure_test',value:12.345,raw:2048,healthy:true},
+      output:{id:'starter_test',demand:.674,current_amps:1.2,current_healthy:true}
     });
     results.push('compact v2 decodes all live numerical, health, input, and output arrays');
     await scenario(page, 'full');

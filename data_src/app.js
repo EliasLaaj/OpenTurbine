@@ -467,14 +467,18 @@ function decodeCompactTelemetry(frame, previous) {
     oil_temp:v[11], batt_voltage:Number(v[12])/10,
     torque:Number(v[13])/10, thrust:Number(v[14])/10,
     throttle_input_raw:v[15], idle_input_raw:v[16],
-    throttle_input_norm:Number(v[17])/100, rc_throttle_norm:Number(v[18])/100,
-    throttle_demand:Number(v[19])/100, throttle_effective:Number(v[20])/100,
-    oil_pct:v[21], oil_demand:Number(v[22])/100,
-    prop_pitch_demand:Number(v[23])/100, ab_fuel_offset:Number(v[24])/100,
-    starter_demand:Number(v[25])/100, ab_pump_demand:Number(v[26])/100,
-    fuel_pump2_demand:Number(v[27])/100, glow_plug_pct:v[28], wet_glow_fuel_pct:v[29],
-    cool_fan_demand:Number(v[30])/100, oil_scavenge_demand:Number(v[31])/100,
-    bleed_valve_demand:Number(v[32])/100,
+    // RC PWM inputs use the same published raw slots; expose the explicit
+    // microsecond names expected by the calibration controls as well.
+    throttle_input_us:v[15], idle_input_us:v[16],
+    throttle_input_norm:Number(v[17])/1000, rc_throttle_norm:Number(v[18])/1000,
+    throttle_demand:Number(v[19])/1000, throttle_effective:Number(v[20])/1000,
+    oil_pct:Number(v[21])/10, oil_demand:Number(v[22])/100,
+    prop_pitch_demand:Number(v[23])/1000, ab_fuel_offset:Number(v[24])/1000,
+    starter_demand:Number(v[25])/1000, ab_pump_demand:Number(v[26])/1000,
+    fuel_pump2_demand:Number(v[27])/1000, glow_plug_pct:Number(v[28])/10,
+    wet_glow_fuel_pct:Number(v[29])/10,
+    cool_fan_demand:Number(v[30])/1000, oil_scavenge_demand:Number(v[31])/1000,
+    bleed_valve_demand:Number(v[32])/1000,
     glow_current_amps:Number(v[33])/10, igniter_current_amps:Number(v[34])/10,
     igniter2_current_amps:Number(v[35])/10, oil_pump_current_amps:Number(v[36])/10,
     max_n1:v[37], max_n2:v[38], max_tot:v[39], max_tit:v[40],
@@ -489,7 +493,7 @@ function decodeCompactTelemetry(frame, previous) {
     oil_pump_current_raw:v[63], last_run_flame_avg:Number(v[64])/10,
     last_run_flame_samples:v[65], min_oil:Number(v[66]) >= 0 ? Number(v[66])/100 : null,
     total_run_seconds:v[67], run_count:v[68], start_attempt_count:v[69],
-    ab_seq_block_idx:v[70], ab_seq_block_total:v[71],
+    ab_seq_block_idx:v[70], ab_seq_block_total:v[71], ab_flame_raw:v[72],
     ri_on:frame.io, ri_ok:frame.ih, ro_on:frame.oo, di_on:frame.di,
     uptime_s:frame.u, boot_count:frame.bc, reset_reason:frame.rr,
     session_dropped_rows:frame.lg, session_queued_rows:frame.lq,
@@ -534,7 +538,7 @@ function decodeCompactTelemetry(frame, previous) {
     healthy:bit(frame.ih, index)
   }));
   if (Array.isArray(frame.ov)) out.registry_outputs = frame.ov.map((percent, index) => ({
-    id:priorOutputs[index]?.id || String(index), demand:Number(percent)/100,
+    id:priorOutputs[index]?.id || String(index), demand:Number(percent)/1000,
     current_amps:Array.isArray(frame.oc) ? Number(frame.oc[index])/10 : undefined,
     current_healthy:bit(frame.oh, index)
   }));

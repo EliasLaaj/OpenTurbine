@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name">Thrust</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Thrust</div><div class="sv-val" id="cal-thrust">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw bridge ADC</div><div class="sv-val" id="cal-thrust-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label" id="thrust-raw-label">Raw load-cell count</div><div class="sv-val" id="cal-thrust-raw">—</div></div>
     </div>
     <div id="thrust-loadcell-wizard"></div>
   </div>
@@ -161,7 +161,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <div class="sensor-row" id="flame-cal-row" style="display:none">
     <div class="sensor-name"><span id="flame-h-cal" class="dot"></span> Flame / Ignition</div>
     <div class="sensor-vals">
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-flame-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin voltage</div><div class="sv-val" id="cal-flame-raw">—</div></div>
       <div class="sv-item"><div class="sv-label">State</div><div class="sv-val" id="cal-flame">—</div></div>
       <div class="sv-item"><div class="sv-label">Threshold</div><div class="sv-val" id="cal-flame-thr">—</div></div>
       <div class="sv-item"><div class="sv-label">Last run average</div><div class="sv-val" id="cal-flame-last-avg">—</div></div>
@@ -170,13 +170,13 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
       <div class="bar-track"><div class="bar-fill" id="bar-flame" style="width:0%"></div></div>
       <div class="thr-mark" id="flame-thr-mark" style="display:none"></div>
     </div>
-    <div class="bar-range"><span>0</span><span>4095 ADC</span></div>
+    <div class="bar-range"><span>0 mV</span><span>3300 mV</span></div>
     <div class="wizard" id="flame-threshold-tools">
       <div class="wizard-title">Flame Threshold Calibration</div>
       <div class="wizard-steps">
         1. Make sure no flame is present, choose whether the igniter should fire, then click <b>Capture noise floor</b> (~1 s sampling). Keep the threshold near the igniter-on noise floor so weak light-off flame is still detected.<br>
         Threshold = noise floor × multiplier (default 3×). Adjust multiplier if needed, then save.<br>
-        <span style="color:var(--yellow)">⚠ <b>Recommended: keep "fire igniter while sampling" ON.</b> Spark noise from the igniter raises the ADC floor.
+        <span style="color:var(--yellow)">⚠ <b>Recommended: keep "fire igniter while sampling" ON.</b> Spark noise from the igniter raises the input-voltage floor.
         Capturing with the igniter firing sets the threshold high enough so that spark bursts during startup are not mistaken for a real flame — preventing false ignition confirmation.
         Only disable this if your igniter is not yet installed. “Last run average” is a low-rate reference from the previous engine run; it is not used automatically as the ignition threshold.</span>
       </div>
@@ -201,10 +201,10 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
       <div id="flame-status" style="font-size:.75rem;color:var(--dim)"></div>
       <div style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
         <span style="font-size:.75rem;color:var(--dim)">Or set threshold directly:</span>
-        <input type="number" id="flame-thr-direct" min="0" max="4095" step="1" style="width:90px"
-               placeholder="0–4095">
+        <label style="font-size:.75rem;color:var(--dim)"><input type="number" id="flame-thr-direct" min="0" max="3300" step="1" style="width:90px"
+               placeholder="0–3300"> mV</label>
         <label style="font-size:.75rem;color:var(--dim)">hysteresis
-          <input type="number" id="flame-hyst-direct" min="0" max="2047" step="1" value="64" style="width:80px">
+          <input type="number" id="flame-hyst-direct" min="0" max="1650" step="1" value="52" style="width:80px"> mV
         </label>
         <select id="flame-active-high" aria-label="Main flame active state"><option value="1">Flame above threshold</option><option value="0">Flame below threshold</option></select>
         <button onclick="saveFlameThresholdDirect()">Set threshold</button>
@@ -217,7 +217,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <div class="sensor-row" id="ab-flame-cal-row" style="display:none">
     <div class="sensor-name"><span id="ab-flame-h-cal" class="dot"></span> Afterburner Flame</div>
     <div class="sensor-vals">
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-ab-flame-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin voltage</div><div class="sv-val" id="cal-ab-flame-raw">—</div></div>
       <div class="sv-item"><div class="sv-label">State</div><div class="sv-val" id="cal-ab-flame">—</div></div>
       <div class="sv-item"><div class="sv-label">Threshold</div><div class="sv-val" id="cal-ab-flame-thr">—</div></div>
     </div>
@@ -225,19 +225,19 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
       <div class="bar-track"><div class="bar-fill" id="bar-ab-flame" style="width:0%"></div></div>
       <div class="thr-mark" id="ab-flame-thr-mark" style="display:none"></div>
     </div>
-    <div class="bar-range"><span>0</span><span>4095 ADC</span></div>
+    <div class="bar-range"><span>0 mV</span><span>3300 mV</span></div>
     <div class="wizard" id="ab-flame-threshold-tools">
       <div class="wizard-title">Afterburner Flame Threshold</div>
       <div class="wizard-steps">
-        Set the raw ADC threshold used by afterburner flame-confirm mode and AB flame diagnostics.
+        Set the ADC-pin voltage threshold used by afterburner flame-confirm mode and AB flame diagnostics.
         Tune this with the afterburner off first, then confirm that a real AB flame clears the threshold.
       </div>
       <div style="margin-top:.5rem;display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
         <span style="font-size:.75rem;color:var(--dim)">Detection threshold:</span>
-        <input type="number" id="ab-flame-thr-direct" min="0" max="4095" step="1" style="width:90px"
-               placeholder="0-4095">
+        <label style="font-size:.75rem;color:var(--dim)"><input type="number" id="ab-flame-thr-direct" min="0" max="3300" step="1" style="width:90px"
+               placeholder="0–3300"> mV</label>
         <label style="font-size:.75rem;color:var(--dim)">hysteresis
-          <input type="number" id="ab-flame-hyst-direct" min="0" max="2047" step="1" value="64" style="width:80px">
+          <input type="number" id="ab-flame-hyst-direct" min="0" max="1650" step="1" value="52" style="width:80px"> mV
         </label>
         <select id="ab-flame-active-high" aria-label="Afterburner flame active state"><option value="1">Flame above threshold</option><option value="0">Flame below threshold</option></select>
         <button onclick="saveAbFlameThresholdDirect()">Set threshold</button>
@@ -399,7 +399,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <div class="sensor-row" id="idle-cal-row" style="display:none">
     <div class="sensor-name">Idle Input</div>
     <div class="sensor-vals">
-      <div class="sv-item"><div class="sv-label" id="idle-raw-label">Raw ADC</div><div class="sv-val" id="cal-idle-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label" id="idle-raw-label">ADC pin voltage</div><div class="sv-val" id="cal-idle-raw">—</div></div>
       <div class="sv-item"><div class="sv-label">Position %</div><div class="sv-val" id="cal-idle-pct">—</div></div>
       <div class="sv-item"><div class="sv-label">Throttle %</div><div class="sv-val" id="cal-idle-thr">—</div></div>
     </div>
@@ -452,7 +452,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
       <div id="ntc-status" style="font-size:.75rem;color:var(--dim)"></div>
       <hr style="border:0;border-top:1px solid var(--border);margin:.8rem 0">
       <div class="wizard-title">Known temperature points</div>
-      <div class="wizard-steps">Use this for an NTC divider or another supported analog temperature input. Stabilise it at four different, well-spaced temperatures covering the useful range. Enter the known temperature in the page-selected unit, capture the live ADC point, review all four points, then save. Saving this disables NTC datasheet mode.</div>
+      <div class="wizard-steps">Use this for an NTC divider or another supported analog temperature input. Stabilise it at four different, well-spaced temperatures covering the useful range. Enter the known temperature in the page-selected unit, capture the live ADC-pin voltage, review all four points, then save. Saving this disables NTC datasheet mode.</div>
       <div id="oiltemp-known-rows"></div>
       <label>Known temperature <input id="oilt-known-temp" type="number" step="0.1" style="width:6rem"> <span data-unit="temp">°C</span></label>
       <div class="wiz-buttons" style="margin-top:.5rem">
@@ -475,7 +475,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name">Battery Voltage</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Voltage</div><div class="sv-val" id="cal-battvolt">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-battvolt-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin voltage</div><div class="sv-val" id="cal-battvolt-raw">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-battvolt" style="width:0%"></div></div>
     <div class="bar-range"><span>0 V</span><span id="battvolt-bar-max">16 V</span></div>
@@ -503,7 +503,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name">Torque</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Torque</div><div class="sv-val" id="cal-torque">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-torque-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label" id="torque-raw-label">ADC pin voltage</div><div class="sv-val" id="cal-torque-raw">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-torque" style="width:0%"></div></div>
     <div class="bar-range"><span>0</span><span id="torque-bar-max">— Nm</span></div>
@@ -542,7 +542,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <div class="sensor-row" id="throttle-cal-row" style="display:none">
     <div class="sensor-name">Throttle Input</div>
     <div class="sensor-vals">
-      <div class="sv-item"><div class="sv-label" id="th-raw-label">Raw ADC</div><div class="sv-val" id="cal-th-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label" id="th-raw-label">ADC pin voltage</div><div class="sv-val" id="cal-th-raw">—</div></div>
       <div class="sv-item"><div class="sv-label">Position</div><div class="sv-val" id="cal-th-pct">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-th" style="width:0%"></div></div>
@@ -564,7 +564,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name">Fuel Flow Sensor (Analog)</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Flow (L/min)</div><div class="sv-val" id="cal-ff">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-ff-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin voltage</div><div class="sv-val" id="cal-ff-raw">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-ff" style="width:0%"></div></div>
     <div class="bar-range"><span>0</span><span id="ff-bar-max-label">10</span></div>
@@ -592,7 +592,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name">Glow Plug Current Sensor</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Current (A)</div><div class="sv-val" id="cal-glow-a">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-glow-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin voltage</div><div class="sv-val" id="cal-glow-raw">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-glow-cur" style="width:0%"></div></div>
     <div class="bar-range"><span>0 A</span><span>50 A</span></div>
@@ -620,7 +620,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name">Oil Pump Current Sensor</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Current (A)</div><div class="sv-val" id="cal-oilpumpcur-a">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-oilpumpcur-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin voltage</div><div class="sv-val" id="cal-oilpumpcur-raw">—</div></div>
       <div class="sv-item"><div class="sv-label">Overcurrent</div><div class="sv-val" id="cal-oilpumpcur-oc">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-oilpumpcur" style="width:0%"></div></div>
@@ -649,7 +649,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name">Igniter 1 Current Sensor</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Current (A)</div><div class="sv-val" id="cal-ign-a">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-ign-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin voltage</div><div class="sv-val" id="cal-ign-raw">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-ign-cur" style="width:0%"></div></div>
     <div class="bar-range"><span>0 A</span><span>50 A</span></div>
@@ -677,7 +677,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name">Secondary Igniter Current Sensor</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Current (A)</div><div class="sv-val" id="cal-ign2-a">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-ign2-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin voltage</div><div class="sv-val" id="cal-ign2-raw">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-ign2-cur" style="width:0%"></div></div>
     <div class="bar-range"><span>0 A</span><span>50 A</span></div>
@@ -904,11 +904,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (fpMin !== 0 || fpMax !== 4095) {
     fpRawZero = fpMin; fpRawRef = fpMax;
     document.getElementById('fp-pts-status').textContent =
-      'Saved: zero=' + fpMin + ' raw, ref=' + fpMax + ' raw @ ' + fpVal + ' bar';
+      'Saved: zero=' + adcMvText(fpMin) + ', ref=' + adcMvText(fpMax) + ' @ ' + fpVal + ' bar';
     document.getElementById('btn-fp-save').disabled = false;
   }
   setText('fuelpress-bar-max', fpVal.toFixed(1) + ' bar');
-  setText('cal-fuelpress-range', fpMin + ' – ' + fpMax + ' raw');
+  setText('cal-fuelpress-range', adcMvText(fpMin) + ' – ' + adcMvText(fpMax));
   for (const [selectId, purpose] of [
     ['oil-zero-reference', 'oil_pressure'],
     ['fuelpress-zero-reference', 'fuel_pressure'],
@@ -923,22 +923,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const registryFlame = registryInputById('flame');
   const thr = registryFlame?.digital_threshold_raw;
-  document.getElementById('cal-flame-thr').textContent = thr ?? '—';
-  if (thr !== undefined) document.getElementById('flame-thr-direct').value = thr;
-  document.getElementById('flame-hyst-direct').value = registryFlame?.digital_hysteresis_raw ?? 64;
+  document.getElementById('cal-flame-thr').textContent = thr !== undefined ? adcMvText(thr) : '—';
+  if (thr !== undefined) document.getElementById('flame-thr-direct').value = Math.round(adcMv(thr));
+  document.getElementById('flame-hyst-direct').value = Math.round(adcMv(registryFlame?.digital_hysteresis_raw ?? 64));
   document.getElementById('flame-active-high').value = registryFlame?.active_high === false ? '0' : '1';
   updateFlameThrMark(thr);
   if (thr !== undefined && flameThresholdAdvisory(thr, registryFlame?.active_high !== false))
-    setText('flame-status', `Saved threshold ${thr}.${flameThresholdAdvisory(thr, registryFlame?.active_high !== false)}`);
+    setText('flame-status', `Saved threshold ${adcMvText(thr)}.${flameThresholdAdvisory(thr, registryFlame?.active_high !== false)}`);
   const registryAbFlame = registryInputById('ab_flame');
   const abThr = registryAbFlame?.digital_threshold_raw;
-  setText('cal-ab-flame-thr', abThr ?? '—');
-  if (abThr !== undefined) document.getElementById('ab-flame-thr-direct').value = abThr;
-  document.getElementById('ab-flame-hyst-direct').value = registryAbFlame?.digital_hysteresis_raw ?? 64;
+  setText('cal-ab-flame-thr', abThr !== undefined ? adcMvText(abThr) : '—');
+  if (abThr !== undefined) document.getElementById('ab-flame-thr-direct').value = Math.round(adcMv(abThr));
+  document.getElementById('ab-flame-hyst-direct').value = Math.round(adcMv(registryAbFlame?.digital_hysteresis_raw ?? 64));
   document.getElementById('ab-flame-active-high').value = registryAbFlame?.active_high === false ? '0' : '1';
   updateAbFlameThrMark(abThr);
   if (abThr !== undefined && flameThresholdAdvisory(abThr, registryAbFlame?.active_high !== false))
-    setText('ab-flame-status', `Saved threshold ${abThr}.${flameThresholdAdvisory(abThr, registryAbFlame?.active_high !== false)}`);
+    setText('ab-flame-status', `Saved threshold ${adcMvText(abThr)}.${flameThresholdAdvisory(abThr, registryAbFlame?.active_high !== false)}`);
   const flameThresholdBased = !registryFlame || ![0,8].includes(Number(registryFlame.driver));
   document.getElementById('flame-threshold-tools').style.display = flameThresholdBased ? '' : 'none';
   document.getElementById('flame-digital-note').style.display = flameThresholdBased ? 'none' : '';
@@ -948,15 +948,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const mn = c.calibration?.throttle_min_raw, mx = c.calibration?.throttle_max_raw;
   if (mn !== undefined && mx !== undefined) {
     thMin = mn; thMax = mx;
-    document.getElementById('th-lo').textContent = mn;
-    document.getElementById('th-hi').textContent = mx;
+    document.getElementById('th-lo').textContent = adcMvText(mn);
+    document.getElementById('th-hi').textContent = adcMvText(mx);
     document.getElementById('btn-th-save').disabled = false;
   }
   const imn = c.calibration?.idle_min_raw, imx = c.calibration?.idle_max_raw;
   if (imn !== undefined && imx !== undefined) {
     idleMin = imn; idleMax = imx;
-    document.getElementById('idle-range-lo').textContent = imn;
-    document.getElementById('idle-range-hi').textContent = imx;
+    document.getElementById('idle-range-lo').textContent = adcMvText(imn);
+    document.getElementById('idle-range-hi').textContent = adcMvText(imx);
     document.getElementById('btn-idle-save').disabled = false;
   }
 
@@ -991,12 +991,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const torqueRegistry = registryChannelByPurpose(c.hardware, 'inputs', 'torque');
   const isHX711 = Number(torqueRegistry?.torque_interface || 0) === 1;
   const isNauTorque = Number(torqueRegistry?.driver) === 10;
+  setText('torque-raw-label', (isHX711 || isNauTorque) ? 'Raw load-cell count' : 'ADC pin voltage');
+  const thrustRegistry = registryChannelByPurpose(c.hardware, 'inputs', 'thrust');
+  setText('thrust-raw-label', Number(thrustRegistry?.driver) === 10
+    ? 'Raw load-cell count' : 'ADC pin voltage');
   const adcWiz  = document.getElementById('torque-adc-wizard');
   const hxWiz   = document.getElementById('torque-hx711-wizard');
   if (adcWiz) adcWiz.style.display  = (isHX711 || isNauTorque) ? 'none' : '';
   if (hxWiz)  hxWiz.style.display   = isHX711 ? '' : 'none';
   renderLoadCellWizard('torque', torqueRegistry);
-  renderLoadCellWizard('thrust', registryChannelByPurpose(c.hardware, 'inputs', 'thrust'));
+  renderLoadCellWizard('thrust', thrustRegistry);
   revealCalibrationDeepLink();
   window.addEventListener('hashchange', revealCalibrationDeepLink);
 
@@ -1029,10 +1033,12 @@ function applyInputTypeLabels(d) {
   if (thType !== throttleInputType) {
     throttleInputType = thType;
     const isServo = thType === 'servo';
-    setText('th-raw-label', isServo ? 'Servo Signal' : 'Raw ADC');
+    setText('th-raw-label', isServo ? 'Servo signal' : 'ADC pin voltage');
     // Update calibration wizard hint
     const steps = document.getElementById('th-wiz-steps');
     if (steps) steps.innerHTML = 'Hold each endpoint steadily while clicking Capture. Each capture averages one second of samples. Saving adds a 2% minimum margin and 1% maximum margin.' + (isServo ? '<br><span style="color:var(--dim)">Values are captured in microseconds (servo signal).</span>' : '');
+    if (thMin !== null) setText('th-lo', inputReadingText(thMin, thType));
+    if (thMax !== null) setText('th-hi', inputReadingText(thMax, thType));
     // Range labels will be updated in the live update loop
     // Hide row if throttle input is not fitted
     const thRow = document.getElementById('throttle-cal-row');
@@ -1041,9 +1047,11 @@ function applyInputTypeLabels(d) {
   if (idleType !== idleInputType) {
     idleInputType = idleType;
     const isServo = idleType === 'servo';
-    setText('idle-raw-label', isServo ? 'Servo Signal' : 'Raw ADC');
+    setText('idle-raw-label', isServo ? 'Servo signal' : 'ADC pin voltage');
     const steps = document.getElementById('idle-wiz-steps');
     if (steps) steps.innerHTML = 'Hold each endpoint steadily while clicking Capture. Each capture averages one second of samples. Saving adds a 2% minimum margin and 1% maximum margin.' + (isServo ? '<br><span style="color:var(--dim)">Values are captured in microseconds (servo signal).</span>' : '');
+    if (idleMin !== null) setText('idle-range-lo', inputReadingText(idleMin, idleType));
+    if (idleMax !== null) setText('idle-range-hi', inputReadingText(idleMax, idleType));
     // Hide row if idle input is not fitted
     const idRow = document.getElementById('idle-cal-row');
     if (idRow) idRow.style.display = idleType === 'none' ? 'none' : '';
@@ -1160,9 +1168,9 @@ window.applyData = function(d) {
   setDot('oil-h-cal',    d.oil_healthy);
   bar('bar-oil', d.oil ?? 0, 0, 6, d.oil_healthy);
 
-  setText('cal-flame-raw', d.flame_raw ?? '—');
+  setText('cal-flame-raw', adcMvText(d.flame_raw));
   setText('cal-flame',     d.flame ? 'FLAME ●' : 'no flame');
-  setText('cal-flame-last-avg', d.last_run_flame_samples > 0 ? Number(d.last_run_flame_avg).toFixed(0) + ' ADC' : '—');
+  setText('cal-flame-last-avg', d.last_run_flame_samples > 0 ? adcMvText(d.last_run_flame_avg) : '—');
   setDot('flame-h-cal',    d.flame);
   bar('bar-flame', d.flame_raw ?? 0, 0, 4095, true);
 
@@ -1187,11 +1195,11 @@ window.applyData = function(d) {
   } else {
     // ADC: show counts, bar over 0–4095
     const idleRaw = d.idle_input_raw ?? 0;
-    setText('cal-idle-raw', d.idle_input_raw !== undefined ? d.idle_input_raw : '—');
+    setText('cal-idle-raw', adcMvText(d.idle_input_raw));
     const idlePosP = Math.round(((idleRaw - rcMin) / (rcMax - rcMin)) * 100);
     setText('cal-idle-pct', Math.max(0, Math.min(100, idlePosP)) + '%');
-    setText('idle-range-lo', String(rcMin));
-    setText('idle-range-hi', String(rcMax));
+    setText('idle-range-lo', adcMvText(rcMin));
+    setText('idle-range-hi', adcMvText(rcMax));
     bar('bar-idle', idleRaw, rcMin, rcMax, true);
   }
   // Idle→throttle % mapping (same regardless of signal type)
@@ -1238,7 +1246,7 @@ window.applyData = function(d) {
   if (oilpCurCalRow) oilpCurCalRow.style.display = hasOilPumpCurrent ? '' : 'none';
 
   if (hasFuelFlowAnalog) {
-    setText('cal-ff-raw', d.fuel_flow_raw ?? '—');
+    setText('cal-ff-raw', adcMvText(d.fuel_flow_raw));
     if (d.fuel_flow !== undefined) {
       const ffValMax = cfg.calibration?.fuel_flow_val_max ?? 10;
       setText('cal-ff', Number(d.fuel_flow).toFixed(3) + ' L/min');
@@ -1246,36 +1254,37 @@ window.applyData = function(d) {
     }
   }
   if (hasAbFlame) {
-    setText('cal-ab-flame-raw', d.ab_flame_raw ?? '—');
+    setText('cal-ab-flame-raw', adcMvText(d.ab_flame_raw));
     setText('cal-ab-flame', d.ab_flame_on ? 'FLAME ●' : 'no flame');
-    setText('cal-ab-flame-thr', d.ab_flame_threshold ?? document.getElementById('cal-ab-flame-thr')?.textContent ?? '—');
+    if (d.ab_flame_threshold !== undefined)
+      setText('cal-ab-flame-thr', adcMvText(d.ab_flame_threshold));
     if (d.ab_flame_threshold !== undefined) updateAbFlameThrMark(d.ab_flame_threshold);
     setDot('ab-flame-h-cal', d.ab_flame_on);
     bar('bar-ab-flame', d.ab_flame_raw ?? 0, 0, 4095, true);
   }
   if (hasGlowCurrent) {
-    setText('cal-glow-raw', d.glow_current_raw ?? '—');
+    setText('cal-glow-raw', adcMvText(d.glow_current_raw));
     if (d.glow_current_amps !== undefined) {
       setText('cal-glow-a', Number(d.glow_current_amps).toFixed(2) + ' A');
       bar('bar-glow-cur', d.glow_current_amps, 0, 50, true);
     }
   }
   if (hasIgnCurrent) {
-    setText('cal-ign-raw', d.igniter_current_raw ?? '—');
+    setText('cal-ign-raw', adcMvText(d.igniter_current_raw));
     if (d.igniter_current_amps !== undefined) {
       setText('cal-ign-a', Number(d.igniter_current_amps).toFixed(2) + ' A');
       bar('bar-ign-cur', d.igniter_current_amps, 0, 50, true);
     }
   }
   if (hasIgn2Current) {
-    setText('cal-ign2-raw', d.igniter2_current_raw ?? '—');
+    setText('cal-ign2-raw', adcMvText(d.igniter2_current_raw));
     if (d.igniter2_current_amps !== undefined) {
       setText('cal-ign2-a', Number(d.igniter2_current_amps).toFixed(2) + ' A');
       bar('bar-ign2-cur', d.igniter2_current_amps, 0, 50, true);
     }
   }
   if (hasOilPumpCurrent) {
-    setText('cal-oilpumpcur-raw', d.oil_pump_current_raw ?? '—');
+    setText('cal-oilpumpcur-raw', adcMvText(d.oil_pump_current_raw));
     if (d.oil_pump_current_amps !== undefined) {
       setText('cal-oilpumpcur-a', Number(d.oil_pump_current_amps).toFixed(2) + ' A');
       setText('cal-oilpumpcur-oc', d.oil_pump_overcurrent ? '⚠ OVERCURRENT' : 'OK');
@@ -1289,17 +1298,22 @@ window.applyData = function(d) {
   }
   if (hasBattVolt && d.batt_voltage !== undefined) {
     setText('cal-battvolt',     Number(d.batt_voltage).toFixed(2) + ' V');
-    setText('cal-battvolt-raw', d.batt_voltage_raw ?? '—');
+    setText('cal-battvolt-raw', adcMvText(d.batt_voltage_raw));
     bar('bar-battvolt', d.batt_voltage, 0, 16, true);
   }
   if (hasTorque && d.torque !== undefined) {
     setText('cal-torque',     Number(d.torque).toFixed(1) + ' Nm');
-    setText('cal-torque-raw', d.torque_raw ?? '—');
+    const torqueChannel = registryChannelByPurpose(cfg.hardware || {}, 'inputs', 'torque');
+    const torqueIsLoadCell = Number(torqueChannel?.driver) === 10 ||
+      Number(torqueChannel?.torque_interface || 0) === 1;
+    setText('cal-torque-raw', torqueIsLoadCell ? (d.torque_raw ?? '—') : adcMvText(d.torque_raw));
     bar('bar-torque', d.torque, 0, parseFloat(document.getElementById('torque-fullscale')?.value || '100'), true);
   }
   if (hasThrust && d.thrust !== undefined) {
     setText('cal-thrust', Number(d.thrust).toFixed(1) + ' N');
-    setText('cal-thrust-raw', d.thrust_raw ?? '—');
+    const thrustChannel = registryChannelByPurpose(cfg.hardware || {}, 'inputs', 'thrust');
+    setText('cal-thrust-raw', Number(thrustChannel?.driver) === 10
+      ? (d.thrust_raw ?? '—') : adcMvText(d.thrust_raw));
   }
 
   // ── Throttle input ────────────────────────────────────────────
@@ -1325,12 +1339,14 @@ window.applyData = function(d) {
       bar('bar-th', us, thRangeMin, thRangeMax, true);
     }
   } else {
-    // ADC: show counts
+    // ADC: show the voltage a user can verify with a meter.
     const raw = d.throttle_input_raw;
-    setText('cal-th-raw', raw !== undefined ? raw : '—');
+    setText('cal-th-raw', adcMvText(raw));
     if (raw !== undefined) {
       const lo = (thMin !== null && thMax !== null) ? thMin : thRangeMin;
       const hi = (thMin !== null && thMax !== null) ? thMax : thRangeMax;
+      document.getElementById('th-lo').textContent = adcMvText(lo);
+      document.getElementById('th-hi').textContent = adcMvText(hi);
       const pct = Math.round(((raw - lo) / (hi - lo)) * 100);
       setText('cal-th-pct', Math.max(0, Math.min(100, pct)) + '%');
       bar('bar-th', raw, lo, hi, true);
@@ -1354,6 +1370,12 @@ function adcMv(raw) {
 }
 function adcMvText(raw) {
   return Number.isFinite(Number(raw)) ? Math.round(adcMv(raw)) + ' mV' : '—';
+}
+function adcRawFromMv(mv) {
+  return Math.round(Math.max(0, Math.min(3300, Number(mv))) * 4095.0 / 3300.0);
+}
+function inputReadingText(raw, type) {
+  return type === 'servo' ? Math.round(Number(raw)) + ' µs' : adcMvText(raw);
 }
 
 // ── Fuel pressure calibration wizard ─────────────────────────
@@ -1404,13 +1426,13 @@ function fpSaveCal() {
     fuel_press_raw_min: fpRawZero,
     fuel_press_raw_max: fpRawRef,
     fuel_press_val_max: refBar
-  }}, 'Fuel pressure calibration saved (' + fpRawZero + '–' + fpRawRef + ' raw = ' +
+  }}, 'Fuel pressure calibration saved (' + adcMvText(fpRawZero) + '–' + adcMvText(fpRawRef) + ' = ' +
       pressureValueLabel(ambientBar) + '–' + refBar + ' bar)', () => {
     if (!cfg.calibration) cfg.calibration = {};
     cfg.calibration.fuel_press_raw_min = fpRawZero;
     cfg.calibration.fuel_press_raw_max = fpRawRef;
     cfg.calibration.fuel_press_val_max = refBar;
-    setText('cal-fuelpress-range', fpRawZero + ' – ' + fpRawRef + ' raw');
+    setText('cal-fuelpress-range', adcMvText(fpRawZero) + ' – ' + adcMvText(fpRawRef));
     setText('fuelpress-bar-max', refBar.toFixed(1) + ' bar');
     document.getElementById('fp-save-status').textContent = 'Saved.';
   });
@@ -1428,10 +1450,10 @@ function fpClearCal() {
     cfg.calibration.fuel_press_raw_min = 0;
     cfg.calibration.fuel_press_raw_max = 4095;
     cfg.calibration.fuel_press_val_max = 10;
-    document.getElementById('fp-pts-status').textContent = 'Calibration cleared — defaults restored (0–4095 raw = 0–10 bar)';
+    document.getElementById('fp-pts-status').textContent = 'Calibration cleared — defaults restored (0–3300 mV = 0–10 bar)';
     document.getElementById('btn-fp-save').disabled = true;
     document.getElementById('fp-save-status').textContent = '';
-    setText('cal-fuelpress-range', '0 – 4095 raw');
+    setText('cal-fuelpress-range', '0 – 3300 mV');
     setText('fuelpress-bar-max', '10 bar');
   });
 }
@@ -1498,7 +1520,7 @@ function oilCalStart() {
     setTimeout(async () => {
       const raw0 = live.oil_raw;
       if (raw0 === undefined) {
-        statusEl.textContent = 'No live ADC data — check connection.';
+        statusEl.textContent = 'No live ADC-pin voltage — check connection.';
         startBtn.disabled = false;
         return;
       }
@@ -1751,7 +1773,7 @@ function oilUseDatasheet(){
   if (raw1 === zero.raw || value1 <= zero.b) { alert('The datasheet value does not produce a usable increasing pressure range from the captured zero. Check the wiring and sensitivity.'); return; }
   oilPts = [{raw:zero.raw,b:zero.b},{raw:raw1,b:value1}];
   oilFit={a:0,b:0,c,d,x0:0,x1:4095}; oilCalStop(); oilGoStep(3);
-  document.getElementById('oil-fit-summary').innerHTML=`<b>Datasheet straight-line calibration</b><br>Zero: ADC ${zero.raw} = ${zero.b.toFixed(2)} bar<br>Sensitivity: ${mv} mV/bar`;
+  document.getElementById('oil-fit-summary').innerHTML=`<b>Datasheet straight-line calibration</b><br>Zero: ${adcMvText(zero.raw)} = ${zero.b.toFixed(2)} bar<br>Sensitivity: ${mv} mV/bar`;
 }
 function fitSse(fit,pts){return pts.reduce((s,p)=>{const x=p.raw,e=((fit.a*x+fit.b)*x+fit.c)*x+fit.d-p.b;return s+e*e;},0);}
 
@@ -1865,11 +1887,10 @@ async function captureFlameNoise() {
     }
 
     const samples = [];
-    for (let i = 0; i < 20; i++) {
-      statusEl.textContent = `Sampling${fireIgn ? ' with igniter active' : ''}… ${i+1}/20`;
-      const d = await fetch('/api/data').then(r => r.json()).catch(() => ({}));
+    for (let i = 0; i < 5; i++) {
+      statusEl.textContent = `Sampling${fireIgn ? ' with igniter active' : ''}… ${i+1}/5`;
+      const d = await nextCalibrationFrame();
       if (d.flame_raw !== undefined) samples.push(d.flame_raw);
-      await new Promise(r => setTimeout(r, 75)); // ~20 samples over 1.5 s
     }
 
     if (samples.length === 0) {
@@ -1897,8 +1918,8 @@ function recomputeFlameThreshold() {
   const mult = parseFloat(document.getElementById('flame-multiplier')?.value) || 3;
   const raw  = Math.round(flameNoise * mult);
   const thr  = Math.min(raw, 4095);  // ADC full-scale — firmware rejects higher
-  let msg  = `Noise floor: ${flameNoise}  ×${mult}  → Threshold: ${thr}`;
-  if (raw > 4095) msg += ' ⚠ capped at 4095 (sensor full-scale) — flame signal may never clear this threshold';
+  let msg  = `Noise floor: ${adcMvText(flameNoise)}  ×${mult}  → Threshold: ${adcMvText(thr)}`;
+  if (raw > 4095) msg += ' ⚠ capped at 3300 mV (sensor full-scale) — flame signal may never clear this threshold';
   document.getElementById('flame-status').textContent = msg;
   const btn = document.getElementById('btn-flame-save');
   if (btn) { btn.disabled = false; btn.dataset.thr = thr; }
@@ -1925,8 +1946,10 @@ function saveMainFlameCondition(thr) {
   const registry = registryInputById('flame');
   if (!registry) { alert('No canonical main flame input is fitted.'); return; }
   const maxHysteresis = Math.max(0, Math.min(2047, 2 * Math.min(thr, 4095 - thr)));
+  const hysteresisMv = Number(document.getElementById('flame-hyst-direct').value);
   const hysteresis = Math.max(0, Math.min(maxHysteresis,
-    Math.round(Number(document.getElementById('flame-hyst-direct').value || registry?.digital_hysteresis_raw || 64))));
+    Number.isFinite(hysteresisMv) ? adcRawFromMv(hysteresisMv)
+      : Number(registry?.digital_hysteresis_raw || 64)));
   const activeHigh = document.getElementById('flame-active-high').value !== '0';
   const registryPatch = registryCalibrationPatch('flame', {
     digital_threshold_raw: thr, digital_hysteresis_raw: hysteresis, active_high: activeHigh
@@ -1937,38 +1960,44 @@ function saveMainFlameCondition(thr) {
       registry.digital_hysteresis_raw = hysteresis;
       registry.active_high = activeHigh;
     }
-    document.getElementById('cal-flame-thr').textContent = thr;
-    document.getElementById('flame-hyst-direct').value = hysteresis;
+    document.getElementById('cal-flame-thr').textContent = adcMvText(thr);
+    document.getElementById('flame-thr-direct').value = Math.round(adcMv(thr));
+    document.getElementById('flame-hyst-direct').value = Math.round(adcMv(hysteresis));
     updateFlameThrMark(thr);
-    setText('flame-status', `Main flame threshold set to ${thr}.${flameThresholdAdvisory(thr, activeHigh)}`);
+    setText('flame-status', `Main flame threshold set to ${adcMvText(thr)}.${flameThresholdAdvisory(thr, activeHigh)}`);
   });
 }
 function saveFlameThresholdDirect() {
-  const thr = parseInt(document.getElementById('flame-thr-direct').value);
-  if (isNaN(thr) || thr < 0 || thr > 4095) return;
+  const mv = Number(document.getElementById('flame-thr-direct').value);
+  if (!Number.isFinite(mv) || mv < 0 || mv > 3300) return;
+  const thr = adcRawFromMv(mv);
   saveMainFlameCondition(thr);
 }
 function saveAbFlameThresholdDirect() {
-  const thr = parseInt(document.getElementById('ab-flame-thr-direct').value);
-  if (isNaN(thr) || thr < 0 || thr > 4095) return;
+  const mv = Number(document.getElementById('ab-flame-thr-direct').value);
+  if (!Number.isFinite(mv) || mv < 0 || mv > 3300) return;
+  const thr = adcRawFromMv(mv);
   const registry = registryInputById('ab_flame');
   const maxHysteresis = Math.max(0, Math.min(2047, 2 * Math.min(thr, 4095 - thr)));
+  const hysteresisMv = Number(document.getElementById('ab-flame-hyst-direct').value);
   const hysteresis = Math.max(0, Math.min(maxHysteresis,
-    Math.round(Number(document.getElementById('ab-flame-hyst-direct').value || registry?.digital_hysteresis_raw || 64))));
+    Number.isFinite(hysteresisMv) ? adcRawFromMv(hysteresisMv)
+      : Number(registry?.digital_hysteresis_raw || 64)));
   const activeHigh = document.getElementById('ab-flame-active-high').value !== '0';
   const registryPatch = registryCalibrationPatch('ab_flame', {
     digital_threshold_raw: thr, digital_hysteresis_raw: hysteresis, active_high: activeHigh
   });
   patchHardware(registryPatch, () => {
-    setText('cal-ab-flame-thr', thr);
+    setText('cal-ab-flame-thr', adcMvText(thr));
     if (registry) {
       registry.digital_threshold_raw = thr;
       registry.digital_hysteresis_raw = hysteresis;
       registry.active_high = activeHigh;
     }
-    document.getElementById('ab-flame-hyst-direct').value = hysteresis;
+    document.getElementById('ab-flame-thr-direct').value = Math.round(adcMv(thr));
+    document.getElementById('ab-flame-hyst-direct').value = Math.round(adcMv(hysteresis));
     updateAbFlameThrMark(thr);
-    setText('ab-flame-status', `Afterburner flame threshold set to ${thr}.${flameThresholdAdvisory(thr, activeHigh)}`);
+    setText('ab-flame-status', `Afterburner flame threshold set to ${adcMvText(thr)}.${flameThresholdAdvisory(thr, activeHigh)}`);
   });
 }
 function clearFlame() {
@@ -1979,44 +2008,46 @@ function clearFlame() {
 }
 
 // ── Throttle calibration ──────────────────────────────────────
-// For ADC input: captures raw ADC counts.
+// ADC values stay as counts internally but are shown as measurable mV.
 // For servo signal input: captures µs pulse width.
-function _thUnit() {
-  return throttleInputType === 'servo' ? ' µs' : '';
-}
 async function _captureInputAverage(key) {
   const samples = [], until = performance.now() + 1000;
   while (performance.now() < until) {
-    const d = await fetch('/api/data').then(r => r.json()).catch(() => ({}));
+    const d = await nextCalibrationFrame();
     const v = Number(d[key]);
     if (Number.isFinite(v)) samples.push(v);
-    await new Promise(r => setTimeout(r, 40));
   }
   if (!samples.length) throw new Error('No input samples received.');
   return Math.round(samples.reduce((a,b)=>a+b,0) / samples.length);
+}
+
+async function nextCalibrationFrame() {
+  // The shared page stream already refreshes live at 3 Hz. Sampling that
+  // browser state avoids a second HTTP loop during calibration captures.
+  await new Promise(resolve => setTimeout(resolve, 340));
+  return live || {};
 }
 async function captureThMin() {
   document.getElementById('th-status').textContent = 'Hold minimum for 1 second…';
   const key = throttleInputType === 'servo' ? 'throttle_input_us' : 'throttle_input_raw';
   try { thMin = await _captureInputAverage(key); } catch(e) { alert(e.message); return; }
-  document.getElementById('th-lo').textContent = thMin + _thUnit();
+  document.getElementById('th-lo').textContent = inputReadingText(thMin, throttleInputType);
   renderThStatus();
 }
 async function captureThMax() {
   document.getElementById('th-status').textContent = 'Hold maximum for 1 second…';
   const key = throttleInputType === 'servo' ? 'throttle_input_us' : 'throttle_input_raw';
   try { thMax = await _captureInputAverage(key); } catch(e) { alert(e.message); return; }
-  document.getElementById('th-hi').textContent = thMax + _thUnit();
+  document.getElementById('th-hi').textContent = inputReadingText(thMax, throttleInputType);
   renderThStatus();
 }
 function renderThStatus() {
-  const u = _thUnit();
   let msg = '';
-  if (thMin !== null) msg += `Min: ${thMin}${u}   `;
-  if (thMax !== null) msg += `Max: ${thMax}${u}`;
+  if (thMin !== null) msg += `Min: ${inputReadingText(thMin, throttleInputType)}   `;
+  if (thMax !== null) msg += `Max: ${inputReadingText(thMax, throttleInputType)}`;
   if (thMin !== null && thMax !== null) {
     const span=thMax-thMin;
-    msg += `  → proposed: ${Math.round(thMin+span*.02)}–${Math.round(thMax-span*.01)}${u}`;
+    msg += `  → proposed: ${inputReadingText(Math.round(thMin+span*.02), throttleInputType)}–${inputReadingText(Math.round(thMax-span*.01), throttleInputType)}`;
   }
   document.getElementById('th-status').textContent = msg;
   document.getElementById('btn-th-save').disabled = thMin === null || thMax === null;
@@ -2030,7 +2061,7 @@ function saveThrottle() {
   patchHardwareThenConfig(analogRegistryPatch, () => {
     const registry = registryInputById('throttle'); registry.min=saveMin; registry.max=saveMax; registry.calibration_points=[];
   }, { calibration: { throttle_min_raw: saveMin, throttle_max_raw: saveMax } },
-  `Throttle calibrated: ${thMin} – ${thMax}${_thUnit()}`, () => {
+  `Throttle calibrated: ${inputReadingText(thMin, throttleInputType)} – ${inputReadingText(thMax, throttleInputType)}`, () => {
     if (!cfg.calibration) cfg.calibration = {};
     cfg.calibration.throttle_min_raw = saveMin;
     cfg.calibration.throttle_max_raw = saveMax;
@@ -2038,9 +2069,6 @@ function saveThrottle() {
 }
 
 // ── P1 / P2 zero calibration ─────────────────────────────────
-function _idleUnit() {
-  return idleInputType === 'servo' ? ' µs' : '';
-}
 async function captureIdleMin() {
   document.getElementById('idle-status').textContent = 'Hold minimum for 1 second…';
   const key = idleInputType === 'servo' ? 'idle_input_us' : 'idle_input_raw';
@@ -2055,11 +2083,11 @@ async function captureIdleMax() {
 }
 function renderIdleStatus() {
   let msg = '';
-  if (idleMin !== null) msg += `Min: ${idleMin}${_idleUnit()}   `;
-  if (idleMax !== null) msg += `Max: ${idleMax}${_idleUnit()}`;
+  if (idleMin !== null) msg += `Min: ${inputReadingText(idleMin, idleInputType)}   `;
+  if (idleMax !== null) msg += `Max: ${inputReadingText(idleMax, idleInputType)}`;
   if (idleMin !== null && idleMax !== null) {
     const span=idleMax-idleMin;
-    msg += `  → proposed: ${Math.round(idleMin+span*.02)}–${Math.round(idleMax-span*.01)}${_idleUnit()}`;
+    msg += `  → proposed: ${inputReadingText(Math.round(idleMin+span*.02), idleInputType)}–${inputReadingText(Math.round(idleMax-span*.01), idleInputType)}`;
   }
   document.getElementById('idle-status').textContent = msg;
   document.getElementById('btn-idle-save').disabled = idleMin === null || idleMax === null;
@@ -2073,7 +2101,7 @@ function saveIdle() {
   patchHardwareThenConfig(analogRegistryPatch, () => {
     const registry = registryInputById('idle'); registry.min=saveMin; registry.max=saveMax; registry.calibration_points=[];
   }, { calibration: { idle_min_raw: saveMin, idle_max_raw: saveMax } },
-  `Idle input calibrated: ${idleMin} - ${idleMax}${_idleUnit()}`, () => {
+  `Idle input calibrated: ${inputReadingText(idleMin, idleInputType)} – ${inputReadingText(idleMax, idleInputType)}`, () => {
     if (!cfg.calibration) cfg.calibration = {};
     cfg.calibration.idle_min_raw = saveMin;
     cfg.calibration.idle_max_raw = saveMax;
@@ -2213,13 +2241,13 @@ function renderAdcSwitchCalibration() {
     const title = document.createElement('div'); title.className = 'wizard-title';
     title.textContent = c.name || c.id;
     const readings = document.createElement('div'); readings.className = 'wizard-steps';
-    readings.innerHTML = 'Raw ADC: <b data-adc-live>—</b> · state: <b data-adc-state>—</b>';
+    readings.innerHTML = 'ADC pin: <b data-adc-live>—</b> · state: <b data-adc-state>—</b>';
     const controls = document.createElement('div');
     controls.style.cssText = 'display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin:.5rem 0';
     const inactive = document.createElement('button'); inactive.textContent = 'Capture inactive';
     const active = document.createElement('button'); active.textContent = 'Capture active';
-    const threshold = document.createElement('input'); threshold.type='number'; threshold.min='0'; threshold.max='4095'; threshold.step='1'; threshold.style.width='80px'; threshold.dataset.adcThreshold=''; threshold.value=String(c.digital_threshold_raw ?? 2048);
-    const hysteresis = document.createElement('input'); hysteresis.type='number'; hysteresis.min='0'; hysteresis.max='2047'; hysteresis.step='1'; hysteresis.style.width='75px'; hysteresis.dataset.adcHysteresis=''; hysteresis.value=String(c.digital_hysteresis_raw ?? 64);
+    const threshold = document.createElement('input'); threshold.type='number'; threshold.min='0'; threshold.max='3300'; threshold.step='1'; threshold.style.width='80px'; threshold.dataset.adcThreshold=''; threshold.value=String(Math.round(adcMv(c.digital_threshold_raw ?? 2048)));
+    const hysteresis = document.createElement('input'); hysteresis.type='number'; hysteresis.min='0'; hysteresis.max='1650'; hysteresis.step='1'; hysteresis.style.width='75px'; hysteresis.dataset.adcHysteresis=''; hysteresis.value=String(Math.round(adcMv(c.digital_hysteresis_raw ?? 64)));
     const polarity = document.createElement('select'); polarity.dataset.adcPolarity='';
     polarity.append(new Option('Active above','1'), new Option('Active below','0'));
     polarity.value = c.active_high === false ? '0' : '1';
@@ -2228,8 +2256,8 @@ function renderAdcSwitchCalibration() {
     inactive.onclick = () => captureAdcSwitchState(c.id, false, inactive);
     active.onclick = () => captureAdcSwitchState(c.id, true, active);
     save.onclick = () => saveAdcSwitchCondition(c.id, box);
-    controls.append(inactive, active, adcSwitchControl('threshold',threshold),
-      adcSwitchControl('hysteresis',hysteresis), polarity, save);
+    controls.append(inactive, active, adcSwitchControl('threshold (mV)',threshold),
+      adcSwitchControl('hysteresis (mV)',hysteresis), polarity, save);
     box.append(title, readings, controls, status); list.append(box);
   });
 }
@@ -2240,7 +2268,7 @@ function updateAdcSwitchLive(data) {
     if (!sample) return;
     const raw = box.querySelector('[data-adc-live]');
     const state = box.querySelector('[data-adc-state]');
-    if (raw) raw.textContent = sample.healthy === false ? 'unavailable' : String(sample.raw ?? '—');
+    if (raw) raw.textContent = sample.healthy === false ? 'unavailable' : adcMvText(sample.raw);
     if (state) state.textContent = sample.healthy === false ? 'unavailable' : (Number(sample.value) >= .5 ? 'active' : 'inactive');
   });
 }
@@ -2248,11 +2276,10 @@ async function sampleAdcSwitchRaw(id) {
   const values = [];
   const until = performance.now() + 1500;
   while (performance.now() < until) {
-    const d = await fetch('/api/data').then(r=>r.json()).catch(()=>null);
+    const d = await nextCalibrationFrame();
     const s = d && Array.isArray(d.registry_inputs)
       ? d.registry_inputs.find(v => String(v?.id) === String(id)) : null;
     if (s?.healthy !== false && Number.isFinite(Number(s?.raw))) values.push(Number(s.raw));
-    await new Promise(resolve => setTimeout(resolve, 100));
   }
   return values;
 }
@@ -2266,7 +2293,7 @@ async function captureAdcSwitchState(id, active, button) {
   const capture = adcSwitchCaptures.get(id) || {};
   capture[active ? 'active' : 'inactive'] = values;
   adcSwitchCaptures.set(id, capture);
-  status.textContent = `${active?'Active':'Inactive'} captured: ${Math.min(...values)}–${Math.max(...values)} raw.`;
+  status.textContent = `${active?'Active':'Inactive'} captured: ${adcMvText(Math.min(...values))}–${adcMvText(Math.max(...values))}.`;
   if (capture.active && capture.inactive) calculateAdcSwitchCondition(box, capture);
 }
 function calculateAdcSwitchCondition(box, capture) {
@@ -2281,20 +2308,23 @@ function calculateAdcSwitchCondition(box, capture) {
   const noise = Math.max(inactive.max-inactive.min, active.max-active.min);
   const railMax = 2 * Math.min(threshold, 4095-threshold);
   const hysteresis = Math.max(0, Math.min(2047, railMax, Math.floor(gap/2), Math.max(4, Math.ceil(noise*2))));
-  box.querySelector('[data-adc-threshold]').value = threshold;
-  box.querySelector('[data-adc-hysteresis]').value = hysteresis;
+  box.querySelector('[data-adc-threshold]').value = Math.round(adcMv(threshold));
+  box.querySelector('[data-adc-hysteresis]').value = Math.round(adcMv(hysteresis));
   box.querySelector('[data-adc-polarity]').value = activeHigh ? '1' : '0';
-  status.textContent = `Calculated threshold ${threshold}, hysteresis ${hysteresis}, active ${activeHigh?'above':'below'}. Review and save.`;
+  status.textContent = `Calculated threshold ${adcMvText(threshold)}, hysteresis ${adcMvText(hysteresis)}, active ${activeHigh?'above':'below'}. Review and save.`;
 }
 function saveAdcSwitchCondition(id, box) {
-  const threshold = Math.round(Number(box.querySelector('[data-adc-threshold]').value));
+  const thresholdMv = Number(box.querySelector('[data-adc-threshold]').value);
+  const threshold = adcRawFromMv(thresholdMv);
   const maxHysteresis = 2 * Math.min(threshold, 4095-threshold);
-  const hysteresis = Math.round(Number(box.querySelector('[data-adc-hysteresis]').value));
+  const hysteresisMv = Number(box.querySelector('[data-adc-hysteresis]').value);
+  const hysteresis = adcRawFromMv(hysteresisMv);
   const activeHigh = box.querySelector('[data-adc-polarity]').value === '1';
   const status = box.querySelector('[data-adc-status]');
-  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 4095 ||
-      !Number.isFinite(hysteresis) || hysteresis < 0 || hysteresis > Math.min(2047,maxHysteresis)) {
-    status.textContent = 'Threshold or hysteresis is outside the usable ADC range.'; return;
+  if (!Number.isFinite(thresholdMv) || thresholdMv < 0 || thresholdMv > 3300 ||
+      !Number.isFinite(hysteresisMv) || hysteresisMv < 0 ||
+      hysteresis > Math.min(2047,maxHysteresis)) {
+    status.textContent = 'Threshold or hysteresis is outside the usable ADC-pin voltage range.'; return;
   }
   const patch = registryCalibrationPatch(id, {digital_threshold_raw:threshold,
     digital_hysteresis_raw:hysteresis, active_high:activeHigh});
@@ -2317,7 +2347,7 @@ function renderOilTempKnownPoints(){
     const line=document.createElement('div');
     line.style.cssText='display:flex;align-items:center;gap:.45rem;margin:.2rem 0';
     const label=document.createElement('span');
-    label.textContent=`${i+1}. ADC ${p.raw} = ${toDispTemp(p.b).toFixed(1)} ${dispTempUnit()}`;
+    label.textContent=`${i+1}. ${adcMvText(p.raw)} = ${toDispTemp(p.b).toFixed(1)} ${dispTempUnit()}`;
     const remove=document.createElement('button');
     remove.type='button'; remove.textContent='Remove';
     remove.style.cssText='font-size:.65rem;padding:.15rem .45rem';
@@ -2332,7 +2362,7 @@ function oilTempAddPoint(){
   if(!Number.isFinite(shown)){alert('Enter the known temperature first.');return;}
   if(!Number.isFinite(raw)||raw<=0||raw>=4095){alert('No valid unsaturated analog oil-temperature reading is available.');return;}
   if(_oilTempKnownPts.some(p=>Math.abs(p.raw-raw)<2)){
-    alert('This ADC reading is already captured. Change the sensor temperature enough to produce a different raw reading, or remove the old point first.');
+    alert('This ADC-pin voltage is already captured. Change the sensor temperature enough to produce a different voltage, or remove the old point first.');
     return;
   }
   _oilTempKnownPts.push({raw,b:fromDispTemp(shown)});
@@ -2349,7 +2379,7 @@ function saveOilTempKnown(){
     const rising = curve.every((p,i)=>!i || p.b>curve[i-1].b);
     const falling = curve.every((p,i)=>!i || p.b<curve[i-1].b);
     if (curve.length < 2 || (!rising && !falling)) {
-      alert('Captured temperatures must consistently increase or decrease as ADC counts rise. Remove duplicate or reversed points and try again.');
+      alert('Captured temperatures must consistently increase or decrease as ADC-pin voltage rises. Remove duplicate or reversed points and try again.');
       return;
     }
     const points = curve.map(p=>({raw:Math.round(p.raw),value:p.b}));
@@ -2362,7 +2392,7 @@ function saveOilTempKnown(){
     return;
   }
   const fit=computeOilCubicFit(_oilTempKnownPts);
-  if(!fit){alert('The points could not be fitted. Use four different ADC readings spread across the temperature range.');return;}
+  if(!fit){alert('The points could not be fitted. Use four different ADC-pin voltages spread across the temperature range.');return;}
   const rawValues=_oilTempKnownPts.map(p=>p.raw);
   patchHardware({sensors:{oil_temp:{use_raw_poly:true,poly_a:fit.a,poly_b:fit.b,poly_c:fit.c,poly_d:fit.d,
     poly_x_min:Math.min(...rawValues),poly_x_max:Math.max(...rawValues)}}},()=>{
@@ -2376,9 +2406,9 @@ function captureBattVolt() {
   const known = parseFloat(document.getElementById('bv-known-v').value);
   if (isNaN(known) || known <= 0) { alert('Enter the measured voltage first.'); return; }
   const raw = live.batt_voltage_raw;
-  if (raw === undefined || raw <= 0) { alert('No battery voltage ADC data yet — check wiring.'); return; }
+  if (raw === undefined || raw <= 0) { alert('No battery ADC-pin voltage yet — check wiring.'); return; }
   const vAdc = (raw / 4095.0) * 3.3;
-  if (vAdc < 0.01) { alert('ADC reading too low to compute divider reliably.'); return; }
+  if (vAdc < 0.01) { alert('ADC-pin voltage is too low to compute the divider reliably.'); return; }
   // ADC full scale = 3.3 V → Vbatt = (raw/4095) * 3.3 * divider
   _bvComputedDivider = known / vAdc;
   _bvComputedDivider = Math.round(_bvComputedDivider * 100) / 100;
@@ -2389,7 +2419,7 @@ function captureBattVolt() {
     return;
   }
   document.getElementById('bv-status').textContent =
-    'Raw ADC: ' + raw + '  Measured: ' + known + ' V  → Divider: ' + _bvComputedDivider;
+    'ADC pin: ' + adcMvText(raw) + '  Measured: ' + known + ' V  → Divider: ' + _bvComputedDivider;
   document.getElementById('btn-bv-save').disabled = false;
 }
 function saveBattVoltDivider() {
@@ -2477,12 +2507,12 @@ function saveLoadCellKnown(kind) {
 let _torqueZeroRaw = null;
 function captureTorqueZero() {
   const raw = live.torque_raw;
-  if (raw === undefined) { alert('No torque ADC data yet.'); return; }
+  if (raw === undefined) { alert('No torque ADC-pin voltage yet.'); return; }
   _torqueZeroRaw = raw;
   // Convert raw to volts: offset_V = raw/4095 * 3.3, then offset_Nm = offset_V * scale
   // Store as Nm offset (requires knowing scale first, but we store raw and recompute on save)
   document.getElementById('torque-status').textContent =
-    'Zero captured: ' + raw + ' raw ADC — now enter full-scale Nm and click Save Scale.';
+    'Zero captured: ' + adcMvText(raw) + ' — now enter full-scale Nm and click Save Scale.';
 }
 function saveTorqueScale() {
   const fullScale = parseFloat(document.getElementById('torque-fullscale').value);
@@ -2556,7 +2586,7 @@ function p12CalMode(ch, mode) {
 }
 function p12CaptureZero(ch) {
   const raw = live[ch + '_raw'];
-  if (raw === undefined) { alert('No live raw ADC data for ' + ch.toUpperCase()); return; }
+  if (raw === undefined) { alert('No live ADC-pin voltage for ' + ch.toUpperCase()); return; }
   if (!_p12State[ch]) _p12State[ch] = {};
   _p12State[ch].zeroRaw = raw;
   const ambientBar = pressureReferenceValue(ch + '-zero-reference');
@@ -2567,7 +2597,7 @@ function p12CaptureRef(ch) {
   const raw = live[ch + '_raw'];
   const bar = parseFloat(document.getElementById(ch + '-ref-bar').value);
   const ambientBar = pressureReferenceValue(ch + '-zero-reference');
-  if (raw === undefined) { alert('No live raw ADC data for ' + ch.toUpperCase()); return; }
+  if (raw === undefined) { alert('No live ADC-pin voltage for ' + ch.toUpperCase()); return; }
   if (isNaN(bar) || bar <= ambientBar) {
     alert('Reference pressure must be above the selected ambient value (' + pressureValueLabel(ambientBar) + ').'); return;
   }
@@ -2600,7 +2630,7 @@ function p12Save(ch) {
     rawMin = Math.round(Math.min(vZero / 3.3, 1.0) * 4095);
     rawMax = Math.round(Math.min(vMax  / 3.3, 1.0) * 4095);
   }
-  if (rawMax <= rawMin) { alert('Reference ADC must be greater than zero ADC'); return; }
+  if (rawMax <= rawMin) { alert('Reference voltage must be greater than the zero voltage'); return; }
   const configPatch = { calibration: {
     [ch + '_raw_min']: rawMin, [ch + '_raw_max']: rawMax, [ch + '_val_max']: valMax
   }};
@@ -2619,8 +2649,8 @@ function p12Save(ch) {
       registry.analog_mv_per_unit=mvPerUnit;
       registry.calibration_points=[{raw:rawMin,value:ambientBar},{raw:rawMax,value:valMax}];
     }
-  }, configPatch, ch.toUpperCase() + ' calibration saved — ambient=' + rawMin + ' (' +
-      pressureValueLabel(ambientBar) + '), ref=' + rawMax + ' → ' + valMax + ' bar', () => {
+  }, configPatch, ch.toUpperCase() + ' calibration saved — ambient=' + adcMvText(rawMin) + ' (' +
+      pressureValueLabel(ambientBar) + '), ref=' + adcMvText(rawMax) + ' → ' + valMax + ' bar', () => {
     if (!cfg.calibration) cfg.calibration = {};
     cfg.calibration[ch + '_raw_min'] = rawMin;
     cfg.calibration[ch + '_raw_max'] = rawMax;
@@ -2646,7 +2676,7 @@ function p12Clear(ch) {
     cfg.calibration[ch + '_raw_max'] = 4095;
     cfg.calibration[ch + '_val_max'] = 10;
     document.getElementById(ch + '-bar-max-label').textContent = '10 bar';
-    document.getElementById(ch + '-cal-status').textContent = 'Reset to defaults (0–4095 ADC → 0–10 bar)';
+    document.getElementById(ch + '-cal-status').textContent = 'Reset to defaults (0–3300 mV → 0–10 bar)';
     _p12State[ch] = {};
   });
 }
@@ -2655,23 +2685,23 @@ function p12Clear(ch) {
 const _ffState = {};
 function ffCaptureZero() {
   const raw = live['fuel_flow_raw'];
-  if (raw === undefined) { alert('No live fuel flow ADC data'); return; }
+  if (raw === undefined) { alert('No live fuel-flow ADC-pin voltage'); return; }
   _ffState.zeroRaw = raw;
-  document.getElementById('ff-zero-captured').textContent = '✓ ADC ' + raw;
+  document.getElementById('ff-zero-captured').textContent = '✓ ' + adcMvText(raw);
 }
 function ffCaptureRef() {
   const raw = live['fuel_flow_raw'];
   const val = parseFloat(document.getElementById('ff-ref-val').value);
-  if (raw === undefined) { alert('No live fuel flow ADC data'); return; }
+  if (raw === undefined) { alert('No live fuel-flow ADC-pin voltage'); return; }
   if (isNaN(val) || val <= 0) { alert('Enter a valid reference flow rate'); return; }
   _ffState.refRaw = raw; _ffState.refVal = val;
-  document.getElementById('ff-ref-captured').textContent = '✓ ADC ' + raw + ' @ ' + val;
+  document.getElementById('ff-ref-captured').textContent = '✓ ' + adcMvText(raw) + ' @ ' + val;
 }
 function ffSave() {
   if (_ffState.zeroRaw === undefined || _ffState.refRaw === undefined) {
     alert('Capture both zero and reference points first'); return;
   }
-  if (_ffState.refRaw <= _ffState.zeroRaw) { alert('Reference ADC must be greater than zero ADC'); return; }
+  if (_ffState.refRaw <= _ffState.zeroRaw) { alert('Reference voltage must be greater than zero voltage'); return; }
   const configPatch = { calibration: {
     fuel_flow_raw_min: _ffState.zeroRaw,
     fuel_flow_raw_max: _ffState.refRaw,
@@ -2693,7 +2723,7 @@ function ffSave() {
     cfg.calibration.fuel_flow_val_max = _ffState.refVal;
     document.getElementById('ff-bar-max-label').textContent = _ffState.refVal;
     document.getElementById('ff-cal-status').textContent =
-      '✓ Saved: 0 @ ADC ' + _ffState.zeroRaw + ',  ' + _ffState.refVal + ' @ ADC ' + _ffState.refRaw;
+      '✓ Saved: 0 @ ' + adcMvText(_ffState.zeroRaw) + ',  ' + _ffState.refVal + ' @ ' + adcMvText(_ffState.refRaw);
   });
 }
 function ffClear() {
@@ -2718,12 +2748,12 @@ function curCaptureZero(which) {
   const rawKeys = { glow: 'glow_current_raw', ign: 'igniter_current_raw', ign2: 'igniter2_current_raw', oilpump: 'oil_pump_current_raw' };
   const rawKey = rawKeys[which] || (which + '_current_raw');
   const raw = live[rawKey];
-  if (raw === undefined) { alert('No live ADC data for ' + which + ' current sensor'); return; }
+  if (raw === undefined) { alert('No live ADC-pin voltage for ' + which + ' current sensor'); return; }
   if (!_curState[which]) _curState[which] = {};
   _curState[which].zeroRaw = raw;
   _curState[which].zeroV   = (raw / 4095.0) * 3.3;
   document.getElementById(which + '-cur-zero-captured').textContent =
-    '✓ ADC ' + raw + '  (' + _curState[which].zeroV.toFixed(3) + ' V)';
+    '✓ ' + adcMvText(raw);
 }
 function curCaptureRef(which) {
   const rawKeys = { glow: 'glow_current_raw', ign: 'igniter_current_raw', ign2: 'igniter2_current_raw', oilpump: 'oil_pump_current_raw' };
@@ -2731,14 +2761,13 @@ function curCaptureRef(which) {
   const raw = live[rawKey];
   const refId = which + '-cur-ref-a';
   const amps  = parseFloat(document.getElementById(refId).value);
-  if (raw === undefined) { alert('No live ADC data for ' + which + ' current sensor'); return; }
+  if (raw === undefined) { alert('No live ADC-pin voltage for ' + which + ' current sensor'); return; }
   if (isNaN(amps) || amps <= 0) { alert('Enter a valid reference current in amps'); return; }
   if (!_curState[which]) _curState[which] = {};
   _curState[which].refRaw  = raw;
   _curState[which].refAmps = amps;
-  const refV = (raw / 4095.0) * 3.3;
   document.getElementById(which + '-cur-ref-captured').textContent =
-    '✓ ADC ' + raw + '  (' + refV.toFixed(3) + ' V @ ' + amps + ' A)';
+    '✓ ' + adcMvText(raw) + ' @ ' + amps + ' A';
 }
 function curSave(which) {
   const st = _curState[which] || {};
@@ -2746,7 +2775,7 @@ function curSave(which) {
     alert('Capture both zero and reference points first'); return;
   }
   if (st.refRaw <= st.zeroRaw) {
-    alert('Reference ADC must be greater than zero ADC for these current sensors. Check sensor direction and wiring.');
+    alert('Reference voltage must be greater than zero voltage for these current sensors. Check sensor direction and wiring.');
     return;
   }
   const zeroV   = st.zeroV;

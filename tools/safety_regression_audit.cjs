@@ -1347,6 +1347,26 @@ expect('rare telemetry text is revisioned outside the 3 Hz numerical frame',
   web.includes('_server.on("/api/telemetry_text"') &&
   webApp.includes("fetch('/api/telemetry_text'") &&
   webApp.includes('requestTelemetryTextRevision'));
+expect('calibration live fields use compact telemetry without repeated full snapshots',
+  web.includes('q.add(ed.abFlameRaw)') &&
+  webApp.includes('throttle_input_us:v[15]') &&
+  webApp.includes('idle_input_us:v[16]') &&
+  webApp.includes('ab_flame_raw:v[72]') &&
+  calibrationHtml.includes('async function nextCalibrationFrame()') &&
+  calibrationHtml.includes('return live || {};') &&
+  !/function _captureInputAverage[\s\S]{0,500}fetch\('\/api\/data'\)/.test(calibrationHtml));
+expect('compact percentages retain the displayed tenth-percent digit',
+  web.includes('ed.mainFuelAppliedDemand * 1000.0f') &&
+  web.includes('ed.registryOutputDemand[i] * 1000.0f') &&
+  web.includes('ed.registryInputValue[i] * 1000.0f') &&
+  webApp.includes('throttle_effective:Number(v[20])/1000') &&
+  webApp.includes('demand:Number(percent)/1000'));
+expect('calibration presents physical ADC voltages while preserving raw storage',
+  calibrationHtml.includes("return Number(raw) * 3300.0 / 4095.0") &&
+  calibrationHtml.includes('function adcRawFromMv(mv)') &&
+  calibrationHtml.includes('ADC pin voltage') &&
+  calibrationHtml.includes("digital_threshold_raw:threshold") &&
+  !calibrationHtml.includes('>Raw ADC<'));
 expect('dashboard sparklines sample browser state at 1 Hz for a 30-second window',
   webApp.includes('const SPARK_LEN = 30;') &&
   webApp.includes('const SPARK_SAMPLE_PERIOD_MS = 1000;'));

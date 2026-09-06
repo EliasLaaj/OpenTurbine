@@ -809,14 +809,14 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     results.push('canonical AB flame and trigger hardware loads as visible reviewable inventory');
 
     await goto(page, 'calibration.html', '#ab-flame-cal-row');
-    assert.equal(await page.locator('#ab-flame-thr-direct').inputValue(), '900');
-    await page.locator('#ab-flame-thr-direct').fill('1234');
+    assert.equal(await page.locator('#ab-flame-thr-direct').inputValue(), '725');
+    await page.locator('#ab-flame-thr-direct').fill('994');
     await page.locator('#ab-flame-cal-row button', {hasText:'Set threshold'}).click();
-    await page.waitForFunction(() => document.querySelector('#ab-flame-status')?.textContent.includes('1234'));
+    await page.waitForFunction(() => document.querySelector('#ab-flame-status')?.textContent.includes('994 mV'));
     const savedAbFlame = await state(page);
     assert.equal(savedAbFlame.hardware.ab_flame, undefined);
-    assert.equal(savedAbFlame.hardware.channel_registry.inputs.find(row => row.id === 'ab_flame_main').digital_threshold_raw, 1234);
-    await page.locator('#ab-flame-thr-direct').fill('3601');
+    assert.equal(savedAbFlame.hardware.channel_registry.inputs.find(row => row.id === 'ab_flame_main').digital_threshold_raw, 1233);
+    await page.locator('#ab-flame-thr-direct').fill('2900');
     await page.locator('#ab-flame-cal-row button', {hasText:'Set threshold'}).click();
     await page.waitForFunction(() => document.querySelector('#ab-flame-status')?.textContent.includes('false flame detection'));
     assert.match(await text(page, '#ab-flame-status'), /active-below.*false flame detection/is);
@@ -851,7 +851,7 @@ async function assertNoSevereLayoutIssues(page, route, viewport) {
     await patchData(page, {registry_inputs:[{id:'pressure_accumulator_ready',value:1,raw:3300,healthy:true}]});
     await adcSwitch.locator('button', {hasText:'Capture active'}).click();
     await page.waitForFunction(() => document.querySelector('[data-channel-id="pressure_accumulator_ready"] [data-adc-status]')?.textContent.includes('Calculated threshold'));
-    assert.equal(await adcSwitch.locator('[data-adc-threshold]').inputValue(), '2000');
+    assert.equal(await adcSwitch.locator('[data-adc-threshold]').inputValue(), '1612');
     assert.equal(await adcSwitch.locator('[data-adc-polarity]').inputValue(), '1');
     await adcSwitch.locator('button', {hasText:'Save'}).click();
     await page.waitForFunction(() => document.querySelector('[data-channel-id="pressure_accumulator_ready"] [data-adc-status]')?.textContent === 'Saved.');

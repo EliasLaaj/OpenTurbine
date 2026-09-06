@@ -1644,7 +1644,7 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     auto q = doc["v"].to<JsonArray>();
     // RPM and temperatures use whole units; pressure uses centibar so the
     // browser can display either 0.1 bar or 0.1 psi without coarse steps.
-    // Demands are whole percent and electrical currents are deciamps.
+    // Demands use tenths of a percent and electrical currents are deciamps.
     q.add((int)lroundf(ed.n1Rpm));                         // 0
     q.add((int)lroundf(ed.n2Rpm));                         // 1
     q.add((int)lroundf(ed.n1RpmAccel));                    // 2
@@ -1662,22 +1662,22 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     q.add((int)lroundf(ed.thrust * 10.0f));                // 14
     q.add(ed.throttleInputRaw);                            // 15
     q.add(ed.idleInputRaw);                                // 16
-    q.add((int)lroundf(inputNorm * 100.0f));               // 17
-    q.add((int)lroundf(ed.rcThrottleNorm * 100.0f));       // 18
-    q.add((int)lroundf(ed.throttleDemand * 100.0f));       // 19
-    q.add((int)lroundf(ed.mainFuelAppliedDemand * 100.0f));// 20
-    q.add((int)lroundf(ed.oilPumpPct));                    // 21
+    q.add((int)lroundf(inputNorm * 1000.0f));              // 17
+    q.add((int)lroundf(ed.rcThrottleNorm * 1000.0f));      // 18
+    q.add((int)lroundf(ed.throttleDemand * 1000.0f));      // 19
+    q.add((int)lroundf(ed.mainFuelAppliedDemand * 1000.0f));// 20
+    q.add((int)lroundf(ed.oilPumpPct * 10.0f));            // 21
     q.add((int)lroundf(ed.oilTargetBar * 100.0f));         // 22
-    q.add((int)lroundf(ed.propPitchDemand * 100.0f));      // 23
-    q.add((int)lroundf(ed.abFuelOffset * 100.0f));         // 24
-    q.add((int)lroundf(ed.starterDemand * 100.0f));        // 25
-    q.add((int)lroundf(ed.abPumpDemand * 100.0f));         // 26
-    q.add((int)lroundf(ed.fuelPump2Demand * 100.0f));      // 27
-    q.add((int)lroundf(ed.glowPlugDemand * 100.0f));       // 28
-    q.add((int)lroundf(ed.wetGlowFuelDemand * 100.0f));    // 29
-    q.add((int)lroundf(ed.coolFanDemand * 100.0f));        // 30
-    q.add((int)lroundf(ed.oilScavengeDemand * 100.0f));    // 31
-    q.add((int)lroundf(ed.bleedValveDemand * 100.0f));     // 32
+    q.add((int)lroundf(ed.propPitchDemand * 1000.0f));     // 23
+    q.add((int)lroundf(ed.abFuelOffset * 1000.0f));        // 24
+    q.add((int)lroundf(ed.starterDemand * 1000.0f));       // 25
+    q.add((int)lroundf(ed.abPumpDemand * 1000.0f));        // 26
+    q.add((int)lroundf(ed.fuelPump2Demand * 1000.0f));     // 27
+    q.add((int)lroundf(ed.glowPlugDemand * 1000.0f));      // 28
+    q.add((int)lroundf(ed.wetGlowFuelDemand * 1000.0f));   // 29
+    q.add((int)lroundf(ed.coolFanDemand * 1000.0f));       // 30
+    q.add((int)lroundf(ed.oilScavengeDemand * 1000.0f));   // 31
+    q.add((int)lroundf(ed.bleedValveDemand * 1000.0f));    // 32
     q.add((int)lroundf(ed.glowCurrentAmps * 10.0f));       // 33
     q.add((int)lroundf(ed.igniterCurrentAmps * 10.0f));    // 34
     q.add((int)lroundf(ed.igniter2CurrentAmps * 10.0f));   // 35
@@ -1721,6 +1721,7 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     q.add(Config::startAttemptCount);                       // 69
     q.add((int)ed.abSeqBlockIdx);                           // 70
     q.add((int)ed.abSeqBlockTotal);                         // 71
+    q.add(ed.abFlameRaw);                                   // 72
 
     auto setFlag = [](uint32_t& mask, uint8_t bit, bool on) {
         if (on) mask |= (1UL << bit);
@@ -1788,13 +1789,13 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     auto iv = doc["iv"].to<JsonArray>();
     auto ir = doc["ir"].to<JsonArray>();
     for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i) {
-        iv.add((float)lroundf(ed.registryInputValue[i] * 100.0f) / 100.0f);
+        iv.add((float)lroundf(ed.registryInputValue[i] * 1000.0f) / 1000.0f);
         ir.add(ed.registryInputRaw[i]);
     }
     auto ov = doc["ov"].to<JsonArray>();
     auto oc = doc["oc"].to<JsonArray>();
     for (uint8_t i = 0; i < HardwareConfig::channelRegistry.outputCount; ++i) {
-        ov.add((int)lroundf(ed.registryOutputDemand[i] * 100.0f));
+        ov.add((int)lroundf(ed.registryOutputDemand[i] * 1000.0f));
         oc.add((int)lroundf(ed.registryOutputCurrentAmps[i] * 10.0f));
     }
 
