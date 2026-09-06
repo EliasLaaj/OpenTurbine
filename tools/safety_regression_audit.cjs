@@ -710,8 +710,9 @@ expect('Classic live telemetry is a bounded complete REST document',
   web.includes('measured > COMPACT_TELEMETRY_MAX') &&
   web.includes('_sendOwnedJson(req, g_webTxBuf, n)'));
 expect('compact telemetry carries reboot identity so clients discard stale snapshots',
-  /_buildCompactTelemetry[\s\S]*?doc\["boot_count"\] = ed\.bootCount;/.test(web) &&
-  /_buildCompactTelemetry[\s\S]*?doc\["reset_reason"\] = ed\.resetReason;/.test(web));
+  /_buildCompactTelemetry[\s\S]*?doc\["bc"\] = ed\.bootCount;/.test(web) &&
+  /_buildCompactTelemetry[\s\S]*?doc\["rr"\] = ed\.resetReason;/.test(web) &&
+  webApp.includes('boot_count:frame.bc') && webApp.includes('reset_reason:frame.rr'));
 expect('full engine restore resolves custom controllers against uploaded hardware',
   web.includes('Config::resolveRuleHandlesForHardware()') &&
   configCpp.includes('bool Config::resolveRuleHandlesForHardware()') &&
@@ -726,10 +727,10 @@ expect('active session logging buffers a bounded newest tail in RAM',
   sessionLogger.includes('if (!_acceptRows || !_rowQueue) return;') &&
   sessionLogger.includes('(_acceptRows || _startPending || _endPending || _open) ? "" : _currentPath'));
 expect('compact telemetry keeps live session-recorder state current',
-  web.includes('doc["session_dropped_rows"] = SessionLogger::droppedRows();') &&
-  web.includes('doc["session_queued_rows"] = SessionLogger::queuedRows();') &&
-  web.includes('doc["session_logger_healthy"] = SessionLogger::healthy();') &&
-  web.includes('doc["session_capture_active"] = SessionLogger::captureActive();') &&
+  web.includes('doc["lg"] = SessionLogger::droppedRows();') &&
+  web.includes('doc["lq"] = SessionLogger::queuedRows();') &&
+  web.includes('setFlag(f2,29, SessionLogger::healthy())') &&
+  web.includes('setFlag(f2,30, SessionLogger::captureActive())') &&
   web.includes('doc["session_log_path"] = SessionLogger::currentPath();'));
 expect('session logger reports an unavailable queue instead of pretending to record',
   /void SessionLogger::startSession\(\) \{[\s\S]{0,300}if \(!_rowQueue\) \{[\s\S]{0,180}_healthy = false;[\s\S]{0,100}_errorCode = 1;/.test(sessionLogger));
@@ -1328,17 +1329,27 @@ expect('idle event snapshots honor the disabled toggle in both STANDBY and FAULT
   flightRecorder.includes('if (hw.hasN1Rpm)') &&
   flightRecorder.includes('if (hw.hasTot)') &&
   flightRecorder.includes('if (hw.hasThrottle)'));
-expect('Classic live telemetry stays within one transport response and rotates optional channels',
+expect('Classic compact v2 sends every numerical and binary channel in one bounded response',
   web.includes('static size_t _buildCompactTelemetry(') &&
   web.includes('measured > COMPACT_TELEMETRY_MAX') &&
-  web.includes('const uint8_t thisGroup = group++ & 0x03u;') &&
-  web.includes('constexpr uint8_t CHANNELS_PER_FRAME = 3;') &&
+  web.includes('doc["cv"] = 2;') &&
+  web.includes('auto iv = doc["iv"].to<JsonArray>();') &&
+  web.includes('auto ov = doc["ov"].to<JsonArray>();') &&
+  !web.includes('const uint8_t thisGroup = group++ & 0x03u;') &&
   web.includes('size_t n = _buildCompactTelemetry(\n            g_webTxBuf'));
 expect('dashboard compact telemetry has one in-flight request and a bounded timeout',
-  webApp.includes('if (!isLiveTelemetryPage() || document.hidden || _restFallbackInFlight) return;') &&
+  webApp.includes('document.hidden || _restFallbackInFlight || _telemetryTextInFlight') &&
   webApp.includes('const timeout = setTimeout(() => controller.abort(), 1800);') &&
   webApp.includes("fetch('/api/telemetry'") &&
   webApp.includes('_restFallbackInFlight = false;'));
+expect('rare telemetry text is revisioned outside the 3 Hz numerical frame',
+  web.includes('doc["tr"] = textRevision;') &&
+  web.includes('_server.on("/api/telemetry_text"') &&
+  webApp.includes("fetch('/api/telemetry_text'") &&
+  webApp.includes('requestTelemetryTextRevision'));
+expect('dashboard sparklines sample browser state at 1 Hz for a 30-second window',
+  webApp.includes('const SPARK_LEN = 30;') &&
+  webApp.includes('const SPARK_SAMPLE_PERIOD_MS = 1000;'));
 expect('normal dashboard and calibration telemetry use a uniform 3 Hz compact HTTP path',
   webApp.includes('return LIVE_TELEMETRY_PERIOD_MS;') &&
   webApp.includes('const period = Math.max(LIVE_TELEMETRY_PERIOD_MS, desiredPullPeriodMs());') &&

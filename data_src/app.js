@@ -185,7 +185,11 @@ function resolveCssColor(color) {
   return v || color;
 }
 
-const SPARK_LEN = 60;
+// Trend graphs deliberately sample the already-received browser state at
+// 1 Hz. Live numbers and indicators still update at 3 Hz; graph rendering
+// never creates additional ECU requests or work.
+const SPARK_LEN = 30;
+const SPARK_SAMPLE_PERIOD_MS = 1000;
 const SPARK_STORAGE_PREFIX = 'ot_dashboard_sparklines_v2';
 const SPARK_MAX_AGE_MS = 15 * 60 * 1000;
 let _sparkStorageKey = '';
@@ -203,6 +207,7 @@ const _sparkBattVolt = sparkSeries('battery');
 const _sparkTorque   = sparkSeries('torque');
 const _sparkRegistryInputs = new Map();
 let _lastSparkPersistMs = 0;
+let _lastSparkSampleMs = 0;
 
 function registryInputSparkSeries(id) {
   const key = 'regin:' + String(id || '');
@@ -280,6 +285,9 @@ const LIVE_TELEMETRY_PERIOD_MS = 333;
 let _lastMsgMs = 0;
 let _restFallbackTimer = null;
 let _restFallbackInFlight = false;
+let _telemetryTextRevision = null;
+let _pendingTelemetryTextRevision = null;
+let _telemetryTextInFlight = false;
 let _lastUptimeS = null;
 let _lastBootCount = null;
 let _statusHeartbeatTimer = null;
@@ -343,7 +351,7 @@ function waitForGlobalTelemetryIdle(timeoutMs = 1500) {
 window.OTWaitForTelemetryIdle = waitForGlobalTelemetryIdle;
 
 async function restTelemetryFallbackNow() {
-  if (!isLiveTelemetryPage() || document.hidden || _restFallbackInFlight) return;
+  if (!isLiveTelemetryPage() || document.hidden || _restFallbackInFlight || _telemetryTextInFlight) return;
   const freshForMs = Math.max(250, Math.floor(desiredPullPeriodMs() * 0.8));
   if (_lastMsgMs && Date.now() - _lastMsgMs < freshForMs) return;
   _restFallbackInFlight = true;
@@ -353,6 +361,8 @@ async function restTelemetryFallbackNow() {
     const r = await fetch('/api/telemetry', { cache: 'no-store', signal: controller.signal });
     if (r.ok) {
       const d = await r.json();
+      if (Number(d?.cv) === 2 && d.tr !== undefined)
+        _pendingTelemetryTextRevision = Number(d.tr) >>> 0;
       _lastMsgMs = Date.now();
       setConnectionState(true, 'Connected');
       applyData(d);
@@ -362,6 +372,35 @@ async function restTelemetryFallbackNow() {
   } finally {
     clearTimeout(timeout);
     _restFallbackInFlight = false;
+    if (_pendingTelemetryTextRevision !== null &&
+        _pendingTelemetryTextRevision !== _telemetryTextRevision)
+      requestTelemetryTextRevision(_pendingTelemetryTextRevision);
+  }
+}
+
+async function requestTelemetryTextRevision(revision) {
+  const wanted = Number(revision) >>> 0;
+  if (_telemetryTextRevision === wanted) return;
+  _pendingTelemetryTextRevision = wanted;
+  if (_telemetryTextInFlight) return;
+  _telemetryTextInFlight = true;
+  const requestedRevision = wanted;
+  let succeeded = false;
+  try {
+    const r = await fetch('/api/telemetry_text', { cache:'no-store' });
+    if (r.ok) {
+      const textState = await r.json();
+      applyData(textState);
+      _telemetryTextRevision = requestedRevision;
+      succeeded = true;
+    }
+  } catch (_) {
+    // The next 3 Hz frame retries because the accepted revision is unchanged.
+  } finally {
+    _telemetryTextInFlight = false;
+    if (succeeded && _pendingTelemetryTextRevision !== null &&
+        _pendingTelemetryTextRevision !== _telemetryTextRevision)
+      requestTelemetryTextRevision(_pendingTelemetryTextRevision);
   }
 }
 
@@ -415,7 +454,94 @@ function startStatusHeartbeat() {
 
 // ── Apply telemetry frame to DOM ──────────────────────────────
 let _lastData = null;
+function decodeCompactTelemetry(frame, previous) {
+  if (!frame || Number(frame.cv) !== 2 || !Array.isArray(frame.v)) return frame;
+  const v = frame.v;
+  const out = {
+    snapshot_id:frame.s,
+    mode:['STANDBY','STARTUP','RUNNING','SHUTDOWN','FAULT'][Number(frame.m)] || 'UNKNOWN',
+    n1:v[0], n2:v[1], n1_rpm_accel:v[2], n2_rpm_accel:v[3],
+    tot:v[4], tit:v[5], oil:Number(v[6])/100,
+    p1:Number(v[7])/100, p2:Number(v[8])/100,
+    fuel_press:Number(v[9])/100, fuel_flow:Number(v[10])/10,
+    oil_temp:v[11], batt_voltage:Number(v[12])/10,
+    torque:Number(v[13])/10, thrust:Number(v[14])/10,
+    throttle_input_raw:v[15], idle_input_raw:v[16],
+    throttle_input_norm:Number(v[17])/100, rc_throttle_norm:Number(v[18])/100,
+    throttle_demand:Number(v[19])/100, throttle_effective:Number(v[20])/100,
+    oil_pct:v[21], oil_demand:Number(v[22])/100,
+    prop_pitch_demand:Number(v[23])/100, ab_fuel_offset:Number(v[24])/100,
+    starter_demand:Number(v[25])/100, ab_pump_demand:Number(v[26])/100,
+    fuel_pump2_demand:Number(v[27])/100, glow_plug_pct:v[28], wet_glow_fuel_pct:v[29],
+    cool_fan_demand:Number(v[30])/100, oil_scavenge_demand:Number(v[31])/100,
+    bleed_valve_demand:Number(v[32])/100,
+    glow_current_amps:Number(v[33])/10, igniter_current_amps:Number(v[34])/10,
+    igniter2_current_amps:Number(v[35])/10, oil_pump_current_amps:Number(v[36])/10,
+    max_n1:v[37], max_n2:v[38], max_tot:v[39], max_tit:v[40],
+    max_p1:Number(v[41])/100, max_p2:Number(v[42])/100,
+    max_oil_temp:v[43], max_batt_voltage:Number(v[44])/10,
+    max_fuel_press:Number(v[45])/100, tot_rise_rate:v[46], egt_rise_rate:v[46],
+    turbo_power_w:v[47], extra_cooldown_remaining_s:v[48], relight_attempts:v[49],
+    flame_raw:v[50], oil_raw:v[51], p1_raw:v[52], p2_raw:v[53],
+    fuel_press_raw:v[54], oil_temp_raw:v[55], batt_voltage_raw:v[56],
+    torque_raw:v[57], thrust_raw:v[58], fuel_flow_raw:v[59],
+    glow_current_raw:v[60], igniter_current_raw:v[61], igniter2_current_raw:v[62],
+    oil_pump_current_raw:v[63], last_run_flame_avg:Number(v[64])/10,
+    last_run_flame_samples:v[65], min_oil:Number(v[66]) >= 0 ? Number(v[66])/100 : null,
+    total_run_seconds:v[67], run_count:v[68], start_attempt_count:v[69],
+    ab_seq_block_idx:v[70], ab_seq_block_total:v[71],
+    ri_on:frame.io, ri_ok:frame.ih, ro_on:frame.oo, di_on:frame.di,
+    uptime_s:frame.u, boot_count:frame.bc, reset_reason:frame.rr,
+    session_dropped_rows:frame.lg, session_queued_rows:frame.lq,
+    session_logger_error:frame.lc,
+    ab_mode:['Off','Arming','Igniting','Running','ShuttingDown','Fault'][Number(frame.am)] || 'Off'
+  };
+  if (Array.isArray(frame.sq)) {
+    out.seq_block_idx = frame.sq[0];
+    out.seq_block_total = frame.sq[1];
+  }
+  const bit = (mask, index) => ((Number(mask) >>> index) & 1) !== 0;
+  const bools = [
+    'fault_latched','dry_oil_stop_active','fault_clear_allowed','n1_healthy',
+    'n2_healthy','tot_healthy','tit_healthy','oil_healthy','p1_healthy','p2_healthy',
+    'fuel_press_healthy','fuel_flow_healthy','oil_temp_healthy','batt_healthy',
+    'torque_healthy','thrust_healthy','flame_healthy','flame','starter_enabled',
+    'fuel_sol_open','igniter_on','igniter2_on','stop_switch_active','start_switch_active',
+    'start_switch_healthy','start_switch_ready','limp_mode','dynamic_idle_enabled',
+    'manual_relight_active','oil_failsafe_active','standby_oil_feed_active','surge_detected'
+  ];
+  bools.forEach((name, index) => { out[name] = bit(frame.f, index); });
+  const bools2 = [
+    'dev_mode','bench_mode','relight_armed','extra_cooldown_active','ab_trigger_active',
+    'ab_flame_on','ab_flame_healthy','ab_permitted','ab_execution_active','ab_sol_open',
+    'glow_plug_hot','glow_current_healthy','igniter_current_healthy',
+    'igniter2_current_healthy','oil_pump_current_healthy','oil_pump_overcurrent',
+    'oil_flow_warning','airstarter_open','main_fuel_protection_active',
+    'config_version_mismatch','throttle_input_valid','idle_input_valid','rc_throttle_valid',
+    'rc_idle_valid','ab_arm_switch_on','config_storage_fault','hardware_ready','watchdog_ready',
+    'recovery_lockout','session_logger_healthy','session_capture_active','limited_start_allowed'
+  ];
+  bools2.forEach((name, index) => { out[name] = bit(frame.g, index); });
+  out.cool_fan_on = Number(v[30]) >= 50;
+  out.oil_scavenge_on = Number(v[31]) >= 50;
+  out.bleed_valve_open = Number(v[32]) >= 50;
+
+  const priorInputs = Array.isArray(previous?.registry_inputs) ? previous.registry_inputs : [];
+  const priorOutputs = Array.isArray(previous?.registry_outputs) ? previous.registry_outputs : [];
+  if (Array.isArray(frame.iv)) out.registry_inputs = frame.iv.map((value, index) => ({
+    id:priorInputs[index]?.id || String(index), value,
+    raw:Array.isArray(frame.ir) ? frame.ir[index] : undefined,
+    healthy:bit(frame.ih, index)
+  }));
+  if (Array.isArray(frame.ov)) out.registry_outputs = frame.ov.map((percent, index) => ({
+    id:priorOutputs[index]?.id || String(index), demand:Number(percent)/100,
+    current_amps:Array.isArray(frame.oc) ? Number(frame.oc[index])/10 : undefined,
+    current_healthy:bit(frame.oh, index)
+  }));
+  return out;
+}
 function applyData(d) {
+  d = decodeCompactTelemetry(d, _lastData);
   setTelemetryStale(false, 0);
   if (d?.profile_id) scopeSparklineHistory(d.profile_id);
   if (d?.startup_seq_count !== undefined) {
@@ -428,6 +554,7 @@ function applyData(d) {
     if (Number.isFinite(nextBootCount) && _lastBootCount !== null && nextBootCount !== _lastBootCount) {
       _lastData = null;
       _lastUptimeS = null;
+      _telemetryTextRevision = null;
       bootChanged = true;
     }
     if (Number.isFinite(nextBootCount)) _lastBootCount = nextBootCount;
@@ -495,7 +622,7 @@ function applyData(d) {
   setText('n2',  d.n2  !== undefined ? fmtInt(d.n2)  : '—');
   const n2Card = document.getElementById('n2-card');
   if (n2Card && d.has_n2 !== undefined) n2Card.style.display = d.has_n2 ? '' : 'none';
-  setText('tot', d.tot !== undefined && d.tot_healthy !== false ? toDispTemp(Number(d.tot)).toFixed(1) : '—');
+  setText('tot', d.tot !== undefined && d.tot_healthy !== false ? toDispTemp(Number(d.tot)).toFixed(0) : '—');
   const totCard = document.getElementById('tot-card');
   if (totCard && d.has_tot !== undefined) totCard.style.display = d.has_tot ? '' : 'none';
   setText('max-n1',  d.max_n1  !== undefined ? fmtInt(d.max_n1) : '—');
@@ -510,11 +637,11 @@ function applyData(d) {
     setText('n2-rate-val', Number.isFinite(rate)
       ? (rate > 0 ? '+' : '') + fmtInt(rate) + ' rpm/s' : '—');
   }
-  setText('max-tot', d.max_tot !== undefined ? toDispTemp(Number(d.max_tot)).toFixed(1) : '—');
-  setText('oil', d.oil !== undefined && d.oil_healthy !== false ? toDispPress(Number(d.oil)).toFixed(2) : '—');
+  setText('max-tot', d.max_tot !== undefined ? toDispTemp(Number(d.max_tot)).toFixed(0) : '—');
+  setText('oil', d.oil !== undefined && d.oil_healthy !== false ? toDispPress(Number(d.oil)).toFixed(1) : '—');
   const oilCard = document.getElementById('oil-card');
   if (oilCard && d.has_oil_press !== undefined) oilCard.style.display = d.has_oil_press ? '' : 'none';
-  setText('oil-demand-val', d.oil_demand !== undefined ? toDispPress(Number(d.oil_demand)).toFixed(2) : '—');
+  setText('oil-demand-val', d.oil_demand !== undefined ? toDispPress(Number(d.oil_demand)).toFixed(1) : '—');
   const baseThrottle = d.throttle_demand !== undefined ? Number(d.throttle_demand) : undefined;
   const throttleChannel = configuredRegistryOutput(d, 'main_fuel', ['main_fuel','main_fuel_output','throttle']);
   const legacyThrottle = d.throttle_effective !== undefined ? Number(d.throttle_effective) : baseThrottle;
@@ -648,7 +775,7 @@ function applyData(d) {
   if (oilMinRow) {
     const minVal = d.oil_min_bar !== undefined ? Number(d.oil_min_bar) : 0;
     oilMinRow.style.display = minVal > 0 ? '' : 'none';
-    if (minVal > 0) setText('oil-min-bar-val', toDispPress(minVal).toFixed(2));
+    if (minVal > 0) setText('oil-min-bar-val', toDispPress(minVal).toFixed(1));
   }
 
   // Oil failsafe indicator
@@ -712,10 +839,10 @@ function applyData(d) {
   // A railed/disconnected optional pressure sensor now reports unhealthy —
   // show an explicit dash instead of a believable extrapolated number.
   const p1Ok = d.p1_healthy !== false, p2Ok = d.p2_healthy !== false;
-  setText('p1', d.p1 !== undefined && p1Ok ? toDispPress(Number(d.p1)).toFixed(2) : '—');
-  setText('p2', d.p2 !== undefined && p2Ok ? toDispPress(Number(d.p2)).toFixed(2) : '—');
-  setText('max-p1', d.max_p1 !== undefined ? toDispPress(Number(d.max_p1)).toFixed(2) : '—');
-  setText('max-p2', d.max_p2 !== undefined ? toDispPress(Number(d.max_p2)).toFixed(2) : '—');
+  setText('p1', d.p1 !== undefined && p1Ok ? toDispPress(Number(d.p1)).toFixed(1) : '—');
+  setText('p2', d.p2 !== undefined && p2Ok ? toDispPress(Number(d.p2)).toFixed(1) : '—');
+  setText('max-p1', d.max_p1 !== undefined ? toDispPress(Number(d.max_p1)).toFixed(1) : '—');
+  setText('max-p2', d.max_p2 !== undefined ? toDispPress(Number(d.max_p2)).toFixed(1) : '—');
   const p1El = document.getElementById('p1'), p2El = document.getElementById('p2');
   if (p1El) p1El.title = p1Ok ? '' : 'P1 sensor fault (railed/disconnected) — check wiring';
   if (p2El) p2El.title = p2Ok ? '' : 'P2 sensor fault (railed/disconnected) — check wiring';
@@ -1007,8 +1134,8 @@ function applyData(d) {
       if (warn) {
         const low = oilMin > 0 && d.oil < oilMin * 1.15;
         warn.style.display = low ? '' : 'none';
-        if (low) warn.textContent = '⚠ Oil ' + toDispPress(Number(d.oil)).toFixed(2)
-          + ' ' + dispPressUnit() + ' — near min ' + toDispPress(oilMin).toFixed(2) + ' ' + dispPressUnit();
+        if (low) warn.textContent = '⚠ Oil ' + toDispPress(Number(d.oil)).toFixed(1)
+          + ' ' + dispPressUnit() + ' — near min ' + toDispPress(oilMin).toFixed(1) + ' ' + dispPressUnit();
       }
     } else {
       // STANDBY/FAULT and other non-op modes: keep the bar live but neutral —
@@ -1022,8 +1149,8 @@ function applyData(d) {
     }
     const absLbl = document.getElementById('oil-abs-label');
     if (absLbl) absLbl.textContent = oilMin > 0
-      ? toDispPress(Number(d.oil)).toFixed(2) + ' / ≥' + toDispPress(oilMin).toFixed(2) + ' ' + dispPressUnit()
-      : toDispPress(Number(d.oil)).toFixed(2) + ' ' + dispPressUnit() + ' / OFF';
+      ? toDispPress(Number(d.oil)).toFixed(1) + ' / ≥' + toDispPress(oilMin).toFixed(1) + ' ' + dispPressUnit()
+      : toDispPress(Number(d.oil)).toFixed(1) + ' ' + dispPressUnit() + ' / OFF';
   }
 
   // ── Firmware version (shown once on first telemetry frame) ──
@@ -1033,42 +1160,48 @@ function applyData(d) {
   }
 
   // ── Sparklines ────────────────────────────────────────────
-  if (d.n1 !== undefined) {
-    pushSparkline(_sparkN1, Number(d.n1));
-    drawSparkline('n1-sparkline', _sparkN1, 'var(--accent)');
-  }
-  if (d.n2 !== undefined) {
-    pushSparkline(_sparkN2, Number(d.n2));
-    drawSparkline('n2-sparkline', _sparkN2, 'var(--accent)');
-  }
-  if (d.tot !== undefined && d.tot_healthy !== false) {
-    pushSparkline(_sparkTot, Number(d.tot));
-    drawSparkline('tot-sparkline', _sparkTot, 'var(--accent)');
-  } else if (d.tot_healthy === false) {
-    drawSparkline('tot-sparkline', [], 'var(--accent)');
-  }
-  if (d.tit !== undefined && d.tit_healthy !== false) {
-    pushSparkline(_sparkTit, Number(d.tit));
-    drawSparkline('tit-sparkline', _sparkTit, 'var(--accent)');
-  } else if (d.tit_healthy === false) {
-    drawSparkline('tit-sparkline', [], 'var(--accent)');
-  }
-  if (d.has_oil_temp && d.oil_temp !== undefined) {
-    pushSparkline(_sparkOilTemp, Number(d.oil_temp));
-    drawSparkline('oil-temp-sparkline', _sparkOilTemp, 'var(--accent)');
-  }
-  if (d.has_batt_voltage && d.batt_voltage !== undefined) {
-    pushSparkline(_sparkBattVolt, Number(d.batt_voltage));
-    drawSparkline('batt-sparkline', _sparkBattVolt, 'var(--accent)');
-  }
-  if (d.has_torque && d.torque !== undefined) {
-    pushSparkline(_sparkTorque, Number(d.torque));
-    drawSparkline('torque-sparkline', _sparkTorque, 'var(--accent)');
+  const sparkNow = Date.now();
+  const sampleSparklines = !_lastSparkSampleMs ||
+    sparkNow - _lastSparkSampleMs >= SPARK_SAMPLE_PERIOD_MS;
+  if (sampleSparklines) {
+    _lastSparkSampleMs = sparkNow;
+    if (d.n1 !== undefined) {
+      pushSparkline(_sparkN1, Number(d.n1));
+      drawSparkline('n1-sparkline', _sparkN1, 'var(--accent)');
+    }
+    if (d.n2 !== undefined) {
+      pushSparkline(_sparkN2, Number(d.n2));
+      drawSparkline('n2-sparkline', _sparkN2, 'var(--accent)');
+    }
+    if (d.tot !== undefined && d.tot_healthy !== false) {
+      pushSparkline(_sparkTot, Number(d.tot));
+      drawSparkline('tot-sparkline', _sparkTot, 'var(--accent)');
+    } else if (d.tot_healthy === false) {
+      drawSparkline('tot-sparkline', [], 'var(--accent)');
+    }
+    if (d.tit !== undefined && d.tit_healthy !== false) {
+      pushSparkline(_sparkTit, Number(d.tit));
+      drawSparkline('tit-sparkline', _sparkTit, 'var(--accent)');
+    } else if (d.tit_healthy === false) {
+      drawSparkline('tit-sparkline', [], 'var(--accent)');
+    }
+    if (d.has_oil_temp && d.oil_temp !== undefined) {
+      pushSparkline(_sparkOilTemp, Number(d.oil_temp));
+      drawSparkline('oil-temp-sparkline', _sparkOilTemp, 'var(--accent)');
+    }
+    if (d.has_batt_voltage && d.batt_voltage !== undefined) {
+      pushSparkline(_sparkBattVolt, Number(d.batt_voltage));
+      drawSparkline('batt-sparkline', _sparkBattVolt, 'var(--accent)');
+    }
+    if (d.has_torque && d.torque !== undefined) {
+      pushSparkline(_sparkTorque, Number(d.torque));
+      drawSparkline('torque-sparkline', _sparkTorque, 'var(--accent)');
+    }
   }
   const oilFlowWarning = document.getElementById('oil-flow-warning-note');
   if (oilFlowWarning) oilFlowWarning.style.display = d.oil_flow_warning ? '' : 'none';
   renderRegistryOutputCards(d);
-  const registryInputCount = renderRegistryInputCards(d);
+  const registryInputCount = renderRegistryInputCards(d, sampleSparklines);
   persistSparklineHistory();
 
   // ── Extended sensors (oil temp, battery, torque, current sensors) ──
@@ -1085,8 +1218,8 @@ function applyData(d) {
   if (oilTempCard) {
     oilTempCard.style.display = d.has_oil_temp ? '' : 'none';
     if (d.has_oil_temp) {
-      setText('oil-temp', d.oil_temp !== undefined ? toDispTemp(Number(d.oil_temp)).toFixed(1) : '—');
-      setText('max-oil-temp', d.max_oil_temp !== undefined ? toDispTemp(Number(d.max_oil_temp)).toFixed(1) : '—');
+      setText('oil-temp', d.oil_temp !== undefined ? toDispTemp(Number(d.oil_temp)).toFixed(0) : '—');
+      setText('max-oil-temp', d.max_oil_temp !== undefined ? toDispTemp(Number(d.max_oil_temp)).toFixed(0) : '—');
       setDot('oil-temp-health', d.oil_temp_healthy, lbl('oil_temp'));
       if (d.oil_temp !== undefined) {
         const oilTempLimit = Number(d.oil_temp_limit || 0);
@@ -1100,8 +1233,8 @@ function applyData(d) {
   if (titCard) {
     titCard.style.display = d.has_tit ? '' : 'none';
     if (d.has_tit) {
-      setText('tit', d.tit !== undefined && d.tit_healthy !== false ? toDispTemp(Number(d.tit)).toFixed(1) : '—');
-      setText('max-tit', d.max_tit !== undefined ? toDispTemp(Number(d.max_tit)).toFixed(1) : '—');
+      setText('tit', d.tit !== undefined && d.tit_healthy !== false ? toDispTemp(Number(d.tit)).toFixed(0) : '—');
+      setText('max-tit', d.max_tit !== undefined ? toDispTemp(Number(d.max_tit)).toFixed(0) : '—');
       setDot('tit-health', d.tit_healthy, lbl('tit'));
       if (d.tit !== undefined) {
         const titLimit = Number(d.tit_limit || 0);
@@ -1131,8 +1264,8 @@ function applyData(d) {
   if (fuelPressCard) {
     fuelPressCard.style.display = d.has_fuel_press ? '' : 'none';
     if (d.has_fuel_press) {
-      setText('fuel-press', d.fuel_press !== undefined ? toDispPress(Number(d.fuel_press)).toFixed(2) : '—');
-      setText('max-fuel-press', d.max_fuel_press !== undefined ? toDispPress(Number(d.max_fuel_press)).toFixed(2) : '—');
+      setText('fuel-press', d.fuel_press !== undefined ? toDispPress(Number(d.fuel_press)).toFixed(1) : '—');
+      setText('max-fuel-press', d.max_fuel_press !== undefined ? toDispPress(Number(d.max_fuel_press)).toFixed(1) : '—');
       setDot('fuel-press-health', d.fuel_press_healthy, lbl('fuel_press'));
       if (d.fuel_press !== undefined) {
         const fuelPressMin = Number(d.fuel_press_min || 0);
@@ -1142,8 +1275,8 @@ function applyData(d) {
         setGaugeBar('fuel-press-gauge-bar', pct);
         const absLbl = document.getElementById('fuel-press-abs-label');
         if (absLbl) absLbl.textContent = fuelPressMin > 0
-          ? toDispPress(Number(d.fuel_press)).toFixed(2) + ' / ≥' + toDispPress(fuelPressMin).toFixed(2) + ' ' + dispPressUnit()
-          : toDispPress(Number(d.fuel_press)).toFixed(2) + ' ' + dispPressUnit() + ' / OFF';
+          ? toDispPress(Number(d.fuel_press)).toFixed(1) + ' / ≥' + toDispPress(fuelPressMin).toFixed(1) + ' ' + dispPressUnit()
+          : toDispPress(Number(d.fuel_press)).toFixed(1) + ' ' + dispPressUnit() + ' / OFF';
       }
     }
   }
@@ -1153,8 +1286,8 @@ function applyData(d) {
   if (battCard) {
     battCard.style.display = d.has_batt_voltage ? '' : 'none';
     if (d.has_batt_voltage) {
-      setText('batt-voltage', d.batt_voltage !== undefined ? Number(d.batt_voltage).toFixed(2) : '—');
-      setText('max-batt-voltage', d.max_batt_voltage !== undefined ? Number(d.max_batt_voltage).toFixed(2) : '—');
+      setText('batt-voltage', d.batt_voltage !== undefined ? Number(d.batt_voltage).toFixed(1) : '—');
+      setText('max-batt-voltage', d.max_batt_voltage !== undefined ? Number(d.max_batt_voltage).toFixed(1) : '—');
       setDot('batt-health', d.batt_healthy, 'Battery voltage');
       {
         const battMin = Number(d.batt_volt_min || 0);
@@ -1718,7 +1851,7 @@ function _showRunSummary(d, durationMs) {
     (d.has_tot && d.max_tot !== undefined) ? { label: 'Peak TOT', value: toDispTemp(Number(d.max_tot)).toFixed(0) + ' ' + dispTempUnit() } : null,
     (d.has_tit && d.max_tit !== undefined) ? { label: 'Peak TIT', value: toDispTemp(Number(d.max_tit)).toFixed(0) + ' ' + dispTempUnit() } : null,
     (d.has_oil_press && d.min_oil !== undefined && d.min_oil !== null)
-      ? { label: 'Minimum oil pressure', value: toDispPress(Number(d.min_oil)).toFixed(2) + ' ' + dispPressUnit() } : null,
+      ? { label: 'Minimum oil pressure', value: toDispPress(Number(d.min_oil)).toFixed(1) + ' ' + dispPressUnit() } : null,
   ].filter(Boolean);
 
   const statsEl = document.getElementById('run-summary-stats');
@@ -2127,8 +2260,8 @@ function registryInputDisplay(ch) {
   const role = String(ch?.role || '');
   const purpose = String(ch?.purpose || '');
   if (registryInputIsBinary(ch)) return {value:value >= 0.5 ? 'ON' : 'OFF', unit:'', numeric:value};
-  if (role === 'temperature') return {value:toDispTemp(value).toFixed(1), unit:dispTempUnit(), numeric:value};
-  if (role === 'pressure') return {value:toDispPress(value).toFixed(2), unit:dispPressUnit(), numeric:value};
+  if (role === 'temperature') return {value:toDispTemp(value).toFixed(0), unit:dispTempUnit(), numeric:value};
+  if (role === 'pressure') return {value:toDispPress(value).toFixed(1), unit:dispPressUnit(), numeric:value};
   if (role === 'speed') return {value:fmtInt(value), unit:'RPM', numeric:value};
   if (role === 'voltage') return {value:value.toFixed(2), unit:'V', numeric:value};
   if (role === 'flow') return {value:value.toFixed(2), unit:'L/min', numeric:value};
@@ -2154,7 +2287,7 @@ function registryInputRangeText(ch) {
   if (purpose === 'generic' || role === 'generic') return 'normalized automation input';
   return 'registry input';
 }
-function renderRegistryInputCards(d) {
+function renderRegistryInputCards(d, sampleSparklines = false) {
   const hostParent = document.getElementById('electrical-cards');
   if (!hostParent) return 0;
   let host = document.getElementById('registry-input-cards');
@@ -2224,7 +2357,7 @@ function renderRegistryInputCards(d) {
   cardRows.forEach((ch, i) => {
     const safeId = String(ch.id || `input_${i}`).replace(/[^a-zA-Z0-9_-]/g, '_');
     const display = registryInputDisplay(ch);
-    if (display.numeric !== null) {
+    if (sampleSparklines && display.numeric !== null) {
       const arr = registryInputSparkSeries(ch.id);
       pushSparkline(arr, display.numeric);
       drawSparkline('regin-spark-' + safeId, arr, 'var(--accent)');

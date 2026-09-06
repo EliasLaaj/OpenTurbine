@@ -1612,8 +1612,8 @@ static void _restartCleanly(const char* reason) {
 }
 
 // ── Telemetry JSON builder ────────────────────────────────────
-// The JS retains the last received value for rotating optional fields, while
-// continuously important state is present in every compact REST response.
+// The boot snapshot owns static metadata; compact v2 carries every live value
+// and binary state on each REST response.
 static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     alignas(EngineData) uint8_t snapshotStorage[sizeof(EngineData)];
     const uint32_t snapshotVersion = EngineData::readPublishedSnapshot(
@@ -1621,29 +1621,15 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     const auto& ed = *reinterpret_cast<const EngineData*>(snapshotStorage);
     doc.clear();
 
-    // Keep continuously watched values in every 3 Hz response. Optional groups
-    // rotate at 0.75 Hz. Each response stays within one conservative Classic
-    // TCP payload, avoiding fragile multipart state and heap churn.
-    doc["snapshot_id"] = snapshotVersion;
-    doc["mode"] = sysModeStr(ed.mode);
-    doc["fault_latched"] = ed.faultLatched;
-    doc["dry_oil_stop_active"] = ed.dryOilStopActive;
-    doc["fault_clear_allowed"] = ed.faultLatched && !ed.dryOilStopActive &&
-        ed.hardwareReady && ed.watchdogReady && Config::profileMatch && !ed.configLocked &&
-        !OutputActivity::anyPhysicalDemand(false);
-    doc["n1"] = (int)ed.n1Rpm;
-    doc["n2"] = (int)ed.n2Rpm;
-    doc["n1_rpm_accel"] = (int)ed.n1RpmAccel;
-    doc["n2_rpm_accel"] = (int)ed.n2RpmAccel;
-    doc["tot"] = (float)(int)(ed.tot * 10) / 10.0f;
-    doc["tit"] = (float)(int)(ed.tit * 10) / 10.0f;
-    doc["oil"] = (float)(int)(ed.oilPressure * 100) / 100.0f;
-    doc["n1_healthy"] = ed.n1Healthy;
-    doc["n2_healthy"] = ed.n2Healthy;
-    doc["tot_healthy"] = ed.totHealthy;
-    doc["tit_healthy"] = ed.titHealthy;
-    doc["oil_healthy"] = ed.oilHealthy;
-    doc["throttle_input_raw"] = ed.throttleInputRaw;
+    // Compact telemetry v2. The boot-time /api/data document owns labels,
+    // capabilities, units, limits and registry IDs. This frame carries only
+    // live values, flags and short changing status strings. Fixed-position
+    // arrays avoid repeating dozens of JSON keys and let every numerical and
+    // binary dashboard value travel at 3 Hz without exceeding one TCP MSS.
+    doc["cv"] = 2;
+    doc["s"] = snapshotVersion;
+    doc["m"] = (uint8_t)ed.mode;
+
     float inputNorm = 0.0f;
     if (HardwareConfig::throttleInputRcPwm) {
         inputNorm = ed.rcThrottleValid ? ed.rcThrottleNorm : 0.0f;
@@ -1652,39 +1638,133 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
         if (range != 0) inputNorm = constrain(
             (ed.throttleInputRaw - Config::throttleMinRaw) / (float)range, 0.0f, 1.0f);
     }
-    doc["throttle_input_norm"] = (float)(int)(inputNorm * 1000) / 1000.0f;
-    doc["idle_input_raw"] = ed.idleInputRaw;
-    doc["rc_throttle_norm"] = (float)(int)(ed.rcThrottleNorm * 1000) / 1000.0f;
-    doc["throttle_demand"] = (float)(int)(ed.throttleDemand * 1000) / 1000.0f;
-    doc["throttle_effective"] = (float)(int)(ed.mainFuelAppliedDemand * 1000) / 1000.0f;
-    doc["oil_pct"] = (int)ed.oilPumpPct;
-    // These are live dashboard actuator values, not occasional diagnostics.
-    // Keep them in every compact frame so a second client cannot repeatedly
-    // consume their rotating group and leave the visible UI stale.
-    doc["prop_pitch_demand"] = (float)(int)(ed.propPitchDemand * 1000) / 1000.0f;
-    doc["ab_fuel_offset"] = (float)(int)(ed.abFuelOffset * 1000) / 1000.0f;
-    // Discrete dashboard state must travel in every frame. Previously these
-    // values lived in a rotating group, so a short ignition pulse could be
-    // over before the browser received the group containing it.
-    // Keep the two ignition aliases for compatibility with dashboards that
-    // do not yet resolve registry masks. Other discrete outputs are covered
-    // by the compact registry bitset below.
-    doc["igniter_on"] = ed.igniterOn;
-    doc["igniter2_on"] = ed.igniter2On;
-    doc["stop_switch_active"] = ed.stopSwitchActive;
-    doc["start_switch_active"] = ed.startSwitchActive;
-    doc["start_switch_healthy"] = ed.startSwitchHealthy;
-    doc["start_switch_ready"] = ed.startSwitchReady;
-    doc["limp_mode"] = ed.limpMode;
-    doc["uptime_s"] = ed.uptimeMs / 1000;
-    // Keep reboot identity in every compact frame. Browser and HIL clients
-    // merge this endpoint into one boot-time /api/data snapshot; without the
-    // generation fields they cannot detect a reboot and will retain stale
-    // topology/state from the previous firmware instance.
-    doc["boot_count"] = ed.bootCount;
-    doc["reset_reason"] = ed.resetReason;
-    doc["last_event"] = ed.lastEvent;
-    doc["fault_description"] = ed.faultDescription;
+    const long remainingMs = (long)(ed.extraCooldownUntilMs - millis());
+    const int cooldownS = (ed.extraCooldownActive && remainingMs > 0)
+        ? (int)(remainingMs / 1000L) : 0;
+    auto q = doc["v"].to<JsonArray>();
+    // RPM and temperatures use whole units; pressure uses centibar so the
+    // browser can display either 0.1 bar or 0.1 psi without coarse steps.
+    // Demands are whole percent and electrical currents are deciamps.
+    q.add((int)lroundf(ed.n1Rpm));                         // 0
+    q.add((int)lroundf(ed.n2Rpm));                         // 1
+    q.add((int)lroundf(ed.n1RpmAccel));                    // 2
+    q.add((int)lroundf(ed.n2RpmAccel));                    // 3
+    q.add((int)lroundf(ed.tot));                           // 4
+    q.add((int)lroundf(ed.tit));                           // 5
+    q.add((int)lroundf(ed.oilPressure * 100.0f));          // 6
+    q.add((int)lroundf(ed.p1 * 100.0f));                   // 7
+    q.add((int)lroundf(ed.p2 * 100.0f));                   // 8
+    q.add((int)lroundf(ed.fuelPressure * 100.0f));         // 9
+    q.add((int)lroundf(ed.fuelFlow * 10.0f));              // 10
+    q.add((int)lroundf(ed.oilTemp));                       // 11
+    q.add((int)lroundf(ed.battVoltage * 10.0f));           // 12
+    q.add((int)lroundf(ed.torque * 10.0f));                // 13
+    q.add((int)lroundf(ed.thrust * 10.0f));                // 14
+    q.add(ed.throttleInputRaw);                            // 15
+    q.add(ed.idleInputRaw);                                // 16
+    q.add((int)lroundf(inputNorm * 100.0f));               // 17
+    q.add((int)lroundf(ed.rcThrottleNorm * 100.0f));       // 18
+    q.add((int)lroundf(ed.throttleDemand * 100.0f));       // 19
+    q.add((int)lroundf(ed.mainFuelAppliedDemand * 100.0f));// 20
+    q.add((int)lroundf(ed.oilPumpPct));                    // 21
+    q.add((int)lroundf(ed.oilTargetBar * 100.0f));         // 22
+    q.add((int)lroundf(ed.propPitchDemand * 100.0f));      // 23
+    q.add((int)lroundf(ed.abFuelOffset * 100.0f));         // 24
+    q.add((int)lroundf(ed.starterDemand * 100.0f));        // 25
+    q.add((int)lroundf(ed.abPumpDemand * 100.0f));         // 26
+    q.add((int)lroundf(ed.fuelPump2Demand * 100.0f));      // 27
+    q.add((int)lroundf(ed.glowPlugDemand * 100.0f));       // 28
+    q.add((int)lroundf(ed.wetGlowFuelDemand * 100.0f));    // 29
+    q.add((int)lroundf(ed.coolFanDemand * 100.0f));        // 30
+    q.add((int)lroundf(ed.oilScavengeDemand * 100.0f));    // 31
+    q.add((int)lroundf(ed.bleedValveDemand * 100.0f));     // 32
+    q.add((int)lroundf(ed.glowCurrentAmps * 10.0f));       // 33
+    q.add((int)lroundf(ed.igniterCurrentAmps * 10.0f));    // 34
+    q.add((int)lroundf(ed.igniter2CurrentAmps * 10.0f));   // 35
+    q.add((int)lroundf(ed.oilPumpCurrentAmps * 10.0f));    // 36
+    q.add((int)lroundf(ed.maxN1));                         // 37
+    q.add((int)lroundf(ed.maxN2));                         // 38
+    q.add((int)lroundf(ed.maxTot));                        // 39
+    q.add((int)lroundf(ed.maxTit));                        // 40
+    q.add((int)lroundf(ed.maxP1 * 100.0f));                // 41
+    q.add((int)lroundf(ed.maxP2 * 100.0f));                // 42
+    q.add((int)lroundf(ed.maxOilTemp));                    // 43
+    q.add((int)lroundf(ed.maxBattVoltage * 10.0f));        // 44
+    q.add((int)lroundf(ed.maxFuelPressure * 100.0f));      // 45
+    q.add((int)lroundf(ed.totRiseRate));                   // 46
+    q.add((int)lroundf(ed.turboPower));                    // 47
+    q.add(cooldownS);                                      // 48
+    q.add((int)ed.relightAttempts);                        // 49
+    q.add(ed.flameSensorRaw);                              // 50
+    q.add(ed.oilPressureRaw);                              // 51
+    q.add(ed.p1Raw);                                       // 52
+    q.add(ed.p2Raw);                                       // 53
+    q.add(ed.fuelPressRaw);                                // 54
+    q.add(ed.oilTempRaw);                                  // 55
+    q.add(ed.battVoltageRaw);                              // 56
+    q.add(ed.torqueRaw);                                   // 57
+    q.add(ed.thrustRaw);                                   // 58
+    q.add(ed.fuelFlowRaw);                                 // 59
+    q.add(g_sensorGlowCurrent.rawCounts());                 // 60
+    q.add(g_sensorIgniterCurrent.rawCounts());              // 61
+    q.add(g_sensorIgniter2Current.rawCounts());             // 62
+    q.add(g_sensorOilPumpCurrent.rawCounts());              // 63
+    q.add((int)lroundf(ed.lastRunFlameAvg * 10.0f));        // 64
+    q.add((uint32_t)ed.lastRunFlameSamples);                // 65
+    q.add(ed.minOilPressure >= 0.0f
+        ? (int)lroundf(ed.minOilPressure * 100.0f) : -1);    // 66
+    uint32_t liveRunSeconds = Config::totalRunSeconds;
+    if (ed.mode == SysMode::RUNNING && !ed.benchMode && !ed.devMode)
+        liveRunSeconds += (millis() - ed.runStartMs) / 1000;
+    q.add(liveRunSeconds);                                  // 67
+    q.add(Config::runCount);                                // 68
+    q.add(Config::startAttemptCount);                       // 69
+    q.add((int)ed.abSeqBlockIdx);                           // 70
+    q.add((int)ed.abSeqBlockTotal);                         // 71
+
+    auto setFlag = [](uint32_t& mask, uint8_t bit, bool on) {
+        if (on) mask |= (1UL << bit);
+    };
+    uint32_t f = 0, f2 = 0;
+    const bool faultClearAllowed = ed.faultLatched && !ed.dryOilStopActive &&
+        ed.hardwareReady && ed.watchdogReady && Config::profileMatch && !ed.configLocked &&
+        !OutputActivity::anyPhysicalDemand(false);
+    setFlag(f, 0, ed.faultLatched); setFlag(f, 1, ed.dryOilStopActive);
+    setFlag(f, 2, faultClearAllowed); setFlag(f, 3, ed.n1Healthy);
+    setFlag(f, 4, ed.n2Healthy); setFlag(f, 5, ed.totHealthy);
+    setFlag(f, 6, ed.titHealthy); setFlag(f, 7, ed.oilHealthy);
+    setFlag(f, 8, ed.p1Healthy); setFlag(f, 9, ed.p2Healthy);
+    setFlag(f,10, ed.fuelPressHealthy); setFlag(f,11, ed.fuelFlowHealthy);
+    setFlag(f,12, ed.oilTempHealthy); setFlag(f,13, ed.battHealthy);
+    setFlag(f,14, ed.torqueHealthy); setFlag(f,15, ed.thrustHealthy);
+    setFlag(f,16, ed.flameHealthy); setFlag(f,17, ed.flameDetected);
+    setFlag(f,18, ed.starterEnabled); setFlag(f,19, ed.fuelSolOpen);
+    setFlag(f,20, ed.igniterOn); setFlag(f,21, ed.igniter2On);
+    setFlag(f,22, ed.stopSwitchActive); setFlag(f,23, ed.startSwitchActive);
+    setFlag(f,24, ed.startSwitchHealthy); setFlag(f,25, ed.startSwitchReady);
+    setFlag(f,26, ed.limpMode); setFlag(f,27, ed.dynamicIdleEnabled);
+    setFlag(f,28, ed.manualRelightActive); setFlag(f,29, ed.oilFailsafeActive);
+    setFlag(f,30, ed.standbyOilFeedActive); setFlag(f,31, ed.surgeDetected);
+
+    setFlag(f2, 0, ed.devMode); setFlag(f2, 1, ed.benchMode);
+    setFlag(f2, 2, ed.relightArmed); setFlag(f2, 3, ed.extraCooldownActive);
+    setFlag(f2, 4, ed.abTriggerActive); setFlag(f2, 5, ed.abFlameOn);
+    setFlag(f2, 6, ed.abFlameHealthy); setFlag(f2, 7, ed.abPermitted);
+    setFlag(f2, 8, ed.abExecutionActive); setFlag(f2, 9, ed.abSolOpen);
+    setFlag(f2,10, ed.glowPlugHot); setFlag(f2,11, ed.glowCurrentHealthy);
+    setFlag(f2,12, ed.igniterCurrentHealthy); setFlag(f2,13, ed.igniter2CurrentHealthy);
+    setFlag(f2,14, ed.oilPumpCurrentHealthy); setFlag(f2,15, ed.oilPumpOvercurrent);
+    setFlag(f2,16, ed.oilFlowWarningActive); setFlag(f2,17, ed.airstarterOpen);
+    setFlag(f2,18, ed.mainFuelProtectionActive); setFlag(f2,19, ed.configVersionMismatch);
+    setFlag(f2,20, ed.throttleInputValid); setFlag(f2,21, ed.idleInputValid);
+    setFlag(f2,22, ed.rcThrottleValid); setFlag(f2,23, ed.rcIdleValid);
+    setFlag(f2,24, ed.abArmSwitchOn); setFlag(f2,25, ed.configStorageFault);
+    setFlag(f2,26, ed.hardwareReady); setFlag(f2,27, ed.watchdogReady);
+    setFlag(f2,28, ed.recoveryLockout); setFlag(f2,29, SessionLogger::healthy());
+    setFlag(f2,30, SessionLogger::captureActive());
+    setFlag(f2,31, _limitedStartRejectReason() == nullptr);
+    doc["f"] = f; doc["g"] = f2;
+
     uint32_t inputOnMask = 0;
     uint32_t inputHealthyMask = 0;
     uint32_t outputOnMask = 0;
@@ -1698,138 +1778,94 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     uint32_t diOnMask = 0;
     for (uint8_t i = 0; i < HardwareConfig::MAX_DI && i < 32; ++i)
         if (ed.diState[i]) diOnMask |= (1UL << i);
-    doc["ri_on"] = inputOnMask;
-    doc["ri_ok"] = inputHealthyMask;
-    doc["ro_on"] = outputOnMask;
-    doc["di_on"] = diOnMask;
+    uint32_t outputCurrentHealthyMask = 0;
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.outputCount && i < 32; ++i)
+        if (ed.registryOutputCurrentHealthy[i]) outputCurrentHealthyMask |= (1UL << i);
+    doc["io"] = inputOnMask; doc["ih"] = inputHealthyMask;
+    doc["oo"] = outputOnMask; doc["oh"] = outputCurrentHealthyMask;
+    doc["di"] = diOnMask;
 
-    static uint8_t group = 0;
-    const uint8_t thisGroup = group++ & 0x03u;
-    if (thisGroup == 0) {
-        doc["oil_raw"] = ed.oilPressureRaw;
-        doc["oil_demand"] = (float)(int)(ed.oilTargetBar * 100) / 100.0f;
-        doc["flame"] = ed.flameDetected;
-        doc["flame_raw"] = ed.flameSensorRaw;
-        doc["flame_healthy"] = ed.flameHealthy;
-        doc["p1"] = (float)(int)(std::max(0.0f, (float)ed.p1) * 100) / 100.0f;
-        doc["p2"] = (float)(int)(std::max(0.0f, (float)ed.p2) * 100) / 100.0f;
-        // Calibration must receive each raw pressure sample in the same
-        // rotating frame as its converted value. Keeping these only in the
-        // one-time full snapshot made the displayed ADC count look frozen.
-        doc["p1_raw"] = ed.p1Raw;
-        doc["p2_raw"] = ed.p2Raw;
-        doc["p1_healthy"] = ed.p1Healthy;
-        doc["p2_healthy"] = ed.p2Healthy;
-        doc["fuel_press"] = (float)(int)(ed.fuelPressure * 100) / 100.0f;
-        doc["fuel_press_raw"] = ed.fuelPressRaw;
-        doc["fuel_press_healthy"] = ed.fuelPressHealthy;
-        doc["fuel_flow"] = (float)(int)(ed.fuelFlow * 100) / 100.0f;
-        doc["fuel_flow_healthy"] = ed.fuelFlowHealthy;
-        doc["oil_temp"] = (float)(int)(ed.oilTemp * 10) / 10.0f;
-        doc["oil_temp_healthy"] = ed.oilTempHealthy;
-        doc["batt_voltage"] = (float)(int)(ed.battVoltage * 100) / 100.0f;
-        doc["batt_healthy"] = ed.battHealthy;
-        doc["torque"] = (float)(int)(ed.torque * 10) / 10.0f;
-        doc["torque_healthy"] = ed.torqueHealthy;
-        doc["thrust"] = (float)(int)(ed.thrust * 10) / 10.0f;
-        doc["thrust_healthy"] = ed.thrustHealthy;
-    } else if (thisGroup == 1) {
-        doc["starter_demand"] = (float)(int)(ed.starterDemand * 1000) / 1000.0f;
-        doc["starter_enabled"] = ed.starterEnabled;
-        doc["fuel_sol_open"] = ed.fuelSolOpen;
-        doc["dynamic_idle_enabled"] = ed.dynamicIdleEnabled;
-        doc["idle_controller_state"] = ed.limpMode ? "Reduced-power mode" : ed.idleControllerState;
-        doc["manual_relight_active"] = ed.manualRelightActive;
-        doc["oil_failsafe_active"] = ed.oilFailsafeActive;
-        doc["standby_oil_feed_active"] = ed.standbyOilFeedActive;
-        doc["dev_mode"] = ed.devMode;
-        doc["bench_mode"] = ed.benchMode;
-        doc["relight_armed"] = ed.relightArmed;
-        doc["relight_attempts"] = (int)ed.relightAttempts;
-        doc["extra_cooldown_active"] = ed.extraCooldownActive;
-        const long remainingMs = (long)(ed.extraCooldownUntilMs - millis());
-        doc["extra_cooldown_remaining_s"] =
-            (ed.extraCooldownActive && remainingMs > 0) ? (int)(remainingMs / 1000L) : 0;
-    } else if (thisGroup == 2) {
-        const char* abStr = "Off";
-        switch (ed.abMode) {
-            case ABMode::Arming: abStr = "Arming"; break;
-            case ABMode::Igniting: abStr = "Igniting"; break;
-            case ABMode::Running: abStr = "Running"; break;
-            case ABMode::ShuttingDown: abStr = "ShuttingDown"; break;
-            case ABMode::Fault: abStr = "Fault"; break;
-            default: break;
-        }
-        doc["ab_mode"] = abStr;
-        doc["ab_trigger_active"] = ed.abTriggerActive;
-        doc["ab_flame_on"] = ed.abFlameOn;
-        doc["ab_flame_healthy"] = ed.abFlameHealthy;
-        doc["ab_permitted"] = ed.abPermitted;
-        doc["ab_execution_active"] = ed.abExecutionActive;
-        doc["ab_inhibit_reason"] = ed.abInhibitReason;
-        doc["ab_fault_reason"] = ed.abFaultReason;
-        doc["ab_sol_open"] = ed.abSolOpen;
-        doc["ab_pump_demand"] = (float)(int)(ed.abPumpDemand * 1000) / 1000.0f;
-        doc["current_block"] = ed.currentBlock;
-        doc["seq_block_idx"] = (int)ed.seqBlockIdx;
-        doc["seq_block_total"] = (int)ed.seqBlockTotal;
-        doc["seq_wait_reason"] = ed.seqWaitReason[0] ? ed.seqWaitReason : nullptr;
-        doc["seq_last_result"] = ed.seqLastResult[0] ? ed.seqLastResult : nullptr;
-        doc["seq_fault_block"] = ed.seqFaultBlock[0] ? ed.seqFaultBlock : nullptr;
-        doc["limited_start_allowed"] = _limitedStartRejectReason() == nullptr;
-        const uint32_t eligible = FeedbackRequirements::eligibleSingleStartOverride(ed, millis());
-        doc["limited_start_sensor"] = eligible != FeedbackRequirements::NONE
-            ? FeedbackRequirements::sensorName(eligible) : nullptr;
-    } else {
-        static uint8_t registryPage = 0;
-        constexpr uint8_t CHANNELS_PER_FRAME = 3;
-        const uint8_t first = registryPage++ * CHANNELS_PER_FRAME;
-        auto inArr = doc["registry_inputs"].to<JsonArray>();
-        auto outArr = doc["registry_outputs"].to<JsonArray>();
-        for (uint8_t offset = 0; offset < CHANNELS_PER_FRAME; ++offset) {
-            const uint8_t i = first + offset;
-            if (i < HardwareConfig::channelRegistry.inputCount) {
-                auto ch = inArr.add<JsonObject>();
-                ch["id"] = HardwareConfig::channelRegistry.inputs[i].id;
-                ch["value"] = (float)(int)(ed.registryInputValue[i] * 1000) / 1000.0f;
-                ch["raw"] = ed.registryInputRaw[i];
-                ch["healthy"] = ed.registryInputHealthy[i];
-            }
-            if (i < HardwareConfig::channelRegistry.outputCount) {
-                auto ch = outArr.add<JsonObject>();
-                ch["id"] = HardwareConfig::channelRegistry.outputs[i].id;
-                ch["demand"] = (float)(int)(ed.registryOutputDemand[i] * 1000) / 1000.0f;
-                ch["current_amps"] = (float)(int)(ed.registryOutputCurrentAmps[i] * 100) / 100.0f;
-                ch["current_healthy"] = ed.registryOutputCurrentHealthy[i];
-            }
-        }
-        const uint8_t count = std::max(
-            HardwareConfig::channelRegistry.inputCount,
-            HardwareConfig::channelRegistry.outputCount);
-        const uint8_t pageCount = std::max<uint8_t>(
-            1, (count + CHANNELS_PER_FRAME - 1) / CHANNELS_PER_FRAME);
-        if (registryPage >= pageCount) registryPage = 0;
-
-        // Recorder state changes throughout a run and while its bounded RAM
-        // queue is being committed after shutdown. It must not live only in
-        // the one-time /api/data snapshot: compact REST clients merge these
-        // rotating frames with that snapshot and would otherwise display the
-        // boot values forever.
-        doc["session_dropped_rows"] = SessionLogger::droppedRows();
-        doc["session_queued_rows"] = SessionLogger::queuedRows();
-        doc["session_logger_healthy"] = SessionLogger::healthy();
-        doc["session_logger_error"] = SessionLogger::errorCode();
-        doc["session_capture_active"] = SessionLogger::captureActive();
-        doc["session_log_path"] = SessionLogger::currentPath();
+    auto iv = doc["iv"].to<JsonArray>();
+    auto ir = doc["ir"].to<JsonArray>();
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i) {
+        iv.add((float)lroundf(ed.registryInputValue[i] * 100.0f) / 100.0f);
+        ir.add(ed.registryInputRaw[i]);
     }
+    auto ov = doc["ov"].to<JsonArray>();
+    auto oc = doc["oc"].to<JsonArray>();
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.outputCount; ++i) {
+        ov.add((int)lroundf(ed.registryOutputDemand[i] * 100.0f));
+        oc.add((int)lroundf(ed.registryOutputCurrentAmps[i] * 10.0f));
+    }
+
+    doc["am"] = (uint8_t)ed.abMode;
+    auto sq = doc["sq"].to<JsonArray>();
+    sq.add((int)ed.seqBlockIdx);
+    sq.add((int)ed.seqBlockTotal);
+    doc["u"] = ed.uptimeMs / 1000;
+    doc["bc"] = ed.bootCount;
+    doc["rr"] = ed.resetReason;
+    const uint32_t eligible = FeedbackRequirements::eligibleSingleStartOverride(ed, millis());
+    doc["lg"] = SessionLogger::droppedRows();
+    doc["lq"] = SessionLogger::queuedRows();
+    doc["lc"] = SessionLogger::errorCode();
+    uint32_t textRevision = 2166136261UL;
+    auto hashText = [&textRevision](const char* text) {
+        if (!text) text = "";
+        while (*text) {
+            textRevision ^= (uint8_t)*text++;
+            textRevision *= 16777619UL;
+        }
+        textRevision ^= 0xffu;
+        textRevision *= 16777619UL;
+    };
+    hashText(ed.lastEvent); hashText(ed.faultDescription); hashText(ed.currentBlock);
+    hashText(ed.seqWaitReason); hashText(ed.seqLastResult); hashText(ed.seqFaultBlock);
+    hashText(ed.limpMode ? "Reduced-power mode" : ed.idleControllerState);
+    hashText(ed.abInhibitReason); hashText(ed.abFaultReason);
+    hashText(ed.abCurrentBlock); hashText(ed.abSeqWaitReason);
+    hashText(ed.throttleCommandOwner); hashText(ed.propPitchCommandOwner);
+    hashText(ed.oilCommandOwner); hashText(ed.governorControllerState);
+    hashText(eligible != FeedbackRequirements::NONE
+        ? FeedbackRequirements::sensorName(eligible) : "");
+    hashText(SessionLogger::currentPath());
+    doc["tr"] = textRevision;
 
     const size_t measured = measureJson(doc);
     if (measured + 1 > len || measured > COMPACT_TELEMETRY_MAX) {
-        Serial.printf("[Web] Compact telemetry overflow (%u bytes, group %u)\n",
-                      (unsigned)measured, (unsigned)thisGroup);
+        Serial.printf("[Web] Compact telemetry v2 overflow (%u bytes)\n",
+                      (unsigned)measured);
         return len;
     }
     return serializeJson(doc, buf, len);
+}
+
+static size_t _buildTelemetryText(char* buf, size_t len, JsonDocument& doc) {
+    alignas(EngineData) uint8_t snapshotStorage[sizeof(EngineData)];
+    EngineData::readPublishedSnapshot(snapshotStorage, sizeof(snapshotStorage));
+    const auto& ed = *reinterpret_cast<const EngineData*>(snapshotStorage);
+    doc.clear();
+    doc["last_event"] = ed.lastEvent;
+    doc["fault_description"] = ed.faultDescription;
+    doc["current_block"] = ed.currentBlock;
+    doc["seq_wait_reason"] = ed.seqWaitReason[0] ? ed.seqWaitReason : nullptr;
+    doc["seq_last_result"] = ed.seqLastResult[0] ? ed.seqLastResult : nullptr;
+    doc["seq_fault_block"] = ed.seqFaultBlock[0] ? ed.seqFaultBlock : nullptr;
+    doc["idle_controller_state"] = ed.limpMode ? "Reduced-power mode" : ed.idleControllerState;
+    doc["ab_inhibit_reason"] = ed.abInhibitReason;
+    doc["ab_fault_reason"] = ed.abFaultReason;
+    doc["ab_current_block"] = ed.abCurrentBlock;
+    doc["ab_seq_wait_reason"] = ed.abSeqWaitReason[0] ? ed.abSeqWaitReason : nullptr;
+    doc["throttle_command_owner"] = ed.throttleCommandOwner;
+    doc["prop_pitch_command_owner"] = ed.propPitchCommandOwner;
+    doc["oil_command_owner"] = ed.oilCommandOwner;
+    doc["governor_controller_state"] = ed.limpMode
+        ? "Reduced-power mode" : ed.governorControllerState;
+    const uint32_t eligible = FeedbackRequirements::eligibleSingleStartOverride(ed, millis());
+    doc["limited_start_sensor"] = eligible != FeedbackRequirements::NONE
+        ? FeedbackRequirements::sensorName(eligible) : nullptr;
+    doc["session_log_path"] = SessionLogger::currentPath();
+    return _serializeJsonBounded(doc, buf, len);
 }
 
 static size_t _buildTelemetry(char* buf, size_t len, JsonDocument& doc, bool full) {
@@ -3146,6 +3182,19 @@ void WebServer::_setupRoutes() {
             g_webTxBuf, sizeof(g_webTxBuf), s_restTelemetryDoc);
         if (n >= sizeof(g_webTxBuf)) {
             req->send(500, "application/json", "{\"error\":\"telemetry response too large\"}");
+            return;
+        }
+        _sendOwnedJson(req, g_webTxBuf, n);
+    });
+
+    // Descriptive strings change rarely and can be hundreds of bytes long.
+    // Compact telemetry carries only their revision; browsers fetch this
+    // document once on connection and again only when that revision changes.
+    _server.on("/api/telemetry_text", HTTP_GET, [](AsyncWebServerRequest* req) {
+        JsonDocument doc;
+        const size_t n = _buildTelemetryText(g_webTxBuf, sizeof(g_webTxBuf), doc);
+        if (n >= sizeof(g_webTxBuf)) {
+            req->send(500, "application/json", "{\"error\":\"telemetry text too large\"}");
             return;
         }
         _sendOwnedJson(req, g_webTxBuf, n);
