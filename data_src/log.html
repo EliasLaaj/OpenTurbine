@@ -220,47 +220,42 @@ function showTab(tab) {
     document.getElementById('pane-' + t).style.display = tab === t ? '' : 'none';
     document.getElementById('tab-'  + t).className = 'tab-btn' + (tab === t ? ' active' : '');
   });
-  if (tab === 'events') loadLog();
-  if (tab === 'session') { loadSessionList(); loadSessionCfg(); loadSessionPreview(); loadPersistenceHealth(); }
+  // A run may finish while this page is sitting on Session Data or in a
+  // background tab. Refresh the shared event source whenever Summary is
+  // selected so a completed-run dashboard banner cannot leave this view stale.
+  if (tab === 'summary' || tab === 'events') loadLog();
+  if (tab === 'session') loadSessionTab();
 }
 
-async function loadPersistenceHealth() {
+function renderPersistenceHealth(d) {
   const el = document.getElementById('persistence-health');
   if (!el) return;
-  el.textContent = 'Loading recorder health…';
-  el.style.color = 'var(--dim)';
   const sessionErrors = ['OK','queue unavailable','file open failed','CSV header failed','RAM backlog/dropped rows','storage reserve reached','file write failed','run identity failed'];
   const eventErrors = ['OK','recorder mutex unavailable','event file open failed','event write failed'];
-  try {
-    const d = await fetchJsonWithRetry('/api/data', 5);
-    const sessionCode = Number(d.session_logger_error || 0);
-    const eventCode = Number(d.event_recorder_error || 0);
-    const sessionState = d.session_logger_healthy === false
-      ? `Session CSV degraded: ${sessionErrors[sessionCode] || `error ${sessionCode}`}`
-      : (d.session_log_path ? `Session CSV healthy · ${d.session_log_path}` : 'Session CSV ready · no run active');
-    const eventState = d.event_recorder_healthy === false
-      ? `Event recorder degraded: ${eventErrors[eventCode] || `error ${eventCode}`}`
-      : 'Event recorder healthy';
-    const pending = Number(d.event_pending_count || 0);
-    const dropped = Number(d.event_dropped_events || 0);
-    const last = Number(d.event_last_append_ms || 0);
-    const free = Number(d.session_free_bytes || 0);
-    const reserve = Number(d.session_reserve_bytes || 0);
-    const eviction = Number(d.session_eviction_count || 0);
-    const detail = `${eventState} · pending ${pending} · dropped ${dropped}` +
-      (last ? ` · last durable append at ${last} ms` : '') +
-      ` · storage free ${free} B / reserve ${reserve} B` +
-      (eviction ? ` · evicted ${eviction}, last run #${Number(d.session_last_evicted || 0)}` : '');
-    const statsCode = Number(d.runtime_stats_error || 0);
-    const statsState = d.runtime_stats_healthy === false
-      ? `Lifetime totals degraded: ${statsCode === 1 ? 'NVS open failed' : statsCode === 2 ? 'NVS write failed' : `error ${statsCode}`}`
-      : (d.runtime_stats_pending ? 'Lifetime totals awaiting safe save' : 'Lifetime totals durable');
-    el.textContent = `${sessionState} · ${detail} · ${statsState}`;
-    el.style.color = (d.session_logger_healthy === false || d.event_recorder_healthy === false || d.runtime_stats_healthy === false) ? 'var(--yellow)' : 'var(--dim)';
-  } catch (error) {
-    el.textContent = `Recorder health could not be read. Refresh this tab in a moment.`;
-    el.style.color = 'var(--yellow)';
-  }
+  const sessionCode = Number(d.session_logger_error || 0);
+  const eventCode = Number(d.event_recorder_error || 0);
+  const sessionState = d.session_logger_healthy === false
+    ? `Session CSV degraded: ${sessionErrors[sessionCode] || `error ${sessionCode}`}`
+    : (d.session_log_path ? `Session CSV healthy · ${d.session_log_path}` : 'Session CSV ready · no run active');
+  const eventState = d.event_recorder_healthy === false
+    ? `Event recorder degraded: ${eventErrors[eventCode] || `error ${eventCode}`}`
+    : 'Event recorder healthy';
+  const pending = Number(d.event_pending_count || 0);
+  const dropped = Number(d.event_dropped_events || 0);
+  const last = Number(d.event_last_append_ms || 0);
+  const free = Number(d.session_free_bytes || 0);
+  const reserve = Number(d.session_reserve_bytes || 0);
+  const eviction = Number(d.session_eviction_count || 0);
+  const detail = `${eventState} · pending ${pending} · dropped ${dropped}` +
+    (last ? ` · last durable append at ${last} ms` : '') +
+    ` · storage free ${free} B / reserve ${reserve} B` +
+    (eviction ? ` · evicted ${eviction}, last run #${Number(d.session_last_evicted || 0)}` : '');
+  const statsCode = Number(d.runtime_stats_error || 0);
+  const statsState = d.runtime_stats_healthy === false
+    ? `Lifetime totals degraded: ${statsCode === 1 ? 'NVS open failed' : statsCode === 2 ? 'NVS write failed' : `error ${statsCode}`}`
+    : (d.runtime_stats_pending ? 'Lifetime totals awaiting safe save' : 'Lifetime totals durable');
+  el.textContent = `${sessionState} · ${detail} · ${statsState}`;
+  el.style.color = (d.session_logger_healthy === false || d.event_recorder_healthy === false || d.runtime_stats_healthy === false) ? 'var(--yellow)' : 'var(--dim)';
 }
 
 // ── Event helpers ─────────────────────────────────────────────
@@ -651,6 +646,7 @@ const SLOG_BITS = ['n1','n2','tot','tit','oil_temp','oil','p1','p2','torque','th
 let _sessionSettingsLocked = false;
 let _sessionSettingsLoaded = false;
 let _loadedRegistryLogIds = [];
+let _sessionTabLoad = null;
 
 function _registryLogUnit(purpose) {
   return ({
@@ -660,11 +656,11 @@ function _registryLogUnit(purpose) {
   })[purpose] || '';
 }
 
-function _renderRegistryLogInputs(hw, selectedIds) {
+function _renderRegistryLogInputs(channels, selectedIds) {
   const host = document.getElementById('registry-log-inputs');
   if (!host) return;
   const selected = new Set(Array.isArray(selectedIds) ? selectedIds.map(String) : []);
-  const channels = (hw?.channel_registry?.inputs || []).filter(channel => {
+  channels = (Array.isArray(channels) ? channels : []).filter(channel => {
     const purpose = String(channel?.purpose || '');
     return channel?.installed !== false && channel?.id &&
       (purpose === 'shaft_speed' || purpose.startsWith('general_'));
@@ -691,116 +687,41 @@ function loadSessionCfg() {
     if (el) el.disabled = true;
   });
   _applySessionSettingsLock();
-  loadSessionCfgJson().then(({cfg, hw, status}) => {
-    _sessionSettingsLocked = !!status?.locked;
-    const sl = cfg.session_log || {};
+  return loadSessionCfgJson().then(status => {
+    _sessionSettingsLocked = !!status.locked;
+    const sl = status.session_log || {};
     _loadedRegistryLogIds = Array.isArray(sl.registry_inputs) ? sl.registry_inputs.map(String) : [];
     const sb = document.getElementById('log-standby');
-    if (sb) sb.checked = !!cfg.telemetry?.log_standby;
+    if (sb) sb.checked = !!status.telemetry?.log_standby;
     const sessionInterval = document.getElementById('session-log-interval');
     const snapshotInterval = document.getElementById('event-snapshot-interval');
     if (sessionInterval) sessionInterval.value = Number(sl.interval_ms || 1000);
-    if (snapshotInterval) snapshotInterval.value = Number(cfg.telemetry?.snapshot_interval_ms || 10000);
+    if (snapshotInterval) snapshotInterval.value = Number(status.telemetry?.snapshot_interval_ms || 10000);
     SLOG_BITS.forEach(bit => {
       const el = document.querySelector('[data-bit="' + bit + '"]');
       if (el) el.checked = !!sl[bit];
     });
-    _renderRegistryLogInputs(hw, _loadedRegistryLogIds);
+    _renderRegistryLogInputs(status.registry_inputs, _loadedRegistryLogIds);
     _sessionSettingsLoaded = true;
-    _applyLogHwVisibility(hw);
+    _applyLogAvailability(status.available || {}, status.labels || {});
     _applySessionSettingsLock();
-  }).catch(() => {
-    // Fallback: at least load the config without hardware filtering
-    fetch('/api/config').then(r => r.json()).then(cfg => {
-      const sl = cfg.session_log || {};
-      _loadedRegistryLogIds = Array.isArray(sl.registry_inputs) ? sl.registry_inputs.map(String) : [];
-      const sessionInterval = document.getElementById('session-log-interval');
-      const snapshotInterval = document.getElementById('event-snapshot-interval');
-      if (sessionInterval) sessionInterval.value = Number(sl.interval_ms || 1000);
-      if (snapshotInterval) snapshotInterval.value = Number(cfg.telemetry?.snapshot_interval_ms || 10000);
-      SLOG_BITS.forEach(bit => {
-        const el = document.querySelector('[data-bit="' + bit + '"]');
-        if (el) {
-          el.checked = !!sl[bit];
-          el.disabled = _sessionSettingsLocked;
-        }
-      });
-      _renderRegistryLogInputs(null, _loadedRegistryLogIds);
-      _sessionSettingsLoaded = true;
-      _applySessionSettingsLock();
-    }).catch(() => {});
-  });
-  // Row count hint (independent of above)
-  fetch('/api/session/log').then(async r => {
-    if (!r.ok) throw new Error(await r.text() || 'no session log');
-    return r.text();
-  }).then(csv => {
-    const rows = csv.trim().split('\n').length - 1;
-    const el = document.getElementById('session-rows');
-    const download = document.getElementById('session-current-download');
-    if (el) el.textContent = rows + ' rows in the current session';
-    if (download) download.disabled = false;
-  }).catch(e => {
-    const el = document.getElementById('session-rows');
-    const download = document.getElementById('session-current-download');
-    const msg = e && e.message ? e.message : '';
-    if (el) el.textContent = msg.includes('STANDBY')
-      ? 'Current session log available after STANDBY'
-      : 'No current session log; use Past Sessions above';
-    if (download) download.disabled = true;
+    renderPersistenceHealth(status);
+    return status;
+  }).catch(error => {
+    const health = document.getElementById('persistence-health');
+    if (health) {
+      health.textContent = 'Recorder status could not be loaded. Use Refresh to retry.';
+      health.style.color = 'var(--yellow)';
+    }
+    throw error;
   });
 }
 
 // Grey out session-log checkboxes whose hardware source is not enabled.
 // They stay visible so the user can see what exists and why it's locked.
-function _applyLogHwVisibility(hw) {
-  const s = (hw && hw.sensors)   || {};
-  const a = (hw && hw.actuators) || {};
-  const hwOn = key => !!(hw && hw[key]);
-  const hasRegistry = (direction, purpose) =>
-    !!(hw?.channel_registry?.[direction] || []).some(c => c?.installed !== false && c?.purpose === purpose);
-  const pressureName = (purpose, fallback) => {
-    const channel = (hw?.channel_registry?.inputs || []).find(
-      c => c?.installed !== false && c?.purpose === purpose);
-    return String(channel?.name || fallback).trim() || fallback;
-  };
-  const pressure1Name = pressureName('p1_pressure', 'Pressure 1');
-  const pressure2Name = pressureName('p2_pressure', 'Pressure 2');
-
-  // Returns true when the source/feature is active in the hardware section.
-  const enabled = bit => {
-    switch (bit) {
-      case 'n1':         return s.n1_rpm       ? !!s.n1_rpm.enabled       : hwOn('has_n1_rpm');
-      case 'n2':         return s.n2_rpm       ? !!s.n2_rpm.enabled       : hwOn('has_n2_rpm');
-      case 'tot':        return s.tot          ? !!s.tot.enabled          : hwOn('has_tot');
-      case 'tit':        return s.tit          ? !!s.tit.enabled          : hwOn('has_tit');
-      case 'oil_temp':   return s.oil_temp     ? !!s.oil_temp.enabled     : hwOn('has_oil_temp');
-      case 'oil':        return s.oil_press    ? !!s.oil_press.enabled    : hwOn('has_oil_press');
-      case 'p1':         return s.p1           ? !!s.p1.enabled           : hwOn('has_p1');
-      case 'p2':         return s.p2           ? !!s.p2.enabled           : hwOn('has_p2');
-      case 'torque':     return s.torque       ? !!s.torque.enabled       : hwOn('has_torque') || hasRegistry('inputs','torque');
-      case 'thrust':     return hwOn('has_thrust') || hasRegistry('inputs','thrust');
-      case 'starter':    return a.starter      ? !!a.starter.enabled      : hwOn('has_starter') || hasRegistry('outputs','starter');
-      case 'oil_pct':    return a.oil_pump     ? !!a.oil_pump.enabled     : hwOn('has_oil_pump');
-      case 'batt':       return s.batt_voltage ? !!s.batt_voltage.enabled : hwOn('has_batt_voltage');
-      case 'fuel_press': return s.fuel_press   ? !!s.fuel_press.enabled   : hwOn('has_fuel_press');
-      case 'fuel_flow':  return s.fuel_flow    ? !!s.fuel_flow.enabled    : hwOn('has_fuel_flow');
-      case 'glow':       return a.glow_plug    ? !!a.glow_plug.enabled    : hwOn('has_glow_plug');
-      case 'wet_glow':   return !!(a.glow_plug && a.glow_plug.enabled && Number(a.glow_plug.type || 0) === 2);
-      case 'glow_current': return !!(a.glow_plug && a.glow_plug.enabled && a.glow_plug.has_current);
-      case 'ign_current':  return !!(a.igniter && a.igniter.enabled && a.igniter.has_current);
-      case 'ign2_current': return !!(a.igniter2 && a.igniter2.enabled && a.igniter2.has_current);
-      case 'oil_current':  return !!(a.oil_pump && a.oil_pump.enabled && a.oil_pump.has_current);
-      case 'fp2':        return a.fuel_pump2   ? !!a.fuel_pump2.enabled   : hwOn('has_fuel_pump2');
-      case 'ab':         return !!(hw && (hw.actuators?.ab_sol?.enabled || hw.actuators?.ab_pump?.enabled ||
-        hw.ab_flame?.enabled || (hw.ab_trigger?.input_pin ?? -1) >= 0 ||
-        (hw.channel_registry?.inputs || []).some(c => c?.installed !== false && c?.purpose === 'ab_flame') ||
-        (hw.channel_registry?.outputs || []).some(c => c?.installed !== false && c?.purpose === 'ab_igniter')));
-      case 'prop':       return a.prop_pitch   ? !!a.prop_pitch.enabled   : hwOn('has_prop_pitch');
-      default:           return true; // throttle, mode — always present
-    }
-  };
-
+function _applyLogAvailability(available, labels) {
+  const pressure1Name = String(labels.p1 || 'Pressure 1').trim() || 'Pressure 1';
+  const pressure2Name = String(labels.p2 || 'Pressure 2').trim() || 'Pressure 2';
   // Human-readable name for the tooltip
   const hwLabel = {
     n1: 'N1 RPM sensor', n2: 'N2 RPM sensor',
@@ -828,7 +749,7 @@ function _applyLogHwVisibility(hw) {
       const textNode = Array.from(lbl.childNodes).find(node => node.nodeType === Node.TEXT_NODE);
       if (textNode) textNode.nodeValue = text;
     }
-    const on = enabled(bit);
+    const on = available[bit] === true;
     if (on) {
       // Restore to normal
       input.disabled    = _sessionSettingsLocked;
@@ -907,10 +828,28 @@ async function fetchJsonWithRetry(url, attempts = 3) {
 }
 
 async function loadSessionCfgJson() {
-  const cfg = await fetchJsonWithRetry('/api/config');
-  const hw = await fetchJsonWithRetry('/api/hardware');
-  const status = await fetchJsonWithRetry('/api/status').catch(() => ({}));
-  return { cfg, hw, status };
+  return fetchJsonWithRetry('/api/session/status', 2);
+}
+
+async function loadSessionTab() {
+  if (_sessionTabLoad) return _sessionTabLoad;
+  const health = document.getElementById('persistence-health');
+  if (health) {
+    health.textContent = 'Loading recorder status…';
+    health.style.color = 'var(--dim)';
+  }
+  _sessionTabLoad = (async () => {
+    // Keep large or flash-backed reads one-at-a-time on Classic. The status
+    // response is small; the list and current CSV are then fetched in order.
+    await loadSessionCfg().catch(() => {});
+    await loadSessionList();
+    await loadSessionPreview();
+  })().catch(() => {
+    // Each loader already presents its own useful retry state.
+  }).finally(() => {
+    _sessionTabLoad = null;
+  });
+  return _sessionTabLoad;
 }
 
 function saveSessionCfg() {
@@ -1025,16 +964,27 @@ function loadSessionPreview() {
   if (wrap)  wrap.style.display = 'none';
   if (empty) empty.style.display = 'none';
 
-  fetch('/api/session/log').then(async r => {
+  return fetch('/api/session/log').then(async r => {
     if (!r.ok) throw new Error(await r.text() || 'no log');
     return r.text();
   }).then(csv => {
+    const rows = Math.max(0, csv.trim().split('\n').filter(line => line.trim()).length - 1);
+    const rowEl = document.getElementById('session-rows');
+    const download = document.getElementById('session-current-download');
+    if (rowEl) rowEl.textContent = rows + ' rows in the current session';
+    if (download) download.disabled = false;
     if (!renderSessionCsvPreview(csv)) {
       clearSessionPreview('No session data yet');
       return;
     }
   }).catch(e => {
     const err = e && e.message ? e.message : '';
+    const rowEl = document.getElementById('session-rows');
+    const download = document.getElementById('session-current-download');
+    if (rowEl) rowEl.textContent = err.includes('STANDBY')
+      ? 'Current session log available after STANDBY'
+      : 'No current session log; use Past Sessions above';
+    if (download) download.disabled = true;
     clearSessionPreview(err.includes('STANDBY') ? 'Session preview available after STANDBY' : '');
   });
 }
@@ -1175,9 +1125,9 @@ function redrawChart() {
 // ── Session list ──────────────────────────────────────────────
 function loadSessionList() {
   const wrap = document.getElementById('session-list-wrap');
-  if (!wrap) return;
+  if (!wrap) return Promise.resolve();
   wrap.innerHTML = '<div style="font-size:.78rem;color:var(--dim)">Loading…</div>';
-  fetch('/api/session/list')
+  return fetch('/api/session/list')
     .then(async r => {
       const body = await r.json().catch(() => []);
       if (!r.ok) throw new Error((body && body.error) || ('HTTP ' + r.status));

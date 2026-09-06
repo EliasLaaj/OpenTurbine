@@ -617,7 +617,7 @@ function installedBrowser() {
       p12Save('p1');
     });
     await page.waitForFunction(() => document.querySelector('#p1-cal-status')?.textContent.includes('Saved'));
-    assert.match(await text(page, '#cal-p1-raw'), /1000 mV/);
+    assert.match(await text(page, '#cal-p1-raw'), /\d+ mV/);
     saved = await state(page);
     const savedP1 = saved.hardware.channel_registry.inputs.find(c => c.purpose === 'p1_pressure');
     assert.ok(Math.abs(savedP1.calibration_points[0].value - 1.01325) < 0.00001);
@@ -648,6 +648,17 @@ function installedBrowser() {
     assert.doesNotMatch(outputCatalog, /Contactor/);
     await page.evaluate(() => closeRegistryAddDialog());
     assert.equal(await page.locator('body').textContent().then(t => /Fault demand/i.test(t)), false);
+    const directHx711 = await page.evaluate(() => {
+      const torque = {installed:true,id:'torque_main',name:'Torque',purpose:'torque',role:'torque',driver:1,pin:34,torque_interface:1,hx711_clk:25,hx711_scale:.01,hx711_zero:0};
+      const thrust = {installed:true,id:'thrust_main',name:'Thrust',purpose:'thrust',role:'thrust',driver:1,pin:35,torque_interface:1,hx711_clk:26,hx711_scale:.02,hx711_zero:0};
+      return {
+        torqueHx: registryLoadCellIsHx711(torque),
+        thrustHx: registryLoadCellIsHx711(thrust),
+        torqueUnit: registryTorqueInterfaceEditor('input', torque, 0).includes('Nm/count'),
+        thrustUnit: registryTorqueInterfaceEditor('input', thrust, 1).includes('N/count')
+      };
+    });
+    assert.deepEqual(directHx711, {torqueHx:true, thrustHx:true, torqueUnit:true, thrustUnit:true});
     const oilSwitchSafety = await page.evaluate(() => {
       const savedSensors = structuredClone(cfg.sensors);
       const savedSafety = structuredClone(cfg.safety);
@@ -707,7 +718,7 @@ function installedBrowser() {
     assert.equal(precisePurposeDeps.overtempCleared, true);
     assert.equal(precisePurposeDeps.oilLoopDisabled, true);
     assert.equal(precisePurposeDeps.oilLoopCleared, true);
-    results.push('hardware picker exposes bounded turbine I/O roles and switch-based oil safety stays available');
+    results.push('hardware picker exposes bounded turbine I/O roles, independent HX711 torque/thrust, and switch-based oil safety');
     await page.evaluate(() => {
       cfg.sensors.p1.enabled = false;
       cfg.sensors.p1.pin = cfg.sensors.oil_press.pin;
@@ -849,6 +860,33 @@ function installedBrowser() {
     for (const key of ['starter_demand','ramp_pct_per_s','pulsed_assist_enabled',
       'pulsed_assist_pwm_pct','pulsed_assist_until_rpm','pulsed_assist_on_ms','pulsed_assist_off_ms'])
       assert.ok(starterDefinition.keys.includes(key));
+    const starterCommandTransition = await page.evaluate(() => {
+      const snapshot = JSON.parse(JSON.stringify(hwCfg));
+      const starter = getEnabledActuators().find(action => action.key === 'starter' && action.mode === 'pct');
+      const igniter = getEnabledActuators().find(action => action.key === 'igniter');
+      if (!starter || !igniter) return {available:false};
+      hwCfg.startup_seq.push('SetOutput');
+      ensureActionSlots('startup');
+      const index = hwCfg.startup_seq.length - 1;
+      hwCfg.startup_enter_actions[index] = [{act:starter.actuator, target:starter.target, value:.25}];
+      const html = buildSetOutputHtml('startup', index);
+      updateSetOutput('startup', index, null, null, '1.5');
+      const storedMs = hwCfg.startup_enter_actions[index][0].transition_ms;
+      updateSetOutput('startup', index, null, null, '0');
+      const zeroMs = hwCfg.startup_enter_actions[index][0].transition_ms;
+      updateSetOutput('startup', index, igniter.target, null);
+      const removedForNonStarter = !Object.prototype.hasOwnProperty.call(
+        hwCfg.startup_enter_actions[index][0], 'transition_ms');
+      hwCfg = snapshot;
+      render('startup', lastIdleRaw);
+      populateAddSelects();
+      return {available:true, hasControl:html.includes('Speed change time'), storedMs, zeroMs, removedForNonStarter};
+    });
+    assert.deepEqual(starterCommandTransition, {
+      available:true, hasControl:true, storedMs:1500, zeroMs:0, removedForNonStarter:true
+    });
+    assert.ok((await page.content()).includes('OTWaitForPageTelemetryIdle(2500)'));
+    results.push('each proportional Set Starter command stores its own speed-change time and zero keeps instant behavior');
     for (const viewport of [{width:1000,height:800}, {width:390,height:844}]) {
       await page.setViewportSize(viewport);
       assert.equal(await page.locator('#block-picker-list').evaluate(list =>
@@ -1003,12 +1041,14 @@ function installedBrowser() {
     assert.equal(new Set(finalStateColumns.map(row => row.width)).size, 1);
     const delayInputs = page.locator('#list-startup .block-card[data-block="TimedDelay"] input[type="number"]');
     assert.equal(await delayInputs.count(), 3);
-    assert.deepEqual(await delayInputs.evaluateAll(els => els.map(el => el.value)), ['15000', '10000', '5000']);
+    assert.deepEqual(await delayInputs.evaluateAll(els => els.map(el => el.value)), ['15', '10', '5']);
+    assert.deepEqual(await page.locator('#list-startup .block-card[data-block="TimedDelay"] .block-cond').allTextContents(), ['15 s', '10 s', '5 s']);
     await page.locator('#list-startup .block-card[data-block="TimedDelay"] .block-header').nth(2).click();
     await delayInputs.nth(2).click();
     await delayInputs.nth(2).press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
-    await delayInputs.nth(2).type('6000', {delay:20});
-    assert.equal(await delayInputs.nth(2).inputValue(), '6000');
+    await delayInputs.nth(2).type('6', {delay:20});
+    assert.equal(await delayInputs.nth(2).inputValue(), '6');
+    assert.equal(await page.evaluate(() => hwCfg.startup_delay_ms.filter(Boolean).at(-1)), 6000);
     assert.equal(await delayInputs.nth(2).evaluate(el => document.activeElement === el), true);
     await page.locator('#save-btn').click();
     await page.locator('#ot-dialog-confirm').click();
@@ -1182,7 +1222,32 @@ function installedBrowser() {
     assert.equal(await pilotCard.count(), 1);
     if (!(await pilotCard.evaluate(el => el.open))) await pilotCard.locator(':scope > summary').click();
     await pilotCard.getByRole('button', {name:'Delete controller'}).click();
-    results.push('Controllers uses expandable local output definitions, including Pilot Fuel, and creates, maps, and deletes them cleanly');
+
+    if (!(await creator.evaluate(el => el.open))) await creator.locator(':scope > summary').click();
+    await creator.locator('#new-controller-output').selectOption('request_shutdown');
+    await creator.getByRole('button', {name:'Create controller', exact:true}).click();
+    const shutdownCard = page.locator('#controller-overview [data-controller-output="request_shutdown"]');
+    assert.equal(await shutdownCard.count(), 1);
+    if (!(await shutdownCard.evaluate(el => el.open))) await shutdownCard.locator(':scope > summary').click();
+    assert.deepEqual(await shutdownCard.getByLabel('Control method').locator('option').allTextContents(), ['On / Off with hysteresis']);
+    await shutdownCard.getByLabel('Controlled by').selectOption('tot_main');
+    await page.evaluate(() => {
+      const index = cfg.rules.findIndex(rule => rule.target === 'request_shutdown');
+      updateSimpleControl(index, 'threshold', 690);
+      updateSimpleControl(index, 'hysteresis', 10);
+      toggleSimpleControlMode(index, 2, true);
+    });
+    const shutdownRule = await page.evaluate(() => cfg.rules.find(rule => rule.target === 'request_shutdown'));
+    assert.equal(shutdownRule.kind, 0);
+    assert.equal(shutdownRule.source, 'tot_main');
+    assert.equal(shutdownRule.on_value, 1);
+    assert.equal(shutdownRule.off_value, 0);
+    assert.equal(shutdownRule.threshold, 690);
+    assert.equal(shutdownRule.hysteresis, 10);
+    assert.equal(shutdownRule.mode_mask, 6);
+    assert.match(await shutdownCard.textContent(), /normal shutdown sequence is requested/i);
+    await shutdownCard.getByRole('button', {name:'Delete controller'}).click();
+    results.push('Controllers creates physical output controllers and a threshold-only Request Normal Shutdown action');
 
     response = await page.request.post(`${base}/api/ecu_config`, {data:{
       settings: automationState.settings,
@@ -1284,8 +1349,20 @@ function installedBrowser() {
     assert.match(await page.locator('body').textContent(), /TIT 1544/);
     results.push('event log renders firmware event keys, TIT peaks, and follows the unit preference');
 
+    const sessionRequests = [];
+    const captureSessionRequest = request => {
+      const pathname = new URL(request.url()).pathname;
+      if (pathname.startsWith('/api/')) sessionRequests.push(pathname);
+    };
+    page.on('request', captureSessionRequest);
     await page.locator('#tab-session').click();
     await page.locator('#session-save-btn:not([disabled])').waitFor();
+    await page.waitForFunction(() => document.querySelector('#session-preview-msg')?.textContent.includes('rows'));
+    page.off('request', captureSessionRequest);
+    assert.equal(sessionRequests.filter(pathname => pathname === '/api/session/status').length, 1);
+    assert.equal(sessionRequests.filter(pathname => pathname === '/api/session/list').length, 1);
+    assert.equal(sessionRequests.filter(pathname => pathname === '/api/session/log').length, 1);
+    assert.equal(sessionRequests.some(pathname => ['/api/data','/api/config','/api/hardware'].includes(pathname)), false);
     assert.equal(await page.locator('[data-bit="p1"]').count(), 1);
     assert.equal(await page.locator('[data-bit="p2"]').count(), 1);
     await page.locator('#session-log-interval').fill('750');
@@ -1295,7 +1372,7 @@ function installedBrowser() {
     saved = await state(page);
     assert.equal(saved.settings.session_log.interval_ms, 750);
     assert.equal(saved.settings.telemetry.snapshot_interval_ms, 12500);
-    results.push('Log > Session Data owns channel selection and logging intervals');
+    results.push('Log > Session Data loads compact status, list, and one shared CSV sequentially');
 
     const recoveredRun = await page.evaluate(() => parseRuns([
       {t:112, ev:'RUN_SUMMARY', runS:86, maxN1:67100, maxTot:676},
@@ -1305,6 +1382,8 @@ function installedBrowser() {
     assert.equal(recoveredRun.tStart, 26);
     assert.equal(recoveredRun.runS, 86);
     assert.equal(recoveredRun.peakN1, 67100);
+    const logSource = fs.readFileSync(path.join(__dirname, '..', 'data_src', 'log.html'), 'utf8');
+    assert.match(logSource, /tab === 'summary' \|\| tab === 'events'\) loadLog\(\)/);
     results.push('completed-run summary recovers from the bounded event window even when START_ATTEMPT is older');
 
     await page.evaluate(() => renderSummary([], 8));

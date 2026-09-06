@@ -243,8 +243,8 @@ public:
         float calibrationValue[PiecewiseCalibration::MAX_POINTS] = {};
         uint16_t digitalThresholdRaw = 2048; // ADC-backed switch centre, 0..4095
         uint16_t digitalHysteresisRaw = 64;  // total switch deadband, 0..2047
-        // Torque cards can use a normal analog transmitter (0) or an HX711
-        // bridge ADC (1).  For HX711, pin is DOUT and hx711Clk is SCK.
+        // Torque and thrust cards can use a normal analog transmitter (0) or
+        // an HX711 bridge ADC (1). For HX711, pin is DOUT and hx711Clk is SCK.
         uint8_t torqueInterface = 0;
         int8_t hx711Clk = -1;
         float hx711Scale = 1.0f;
@@ -447,6 +447,15 @@ public:
         for (uint8_t i=0; i<inputCount; ++i) if (!validId(inputs[i].id) || !driverMatches(Input, inputs[i].driver) || !roleValid(Input, inputs[i].role) || !purposeValid(Input, inputs[i].purpose) || !semanticDriverValid(inputs[i]) || (!(inputs[i].physicalPortId[0] && inputs[i].physicalModeId[0]) && !temperatureInterfaceValid(inputs[i])) || !torqueInterfaceValid(inputs[i]) || !demandsValid(inputs[i])) {
             snprintf(_validationError, sizeof(_validationError),
                      "Input %s has invalid role, signal type, or range", inputs[i].id);
+            return false;
+        }
+        uint8_t directHx711Count = 0;
+        for (uint8_t i=0; i<inputCount; ++i)
+            if (inputs[i].installed && inputs[i].driver == Analog &&
+                inputs[i].torqueInterface == 1) ++directHx711Count;
+        if (directHx711Count > 2) {
+            snprintf(_validationError, sizeof(_validationError),
+                     "At most two direct HX711 load-cell inputs are supported");
             return false;
         }
         for (uint8_t i=0; i<outputCount; ++i) {
@@ -846,7 +855,8 @@ private:
     }
     static bool torqueInterfaceValid(const Channel& c) {
         if (!c.torqueInterface) return true;
-        return c.torqueInterface == 1 && c.direction == Input && !strcmp(c.role, "torque") &&
+        return c.torqueInterface == 1 && c.direction == Input &&
+               (!strcmp(c.role, "torque") || !strcmp(c.role, "thrust")) &&
                c.driver == Analog && c.pin >= 0 && c.hx711Clk >= 0 && c.pin != c.hx711Clk &&
                c.hx711Scale >= 0.000001f && c.hx711Scale <= 1000000.0f;
     }

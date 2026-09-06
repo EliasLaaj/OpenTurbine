@@ -585,7 +585,8 @@ function controllerChannelName(row) {
   const purposeNames = {
     throttle:'Throttle Input', idle:'Idle Input', n1_speed:'N1 Speed', n2_speed:'N2 Speed',
     oil_pressure:'Oil Pressure', main_fuel:'Main Fuel Metering', oil_pump:'Oil Pump',
-    prop_pitch:'Propeller Pitch', ab_pump:'Afterburner Fuel Pump', pilot_fuel:'Pilot Fuel'
+    prop_pitch:'Propeller Pitch', ab_pump:'Afterburner Fuel Pump', pilot_fuel:'Pilot Fuel',
+    request_shutdown:'Request Normal Shutdown'
   };
   const raw = String(row.name || '').trim();
   const internalLooking = !raw || raw === 'Main Fuel Pump' || raw === String(row.id || '') ||
@@ -618,6 +619,13 @@ function _resolveControllerChannelId(value, rows, kind, numericValue) {
 function _defaultRuleForOutput(channel) {
   const inputs = simpleControlInputs();
   const relay = [4,11].includes(Number(channel.driver));
+  if (String(channel.purpose) === 'request_shutdown') {
+    return {enabled:true,kind:0,op:0,threshold:0,hysteresis:0,on_value:1,off_value:0,
+      input_min:0,input_max:1,output_min:0,output_max:1,mode_mask:4,
+      target_source_type:0,target_source:'',target_fixed:0,target_low:0,target_high:1,
+      target_input_min:0,target_input_max:1,response_gain:.02,integral_gain:.005,deadband:.01,
+      name:'Request Normal Shutdown',source:'',target:'request_shutdown'};
+  }
   // Main fuel naturally follows the sole throttle input. Every other new
   // controller starts as an explicit fixed command so merely creating it can
   // never make an unrelated first registry input control physical hardware.
@@ -646,7 +654,7 @@ function createControllerForOutput(outputId) {
   cfg.rules ||= [];
   cfg.rules.push(_defaultRuleForOutput(channel));
   _controllerRulesDirty = true;
-  _controllerHardwareDirty = true;
+  if (!channel.virtual) _controllerHardwareDirty = true;
   _markDirty();
   renderForm(true);
   _applyAllVisibility();
@@ -709,8 +717,7 @@ function migrateLegacyControllerDefinitions() {
 function renderControllerOverview() {
   const root = document.getElementById('controller-overview');
   if (!root || CONFIG_SURFACE !== 'controllers') return;
-  const outputs = (hwCfg?.channel_registry?.outputs || []).filter(row =>
-    row && row.installed !== false && !String(row.mirror_of || ''));
+  const outputs = simpleControlOutputs();
   const rules = cfg.rules || [];
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const configuredCards = [...document.querySelectorAll('#simple-controls [data-controller-card]')];
@@ -861,8 +868,12 @@ function simpleControlInputs() {
   return (hwCfg?.channel_registry?.inputs || []).filter(row => row && row.installed !== false);
 }
 function simpleControlOutputs() {
-  return (hwCfg?.channel_registry?.outputs || []).filter(row =>
+  const physical = (hwCfg?.channel_registry?.outputs || []).filter(row =>
     row && row.installed !== false && !String(row.mirror_of || ''));
+  return physical.concat([{
+    id:'request_shutdown', name:'Request Normal Shutdown', purpose:'request_shutdown',
+    role:'safety_action', driver:4, installed:true, virtual:true
+  }]);
 }
 function feedbackDefaultsForInput(id) {
   const row = simpleControlInputs().find(input => String(input.id) === String(id));
@@ -883,6 +894,9 @@ function updateSimpleControl(index, key, value) {
   rule[key] = value;
   _controllerRulesDirty = true;
   if (key === 'kind') {
+    const target = simpleControlOutputs().find(row => String(row.id) === String(rule.target));
+    if (target?.virtual) value = 0;
+    rule[key] = value;
     // Changing topology removes the runtime effect of fields that no longer
     // apply. Defaults remain unsurprising if the user changes back later.
     if (Number(value) === 0) {
@@ -1205,15 +1219,25 @@ function renderSimpleControls() {
       rule.target_source = _resolveControllerChannelId(rule.target_source, inputs, 'input', rule.target_sensor);
   });
   const cards = rules.map((rule, index) => {
-    const kind = Number(rule.kind || 0);
     const usedByOthers = new Set(rules.filter((_, i) => i !== index).map(row => String(row.target || '')));
     const target = outputs.find(row => row.id === rule.target);
+    const actionTarget = target?.virtual === true;
+    if (actionTarget) {
+      rule.kind = 0;
+      rule.on_value = 1;
+      rule.off_value = 0;
+      rule.mode_mask = (Number(rule.mode_mask ?? 4) & 0x06) || 4;
+    }
+    const kind = Number(rule.kind || 0);
     const relay = target && [4,11].includes(Number(target.driver));
     const dangerous = ['main_fuel','fuel_shutoff','fuel_pump','pilot_fuel','igniter',
       'ab_igniter','ab_valve','ab_pump','glow_plug',
-      'starter','starter_enable','air_starter'].includes(String(target?.purpose || ''));
+      'starter','starter_enable','air_starter','request_shutdown'].includes(String(target?.purpose || ''));
     const targetSourceType = Number(rule.target_source_type || 0);
     const modeMask = Number(rule.mode_mask ?? 4) & 0x0f;
+    const operatingStates = actionTarget
+      ? `<label class="automation-state"><input type="checkbox" ${modeMask&2?'checked':''} onchange="toggleSimpleControlMode(${index},2,this.checked)"> Startup</label><label class="automation-state"><input type="checkbox" ${modeMask&4?'checked':''} onchange="toggleSimpleControlMode(${index},4,this.checked)"> Running</label>`
+      : `<label class="automation-state"><input type="checkbox" ${modeMask&1?'checked':''} onchange="toggleSimpleControlMode(${index},1,this.checked)"> Standby</label><label class="automation-state"><input type="checkbox" ${modeMask&2?'checked':''} onchange="toggleSimpleControlMode(${index},2,this.checked)"> Startup</label><label class="automation-state"><input type="checkbox" ${modeMask&4?'checked':''} onchange="toggleSimpleControlMode(${index},4,this.checked)"> Running</label><label class="automation-state"><input type="checkbox" ${modeMask&8?'checked':''} onchange="toggleSimpleControlMode(${index},8,this.checked)"> Shutdown</label>`;
     const inputChoice = `<label class="cfg-field"><span class="cfg-label">${kind===2?'Feedback signal':'Controlled by'}</span><select onchange="updateSimpleControl(${index},'source',this.value)">${optionRows(inputs,rule.source)}</select></label>`;
     let topology = '';
     if (kind === 0) {
@@ -1242,9 +1266,9 @@ function renderSimpleControls() {
       <div class="cfg-grid">
         <label class="cfg-field"><span class="cfg-label">Controller name</span><input aria-label="Controller name" value="${esc(rule.name || '')}" maxlength="31" onchange="updateSimpleControl(${index},'name',this.value)"></label>
         <label class="cfg-field"><span class="cfg-label">Output</span><select onchange="updateSimpleControl(${index},'target',this.value)">${optionRows(outputs,rule.target,usedByOthers)}</select></label>
-        <label class="cfg-field"><span class="cfg-label">Control method</span><select onchange="updateSimpleControl(${index},'kind',+this.value)"><option value="0"${kind===0?' selected':''}>On / Off with hysteresis</option>${relay?'':`<option value="1"${kind===1?' selected':''}>Map input to output</option><option value="2"${kind===2?' selected':''}>Hold a feedback target</option>`}<option value="3"${kind===3?' selected':''}>Fixed output in selected states</option></select></label>
+        <label class="cfg-field"><span class="cfg-label">Control method</span><select onchange="updateSimpleControl(${index},'kind',+this.value)"><option value="0"${kind===0?' selected':''}>On / Off with hysteresis</option>${relay?'':`<option value="1"${kind===1?' selected':''}>Map input to output</option><option value="2"${kind===2?' selected':''}>Hold a feedback target</option>`}${actionTarget?'':'<option value="3"'+(kind===3?' selected':'')+'>Fixed output in selected states</option>'}</select></label>
         ${topology}
-      </div><details class="protection-card" style="margin-top:.65rem"><summary><span><span class="protection-card-title">When this controller is active</span><span class="protection-card-desc">RUNNING by default; advanced turbine arrangements may choose other normal states</span></span><span class="protection-card-chevron">›</span></summary><div class="cfg-grid"><label class="cfg-field"><span class="cfg-label">Operating states</span><span class="automation-states"><label class="automation-state"><input type="checkbox" ${modeMask&1?'checked':''} onchange="toggleSimpleControlMode(${index},1,this.checked)"> Standby</label><label class="automation-state"><input type="checkbox" ${modeMask&2?'checked':''} onchange="toggleSimpleControlMode(${index},2,this.checked)"> Startup</label><label class="automation-state"><input type="checkbox" ${modeMask&4?'checked':''} onchange="toggleSimpleControlMode(${index},4,this.checked)"> Running</label><label class="automation-state"><input type="checkbox" ${modeMask&8?'checked':''} onchange="toggleSimpleControlMode(${index},8,this.checked)"> Shutdown</label></span><span class="cfg-desc">The controller owns this output only in checked states. It is always released in FAULT, and STOP/shutdown safety remains authoritative.</span></label></div></details>${dangerous?'<div class="cfg-desc" style="color:var(--yellow);margin-top:.55rem">Warning: this output can affect starting, combustion, or shutdown. Check the selected operating states carefully; STOP, FAULT, and hardware safety remain authoritative.</div>':''}<div class="controller-local-settings" data-controller-settings="${esc(rule.target || '')}"></div></div>
+      </div><details class="protection-card" style="margin-top:.65rem"><summary><span><span class="protection-card-title">When this controller is active</span><span class="protection-card-desc">RUNNING by default; advanced turbine arrangements may choose other normal states</span></span><span class="protection-card-chevron">›</span></summary><div class="cfg-grid"><label class="cfg-field"><span class="cfg-label">Operating states</span><span class="automation-states">${operatingStates}</span><span class="cfg-desc">${actionTarget?'The normal shutdown sequence is requested once the condition becomes true. This does not create a latched FAULT.':'The controller owns this output only in checked states. It is always released in FAULT, and STOP/shutdown safety remains authoritative.'}</span></label></div></details>${dangerous?'<div class="cfg-desc" style="color:var(--yellow);margin-top:.55rem">Warning: this output can affect starting, combustion, or shutdown. Check the selected operating states carefully; STOP, FAULT, and hardware safety remain authoritative.</div>':''}<div class="controller-local-settings" data-controller-settings="${esc(rule.target || '')}"></div></div>
     </details>`;
   }).join('');
   const used = new Set(rules.map(rule => String(rule.target || '')));
@@ -1257,7 +1281,7 @@ const ALL_WORKSPACE_GROUPS = [
   { id:'fuel', title:'Main Fuel & Idle', desc:'Normal fuel demand, idle authority, and reduced-power behavior', sections:['Throttle Response','Idle','Reduced-Power Mode'] },
   { id:'power', title:'Power Turbine & Afterburner', desc:'N2 control and afterburner ignition/running behavior', sections:['Afterburner — Ignition Method','Afterburner — Flame Confirmation','Afterburner — Running'] },
   { id:'oil', title:'Oil & Lubrication Controllers', desc:'Normal pressure response and windmilling oil behavior', sections:['Oil Pressure Control','Windmilling Oil Protection'] },
-  { id:'recovery', title:'Start & Recovery Controllers', desc:'Relight and starter-assist behavior', sections:['Automatic Relight','Manual Relight','Pulsed Starter Assist'] },
+  { id:'recovery', title:'Start & Recovery Controllers', desc:'Automatic and manual relight behavior', sections:['Automatic Relight','Manual Relight'] },
   { id:'safety', title:'Shutdown & Protection', desc:'Gradual fuel pullbacks, reactive or predictive limiting, hard shutdowns, and input-loss actions', sections:['Engine Protection Limits','Gradual Fuel Limit Protection','Oil Pressure Safety','Combustion & Startup Protection','Auxiliary Protection','RPM Sensor Fault Detection','RC / Servo Signal Loss Detection'] },
   { id:'runtime', title:'ECU Runtime', desc:'Control-loop scheduling and device-wide execution', sections:['ECU Runtime'] },
   { id:'display', title:'External Display Thresholds', desc:'Display-only warning zones for the optional instrument cluster', sections:['External Instrument Cluster Display'] },

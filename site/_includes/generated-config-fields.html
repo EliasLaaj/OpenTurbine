@@ -1,5 +1,5 @@
 <!-- Generated from the shared Controllers/System schema by tools/generate_site_config_reference.cjs. Do not edit by hand. -->
-<p class="source-note"><strong>163 fields in 21 sections.</strong> This reference is generated from the same schema that renders the ECU Controllers and System pages, so names and explanations match the current code.</p>
+<p class="source-note"><strong>158 fields in 20 sections.</strong> This reference is generated from the same schema that renders the ECU Controllers and System pages, so names and explanations match the current code.</p>
 
 <details class="reference-section">
   <summary>Engine Protection Limits <span>13 fields</span></summary>
@@ -86,14 +86,6 @@
   <div class="table-wrap"><table>
     <thead><tr><th>Dashboard field</th><th>What it controls</th></tr></thead>
     <tbody><tr><td><strong>N1 Warn RPM</strong></td><td>N1 warning-zone start on the external cluster. 0 selects an automatic value at 90% of the configured N1 hard limit. This changes only cluster presentation.</td></tr><tr><td><strong>N2 Warn RPM</strong></td><td>N2 warning-zone start on the external cluster. This field appears only when N2 feedback is fitted and changes only cluster presentation.</td></tr><tr><td><strong>EGT Warn</strong></td><td>Selected engine-temperature warning threshold for cluster status. 0 = auto (selected EGT limit minus safety margin).</td></tr><tr><td><strong>Oil Warn</strong></td><td>Oil pressure warning status code threshold. 0 = auto (running minimum)</td></tr></tbody>
-  </table></div>
-</details>
-
-<details class="reference-section">
-  <summary>Pulsed Starter Assist <span>5 fields</span></summary>
-  <div class="table-wrap"><table>
-    <thead><tr><th>Dashboard field</th><th>What it controls</th></tr></thead>
-    <tbody><tr><td><strong>Enable Pulsed Starter Assist</strong></td><td>Allow StarterSpin to use low-speed pulses. Requires a servo/PWM starter and healthy N1 feedback. Relay/on-off starters are intentionally unsupported.</td></tr><tr><td><strong>Assist Starter Output</strong> <span class="quiet">(%)</span></td><td>Starter demand during each ON pulse. Verify this output with the STANDBY-only Tools test before attempting a start.</td></tr><tr><td><strong>Assist Until N1 Speed</strong> <span class="quiet">(RPM)</span></td><td>Once healthy N1 reaches this value, pulsing finishes for the current StarterSpin block and ordinary starter control continues. Normally set this below the StarterSpin target.</td></tr><tr><td><strong>Pulse ON Time</strong> <span class="quiet">(ms)</span></td><td>How long the starter remains energized during each assist pulse.</td></tr><tr><td><strong>Pulse OFF Time</strong> <span class="quiet">(ms)</span></td><td>Rest time between assist pulses.</td></tr></tbody>
   </table></div>
 </details>
 

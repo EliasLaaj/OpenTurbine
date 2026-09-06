@@ -496,6 +496,10 @@ public:
 
     // ── API ───────────────────────────────────────────────────
     static void load();
+    // Seed the complete compiled settings profile before HardwareConfig writes
+    // a first-boot unified file. Static initializers alone cannot represent
+    // structured defaults such as controller rules reliably.
+    static void resetToCompiledDefaults();
     static bool save(bool writeRuntimeHardware = false); // atomic unified save; full restore passes true
     static void sanitizeForHardware(); // clear settings that reference unequipped hardware
     // Auto-fill a sane default threshold for any threshold-based

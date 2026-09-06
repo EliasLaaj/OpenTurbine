@@ -478,7 +478,7 @@ function enumNames(source, marker) {
       path: '/generate_204',
       isLive: true,
       isDashboard: true,
-      desiredPeriod: 500,
+      desiredPeriod: 333,
       restActive: true
     });
     results.push('captive portal dashboard entry starts the same compact telemetry path as /index.html');

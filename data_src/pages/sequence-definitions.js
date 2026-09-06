@@ -160,11 +160,11 @@ const BLOCKS = {
   },
   TimedDelay: {
     label:'Timed Delay', type:'wait', badgeClass:'badge-wait',
-    condition: hw => `${hw.timed_delay_ms ?? 1000} ms`,
+    condition: hw => `${seqRound((hw.timed_delay_ms ?? 1000) / 1000)} s`,
     timeout_action:null,
     desc:'Pauses the sequence for the configured duration. No actuator changes - all outputs remain in whatever state the previous block left them.',
     params:[
-      {key:'timed_delay_ms', label:'Delay', unit:'ms', type:'int', min:100, max:60000, step:100, def:1000, configKey:'timed_delay_ms',
+      {key:'timed_delay_ms', label:'Delay', unit:'s', unitType:'duration_ms_as_s', type:'float', min:100, max:60000, step:100, def:1000, configKey:'timed_delay_ms',
         desc:'How long the sequence waits while leaving every output in the state set by the preceding block.'},
     ]
   },

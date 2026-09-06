@@ -100,10 +100,10 @@ function registryStatus(c) {
     const info = GPIO_DB?.[pin];
     if (!info || info.r) return {kind:'error', text:`GPIO ${pin} is unavailable on this board`};
     if (direction === 'output' && info.i) return {kind:'error', text:`GPIO ${pin} is input-only`};
-    if (direction === 'input' && Number(c.driver) === 1 && Number(c.temp_interface || 0) !== 5 && !registryTorqueIsHx711(c) && !info.adc1)
+    if (direction === 'input' && Number(c.driver) === 1 && Number(c.temp_interface || 0) !== 5 && !registryLoadCellIsHx711(c) && !info.adc1)
       return {kind:'error', text:`GPIO ${pin} is not ADC1-capable`};
   }
-  if (registryTorqueIsHx711(c)) {
+  if (registryLoadCellIsHx711(c)) {
     const clk = Number(c.hx711_clk ?? -1), info = GPIO_DB?.[clk];
     if (clk < 0) return {kind:'error', text:'HX711 SCK pin required'};
     if (!info || info.r || info.i) return {kind:'error', text:`HX711 SCK GPIO ${clk} must be output-capable`};
@@ -163,7 +163,7 @@ function registryDemandProblem(value) {
 }
 function registryRangeProblem(c) {
   if (Number(c?.driver) >= 8) return '';
-  if (registryTorqueIsHx711(c)) return '';
+  if (registryLoadCellIsHx711(c)) return '';
   if (String(c?.role || '') === 'temperature' && Number(c?.temp_interface || 0) !== 0) return '';
   const driver = Number(c?.driver);
   const min = Number(c?.min ?? 0);
@@ -205,7 +205,7 @@ function registryPinSummary(c) {
     return port ? pcbChoiceLabel({port,mode}) : 'PCB connection missing';
   }
   if (Number(c?.driver) >= 8) return `I2C 0x${Number(c.i2c_address||0).toString(16).toUpperCase().padStart(2,'0')} channel ${Number(c.device_channel||0)}`;
-  if (registryTorqueIsHx711(c)) return `DOUT GPIO${c.pin} / SCK GPIO${c.hx711_clk ?? 'not set'}`;
+  if (registryLoadCellIsHx711(c)) return `DOUT GPIO${c.pin} / SCK GPIO${c.hx711_clk ?? 'not set'}`;
   if (registryTemperatureIsSpi(c)) {
     return `Shared SPI bus / CS GPIO${c.spi_cs}`;
   }
@@ -259,7 +259,7 @@ function updateRegistryProfilePort(direction,index,value) {
   dirty(); renderRegistryInventory(); updateSaveButton();
 }
 function registrySignalSummary(c) {
-  if (registryTorqueIsHx711(c)) return 'HX711 load-cell amplifier';
+  if (registryLoadCellIsHx711(c)) return 'HX711 load-cell amplifier';
   const tempNames = {1:'MAX6675 thermocouple', 2:'MAX31855 thermocouple', 3:'MAX31856 thermocouple', 4:'NTC thermistor divider', 5:'DS18B20 OneWire'};
   return tempNames[Number(c.temp_interface)] || driverName(c.driver);
 }
@@ -1240,7 +1240,7 @@ function renderRegistryInventory() {
            ${pcbProfileActive() ? '' : registryI2cEditor(direction, c, i)}
            ${pcbProfileActive() ? '' : (direction==='input' ? registryTemperatureInterfaceEditor(c, i) : '')}
            ${pcbProfileActive() ? '' : registryTorqueInterfaceEditor(direction, c, i)}
-           ${(!pcbProfileActive() || !c.physical_port) && Number(c.driver)<8 && !(direction==='input' && registryTemperatureIsSpi(c)) ? `<div class="hw-field"><span class="hw-label">${direction==='input' ? registryInputPinLabel(c) : 'GPIO pin'}</span><select class="${pinClass}" onchange="updateRegistryChannel('${direction}',${i},'pin',+this.value)">${buildPinOptions(c.pin, registryTorqueIsHx711(c) || Number(c.temp_interface||0)===5 ? 'in' : registryPinMode(direction, c.driver))}</select>${pcbProfileActive()?'<span class="hw-desc">Only unreserved ESP32 pins are offered. PCB-labelled connections are preferred when suitable.</span>':''}</div>` : ''}
+           ${(!pcbProfileActive() || !c.physical_port) && Number(c.driver)<8 && !(direction==='input' && registryTemperatureIsSpi(c)) ? `<div class="hw-field"><span class="hw-label">${direction==='input' ? registryInputPinLabel(c) : 'GPIO pin'}</span><select class="${pinClass}" onchange="updateRegistryChannel('${direction}',${i},'pin',+this.value)">${buildPinOptions(c.pin, registryLoadCellIsHx711(c) || Number(c.temp_interface||0)===5 ? 'in' : registryPinMode(direction, c.driver))}</select>${pcbProfileActive()?'<span class="hw-desc">Only unreserved ESP32 pins are offered. PCB-labelled connections are preferred when suitable.</span>':''}</div>` : ''}
            ${pcbProfileActive() ? '' : registryInputOptionsEditor(direction, c, i)}
            ${registryProfileInputTuningEditor(direction, c, i)}
            ${pcbProfileActive() ? '' : registryInvertEditor(direction, c, i)}

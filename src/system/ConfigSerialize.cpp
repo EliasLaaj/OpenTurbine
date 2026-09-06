@@ -368,6 +368,12 @@ bool Config::applyJsonRuntimeOnly(const JsonDocument& doc, bool allowActiveLive,
         return false;
     }
     _fromDoc(doc, validateHardwareDependencies);
+    // Full engine-file restore may intentionally replace the device identity.
+    // The caller temporarily aligns HardwareConfig for validation, so carry the
+    // validated settings identity into runtime before the atomic unified save.
+    // Otherwise a matching uploaded Hardware/Settings pair with a new name is
+    // rejected later as if the two sections belonged to different engines.
+    strlcpy(profileId, id, sizeof(profileId));
     profileMatch = true;
     EngineData::instance().configVersionMismatch = false;
     return true;
@@ -522,7 +528,7 @@ void Config::_applyDefaults() {
     rpmZeroThreshold = 100.0f;
     cooldownUseStarter = true; cooldownUseOilPump = true;
     cooldownStarterPct = 40.0f; cooldownOilPct = 30.0f; cooldownOilPressureTarget = 2.0f;
-    throttleRampUpMs = 600; throttleRampDownMs = 800;
+    throttleRampUpMs = 1000; throttleRampDownMs = 2000;
     throttleIdleMaxPct = 50; throttleExpo = 0.0f;
     fuelPumpMinPct = 0;
     pullbackN1Enabled = true; pullbackN2Enabled = false; pullbackEgtEnabled = true;
@@ -582,7 +588,7 @@ void Config::_applyDefaults() {
     standbyOilSource = 0; standbyOilRpmLimit = 1000.0f; standbyOilFeedPct = 25.0f;
     standbyOilFeedBar = 0.0f;
     standbyOilOutputId[0] = '\0';
-    limpMaxThrottlePct = 50.0f; igniterOnStart = true; manualRelightIgnitionTarget = 0;
+    limpMaxThrottlePct = 75.0f; igniterOnStart = false; manualRelightIgnitionTarget = 0;
     cooldownSkipHoldMs = 1000;
     manualRelightOutputId[0] = '\0';
     fp2StartPct = 0.0f; fp2EndPct = 80.0f; fp2RampMs = 3000; fp2DemandPct = 0.0f;
@@ -646,6 +652,10 @@ void Config::_applyDefaults() {
     }
     loadWarning[0] = '\0';
     // Runtime stats are NOT reset here; hour meter data persists across config reloads.
+}
+
+void Config::resetToCompiledDefaults() {
+    _applyDefaults();
 }
 
 void Config::_fromDoc(const JsonDocument& doc, bool resolveRuleHandles) {

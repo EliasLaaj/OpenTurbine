@@ -929,6 +929,7 @@ void writeSeqSideActions(
             item["act"] = a.actuator;
             item["target"] = a.targetId[0] ? a.targetId : sequenceTargetId(a.actuator);
             item["value"] = a.value;
+            if (a.transitionMs > 0) item["transition_ms"] = a.transitionMs;
         }
     }
 }
@@ -953,6 +954,7 @@ void readSeqSideActions(
             actions[i][out].actuator = act >= 0 ? (uint8_t)act : 255;
             strlcpy(actions[i][out].targetId, target, sizeof(actions[i][out].targetId));
             actions[i][out].value = constrain(item["value"] | 0.0f, 0.0f, 1.0f);
+            actions[i][out].transitionMs = (uint16_t)constrain(item["transition_ms"] | 0UL, 0UL, 60000UL);
             out++;
         }
     }
@@ -1446,6 +1448,12 @@ bool validateSequenceReferenceIds(JsonVariantConst doc, const ChannelRegistry* r
             if (!slot.is<JsonArrayConst>()) return false;
             for (JsonVariantConst item : slot.as<JsonArrayConst>()) {
                 if (!item.is<JsonObjectConst>() || !validTarget(item["target"])) return false;
+                JsonVariantConst transition = item["transition_ms"];
+                if (!transition.isNull()) {
+                    if (!transition.is<long>() && !transition.is<unsigned long>()) return false;
+                    if ((transition.is<long>() && transition.as<long>() < 0) ||
+                        transition.as<unsigned long>() > 60000UL) return false;
+                }
             }
         }
     }
@@ -2060,8 +2068,10 @@ bool validatePlatformPins(const JsonDocument& doc,
         if (registryNeedsMosi && (spi["mosi_pin"] | -1) < 0) return false;
         for (uint8_t i = 0; i < registry.inputCount; i++) {
             const auto& ch = registry.inputs[i];
-            const bool hx711Torque = !strcmp(ch.role, "torque") && ch.torqueInterface == 1;
-            if (hx711Torque) {
+            const bool hx711LoadCell =
+                (!strcmp(ch.role, "torque") || !strcmp(ch.role, "thrust")) &&
+                ch.torqueInterface == 1;
+            if (hx711LoadCell) {
                 if (!gpioAllowed(ch.pin) || !outputGpioAllowed(ch.hx711Clk) ||
                     ch.pin == ch.hx711Clk) return false;
                 // Core torque pins are mirrored into the runtime adapter and
@@ -2632,12 +2642,16 @@ void HardwareConfig::load() {
     }
 
     // First boot with no ecu_config.json seeds the file from the compiled
-    // hardware_profile.h defaults (applyDefaults() above + save() below).
+    // hardware_profile.h defaults (applyDefaults() above + streamed save below).
     // Factory reset regenerates from the same defaults (no factory_config.json
     // ships), so hardware_profile.h is the single source of default topology.
     if (!LittleFS.exists(PATH)) {
         Serial.println("[HWCfg] No ecu_config.json - using compiled defaults, generating file");
-        if (!save()) {
+        // Hardware loads before Config at boot. Initialize the complete settings
+        // profile so clean installs and factory resets include structured
+        // defaults such as the schema-1 Main Fuel controller.
+        Config::resetToCompiledDefaults();
+        if (!saveUnified(false)) {
             inhibitStartForHardwareConfigFailure(
                 "Cannot start: hardware configuration storage is unavailable.", true);
         } else if (PcbProfileManager::active() &&
@@ -2691,7 +2705,7 @@ void HardwareConfig::load() {
         delay(0);
     } else {
         Serial.println("[HWCfg] Hardware section missing - adding compiled defaults");
-        if (!save()) {
+        if (!saveUnified(true)) {
             inhibitStartForHardwareConfigFailure(
                 "Cannot start: no stored hardware configuration is available.", true);
         }
@@ -2709,7 +2723,7 @@ void HardwareConfig::load() {
         Serial.printf("[HWCfg] Stored hardware platform %s does not match firmware %s - regenerating safe defaults\n",
                       workDoc["platform"] | "(unset)", currentPlatformName());
         applyDefaults();
-        if (!save()) {
+        if (!saveUnified(true)) {
             inhibitStartForHardwareConfigFailure(
                 "Cannot start: hardware configuration could not be saved to storage.", true);
             Serial.println("[HWCfg] Platform migration save failed - START inhibited");
@@ -2741,80 +2755,6 @@ void HardwareConfig::load() {
 }
 
 // ── Save ──────────────────────────────────────────────────────
-bool HardwareConfig::save() {
-    static constexpr const char* TMP_PATH = "/ecu_config.hw.tmp";
-    static constexpr const char* BAK_PATH = "/ecu_config.bak";
-    if (!Config::acquireStorageWrite()) {
-        Serial.println("[HWCfg] Timed out waiting to write ecu_config.json");
-        return false;
-    }
-    struct StorageRelease {
-        ~StorageRelease() { Config::releaseStorageWrite(); }
-    } release;
-    // Read-modify-write: preserve other sections (settings etc.)
-    JsonDocument fullDoc;
-    File fr = LittleFS.open(PATH, "r");
-    if (fr) {
-        // The unified file currently has two authoritative top-level
-        // sections. Hardware is being replaced, so parsing its old copy only
-        // wastes heap while the incoming POST document is still resident.
-        JsonDocument filter;
-        filter["settings"] = true;
-        DeserializationError err = deserializeJson(
-            fullDoc, fr, DeserializationOption::Filter(filter));
-        fr.close();
-        if (err) {
-            Serial.printf("[HWCfg] Refusing to overwrite unreadable ecu_config.json: %s\n",
-                          err.c_str());
-            return false;
-        }
-    }
-
-    // Rebuild Hardware directly inside the unified document; no second
-    // hardware document or copied replacement is needed.
-    _toDoc(fullDoc[SECTION].to<JsonObject>());
-    if (fullDoc["settings"].is<JsonObject>())
-        fullDoc["settings"]["profile_id"] = profileId;
-
-    File fw = LittleFS.open(TMP_PATH, "w");
-    if (!fw) {
-        Serial.println("[HWCfg] Failed to open ecu_config.hw.tmp for write");
-        return false;
-    }
-    size_t expected = measureJsonPretty(fullDoc);
-    size_t written = serializeJsonPretty(fullDoc, fw);
-    fw.close();
-    if (written != expected) {
-        LittleFS.remove(TMP_PATH);
-        Serial.println("[HWCfg] Incomplete write to ecu_config.hw.tmp");
-        return false;
-    }
-    LittleFS.remove(BAK_PATH);
-    bool hadOriginal = LittleFS.exists(PATH);
-    if (hadOriginal && !LittleFS.rename(PATH, BAK_PATH)) {
-        LittleFS.remove(TMP_PATH);
-        Serial.println("[HWCfg] failed to preserve previous ecu_config.json");
-        return false;
-    }
-    if (!LittleFS.rename(TMP_PATH, PATH)) {
-        Serial.println("[HWCfg] rename ecu_config.hw.tmp failed");
-        const bool restored = !hadOriginal || LittleFS.rename(BAK_PATH, PATH);
-        LittleFS.remove(TMP_PATH);
-        if (!restored) {
-            // Keep ecu_config.bak: load() can recover it on a later boot once
-            // the filesystem is writable again.
-            Serial.println("[HWCfg] rollback failed; preserving ecu_config.bak for boot recovery");
-        }
-        return false;
-    }
-    if (hadOriginal) LittleFS.remove(BAK_PATH);
-    return true;
-}
-
-// ── Apply defaults ─────────────────────────────────────────────
-// Called before load() to seed all values from hardware_profile.h.
-// Static member initialisers already handle this at program start;
-// this function is used when resetting to defaults at runtime.
 bool HardwareConfig::saveUnified(bool preserveStoredSettings) {
     static constexpr const char* TMP_PATH = "/ecu_config.unified.tmp";
     static constexpr const char* BAK_PATH = "/ecu_config.bak";

@@ -736,7 +736,7 @@ const setups = [
         const coolantIn = await page.locator('[data-registry-input-id="coolant_temperature"]').textContent();
         const coolantOut = await page.locator('[data-registry-output-id="coolant_pump"]').textContent();
         assert.match(coolantIn, /Coolant Temp/);
-        assert.match(coolantIn, /72\.5/);
+        assert.match(coolantIn, /73/);
         assert.match(coolantOut, /Coolant Pump/);
         assert.match(coolantOut, /80\.0%/);
       }

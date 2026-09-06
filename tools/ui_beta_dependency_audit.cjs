@@ -714,7 +714,7 @@ async function optionDisabled(page, selector, value) {
     assert.equal(await shown(page, '#oilpump-current-cal-row'), true);
     assert.equal(await shown(page, '#ab-flame-cal-row'), true);
     assert.match(await page.locator('#cal-th-raw').textContent(), /us|µs/);
-    assert.match(await page.locator('#idle-raw-label').textContent(), /raw/i);
+    assert.match(await page.locator('#idle-raw-label').textContent(), /voltage|mV/i);
     await page.evaluate(() => {
       live = {};
       window.applyData({
@@ -883,7 +883,7 @@ async function optionDisabled(page, selector, value) {
       ab_trigger: { input_pin: -1 }
     });
     await page.reload();
-    await page.waitForSelector('#add-startup-sel');
+    await page.waitForSelector('#add-startup-sel', { state: 'attached' });
     const sequenceHidden = await page.evaluate(() => ({
       startup: Array.from(document.querySelectorAll('#add-startup-sel option')).map(o => ({ value: o.value, disabled: o.disabled })).filter(o => o.value),
       afterburnerValues: Array.from(document.querySelectorAll('#add-afterburner-sel option')).map(o => o.value).filter(Boolean),

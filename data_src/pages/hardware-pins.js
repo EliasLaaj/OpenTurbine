@@ -172,7 +172,7 @@ function collectPinUsage() {
     if (addProfilePortPin(ch, 'input') ||
         (profileActive && ch.purpose === 'battery_voltage' &&
          pcbProfile?.fixed_functions?.supply_voltage?.available)) return;
-    if (registryTorqueIsHx711(ch)) {
+    if (registryLoadCellIsHx711(ch)) {
       const label = registryDisplayName('input', ch, ch.id || 'Torque');
       add(ch.pin, `${label} DOUT`);
       add(ch.hx711_clk, `${label} SCK`);

@@ -288,6 +288,7 @@ let _restFallbackInFlight = false;
 let _telemetryTextRevision = null;
 let _pendingTelemetryTextRevision = null;
 let _telemetryTextInFlight = false;
+let _telemetryPauseDepth = 0;
 let _lastUptimeS = null;
 let _lastBootCount = null;
 let _statusHeartbeatTimer = null;
@@ -337,11 +338,11 @@ function requestTelemetryNow() {
 }
 
 function waitForGlobalTelemetryIdle(timeoutMs = 1500) {
-  if (!_restFallbackInFlight) return Promise.resolve(true);
+  if (!_restFallbackInFlight && !_telemetryTextInFlight) return Promise.resolve(true);
   return new Promise(resolve => {
     const started = Date.now();
     const poll = () => {
-      if (!_restFallbackInFlight) resolve(true);
+      if (!_restFallbackInFlight && !_telemetryTextInFlight) resolve(true);
       else if (Date.now() - started >= timeoutMs) resolve(false);
       else setTimeout(poll, 25);
     };
@@ -350,8 +351,28 @@ function waitForGlobalTelemetryIdle(timeoutMs = 1500) {
 }
 window.OTWaitForTelemetryIdle = waitForGlobalTelemetryIdle;
 
+// Configuration writes briefly need the Classic ESP32's contiguous maintenance
+// workspace. Pause new live requests, drain the current one, perform exactly one
+// write, then resume the 3 Hz stream. Nested callers are safe and only the outer
+// operation restarts telemetry.
+async function withGlobalTelemetryPaused(work, timeoutMs = 2500) {
+  _telemetryPauseDepth++;
+  try {
+    const idle = await waitForGlobalTelemetryIdle(timeoutMs);
+    if (!idle) throw new Error('Live data stream did not become idle; save was not started');
+    return await work();
+  } finally {
+    _telemetryPauseDepth = Math.max(0, _telemetryPauseDepth - 1);
+    if (_telemetryPauseDepth === 0) {
+      _lastMsgMs = 0;
+      setTimeout(requestTelemetryNow, 0);
+    }
+  }
+}
+window.OTWithTelemetryPaused = withGlobalTelemetryPaused;
+
 async function restTelemetryFallbackNow() {
-  if (!isLiveTelemetryPage() || document.hidden || _restFallbackInFlight || _telemetryTextInFlight) return;
+  if (!isLiveTelemetryPage() || document.hidden || _telemetryPauseDepth > 0 || _restFallbackInFlight || _telemetryTextInFlight) return;
   const freshForMs = Math.max(250, Math.floor(desiredPullPeriodMs() * 0.8));
   if (_lastMsgMs && Date.now() - _lastMsgMs < freshForMs) return;
   _restFallbackInFlight = true;
@@ -372,7 +393,7 @@ async function restTelemetryFallbackNow() {
   } finally {
     clearTimeout(timeout);
     _restFallbackInFlight = false;
-    if (_pendingTelemetryTextRevision !== null &&
+    if (_telemetryPauseDepth === 0 && _pendingTelemetryTextRevision !== null &&
         _pendingTelemetryTextRevision !== _telemetryTextRevision)
       requestTelemetryTextRevision(_pendingTelemetryTextRevision);
   }
@@ -382,7 +403,7 @@ async function requestTelemetryTextRevision(revision) {
   const wanted = Number(revision) >>> 0;
   if (_telemetryTextRevision === wanted) return;
   _pendingTelemetryTextRevision = wanted;
-  if (_telemetryTextInFlight) return;
+  if (_telemetryPauseDepth > 0 || _telemetryTextInFlight) return;
   _telemetryTextInFlight = true;
   const requestedRevision = wanted;
   let succeeded = false;
@@ -2449,9 +2470,11 @@ if (_emptySeqBanner) _emptySeqBanner.style.display = 'none';
 // that route needs substantially more contiguous RAM and belongs exclusively
 // to System > Backup & restore.
 window.OTSaveConfigPatch = async function(patch) {
-  const response = await fetch('/api/config', {
-    method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(patch)
+  return withGlobalTelemetryPaused(async () => {
+    const response = await fetch('/api/config', {
+      method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(patch)
+    });
+    const data = await response.json().catch(() => ({}));
+    return {response, data};
   });
-  const data = await response.json().catch(() => ({}));
-  return {response, data};
 };

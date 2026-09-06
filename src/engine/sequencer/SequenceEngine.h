@@ -45,6 +45,7 @@ public:
         // Replacement is ECU-owned cleanup. User success/timeout exit actions
         // must not run for a forced replacement.
         const uint32_t operation = ++_generation;
+        _cancelStarterTransition();
         if (_running && _blocks && _idx < _count) {
             IBlock::setAfterburnerContext(_afterburner);
             _blocks[_idx]->onExit();
@@ -71,6 +72,7 @@ public:
 
     void stopSequence() {
         const uint32_t operation = ++_generation;
+        _cancelStarterTransition();
         if (_running && _idx < _count) {
             IBlock::setAfterburnerContext(_afterburner);
             _blocks[_idx]->onExit();
@@ -97,6 +99,7 @@ public:
     }
 
     void tick() {
+        _updateStarterTransition();
         if (!_running || !_blocks || _idx >= _count) return;
         const uint32_t operation = _generation;
 
@@ -142,6 +145,7 @@ public:
                     break;
                 }
                 FlightRecorder::logBlockExit(_blocks[_idx]->name(), "abort");
+                _cancelStarterTransition();
                 _blocks[_idx]->onExit();
                 if (_generation != operation) return;
                 _running = false;
@@ -162,6 +166,7 @@ public:
                     break;
                 }
                 FlightRecorder::logBlockExit(_blocks[_idx]->name(), "fault");
+                _cancelStarterTransition();
                 _recordFaultBlock(_blocks[_idx]->name());
                 _blocks[_idx]->onExit();
                 if (_generation != operation) return;
@@ -191,6 +196,11 @@ private:
     DoneFn    _done    = nullptr;
     AbortFn   _abort   = nullptr;
     FaultFn   _fault   = nullptr;
+    bool      _starterTransitionActive = false;
+    float     _starterTransitionFrom = 0.0f;
+    float     _starterTransitionTo = 0.0f;
+    uint32_t  _starterTransitionStartedMs = 0;
+    uint32_t  _starterTransitionDurationMs = 0;
 
     void _enter(size_t i) {
         const char* bname = _blocks[i]->name();
@@ -208,7 +218,10 @@ private:
         _applyActions(_enterActions, i);
         // A configurable side action must never be able to re-energize a
         // combustion or starter output in the hard-cut shutdown block.
-        if (strcmp(bname, "ImmediateCut") == 0) _blocks[i]->onEnter();
+        if (strcmp(bname, "ImmediateCut") == 0) {
+            _cancelStarterTransition();
+            _blocks[i]->onEnter();
+        }
     }
 
     void _recordResult(const char* result) {
@@ -233,7 +246,37 @@ private:
         for (int j = 0; j < HardwareConfig::MAX_SEQ_SIDE_ACTIONS; j++) {
             const auto& a = actions[i][j];
             if (!a.enabled) continue;
-            RulesEngine::applyActuatorDemand(a.actuator, a.value);
+            if (a.actuator == RulesEngine::STARTER && a.transitionMs > 0) {
+                auto& ed = EngineData::instance();
+                _starterTransitionFrom = constrain(ed.starterDemand, 0.0f, 1.0f);
+                _starterTransitionTo = constrain(a.value, 0.0f, 1.0f);
+                _starterTransitionStartedMs = millis();
+                _starterTransitionDurationMs = a.transitionMs;
+                _starterTransitionActive = true;
+                _updateStarterTransition();
+            } else {
+                if (a.actuator == RulesEngine::STARTER) _cancelStarterTransition();
+                RulesEngine::applyActuatorDemand(a.actuator, a.value);
+            }
         }
+    }
+
+    void _cancelStarterTransition() {
+        _starterTransitionActive = false;
+        _starterTransitionDurationMs = 0;
+    }
+
+    void _updateStarterTransition() {
+        if (!_starterTransitionActive || _starterTransitionDurationMs == 0) return;
+        const uint32_t elapsed = millis() - _starterTransitionStartedMs;
+        if (elapsed >= _starterTransitionDurationMs) {
+            RulesEngine::applyActuatorDemand(RulesEngine::STARTER, _starterTransitionTo);
+            _cancelStarterTransition();
+            return;
+        }
+        const float fraction = (float)elapsed / (float)_starterTransitionDurationMs;
+        const float demand = _starterTransitionFrom +
+                             (_starterTransitionTo - _starterTransitionFrom) * fraction;
+        RulesEngine::applyActuatorDemand(RulesEngine::STARTER, demand);
     }
 };

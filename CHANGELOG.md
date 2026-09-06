@@ -10,6 +10,35 @@ _Note: there is no 1.2.0 release — 1.1.0 was followed directly by 1.3.0._
 
 ## [Unreleased]
 
+## [2.3.2] — 2026-09-06
+
+### Changed
+
+- Updated fresh-install and factory-reset control defaults to the reviewed bench profile: 1.0 s main-fuel ramp-up, 2.0 s ramp-down, a 75% reduced-power cap, and manual relight from the physical Start input disabled. Target-specific GPIO defaults remain separate for ESP32 Classic and ESP32-S3.
+
+- Direct HX711 load-cell inputs now support both torque and thrust, including one of each at the same time, with independent DOUT/SCK wiring and calibration.
+
+### Added
+
+- Custom controllers can request the normal shutdown sequence from a fitted
+  input threshold with hysteresis. The virtual action uses no GPIO, is limited
+  to STARTUP/RUNNING, and does not latch an engine fault.
+
+### Fixed
+
+- Clean installs and factory resets initialize the complete settings profile before saving it, including the explicit Main Fuel controller.
+- Full engine-file restore carries a matching uploaded identity through the atomic save, so restoring a differently named engine does not fail as a false section mismatch.
+- Set Starter preserves its per-command speed-change time; sequence delays use seconds and starter-presence checks include fitted output actions.
+- Run summaries recover completed runs from retained event history, and Session Data loads recorder status and files sequentially.
+- Live actuator indications follow the compact telemetry values.
+- Calibration saves now pause the 3 Hz live stream, release its disposable ECU
+  workspace, and use the section-streaming atomic writer on Classic ESP32.
+- Hardware persistence now rejects ArduinoJson allocation overflow and any
+  unexpected registry-count loss, preventing a valid-looking truncated engine
+  file from replacing the last known-good configuration.
+- The obsolete monolithic hardware writer was removed; all page-owned updates
+  now share the section-streaming atomic persistence path.
+
 ## [2.3.1] — 2026-09-06
 
 ### Changed

@@ -87,6 +87,10 @@ async function saveAll() {
   setSaveStatus('Saving engine file...');
   try {
     if (typeof stopSequenceTelemetry === 'function') stopSequenceTelemetry();
+    if (typeof window.OTWaitForPageTelemetryIdle === 'function') {
+      const idle = await window.OTWaitForPageTelemetryIdle(2500);
+      if (!idle) throw new Error('Live sequence status did not become idle; save was not started');
+    }
     await new Promise(resolve => setTimeout(resolve, 150));
     const settingsPatch = mergeSequenceEdits(loadedCfg, cfg, {});
     const hardwareKeys = [

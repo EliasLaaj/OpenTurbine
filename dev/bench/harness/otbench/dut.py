@@ -16,6 +16,117 @@ import urllib.error
 import urllib.request
 
 
+def _decode_compact_telemetry(frame, previous=None):
+    """Expand the firmware's compact v2 frame into the public telemetry names.
+
+    Keep this in step with ``decodeCompactTelemetry`` in ``data_src/app.js`` so
+    the physical HIL runner exercises the same 3 Hz transport as the browser.
+    """
+    if not isinstance(frame, dict) or frame.get("cv") != 2 or not isinstance(frame.get("v"), list):
+        return frame
+    v = frame["v"]
+    if len(v) < 73:
+        raise RuntimeError("compact telemetry v2 value array is truncated")
+
+    def bit(mask, index):
+        return bool((int(mask or 0) >> index) & 1)
+
+    out = {
+        "snapshot_id": frame.get("s"),
+        "mode": ("STANDBY", "STARTUP", "RUNNING", "SHUTDOWN", "FAULT")[int(frame.get("m", 255))]
+                if 0 <= int(frame.get("m", 255)) < 5 else "UNKNOWN",
+        "n1": v[0], "n2": v[1], "n1_rpm_accel": v[2], "n2_rpm_accel": v[3],
+        "tot": v[4], "tit": v[5], "oil": v[6] / 100.0,
+        "p1": v[7] / 100.0, "p2": v[8] / 100.0,
+        "fuel_press": v[9] / 100.0, "fuel_flow": v[10] / 10.0,
+        "oil_temp": v[11], "batt_voltage": v[12] / 10.0,
+        "torque": v[13] / 10.0, "thrust": v[14] / 10.0,
+        "throttle_input_raw": v[15], "idle_input_raw": v[16],
+        "throttle_input_us": v[15], "idle_input_us": v[16],
+        "throttle_input_norm": v[17] / 1000.0, "rc_throttle_norm": v[18] / 1000.0,
+        "throttle_demand": v[19] / 1000.0, "throttle_effective": v[20] / 1000.0,
+        "oil_pct": v[21] / 10.0, "oil_demand": v[22] / 100.0,
+        "prop_pitch_demand": v[23] / 1000.0, "ab_fuel_offset": v[24] / 1000.0,
+        "starter_demand": v[25] / 1000.0, "ab_pump_demand": v[26] / 1000.0,
+        "fuel_pump2_demand": v[27] / 1000.0, "glow_plug_pct": v[28] / 10.0,
+        "wet_glow_fuel_pct": v[29] / 10.0, "cool_fan_demand": v[30] / 1000.0,
+        "oil_scavenge_demand": v[31] / 1000.0, "bleed_valve_demand": v[32] / 1000.0,
+        "glow_current_amps": v[33] / 10.0, "igniter_current_amps": v[34] / 10.0,
+        "igniter2_current_amps": v[35] / 10.0, "oil_pump_current_amps": v[36] / 10.0,
+        "max_n1": v[37], "max_n2": v[38], "max_tot": v[39], "max_tit": v[40],
+        "max_p1": v[41] / 100.0, "max_p2": v[42] / 100.0,
+        "max_oil_temp": v[43], "max_batt_voltage": v[44] / 10.0,
+        "max_fuel_press": v[45] / 100.0, "tot_rise_rate": v[46], "egt_rise_rate": v[46],
+        "turbo_power_w": v[47], "extra_cooldown_remaining_s": v[48],
+        "relight_attempts": v[49], "flame_raw": v[50], "oil_raw": v[51],
+        "p1_raw": v[52], "p2_raw": v[53], "fuel_press_raw": v[54],
+        "oil_temp_raw": v[55], "batt_voltage_raw": v[56], "torque_raw": v[57],
+        "thrust_raw": v[58], "fuel_flow_raw": v[59], "glow_current_raw": v[60],
+        "igniter_current_raw": v[61], "igniter2_current_raw": v[62],
+        "oil_pump_current_raw": v[63], "last_run_flame_avg": v[64] / 10.0,
+        "last_run_flame_samples": v[65], "min_oil": v[66] / 100.0 if v[66] >= 0 else None,
+        "total_run_seconds": v[67], "run_count": v[68], "start_attempt_count": v[69],
+        "ab_seq_block_idx": v[70], "ab_seq_block_total": v[71], "ab_flame_raw": v[72],
+        "ri_on": frame.get("io"), "ri_ok": frame.get("ih"),
+        "ro_on": frame.get("oo"), "di_on": frame.get("di"),
+        "uptime_s": frame.get("u"), "boot_count": frame.get("bc"),
+        "reset_reason": frame.get("rr"), "session_dropped_rows": frame.get("lg"),
+        "session_queued_rows": frame.get("lq"), "session_logger_error": frame.get("lc"),
+        "_text_revision": frame.get("tr"),
+    }
+    ab_modes = ("Off", "Arming", "Igniting", "Running", "ShuttingDown", "Fault")
+    ab_index = int(frame.get("am", 0))
+    out["ab_mode"] = ab_modes[ab_index] if 0 <= ab_index < len(ab_modes) else "Off"
+    if isinstance(frame.get("sq"), list) and len(frame["sq"]) >= 2:
+        out["seq_block_idx"], out["seq_block_total"] = frame["sq"][:2]
+
+    names = (
+        "fault_latched", "dry_oil_stop_active", "fault_clear_allowed", "n1_healthy",
+        "n2_healthy", "tot_healthy", "tit_healthy", "oil_healthy", "p1_healthy", "p2_healthy",
+        "fuel_press_healthy", "fuel_flow_healthy", "oil_temp_healthy", "batt_healthy",
+        "torque_healthy", "thrust_healthy", "flame_healthy", "flame", "starter_enabled",
+        "fuel_sol_open", "igniter_on", "igniter2_on", "stop_switch_active", "start_switch_active",
+        "start_switch_healthy", "start_switch_ready", "limp_mode", "dynamic_idle_enabled",
+        "manual_relight_active", "oil_failsafe_active", "standby_oil_feed_active", "surge_detected",
+    )
+    names2 = (
+        "dev_mode", "bench_mode", "relight_armed", "extra_cooldown_active", "ab_trigger_active",
+        "ab_flame_on", "ab_flame_healthy", "ab_permitted", "ab_execution_active", "ab_sol_open",
+        "glow_plug_hot", "glow_current_healthy", "igniter_current_healthy",
+        "igniter2_current_healthy", "oil_pump_current_healthy", "oil_pump_overcurrent",
+        "oil_flow_warning", "airstarter_open", "main_fuel_protection_active",
+        "config_version_mismatch", "throttle_input_valid", "idle_input_valid", "rc_throttle_valid",
+        "rc_idle_valid", "ab_arm_switch_on", "config_storage_fault", "hardware_ready", "watchdog_ready",
+        "recovery_lockout", "session_logger_healthy", "session_capture_active", "limited_start_allowed",
+    )
+    out.update((name, bit(frame.get("f"), index)) for index, name in enumerate(names))
+    out.update((name, bit(frame.get("g"), index)) for index, name in enumerate(names2))
+    out["cool_fan_on"] = v[30] >= 50
+    out["oil_scavenge_on"] = v[31] >= 50
+    out["bleed_valve_open"] = v[32] >= 50
+
+    previous = previous or {}
+    prior_inputs = previous.get("registry_inputs") or []
+    prior_outputs = previous.get("registry_outputs") or []
+    if isinstance(frame.get("iv"), list):
+        out["registry_inputs"] = [
+            {"id": prior_inputs[i].get("id", str(i)) if i < len(prior_inputs) else str(i),
+             "value": value,
+             "raw": frame.get("ir", [None] * len(frame["iv"]))[i],
+             "healthy": bit(frame.get("ih"), i)}
+            for i, value in enumerate(frame["iv"])
+        ]
+    if isinstance(frame.get("ov"), list):
+        out["registry_outputs"] = [
+            {"id": prior_outputs[i].get("id", str(i)) if i < len(prior_outputs) else str(i),
+             "demand": value / 1000.0,
+             "current_amps": (frame.get("oc") or [None] * len(frame["ov"]))[i] / 10.0,
+             "current_healthy": bit(frame.get("oh"), i)}
+            for i, value in enumerate(frame["ov"])
+        ]
+    return out
+
+
 class DUT:
     def __init__(self, base=None, timeout=8.0):
         base = base or os.environ.get("OTBENCH_DUT", "http://192.168.4.1")
@@ -23,6 +134,7 @@ class DUT:
         self.timeout = timeout
         self.wifi_profile = os.environ.get("OTBENCH_WIFI_PROFILE", "OpenTurbine")
         self._data_base = None
+        self._text_revision = None
         self._last_wifi_reconnect = 0.0
 
     def _reconnect_wifi(self, force=False):
@@ -197,7 +309,7 @@ class DUT:
             self._data_base = self._get("/api/data")
             return dict(self._data_base)
 
-        telemetry = self._get("/api/telemetry")
+        telemetry = _decode_compact_telemetry(self._get("/api/telemetry"), self._data_base)
         old_boot = self._data_base.get("boot_count")
         new_boot = telemetry.get("boot_count")
         if old_boot is not None and new_boot is None:
@@ -211,6 +323,10 @@ class DUT:
         # field does not make the harness fall back to its boot-time value.
         # This mirrors the browser's persistent telemetry model.
         self._data_base.update(telemetry)
+        text_revision = telemetry.get("_text_revision")
+        if text_revision is not None and text_revision != self._text_revision:
+            self._data_base.update(self._get("/api/telemetry_text"))
+            self._text_revision = text_revision
         return dict(self._data_base)
 
     def full_data(self):

@@ -13,6 +13,20 @@ function expect(label, condition) {
 }
 
 const configSerialize = read('src/system/ConfigSerialize.cpp');
+const configHeader = read('src/system/Config.h');
+expect('factory control defaults match the reviewed clean-board profile',
+  configSerialize.includes('throttleRampUpMs = 1000; throttleRampDownMs = 2000;') &&
+  configSerialize.includes('limpMaxThrottlePct = 75.0f; igniterOnStart = false;') &&
+  configSerialize.includes('controllerSchema = 1;') &&
+  configSerialize.includes('strlcpy(fuel.sourceId, "operator_throttle"') &&
+  configSerialize.includes('strlcpy(fuel.targetId, "main_fuel"'));
+const hardwareConfigCpp = read('src/system/HardwareConfig.cpp');
+expect('first boot initializes the complete settings profile before unified save',
+  hardwareConfigCpp.includes('Config::resetToCompiledDefaults();') &&
+  configHeader.includes('static void resetToCompiledDefaults();') &&
+  configSerialize.includes('void Config::resetToCompiledDefaults()'));
+expect('validated runtime restore carries its matching engine identity into the atomic save',
+  configSerialize.includes('strlcpy(profileId, id, sizeof(profileId));'));
 const configCpp = read('src/system/Config.cpp') + configSerialize;
 const configHtml = read('data_src/config.html');
 const hardware = read('src/Hardware.h');
@@ -357,6 +371,13 @@ expect('repeatable general typed sensors remain first-class registry inputs',
   hardwareHtml.includes('General pressure') &&
   hardwareHtml.includes('General flow') &&
   hardwareHtml.includes('General current'));
+expect('independent direct HX711 inputs support both torque and thrust',
+  hardwareCatalog.includes("'torque','general_torque','thrust','general_thrust'") &&
+  hardwareCatalog.includes("? 'N' : 'Nm'") &&
+  channelRegistry.includes('!strcmp(c.role, "torque") || !strcmp(c.role, "thrust")') &&
+  channelRegistry.includes('At most two direct HX711 load-cell inputs are supported') &&
+  hardware.includes('MAX_REGISTRY_HX711 = 2') &&
+  hardware.includes('g_registryHx711Slot'));
 expect('glow output owns sequence behavior and exposes its compound wet-glow hardware',
   main.includes('output->ignitionHoldDemand') &&
   main.includes('const float demand = on ? _onDemand : 0.0f') &&
@@ -562,6 +583,18 @@ expect('NTC divider orientation reaches the resistance calculation',
   ntc.includes('_cal.fixedPullup') && hardware.includes('hw.ntcFixedPullup'));
 expect('sequencer uses turbine startup terminology',
   sequenceHtml.includes("label:'Set Starter'") && !sequenceHtml.includes("label:'Crank Engine'"));
+expect('ordinary Set Starter cards persist and execute a bounded per-command transition',
+  sequenceRules.includes('Speed change time') &&
+  sequenceRules.includes('row.transition_ms') &&
+  hwConfig.includes('item["transition_ms"] = a.transitionMs') &&
+  hwConfig.includes('transition.as<long>() < 0') &&
+  hwConfig.includes('transition.as<unsigned long>() > 60000UL') &&
+  sequenceEngine.includes('a.actuator == RulesEngine::STARTER && a.transitionMs > 0') &&
+  sequenceEngine.includes('_starterTransitionFrom +') &&
+  sequenceEngine.includes('_cancelStarterTransition();'));
+expect('sequence save drains its local status request before claiming Classic maintenance memory',
+  sequenceHtml.includes('OTWaitForPageTelemetryIdle') &&
+  sequenceHtml.includes('Live sequence status did not become idle'));
 expect('hardware dependency warnings use the same turbine block names',
   hardwareHtml.includes("StarterSpin:'Set Starter'") && !hardwareHtml.includes("StarterSpin:'Crank Engine'"));
 expect('zero minimum N1 remains a valid underspeed-disable setting',
@@ -759,7 +792,13 @@ expect('startup feedback follows actual block consumers',
   !feedback.includes('startupHas("StarterSpin") || startupHas("Spool") ||\n               startupHas("SafetyHold")'));
 expect('startup validation warns when rotor spooling is entirely external',
   main.includes('No starter, spool, or air-starter action is present') &&
-  main.includes('strcmp(nm, "AirstarterOn") == 0'));
+  main.includes('strcmp(nm, "AirstarterOn") == 0') &&
+  main.includes('action.actuator == RulesEngine::STARTER') &&
+  main.includes('action.actuator == RulesEngine::AIRSTARTER'));
+expect('per-card timed delays are edited and summarized in seconds while stored as milliseconds',
+  sequenceState.includes("p.unitType === 'duration_ms_as_s'") &&
+  sequenceRules.includes('timedDelayValue(tab, idx) / 1000') &&
+  sequenceRules.includes('seqRound(val / 1000)'));
 expect('every enabled oil loop makes its pressure feedback operationally required',
   feedback.includes('allOilLoopFeedbackHealthy') && safety.includes('allOilLoopFeedbackHealthy'));
 expect('start fuel and registry starter channels join the immediate shutdown cut',
@@ -812,6 +851,15 @@ expect('custom controllers expose normal operating states but never FAULT owners
   configHtml.includes('Standby') && configHtml.includes('Startup') &&
   configHtml.includes('Running') && configHtml.includes('Shutdown') &&
   rulesEngine.includes('FAULT is never an automation state'));
+expect('normal-shutdown rules are threshold-only, omit idle modes, and call the shutdown sequence',
+  configRender.includes("id:'request_shutdown', name:'Request Normal Shutdown'") &&
+  configRender.includes("rule.mode_mask = (Number(rule.mode_mask ?? 4) & 0x06) || 4") &&
+  configRender.includes("actionTarget?'':'<option value=\"3\"'") &&
+  configRender.includes('does not create a latched FAULT') &&
+  configCpp.includes('return RulesEngine::REQUEST_SHUTDOWN') &&
+  configCpp.includes('(rule["mode_mask"].as<uint8_t>() & ~0x06u) != 0') &&
+  rulesEngine.includes('case REQUEST_SHUTDOWN:') &&
+  rulesEngine.includes('if (dem >= 0.5f && _shutdownCb) _shutdownCb();'));
 expect('built-in auxiliary requests remain authoritative beside optional user controllers',
   configHtml.includes('Built-in turbine subsystems') &&
   configHtml.includes('They do not prevent a separate normal output controller') &&
@@ -919,9 +967,22 @@ expect('large hardware calibration merges without serialized web-buffer snapshot
   const patchRoute = web.slice(web.indexOf('// PATCH /api/hardware'), web.indexOf('// GET /api/ecu_config'));
   return patchRoute.includes('HardwareConfig::toJson(current)') &&
     patchRoute.includes('HardwareConfig::validateJson(current, &HardwareConfig::channelRegistry)') &&
+    patchRoute.includes('_releaseLiveTelemetryWorkspace()') &&
+    patchRoute.includes('completeRegistrySnapshot') &&
+    patchRoute.includes('current.overflowed()') &&
+    patchRoute.includes('HardwareConfig::saveUnified(preserveStoredSettings)') &&
+    !patchRoute.includes(': HardwareConfig::save()') &&
     !patchRoute.includes('HardwareConfig::toJson(g_webTxBuf') &&
     !patchRoute.includes('_serializeJsonBounded(current');
 })());
+expect('calibration writes pause and drain compact telemetry before maintenance allocation',
+  webApp.includes('async function withGlobalTelemetryPaused') &&
+  webApp.includes('_telemetryPauseDepth > 0') &&
+  webApp.includes('window.OTWithTelemetryPaused = withGlobalTelemetryPaused') &&
+  calibrationHtml.includes('window.OTWithTelemetryPaused(save)'));
+expect('hardware persistence rejects valid-looking ArduinoJson overflow prefixes',
+  hwConfig.includes('ok &= !section.overflowed()') &&
+  !hwConfig.includes('bool HardwareConfig::save()'));
 expect('rules and custom conditions accept thrust plus addressable generic I2C channels',
   configCpp.includes('return RulesEngine::THRUST') &&
   configCpp.includes('case 27: return HardwareConfig::hasThrust') &&
@@ -1338,7 +1399,7 @@ expect('Classic compact v2 sends every numerical and binary channel in one bound
   !web.includes('const uint8_t thisGroup = group++ & 0x03u;') &&
   web.includes('size_t n = _buildCompactTelemetry(\n            g_webTxBuf'));
 expect('dashboard compact telemetry has one in-flight request and a bounded timeout',
-  webApp.includes('document.hidden || _restFallbackInFlight || _telemetryTextInFlight') &&
+  webApp.includes('document.hidden || _telemetryPauseDepth > 0 || _restFallbackInFlight || _telemetryTextInFlight') &&
   webApp.includes('const timeout = setTimeout(() => controller.abort(), 1800);') &&
   webApp.includes("fetch('/api/telemetry'") &&
   webApp.includes('_restFallbackInFlight = false;'));

@@ -2110,8 +2110,10 @@ function saveIdle() {
 
 // ── Hardware patch (no reboot) ────────────────────────────────
 function patchHardware(patch, onOk) {
-  fetch('/api/hardware', {method:'PATCH', body:JSON.stringify(patch),
-    headers:{'Content-Type':'application/json'}})
+  const save = () => fetch('/api/hardware', {method:'PATCH', body:JSON.stringify(patch),
+    headers:{'Content-Type':'application/json'}});
+  const request = window.OTWithTelemetryPaused ? window.OTWithTelemetryPaused(save) : save();
+  request
   .then(async r => {
     const d = await r.json().catch(() => ({}));
     if (!r.ok || d.ok === false) throw new Error(d.error || d.reason || ('HTTP ' + r.status));

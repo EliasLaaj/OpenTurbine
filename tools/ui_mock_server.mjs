@@ -491,6 +491,49 @@ const server = http.createServer(async (req, res) => {
       ok: true, mode: state.data.mode, locked: !!state.data.config_locked,
       dev_mode: !!state.data.dev_mode
     });
+    if (req.method === 'GET' && url.pathname === '/api/session/status') {
+      const hardware = state.hardware;
+      const sensorOn = key => !!hardware.sensors?.[key]?.enabled;
+      const actuatorOn = key => !!hardware.actuators?.[key]?.enabled;
+      return sendJson(res, 200, {
+        locked: !!state.data.config_locked,
+        session_log: clone(state.settings.session_log || {}),
+        telemetry: {
+          log_standby: !!state.settings.telemetry?.log_standby,
+          snapshot_interval_ms: state.settings.telemetry?.snapshot_interval_ms || 10000
+        },
+        available: {
+          n1:sensorOn('n1_rpm'), n2:sensorOn('n2_rpm'), tot:sensorOn('tot'), tit:sensorOn('tit'),
+          oil_temp:sensorOn('oil_temp'), oil:sensorOn('oil_press'), p1:sensorOn('p1'), p2:sensorOn('p2'),
+          torque:sensorOn('torque'), thrust:true, throttle:sensorOn('throttle_input'),
+          starter:actuatorOn('starter'), oil_pct:actuatorOn('oil_pump'), batt:sensorOn('batt_voltage'),
+          fuel_press:sensorOn('fuel_press'), fuel_flow:sensorOn('fuel_flow'), glow:actuatorOn('glow_plug'),
+          wet_glow:false, glow_current:!!hardware.actuators?.glow_plug?.has_current,
+          ign_current:!!hardware.actuators?.igniter?.has_current,
+          ign2_current:!!hardware.actuators?.igniter2?.has_current,
+          oil_current:!!hardware.actuators?.oil_pump?.has_current,
+          fp2:actuatorOn('fuel_pump2'), ab:true, prop:actuatorOn('prop_pitch'), mode:true, loop:true
+        },
+        labels: {p1:hardware.labels?.p1 || 'Pressure 1', p2:hardware.labels?.p2 || 'Pressure 2'},
+        registry_inputs: (hardware.channel_registry?.inputs || []).filter(channel =>
+          channel.purpose === 'shaft_speed' || String(channel.purpose || '').startsWith('general_')),
+        session_logger_healthy: state.data.session_logger_healthy ?? true,
+        session_logger_error: state.data.session_logger_error || 0,
+        session_log_path: state.data.session_log_path || '/logs/session_8.csv',
+        session_eviction_count: state.data.session_eviction_count || 0,
+        session_last_evicted: state.data.session_last_evicted || 0,
+        session_free_bytes: state.data.session_free_bytes || 65536,
+        session_reserve_bytes: state.data.session_reserve_bytes || 8192,
+        event_dropped_events: state.data.event_dropped_events || 0,
+        event_pending_count: state.data.event_pending_count || 0,
+        event_recorder_healthy: state.data.event_recorder_healthy ?? true,
+        event_recorder_error: state.data.event_recorder_error || 0,
+        event_last_append_ms: state.data.event_last_append_ms || 1000,
+        runtime_stats_pending: state.data.runtime_stats_pending || false,
+        runtime_stats_healthy: state.data.runtime_stats_healthy ?? true,
+        runtime_stats_error: state.data.runtime_stats_error || 0
+      });
+    }
     if (req.method === 'GET' && url.pathname === '/api/loop_diagnostics') return sendJson(res, 200, {
       mode: state.data.mode, loop_hz: 333.3, loop_period_ms: 3,
       loop_period_max_ms: 3.1, loop_exec_avg_ms: 0.3,

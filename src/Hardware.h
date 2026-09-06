@@ -429,6 +429,11 @@ namespace Hardware {
         DS18B20TempSensor("REG_DS18_3"), DS18B20TempSensor("REG_DS18_4")
     };
     inline int8_t            g_registryDs18Slot[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
+    static constexpr uint8_t MAX_REGISTRY_HX711 = 2;
+    inline HX711Sensor       g_registryHx711[MAX_REGISTRY_HX711] = {
+        HX711Sensor(-1, -1, "REG_HX711_1"), HX711Sensor(-1, -1, "REG_HX711_2")
+    };
+    inline int8_t            g_registryHx711Slot[ChannelRegistry::MAX_INPUT_CHANNELS] = {};
     static constexpr uint8_t REG_RC_FRESH = 0x01;
     static constexpr uint8_t REG_RC_VALID = 0x02;
     static constexpr uint8_t REG_PWM_FRESH = 0x01;
@@ -499,11 +504,6 @@ namespace Hardware {
             (!strcmp(c.purpose, "throttle") || registryInputBoundTo(c, "operator_throttle"))) return 4;
         if (c.driver == ChannelRegistry::RcPwm &&
             (!strcmp(c.purpose, "idle") || registryInputBoundTo(c, "operator_idle"))) return 5;
-        // HX711 uses the dedicated timing-sensitive load-cell driver. Mirror
-        // its calibrated result; never analogRead() the DOUT GPIO a second
-        // time as though this were an analog torque transmitter.
-        if (c.driver == ChannelRegistry::Analog && c.torqueInterface == 1 &&
-            (!strcmp(c.purpose, "torque") || !strcmp(c.id, "torque_main"))) return 7;
         return 0;
     }
 
@@ -637,9 +637,6 @@ namespace Hardware {
             const auto& c = HardwareConfig::channelRegistry.inputs[i];
             ed.registryInputValue[i] = c.inverted ? 1.0f - ed.rcIdleNorm : ed.rcIdleNorm;
             ed.registryInputHealthy[i] = ed.rcIdleValid;
-        } else if (kind == 7) {
-            ed.registryInputValue[i] = ed.torque;
-            ed.registryInputHealthy[i] = ed.torqueHealthy;
         }
     }
 
@@ -689,11 +686,13 @@ namespace Hardware {
         buildRegistryInputPlan();
         uint8_t ds18Count = 0;
         uint8_t pcntCount = 0;
+        uint8_t hx711Count = 0;
         for (uint8_t i = 0; i < reg.inputCount; ++i) {
             const auto& c = reg.inputs[i];
             ed.registryInputValue[i] = 0.0f;
             g_registryDs18Slot[i] = -1;
             g_registryPcntSlot[i] = -1;
+            g_registryHx711Slot[i] = -1;
             g_registryCoreKind[i] = registryCoreInputKind(c);
             g_registryInputFlags[i] = ChannelRegistry::isSwitchCondition(c)
                 ? REG_INPUT_THRESHOLD_SWITCH : 0;
@@ -706,6 +705,16 @@ namespace Hardware {
             if (c.driver == ChannelRegistry::I2cDigital ||
                 c.driver == ChannelRegistry::I2cAnalog ||
                 c.driver == ChannelRegistry::I2cLoadCell) {
+                ed.registryInputHealthy[i] = false;
+                continue;
+            }
+            if (c.installed && c.driver == ChannelRegistry::Analog &&
+                c.torqueInterface == 1 && c.pin >= 0 && c.hx711Clk >= 0) {
+                if (hx711Count < MAX_REGISTRY_HX711) {
+                    g_registryHx711Slot[i] = (int8_t)hx711Count;
+                    g_registryHx711[hx711Count++].begin(c.pin, c.hx711Clk,
+                                                        c.hx711Scale, (long)c.hx711Zero);
+                }
                 ed.registryInputHealthy[i] = false;
                 continue;
             }
@@ -891,6 +900,16 @@ namespace Hardware {
             }
             if (!c.installed || c.pin < 0) {
                 ed.registryInputHealthy[i] = false;
+                continue;
+            }
+            if (g_registryHx711Slot[i] >= 0) {
+                auto& sensor = g_registryHx711[(uint8_t)g_registryHx711Slot[i]];
+                sensor.update();
+                ed.registryInputValue[i] = sensor.getValue();
+                ed.registryInputRaw[i] = (int)sensor.rawCounts();
+                ed.registryInputHealthy[i] = sensor.isHealthy();
+                ed.registryInputSampleSeq[i] = sensor.sampleSequence();
+                ed.registryInputSampleMs[i] = sensor.sampleTimestampMs();
                 continue;
             }
             if (g_registryDs18Slot[i] >= 0) {
@@ -1915,7 +1934,8 @@ namespace Hardware {
             // ADC 0–4095 → 0–3.3 V; multiply by divider to get Vbatt
             g_sensorBattVolt.setCal({ 0.0f, 4095.0f, 0.0f, hw.battVoltDivider * 3.3f });
         }
-        if (hw.hasTorque && hw.torqueHx711 && hw.torqueDtPin >= 0 && hw.torqueClkPin >= 0) {
+        if (hw.hasTorque && hw.torqueHx711 && hw.torqueDtPin >= 0 && hw.torqueClkPin >= 0 &&
+            !torqueRegistryAnalog) {
             g_sensorTorqueHx711.begin(hw.torqueDtPin, hw.torqueClkPin,
                                       hw.torqueHxScale, (long)hw.torqueHxZero);
         } else if (hw.hasTorque && hw.torquePin >= 0 && !torqueRegistryAnalog) {
@@ -2310,10 +2330,7 @@ namespace Hardware {
             if (ed.battHealthy && ed.battVoltage > ed.maxBattVoltage) ed.maxBattVoltage = ed.battVoltage;
         }
         if (hw.hasTorque) {
-            const bool registryOwnsTorque = torqueRegistry >= 0 &&
-                !(HardwareConfig::channelRegistry.inputs[torqueRegistry].driver ==
-                      ChannelRegistry::Analog &&
-                  HardwareConfig::channelRegistry.inputs[torqueRegistry].torqueInterface == 1);
+            const bool registryOwnsTorque = torqueRegistry >= 0;
             if (registryOwnsTorque) {
                 ed.torqueHealthy = ed.registryInputHealthy[torqueRegistry];
                 if (ed.torqueHealthy) {

@@ -1184,6 +1184,17 @@ static void validateSequences(bool report) {
             if (strcmp(nm, "StarterSpin") == 0 || strcmp(nm, "Spool") == 0 ||
                 strcmp(nm, "AirstarterOn") == 0)
                 hasSpoolAction = true;
+            // Set Output cards execute through per-slot side actions. Count a
+            // positive starter or air-starter command exactly like the older
+            // dedicated blocks so a valid visual sequence is not warned as
+            // externally spooled.
+            for (int j = 0; j < HardwareConfig::MAX_SEQ_SIDE_ACTIONS && !hasSpoolAction; j++) {
+                const auto& action = hw.startupEnterActions[i][j];
+                if (action.enabled && action.value > 0.01f &&
+                    (action.actuator == RulesEngine::STARTER ||
+                     action.actuator == RulesEngine::AIRSTARTER))
+                    hasSpoolAction = true;
+            }
             if (strcmp(nm, "FuelOpen") == 0 || strcmp(nm, "FuelPumpIdle") == 0 ||
                 strcmp(nm, "FuelPumpRamp") == 0 || strcmp(nm, "FuelPump2Set") == 0 ||
                 strcmp(nm, "FuelPump2On") == 0) {

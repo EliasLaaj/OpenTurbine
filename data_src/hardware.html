@@ -354,7 +354,7 @@ function collectPinUsage() {
     if (addProfilePortPin(ch, 'input') ||
         (profileActive && ch.purpose === 'battery_voltage' &&
          pcbProfile?.fixed_functions?.supply_voltage?.available)) return;
-    if (registryTorqueIsHx711(ch)) {
+    if (registryLoadCellIsHx711(ch)) {
       const label = registryDisplayName('input', ch, ch.id || 'Torque');
       add(ch.pin, `${label} DOUT`);
       add(ch.hx711_clk, `${label} SCK`);
@@ -2206,20 +2206,22 @@ function registryPinMode(direction, driver) {
   if (direction === 'input') return Number(driver) === 1 ? 'adc' : 'in';
   return 'out';
 }
-function registryTorqueIsHx711(c) {
-  return ['torque','general_torque'].includes(registryDerivedPurpose('input', c || {})) && Number(c?.torque_interface || 0) === 1;
+function registryLoadCellIsHx711(c) {
+  return ['torque','general_torque','thrust','general_thrust'].includes(registryDerivedPurpose('input', c || {})) && Number(c?.torque_interface || 0) === 1;
 }
 function registryTorqueInterfaceEditor(direction, c, index) {
-  if (direction !== 'input' || !['torque','general_torque'].includes(registryDerivedPurpose(direction, c))) return '';
+  const purpose = registryDerivedPurpose(direction, c);
+  if (direction !== 'input' || !['torque','general_torque','thrust','general_thrust'].includes(purpose)) return '';
   if (Number(c.driver) === 10) return '';
-  const hx = registryTorqueIsHx711(c);
+  const hx = registryLoadCellIsHx711(c);
+  const unit = ['thrust','general_thrust'].includes(purpose) ? 'N' : 'Nm';
   const clk = Number(c.hx711_clk ?? -1);
   const scale = Number(c.hx711_scale ?? 1);
   const zero = Number(c.hx711_zero ?? 0);
   const clkClass = `${registryFieldChangedClass('input', index, 'hx711_clk')}${clk < 0 ? ' field-error' : ''}`;
   return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">Sensor interface</span><span class="hw-desc">Choose the sensor hardware actually connected. HX711 uses a bridge/load-cell amplifier with separate DOUT and SCK wires.</span><select onchange="updateRegistryChannel('input',${index},'torque_interface',+this.value)"><option value="0"${hx?'':' selected'}>Analog 0–3.3 V transmitter</option><option value="1"${hx?' selected':''}>HX711 load-cell amplifier</option></select></div>
     ${hx ? `<div class="hw-field"><span class="hw-label">HX711 SCK GPIO</span><span class="hw-desc">Clock output from the ECU to HX711 SCK.</span><select class="${clkClass}" onchange="updateRegistryChannel('input',${index},'hx711_clk',+this.value)">${buildPinOptions(clk,'out')}</select></div>
-    <div class="hw-field"><span class="hw-label">HX711 scale (Nm/count)</span><input type="number" min="0.000001" max="1000000" step="0.000001" value="${registryFormatValue(scale,6)}" oninput="updateRegistryChannel('input',${index},'hx711_scale',registryParseValue(this.value))"></div>
+    <div class="hw-field"><span class="hw-label">HX711 scale (${unit}/count)</span><input type="number" min="0.000001" max="1000000" step="0.000001" value="${registryFormatValue(scale,6)}" oninput="updateRegistryChannel('input',${index},'hx711_scale',registryParseValue(this.value))"></div>
     <div class="hw-field"><span class="hw-label">HX711 zero count</span><input type="number" step="1" value="${Math.round(zero)}" oninput="updateRegistryChannel('input',${index},'hx711_zero',+this.value)"></div>` : ''}`;
 }
 function registryInvertEditor(direction, c, index) {
@@ -2304,7 +2306,7 @@ function registryRangeMeta(direction, driver, role, referenceMv = 3300) {
 }
 function registryRangeEditor(direction, c, index) {
   if (registryFixedProfileFunction(direction,c)) return '';
-  if (direction === 'input' && registryTorqueIsHx711(c)) return '';
+  if (direction === 'input' && registryLoadCellIsHx711(c)) return '';
   const purpose = registryDerivedPurpose(direction,c);
   const isSwitch = registryIsSwitchRole(c.role) || ['start_switch','stop_switch'].includes(purpose);
   if (direction === 'input' && Number(c.driver) === 1 && isSwitch) {
@@ -2370,7 +2372,7 @@ function registryPulseScaleEditor(direction, c, index) {
 function registryAnalogScaleEditor(direction, c, index) {
   if (registryFixedProfileFunction(direction,c)) return '';
   if (direction !== 'input' || ![1,9].includes(Number(c.driver))) return '';
-  if (registryTorqueIsHx711(c)) return '';
+  if (registryLoadCellIsHx711(c)) return '';
   if (registryIsSwitchRole(c.role) ||
       ['start_switch','stop_switch'].includes(registryDerivedPurpose(direction,c))) return '';
   if (String(c.role||'') === 'temperature' && Number(c.temp_interface||0) !== 0) return '';
@@ -2407,7 +2409,7 @@ function registrySignalTypeEditor(direction, c, index, driverClass) {
   return `<div class="hw-field"><span class="hw-label">Signal type</span><span class="hw-desc">The electrical signal connected to this device.</span><select class="${driverClass}" onchange="updateRegistryChannel('${direction}',${index},'driver',+this.value)">${registryDriverOptions(direction, c.driver, c.role, registryDerivedPurpose(direction,c))}</select></div>`;
 }
 function registryInputPinLabel(c) {
-  if (registryTorqueIsHx711(c)) return 'HX711 DOUT GPIO';
+  if (registryLoadCellIsHx711(c)) return 'HX711 DOUT GPIO';
   if (String(c?.role||'') === 'temperature') {
     if (Number(c.temp_interface) === 5) return 'OneWire data GPIO';
     if ([0,4].includes(Number(c.temp_interface||0))) return 'ADC GPIO';
@@ -2442,7 +2444,7 @@ function registryTemperatureInterfaceEditor(c, index) {
 }
 function registryInputOptionsEditor(direction, c, index) {
   if (direction !== 'input') return '';
-  if (registryTorqueIsHx711(c)) return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">HX711 wiring</span><span class="hw-desc">DOUT is an input and SCK is an output. No internal pull-up or pull-down is applied.</span></div>`;
+  if (registryLoadCellIsHx711(c)) return `<div class="hw-field" style="grid-column:1/-1"><span class="hw-label">HX711 wiring</span><span class="hw-desc">DOUT is an input and SCK is an output. No internal pull-up or pull-down is applied.</span></div>`;
   const d = Number(c.driver);
   const purpose = registryDerivedPurpose(direction,c);
   const activeStateEditor = (d === 8 || ([1,9].includes(d) &&
@@ -2555,7 +2557,7 @@ function registryIsCoreManagedInput(c) {
   };
   const runtimeSensor = cfg.sensors?.[keyMap[purpose]];
   if (!runtimeSensor?.enabled) return false;
-  if (purpose === 'torque' && registryTorqueIsHx711(c)) {
+  if (purpose === 'torque' && registryLoadCellIsHx711(c)) {
     return !!(runtimeSensor.hx711 && Number(runtimeSensor.dt_pin) === Number(c.pin) &&
       Number(runtimeSensor.clk_pin) === Number(c.hx711_clk));
   }
@@ -2738,7 +2740,7 @@ function registryMinimumRunEditor(c, index) {
 }
 function registryCurveSupported(direction, c) {
   if (direction !== 'input' || ![1,9].includes(Number(c?.driver))) return false;
-  if (registryTorqueIsHx711(c)) return false;
+  if (registryLoadCellIsHx711(c)) return false;
   if (String(c?.role||'') === 'flame') return false;
   if (registryIsSwitchRole(c.role) ||
       ['start_switch','stop_switch'].includes(registryDerivedPurpose(direction,c))) return false;
@@ -3076,10 +3078,10 @@ function registryStatus(c) {
     const info = GPIO_DB?.[pin];
     if (!info || info.r) return {kind:'error', text:`GPIO ${pin} is unavailable on this board`};
     if (direction === 'output' && info.i) return {kind:'error', text:`GPIO ${pin} is input-only`};
-    if (direction === 'input' && Number(c.driver) === 1 && Number(c.temp_interface || 0) !== 5 && !registryTorqueIsHx711(c) && !info.adc1)
+    if (direction === 'input' && Number(c.driver) === 1 && Number(c.temp_interface || 0) !== 5 && !registryLoadCellIsHx711(c) && !info.adc1)
       return {kind:'error', text:`GPIO ${pin} is not ADC1-capable`};
   }
-  if (registryTorqueIsHx711(c)) {
+  if (registryLoadCellIsHx711(c)) {
     const clk = Number(c.hx711_clk ?? -1), info = GPIO_DB?.[clk];
     if (clk < 0) return {kind:'error', text:'HX711 SCK pin required'};
     if (!info || info.r || info.i) return {kind:'error', text:`HX711 SCK GPIO ${clk} must be output-capable`};
@@ -3139,7 +3141,7 @@ function registryDemandProblem(value) {
 }
 function registryRangeProblem(c) {
   if (Number(c?.driver) >= 8) return '';
-  if (registryTorqueIsHx711(c)) return '';
+  if (registryLoadCellIsHx711(c)) return '';
   if (String(c?.role || '') === 'temperature' && Number(c?.temp_interface || 0) !== 0) return '';
   const driver = Number(c?.driver);
   const min = Number(c?.min ?? 0);
@@ -3181,7 +3183,7 @@ function registryPinSummary(c) {
     return port ? pcbChoiceLabel({port,mode}) : 'PCB connection missing';
   }
   if (Number(c?.driver) >= 8) return `I2C 0x${Number(c.i2c_address||0).toString(16).toUpperCase().padStart(2,'0')} channel ${Number(c.device_channel||0)}`;
-  if (registryTorqueIsHx711(c)) return `DOUT GPIO${c.pin} / SCK GPIO${c.hx711_clk ?? 'not set'}`;
+  if (registryLoadCellIsHx711(c)) return `DOUT GPIO${c.pin} / SCK GPIO${c.hx711_clk ?? 'not set'}`;
   if (registryTemperatureIsSpi(c)) {
     return `Shared SPI bus / CS GPIO${c.spi_cs}`;
   }
@@ -3235,7 +3237,7 @@ function updateRegistryProfilePort(direction,index,value) {
   dirty(); renderRegistryInventory(); updateSaveButton();
 }
 function registrySignalSummary(c) {
-  if (registryTorqueIsHx711(c)) return 'HX711 load-cell amplifier';
+  if (registryLoadCellIsHx711(c)) return 'HX711 load-cell amplifier';
   const tempNames = {1:'MAX6675 thermocouple', 2:'MAX31855 thermocouple', 3:'MAX31856 thermocouple', 4:'NTC thermistor divider', 5:'DS18B20 OneWire'};
   return tempNames[Number(c.temp_interface)] || driverName(c.driver);
 }
@@ -4216,7 +4218,7 @@ function renderRegistryInventory() {
            ${pcbProfileActive() ? '' : registryI2cEditor(direction, c, i)}
            ${pcbProfileActive() ? '' : (direction==='input' ? registryTemperatureInterfaceEditor(c, i) : '')}
            ${pcbProfileActive() ? '' : registryTorqueInterfaceEditor(direction, c, i)}
-           ${(!pcbProfileActive() || !c.physical_port) && Number(c.driver)<8 && !(direction==='input' && registryTemperatureIsSpi(c)) ? `<div class="hw-field"><span class="hw-label">${direction==='input' ? registryInputPinLabel(c) : 'GPIO pin'}</span><select class="${pinClass}" onchange="updateRegistryChannel('${direction}',${i},'pin',+this.value)">${buildPinOptions(c.pin, registryTorqueIsHx711(c) || Number(c.temp_interface||0)===5 ? 'in' : registryPinMode(direction, c.driver))}</select>${pcbProfileActive()?'<span class="hw-desc">Only unreserved ESP32 pins are offered. PCB-labelled connections are preferred when suitable.</span>':''}</div>` : ''}
+           ${(!pcbProfileActive() || !c.physical_port) && Number(c.driver)<8 && !(direction==='input' && registryTemperatureIsSpi(c)) ? `<div class="hw-field"><span class="hw-label">${direction==='input' ? registryInputPinLabel(c) : 'GPIO pin'}</span><select class="${pinClass}" onchange="updateRegistryChannel('${direction}',${i},'pin',+this.value)">${buildPinOptions(c.pin, registryLoadCellIsHx711(c) || Number(c.temp_interface||0)===5 ? 'in' : registryPinMode(direction, c.driver))}</select>${pcbProfileActive()?'<span class="hw-desc">Only unreserved ESP32 pins are offered. PCB-labelled connections are preferred when suitable.</span>':''}</div>` : ''}
            ${pcbProfileActive() ? '' : registryInputOptionsEditor(direction, c, i)}
            ${registryProfileInputTuningEditor(direction, c, i)}
            ${pcbProfileActive() ? '' : registryInvertEditor(direction, c, i)}
@@ -4568,7 +4570,7 @@ function updateRegistryChannel(direction, index, key, value) {
 function syncRegistryTorqueAdapter(c) {
   if (!cfg.sensors) cfg.sensors = {};
   const runtimeTorque = cfg.sensors.torque ||= {};
-  const hx = registryTorqueIsHx711(c);
+  const hx = registryLoadCellIsHx711(c);
   runtimeTorque.enabled = true;
   runtimeTorque.hx711 = hx;
   runtimeTorque.pin = hx ? -1 : Number(c.pin ?? -1);
@@ -5973,7 +5975,7 @@ function _registryFieldLabel(key) {
     loadcell_gain:'Load-cell gain', loadcell_rate_sps:'Load-cell sample rate', loadcell_zero:'Load-cell zero',
     loadcell_n_per_count:'Load-cell scale', lever_arm_m:'Torque lever arm',
     digital_threshold_raw:'Switch threshold', digital_hysteresis_raw:'Switch hysteresis',
-    torque_interface:'Torque sensor interface', hx711_clk:'HX711 clock GPIO', hx711_scale:'HX711 scale', hx711_zero:'HX711 zero',
+    torque_interface:'Load-cell sensor interface', hx711_clk:'HX711 clock GPIO', hx711_scale:'HX711 scale', hx711_zero:'HX711 zero',
     temp_interface:'Temperature sensor interface', spi_clk:'SPI clock GPIO', spi_cs:'SPI chip-select GPIO',
     spi_miso:'SPI MISO GPIO', spi_mosi:'SPI MOSI GPIO', tc_type:'Thermocouple type',
     temp_resolution:'Temperature resolution', ntc_beta:'NTC beta coefficient', ntc_r0:'NTC resistance at 25 C',
@@ -6042,7 +6044,7 @@ function _registryFieldRelevant(direction, channel, key) {
     if (['temp_resolution'].includes(key)) return tempInterface === 5;
     if (['ntc_beta','ntc_r0','ntc_r_fixed','ntc_pullup'].includes(key)) return tempInterface === 4;
     const torqueInterface = Number(channel?.torque_interface || 0);
-    if (key === 'torque_interface') return channel?.role === 'torque';
+    if (key === 'torque_interface') return ['torque','thrust'].includes(String(channel?.role || ''));
     if (['hx711_clk','hx711_scale','hx711_zero'].includes(key)) return torqueInterface === 1;
     return false;
   }

@@ -40,7 +40,7 @@ function _registryFieldLabel(key) {
     loadcell_gain:'Load-cell gain', loadcell_rate_sps:'Load-cell sample rate', loadcell_zero:'Load-cell zero',
     loadcell_n_per_count:'Load-cell scale', lever_arm_m:'Torque lever arm',
     digital_threshold_raw:'Switch threshold', digital_hysteresis_raw:'Switch hysteresis',
-    torque_interface:'Torque sensor interface', hx711_clk:'HX711 clock GPIO', hx711_scale:'HX711 scale', hx711_zero:'HX711 zero',
+    torque_interface:'Load-cell sensor interface', hx711_clk:'HX711 clock GPIO', hx711_scale:'HX711 scale', hx711_zero:'HX711 zero',
     temp_interface:'Temperature sensor interface', spi_clk:'SPI clock GPIO', spi_cs:'SPI chip-select GPIO',
     spi_miso:'SPI MISO GPIO', spi_mosi:'SPI MOSI GPIO', tc_type:'Thermocouple type',
     temp_resolution:'Temperature resolution', ntc_beta:'NTC beta coefficient', ntc_r0:'NTC resistance at 25 C',
@@ -109,7 +109,7 @@ function _registryFieldRelevant(direction, channel, key) {
     if (['temp_resolution'].includes(key)) return tempInterface === 5;
     if (['ntc_beta','ntc_r0','ntc_r_fixed','ntc_pullup'].includes(key)) return tempInterface === 4;
     const torqueInterface = Number(channel?.torque_interface || 0);
-    if (key === 'torque_interface') return channel?.role === 'torque';
+    if (key === 'torque_interface') return ['torque','thrust'].includes(String(channel?.role || ''));
     if (['hx711_clk','hx711_scale','hx711_zero'].includes(key)) return torqueInterface === 1;
     return false;
   }

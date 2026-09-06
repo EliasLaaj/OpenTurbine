@@ -71,6 +71,7 @@ function seqRound(value) {
 function seqDisplayValue(p, value) {
   if (p.zeroOff && Number(value) === 0) return '0';
   if (p.unitType === 'temp') return seqRound(toDispTemp(Number(value ?? 0)));
+  if (p.unitType === 'duration_ms_as_s') return seqRound(Number(value ?? 0) / 1000);
   return value;
 }
 
@@ -78,16 +79,19 @@ function seqStoredValue(p, rawVal) {
   const parsed = p.type === 'float' ? parseFloat(rawVal) : parseInt(rawVal);
   if (!Number.isFinite(parsed)) return undefined;
   if (p.zeroOff && parsed === 0) return 0;
+  if (p.unitType === 'duration_ms_as_s') return Math.round(parsed * 1000);
   return p.unitType === 'temp' ? fromDispTemp(parsed) : parsed;
 }
 
 function seqDisplayAttr(p, value) {
   if (value === undefined) return '';
   if (p.zeroOff && Number(value) === 0) return '0';
+  if (p.unitType === 'duration_ms_as_s') return seqRound(Number(value) / 1000);
   return p.unitType === 'temp' ? seqRound(toDispTemp(Number(value))) : String(value);
 }
 
 function seqDisplayStep(p) {
+  if (p.unitType === 'duration_ms_as_s') return seqRound(Number(p.step || 100) / 1000);
   if (p.unitType === 'temp') {
     return seqRound(tempUnit() === 'F' ? Number(p.step || 1) * 9 / 5 : Number(p.step || 1));
   }

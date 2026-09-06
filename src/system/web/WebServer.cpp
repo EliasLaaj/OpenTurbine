@@ -2639,6 +2639,133 @@ void WebServer::_setupRoutes() {
         req->send(resp);
     });
 
+    // GET /api/session/status - compact Session Data page bootstrap.
+    //
+    // The log page used to fetch /api/config, /api/hardware and the full
+    // /api/data snapshot at the same time as it enumerated and previewed log
+    // files. On Classic ESP32 that burst retained several large response
+    // buffers and made the hardware request retry for many seconds. Keep the
+    // page bootstrap proportional to what it displays: logging settings,
+    // fitted-source availability and recorder health only.
+    _server.on("/api/session/status", HTTP_GET, [](AsyncWebServerRequest* req) {
+        JsonDocument doc;
+        doc["locked"] = Config::isLocked();
+
+        JsonObject sl = doc["session_log"].to<JsonObject>();
+        const uint32_t mask = Config::sessionLogMask;
+        sl["n1"]           = (bool)(mask & Config::SLOG_N1);
+        sl["n2"]           = (bool)(mask & Config::SLOG_N2);
+        sl["tot"]          = (bool)(mask & Config::SLOG_TOT);
+        sl["oil"]          = (bool)(mask & Config::SLOG_OIL);
+        sl["p1"]           = (bool)(mask & Config::SLOG_P1);
+        sl["p2"]           = (bool)(mask & Config::SLOG_P2);
+        sl["throttle"]     = (bool)(mask & Config::SLOG_THR);
+        sl["mode"]         = (bool)(mask & Config::SLOG_MODE);
+        sl["tit"]          = (bool)(mask & Config::SLOG_TIT);
+        sl["batt"]         = (bool)(mask & Config::SLOG_BATT);
+        sl["fuel_press"]   = (bool)(mask & Config::SLOG_FUEL_PRESS);
+        sl["fuel_flow"]    = (bool)(mask & Config::SLOG_FUEL_FLOW);
+        sl["glow"]         = (bool)(mask & Config::SLOG_GLOW);
+        sl["fp2"]          = (bool)(mask & Config::SLOG_FP2);
+        sl["ab"]           = (bool)(mask & Config::SLOG_AB);
+        sl["prop"]         = (bool)(mask & Config::SLOG_PROP);
+        sl["oil_pct"]      = (bool)(mask & Config::SLOG_OIL_PCT);
+        sl["loop"]         = (bool)(mask & Config::SLOG_LOOP);
+        sl["glow_current"] = (bool)(mask & Config::SLOG_GLOW_CURRENT);
+        sl["ign_current"]  = (bool)(mask & Config::SLOG_IGN_CURRENT);
+        sl["ign2_current"] = (bool)(mask & Config::SLOG_IGN2_CURRENT);
+        sl["oil_current"]  = (bool)(mask & Config::SLOG_OIL_CURRENT);
+        sl["wet_glow"]     = (bool)(mask & Config::SLOG_WET_GLOW);
+        sl["oil_temp"]     = (bool)(mask & Config::SLOG_OIL_TEMP);
+        sl["torque"]       = (bool)(mask & Config::SLOG_TORQUE);
+        sl["starter"]      = (bool)(mask & Config::SLOG_STARTER);
+        sl["thrust"]       = (bool)(mask & Config::SLOG_THRUST);
+        sl["interval_ms"]  = Config::sessionLogIntervalMs;
+        JsonArray selected = sl["registry_inputs"].to<JsonArray>();
+        for (uint8_t i = 0; i < Config::sessionRegistryInputCount; ++i)
+            selected.add(Config::sessionRegistryInputIds[i]);
+
+        JsonObject telemetry = doc["telemetry"].to<JsonObject>();
+        telemetry["log_standby"] = Config::logStandby;
+        telemetry["snapshot_interval_ms"] = Config::snapshotIntervalMs;
+
+        JsonObject available = doc["available"].to<JsonObject>();
+        available["n1"] = HardwareConfig::hasN1Rpm;
+        available["n2"] = HardwareConfig::hasN2Rpm;
+        available["tot"] = HardwareConfig::hasTot;
+        available["tit"] = HardwareConfig::hasTit;
+        available["oil_temp"] = HardwareConfig::hasOilTemp;
+        available["oil"] = HardwareConfig::hasOilPress;
+        available["p1"] = HardwareConfig::hasP1;
+        available["p2"] = HardwareConfig::hasP2;
+        available["torque"] = HardwareConfig::hasTorque;
+        available["thrust"] = HardwareConfig::hasThrust;
+        available["throttle"] = HardwareConfig::hasThrottleInput;
+        available["starter"] = HardwareConfig::hasStarter;
+        available["oil_pct"] = HardwareConfig::hasOilPump;
+        available["batt"] = HardwareConfig::hasBattVoltage;
+        available["fuel_press"] = HardwareConfig::hasFuelPress;
+        available["fuel_flow"] = HardwareConfig::hasFuelFlow;
+        available["glow"] = HardwareConfig::hasGlowPlug;
+        available["wet_glow"] = HardwareConfig::hasGlowPlug &&
+                                  HardwareConfig::glowPlugType == 2 &&
+                                  HardwareConfig::wetGlowFuelPin >= 0;
+        available["glow_current"] = HardwareConfig::hasGlowPlug && HardwareConfig::hasGlowCurrentSensor;
+        available["ign_current"] = HardwareConfig::hasIgniter && HardwareConfig::hasIgniterCurrentSensor;
+        available["ign2_current"] = HardwareConfig::hasIgniter2 && HardwareConfig::hasIgniter2CurrentSensor;
+        available["oil_current"] = HardwareConfig::hasOilPump && HardwareConfig::hasOilPumpCurrentSensor;
+        available["fp2"] = HardwareConfig::hasFuelPump2;
+        available["ab"] = HardwareConfig::hasAfterburner;
+        available["prop"] = HardwareConfig::hasPropPitch;
+        available["mode"] = true;
+        available["loop"] = true;
+
+        const char* p1Name = "Pressure 1";
+        const char* p2Name = "Pressure 2";
+        JsonArray channels = doc["registry_inputs"].to<JsonArray>();
+        for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount; ++i) {
+            const auto& channel = HardwareConfig::channelRegistry.inputs[i];
+            if (!channel.installed) continue;
+            if (!strcmp(channel.purpose, "p1_pressure")) p1Name = channel.name;
+            if (!strcmp(channel.purpose, "p2_pressure")) p2Name = channel.name;
+            if (strcmp(channel.purpose, "shaft_speed") &&
+                strncmp(channel.purpose, "general_", 8)) continue;
+            JsonObject item = channels.add<JsonObject>();
+            item["id"] = channel.id;
+            item["name"] = channel.name;
+            item["purpose"] = channel.purpose;
+        }
+        JsonObject labels = doc["labels"].to<JsonObject>();
+        labels["p1"] = p1Name;
+        labels["p2"] = p2Name;
+
+        doc["session_logger_healthy"] = SessionLogger::healthy();
+        doc["session_logger_error"] = SessionLogger::errorCode();
+        doc["session_log_path"] = SessionLogger::currentPath();
+        doc["session_eviction_count"] = SessionLogger::evictionCount();
+        doc["session_last_evicted"] = SessionLogger::lastEvictedSession();
+        doc["session_free_bytes"] = SessionLogger::freeBytes();
+        doc["session_reserve_bytes"] = SessionLogger::reserveBytes();
+        doc["event_dropped_events"] = FlightRecorder::droppedEvents();
+        doc["event_pending_count"] = FlightRecorder::pendingCount();
+        doc["event_recorder_healthy"] = FlightRecorder::healthy();
+        doc["event_recorder_error"] = FlightRecorder::errorCode();
+        doc["event_last_append_ms"] = FlightRecorder::lastDurableAppendMs();
+        doc["runtime_stats_pending"] = Config::runtimeStatsPending();
+        doc["runtime_stats_healthy"] = Config::runtimeStatsHealthy();
+        doc["runtime_stats_error"] = Config::runtimeStatsError();
+
+        const size_t needed = measureJson(doc);
+        if (needed + 1 > sizeof(g_webTxBuf)) {
+            req->send(500, "application/json", "{\"error\":\"session status response too large\"}");
+            return;
+        }
+        const size_t n = serializeJson(doc, g_webTxBuf, sizeof(g_webTxBuf));
+        doc.clear();
+        doc.shrinkToFit();
+        _sendOwnedJson(req, g_webTxBuf, n);
+    });
+
     // GET /api/device_info - updater-friendly board identity and maintenance state.
     _server.on("/api/device_info", HTTP_GET, [](AsyncWebServerRequest* req) {
         auto& ed = EngineData::instance();
@@ -4373,6 +4500,10 @@ void WebServer::_setupRoutes() {
 #if defined(OT_PLATFORM_ESP32)
             // ArduinoJson 7 owns these strings; lending RX after parsing
             // leaves room for validating and serializing the complete section.
+            // Compact telemetry retains a small reusable JsonDocument between
+            // frames. Retire it before this maintenance transaction so the
+            // Classic has the largest contiguous workspace available.
+            _releaseLiveTelemetryWorkspace();
             ClassicRxWorkspaceLoan rxWorkspaceLoan;
 #endif
             bool patchAllowed = true;
@@ -4532,6 +4663,23 @@ void WebServer::_setupRoutes() {
             // may exceed the small general-purpose web scratch buffers.
             JsonDocument current;
             HardwareConfig::toJson(current);
+            auto completeRegistrySnapshot = [&current]() {
+                JsonObjectConst registry = current["channel_registry"].as<JsonObjectConst>();
+                return !current.overflowed() && !registry.isNull() &&
+                    registry["inputs"].as<JsonArrayConst>().size() == HardwareConfig::channelRegistry.inputCount &&
+                    registry["outputs"].as<JsonArrayConst>().size() == HardwareConfig::channelRegistry.outputCount &&
+                    registry["bindings"].as<JsonArrayConst>().size() == HardwareConfig::channelRegistry.bindingCount;
+            };
+            // A failed ArduinoJson allocation can leave a valid-looking prefix.
+            // Calibration/system/controller/sequence PATCHes do not own channel
+            // topology, so a complete registry snapshot is a transaction
+            // invariant. Reject before validateJson() can use the live registry
+            // as its bounded Classic validation workspace.
+            if (!hardwarePagePatch && !completeRegistrySnapshot()) {
+                req->send(503, "application/json",
+                    "{\"error\":\"Not enough memory to build a complete hardware update; no changes were saved\"}");
+                return;
+            }
             const bool prevSafOilT = HardwareConfig::safetyOilTempHigh;
             const bool prevSafFP = HardwareConfig::safetyFuelPressLow;
             const bool prevSafBatt = HardwareConfig::safetyBattLow;
@@ -4558,6 +4706,11 @@ void WebServer::_setupRoutes() {
                 patch.remove("channel_registry_calibration");
             }
             _mergeJsonObject(current.as<JsonObject>(), patch.as<JsonObjectConst>());
+            if (current.overflowed() || (!hardwarePagePatch && !completeRegistrySnapshot())) {
+                req->send(503, "application/json",
+                    "{\"error\":\"Not enough memory to build a complete hardware update; no changes were saved\"}");
+                return;
+            }
             if (!ConfigApplyGate::tryBeginWebWrite()) {
                 req->send(409, "application/json", "{\"error\":\"START transition or another configuration update is in progress\"}");
                 return;
@@ -4598,9 +4751,11 @@ void WebServer::_setupRoutes() {
             // Full uploaded engine files keep their strict cross-profile check.
             const bool preserveStoredSettings = (systemPatch || sequencePatch) &&
                                                 !profileRenamePatch;
-            const bool saved = (systemPatch || controllerPatch || sequencePatch || hardwarePagePatch)
-                ? HardwareConfig::saveUnified(preserveStoredSettings)
-                : HardwareConfig::save();
+            // Stream hardware and settings separately for every bounded PATCH.
+            // The removed monolithic writer assembled both sections in one
+            // JsonDocument and could exhaust a Classic ESP32 heap. This writer
+            // has explicit overflow checks and installs the file atomically.
+            const bool saved = HardwareConfig::saveUnified(preserveStoredSettings);
             if (!saved) {
                 HardwareConfig::load();
                 ConfigApplyGate::release();

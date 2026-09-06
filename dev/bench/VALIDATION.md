@@ -18,7 +18,7 @@ either target to a build-only-by-a-few-bytes state.
 
 Systematic hardware-in-the-loop validation of the OpenTurbine firmware on the
 bench rig, aimed at finding defects **before** they reach a real turbine engine.
-The current release candidate is OpenTurbine 2.3.1. DUT and tester roles may be
+The current release candidate is OpenTurbine 2.3.2. DUT and tester roles may be
 swapped between the ESP32-S3 and Classic ESP32 as a campaign requires. Tests
 drive physical ADC/PCNT/SPI/digital paths where wired and use explicit simulator
 coverage for unavailable I²C devices.
@@ -29,6 +29,30 @@ the **v2.0.0 release-candidate HIL** section as the baseline and the newer
 superseded EGT-rate and old configuration behavior are not v2 requirements.
 
 Legend: ✅ pass · ⚠️ anomaly/concern · ❌ bug · ⏭️ not physically testable
+
+## v2.3.2 release follow-up — 2026-09-06
+
+- The canonical release gate passed for both targets: 11 UI audit programs,
+  288 safety checks, 17 setup matrices, native command/controller/feedback
+  behavior, 32 sensor protocol vectors, 12 release-tool tests, 31 bench harness
+  tests, Setup Tool tests, and both firmware/filesystem memory budgets.
+- The final S3 image (`build_id e6f9db8ae32fb513`) passed a physical factory
+  reset: 1 s fuel ramp-up, 2 s ramp-down, 50% idle maximum, 75% reduced-power
+  maximum, physical-Start relight disabled, and one schema-1 Main Fuel controller.
+  The boot-order defect that omitted structured controller defaults was fixed
+  and the factory reset was repeated successfully.
+- With Classic ESP32 running OTBench 0.9, this S3 image passed all six selected
+  checks: handshake, safe standby, physical STOP, ignition output, oil-pump
+  output, and physical START. Output tests independently checked the energized
+  and safe states at the tester. The compact-v2 harness decoder now consumes
+  the same telemetry and revisioned text contract as the dashboard.
+- The final Classic image (`build_id 61d4f754a82f3a6d`) accepted the saved JU4
+  engine file through the normal full-restore API, rebooted onto the `JU4`
+  access point, and reported matching JU4 hardware/settings identities,
+  schema-1 control, STANDBY, and no active outputs. This exposed and verified
+  the fix for carrying a changed engine identity through the atomic save.
+- Direct HX711 torque/thrust support is covered by driver/protocol tests and
+  both target builds. This follow-up did not attach a real thrust load cell.
 
 ## v2.2.2 ESP32-S3 release-candidate qualification — 2026-09-05
 

@@ -471,6 +471,7 @@ public:
         bool    enabled = false;
         uint8_t actuator = 255;
         char    targetId[20] = {}; // stable output identity; survives a temporarily missing device
+        uint16_t transitionMs = 0; // ordinary starter change time (0-60 s); 0 = immediate
         float   value = 0.0f;  // 0.0-1.0 demand; relays use any intentional nonzero as ON
     };
     struct CustomBlockStep {
@@ -541,7 +542,6 @@ public:
 
     // ── API ───────────────────────────────────────────────────
     static void load();                      // call at boot after LittleFS.begin()
-    static bool save();                      // write current values → ecu_config.json hardware section
     // Atomically write current Hardware and Settings while holding only one
     // large JSON section in heap at a time.
     static bool saveUnified(bool preserveStoredSettings = false);

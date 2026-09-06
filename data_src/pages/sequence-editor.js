@@ -30,7 +30,7 @@ function buildCard(bname, idx, tab) {
   // Build condition text for WHILE blocks
   const hw = flattenHw();
   const condText = bname === 'TimedDelay'
-    ? `${timedDelayValue(tab, idx)} ms`
+    ? `${seqRound(timedDelayValue(tab, idx) / 1000)} s`
     : (def ? (def.condition ? def.condition(hw) : null) : null);
 
   // Timeout badge
@@ -470,13 +470,20 @@ function buildSetOutputHtml(tab, idx) {
     : meta.mode === 'pct'
     ? `<div style="display:flex;align-items:center;gap:.35rem"><input class="param-input" type="number" min="0" max="100" step="1" value="${display}" oninput="updateSetOutput('${tab}',${idx},null,this.value)"><span class="param-unit">%</span></div>`
     : `<select class="param-input" onchange="updateSetOutput('${tab}',${idx},null,this.value)"><option value="1" ${display?'selected':''}>ON</option><option value="0" ${!display?'selected':''}>OFF</option></select>`;
+  const starterTransition = meta?.key === 'starter' && meta.mode === 'pct'
+    ? `<div class="param-field"><span class="param-label">Speed change time <span class="param-unit">(s)</span></span>
+        <input class="param-input" type="number" min="0" max="60" step="0.1" value="${Math.max(0, Number(row.transition_ms) || 0) / 1000}"
+          oninput="updateSetOutput('${tab}',${idx},null,null,this.value)">
+        <span class="param-desc">Time to move smoothly from the current starter demand to the requested demand. Set 0 for an immediate change. STOP and faults remain immediate.</span></div>`
+    : '';
   return `<div class="param-grid">
     <div class="param-field"><span class="param-label">Output device</span><select class="param-input" onchange="updateSetOutput('${tab}',${idx},this.value,null)">${options}</select><span class="param-desc">Any fitted output may be selected. Hardware driver limits are always respected.</span></div>
     <div class="param-field"><span class="param-label">${meta?.mode === 'pct' ? 'Demand (0–100%)' : 'Command'}</span>${demand}<span class="param-desc">${!meta ? 'Choose a fitted output to restore this block.' : meta.mode === 'pct' ? 'Zero is off; 100% is the configured full output.' : 'Binary relay or switch output.'}</span></div>
+    ${starterTransition}
   </div>`;
 }
 
-function updateSetOutput(tab, idx, newTarget, newValue) {
+function updateSetOutput(tab, idx, newTarget, newValue, newTransitionSeconds = null) {
   ensureActionSlots(tab);
   const key = actionKey(tab, 'enter');
   const row = hwCfg[key]?.[idx]?.[0];
@@ -489,10 +496,16 @@ function updateSetOutput(tab, idx, newTarget, newValue) {
     row.act = meta.actuator;
     row.target = meta.target;
     row.value = previousMeta?.mode === meta.mode ? actionStoredValue(row, previous) : 0;
+    if (meta.key !== 'starter' || meta.mode !== 'pct') delete row.transition_ms;
+    else if (!Number.isFinite(Number(row.transition_ms))) row.transition_ms = 0;
     renderFast(tab);
     return;
   }
-  row.value = actionStoredValue(row, newValue);
+  if (newTransitionSeconds !== null && newTransitionSeconds !== undefined) {
+    row.transition_ms = Math.round(Math.max(0, Math.min(60, Number(newTransitionSeconds) || 0)) * 1000);
+  } else {
+    row.value = actionStoredValue(row, newValue);
+  }
   markSequenceDirty('Sequence edited — save to apply');
 }
 
@@ -512,7 +525,7 @@ function onParamChange(bname, pkey, configKey, rawVal, tab, idx) {
     hwCfg[delaySeqKey(tab)][idx] = val;
     const card = document.querySelector(`#list-${tab} .block-card[data-idx="${idx}"]`);
     const summary = card?.querySelector('.block-cond');
-    if (summary) summary.textContent = `${val} ms`;
+    if (summary) summary.textContent = `${seqRound(val / 1000)} s`;
     markSequenceDirty('Sequence edited — save to apply');
     return;
   }

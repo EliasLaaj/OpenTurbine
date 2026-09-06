@@ -151,8 +151,8 @@ int   Config::shutdownRpmDropTimeoutMs= 15000;
 int   Config::shutdownCooldownTimeoutMs= 60000;  // 60 s default (was 200 s — unreachably long for typical engines)
 int   Config::shutdownFinalStopTimeoutMs=10000;
 
-float Config::throttleRampUpMs      = 600;
-float Config::throttleRampDownMs    = 800;
+float Config::throttleRampUpMs      = 1000;
+float Config::throttleRampDownMs    = 2000;
 float Config::throttleIdleMaxPct    = 50;
 float Config::fuelPumpMinPct        = 0;   // 0 = not calibrated; measured via the fuel-pump min-spin calibration
 float Config::throttleExpo          = 0.0f;  // 0 = linear by default
@@ -305,8 +305,8 @@ float    Config::standbyOilFeedPct   = 25.0f;
 float    Config::standbyOilFeedBar   = 0.0f;
 char     Config::standbyOilOutputId[20] = {};
 
-float    Config::limpMaxThrottlePct  = 50.0f;
-bool     Config::igniterOnStart      = true;
+float    Config::limpMaxThrottlePct  = 75.0f;
+bool     Config::igniterOnStart      = false;
 int      Config::manualRelightIgnitionTarget = 0;
 char     Config::manualRelightOutputId[20] = {};
 
@@ -1125,6 +1125,15 @@ bool validateSettingsDoc(const JsonDocument& doc, bool validateHardwareDependenc
             const char* target = rule["target"] | "";
             const int8_t handle = validateHardwareDependencies
                 ? ConfigInternal::ruleTargetHandle(target) : -1;
+            // A normal-shutdown request is an edge-like safety action rather
+            // than a physical output. It must be driven by a threshold rule,
+            // request shutdown when true, remain inactive when false, and only
+            // run in states from which the shutdown sequence is meaningful.
+            // Enforce this for complete imports as well as normal UI saves.
+            if (!strcmp(target, "request_shutdown") &&
+                (kind != 0 || rule["on_value"].as<float>() != 1.0f ||
+                 rule["off_value"].as<float>() != 0.0f ||
+                 (rule["mode_mask"].as<uint8_t>() & ~0x06u) != 0)) return false;
             if (validateHardwareDependencies && (kind == 1 || kind == 2) &&
                 !ruleActuatorSupportsVariable(handle)) return false;
             if (validateHardwareDependencies && rule["enabled"].as<bool>()) {

@@ -330,7 +330,7 @@ function updateRegistryChannel(direction, index, key, value) {
 function syncRegistryTorqueAdapter(c) {
   if (!cfg.sensors) cfg.sensors = {};
   const runtimeTorque = cfg.sensors.torque ||= {};
-  const hx = registryTorqueIsHx711(c);
+  const hx = registryLoadCellIsHx711(c);
   runtimeTorque.enabled = true;
   runtimeTorque.hx711 = hx;
   runtimeTorque.pin = hx ? -1 : Number(c.pin ?? -1);

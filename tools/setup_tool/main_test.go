@@ -184,7 +184,7 @@ func TestPackageDownloadRejectsPlainHTTP(t *testing.T) {
 }
 
 func TestRecommendedPackageURLsPreferResolvedRelease(t *testing.T) {
-	resolved := "https://github.com/example/OpenTurbine/releases/download/v2.3.1/OpenTurbine_Recommended.zip"
+	resolved := "https://github.com/example/OpenTurbine/releases/download/v2.3.2/OpenTurbine_Recommended.zip"
 	got := recommendedPackageURLs(defaultPackageURL, resolved)
 	if len(got) != 2 || got[0] != resolved || got[1] != defaultPackageURL {
 		t.Fatalf("download order = %v; want immutable release URL before stable latest URL", got)
