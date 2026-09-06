@@ -271,10 +271,12 @@ function drawSparkline(canvasId, data, color) {
 }
 
 // ── Compact live telemetry ────────────────────────────────────
-// One bounded REST sample at 2 Hz is sufficient for the human-facing UI and
-// proved robust on Classic while the
-// user navigates. Browsers reuse the HTTP connection; only one request may be
-// in flight, and every response is a complete JSON document.
+// One bounded REST sample at 3 Hz keeps the controls and primary engine data
+// visibly responsive on Classic. Browsers reuse the HTTP connection; only one
+// request may be in flight, and every response is a complete JSON document.
+// Optional diagnostics still rotate between frames to preserve the single-MSS
+// payload and the fixed ECU memory envelope.
+const LIVE_TELEMETRY_PERIOD_MS = 333;
 let _lastMsgMs = 0;
 let _restFallbackTimer = null;
 let _restFallbackInFlight = false;
@@ -319,7 +321,7 @@ function hasPageLocalTelemetry() {
 function desiredPullPeriodMs() {
   if (!isLiveTelemetryPage()) return 2000;
   if (isConfigPage()) return 1000;
-  return 500;
+  return LIVE_TELEMETRY_PERIOD_MS;
 }
 
 function requestTelemetryNow() {
@@ -365,7 +367,7 @@ async function restTelemetryFallbackNow() {
 
 function startRestFallbackTimer() {
   if (_restFallbackTimer || !isLiveTelemetryPage()) return;
-  const period = Math.max(500, desiredPullPeriodMs());
+  const period = Math.max(LIVE_TELEMETRY_PERIOD_MS, desiredPullPeriodMs());
   _restFallbackTimer = setInterval(restTelemetryFallbackNow, period);
 }
 
@@ -1970,7 +1972,7 @@ async function startTelemetryBoot() {
     // leave later samples deferred. It also briefly rendered the
     // unconfigured/default dashboard layout. Sequential startup gives the UI
     // its labels and fitted-channel layout first, then keeps only the compact
-    // 2 Hz stream active.
+    // 3 Hz stream active.
     await loadDashboardSnapshot();
   }
   startStaleMonitor();

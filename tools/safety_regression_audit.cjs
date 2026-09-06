@@ -614,7 +614,7 @@ expect('Tools polls compact live telemetry after loading its configuration and h
   !toolsHtml.includes("fetchJsonWithTimeout('/api/data', 3000)"));
 expect('Classic and S3 browser telemetry use one compact persistent HTTP transport',
   webApp.includes("fetch('/api/telemetry'") &&
-  webApp.includes('return 500;') &&
+  webApp.includes('const LIVE_TELEMETRY_PERIOD_MS = 333;') &&
   !webApp.includes('new WebSocket(') &&
   !webApp.includes("info?.target !== 'esp32dev'"));
 expect('runtime configuration heap pressure fails without rebooting the ECU',
@@ -1339,9 +1339,9 @@ expect('dashboard compact telemetry has one in-flight request and a bounded time
   webApp.includes('const timeout = setTimeout(() => controller.abort(), 1800);') &&
   webApp.includes("fetch('/api/telemetry'") &&
   webApp.includes('_restFallbackInFlight = false;'));
-expect('normal dashboard and calibration telemetry use a uniform 2 Hz compact HTTP path',
-  webApp.includes('return 500;') &&
-  webApp.includes('const period = Math.max(500, desiredPullPeriodMs());') &&
+expect('normal dashboard and calibration telemetry use a uniform 3 Hz compact HTTP path',
+  webApp.includes('return LIVE_TELEMETRY_PERIOD_MS;') &&
+  webApp.includes('const period = Math.max(LIVE_TELEMETRY_PERIOD_MS, desiredPullPeriodMs());') &&
   webApp.includes('setInterval(restTelemetryFallbackNow, period);'));
 expect('web assets and JSON replies declare the server one-response lifecycle',
   (web.match(/addHeader\("Connection", "close"\)/g) || []).length >= 3 &&

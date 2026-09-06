@@ -1621,8 +1621,8 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     const auto& ed = *reinterpret_cast<const EngineData*>(snapshotStorage);
     doc.clear();
 
-    // Keep continuously watched values in every 2 Hz response. Optional groups
-    // rotate at 0.5 Hz. Each response stays within one conservative Classic
+    // Keep continuously watched values in every 3 Hz response. Optional groups
+    // rotate at 0.75 Hz. Each response stays within one conservative Classic
     // TCP payload, avoiding fragile multipart state and heap churn.
     doc["snapshot_id"] = snapshotVersion;
     doc["mode"] = sysModeStr(ed.mode);
@@ -3139,7 +3139,7 @@ void WebServer::_setupRoutes() {
     // Frequent dynamic data only. Static labels, limits, capabilities and
     // registry metadata remain in the one-time /api/data boot snapshot. Use
     // the same conservative single-packet compact document so
-    // the Classic can sustain a 2 Hz HTTP request path without large
+    // the Classic can sustain a 3 Hz HTTP request path without large
     // transient response allocations.
     _server.on("/api/telemetry", HTTP_GET, [](AsyncWebServerRequest* req) {
         size_t n = _buildCompactTelemetry(
