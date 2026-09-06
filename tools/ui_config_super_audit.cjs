@@ -251,14 +251,14 @@ async function sectionVisible(page, title) {
     });
     await gotoConfig(page);
     await page.locator('#btn-view-expert').click();
-    assert.equal(await shown(page, '#starter-support-section'), false, 'starter support section should hide without starter hardware');
+    assert.equal(await page.locator('#starter-support-section').count(), 0, 'starter settings belong to the Set Starter sequence block');
     assert.equal(await page.locator('#glow-cfg-section').count(), 0, 'shared glow settings were replaced by each device card');
     assert.equal(await shown(page, '#rc-pwm-section'), false, 'RC PWM section should hide without servo PWM inputs');
     await page.locator('#btn-view-explore').click();
     assert.equal(await page.locator('#starter-support-section').count(), 0,
       'an output-owned starter controller should not clutter builds without a starter output');
     await page.locator('#btn-view-expert').click();
-    assert.equal(await shown(page, '#starter-support-section'), false, 'Configured system should hide unavailable starter assist');
+    assert.equal(await page.locator('#starter-support-section').count(), 0, 'Config should not duplicate Set Starter settings');
     await page.locator('#btn-view-explore').click();
     await page.locator('#cfg-search').fill('Bendix starter');
     assert.equal(await page.locator('#cf-sa_en').count(), 0, 'search must not recreate a controller whose output is not fitted');
@@ -277,7 +277,7 @@ async function sectionVisible(page, title) {
     });
     await gotoConfig(page);
     await page.locator('#btn-view-expert').click();
-    assert.equal(await shown(page, '#starter-support-section'), true, 'starter support settings should show when support and N1 are available');
+    assert.equal(await page.locator('#starter-support-section').count(), 0, 'starter support stays consolidated in Set Starter');
     assert.equal(await page.locator('#glow-cfg-section').count(), 0, 'glow behavior belongs to the exact Hardware device card');
     assert.equal(await shown(page, '#rc-pwm-section'), true, 'RC PWM section should show with servo PWM throttle input');
     await patchHardware(page, {
@@ -285,8 +285,8 @@ async function sectionVisible(page, title) {
     });
     await gotoConfig(page);
     await page.locator('#btn-view-expert').click();
-    assert.equal(await shown(page, '#starter-support-section'), false, 'starter support settings should hide without N1 feedback');
-    results.push('optional Pulsed Starter Assist, glow, and RC PWM sections follow fitted hardware and feedback prerequisites');
+    assert.equal(await page.locator('#starter-support-section').count(), 0, 'starter support remains absent from Config without N1 feedback');
+    results.push('starter setup stays in Set Starter while glow and RC PWM sections follow fitted hardware');
 
     await reset(page);
     console.log('super-audit: cluster toggle');

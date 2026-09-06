@@ -569,6 +569,26 @@ function installedBrowser() {
     assert.match(await text(page, '#oil-fit-summary'), /Datasheet straight-line calibration/);
     results.push('flame calibration makes igniter-off capture explicit and oil datasheet calibration creates a saveable curve');
 
+    assert.deepEqual(await page.locator('#p1-zero-reference option').allTextContents(), [
+      'Gauge (ambient = 0 bar)',
+      'Absolute (ambient ≈ 1.013 bar)'
+    ]);
+    await page.evaluate(() => {
+      window.applyData({ has_p1:true, p1_raw:1241, p1:1.01325 });
+      document.getElementById('p1-zero-reference').value = '1.01325';
+      _p12State.p1 = { mode:'physical', zeroRaw:620, refRaw:3102, refBar:5 };
+      p12Save('p1');
+    });
+    await page.waitForFunction(() => document.querySelector('#p1-cal-status')?.textContent.includes('Saved'));
+    assert.match(await text(page, '#cal-p1-raw'), /1000 mV/);
+    saved = await state(page);
+    const savedP1 = saved.hardware.channel_registry.inputs.find(c => c.purpose === 'p1_pressure');
+    assert.ok(Math.abs(savedP1.calibration_points[0].value - 1.01325) < 0.00001);
+    assert.equal(savedP1.calibration_points[0].raw, 620);
+    assert.equal(savedP1.calibration_points[1].value, 5);
+    assert.ok(savedP1.analog_zero_mv < 500);
+    results.push('all pressure calibrations offer gauge/absolute references, save the selected basis, and show ADC-pin millivolts');
+
     await page.goto(`${base}/hardware.html`);
     await page.waitForFunction(() => /Loaded|Converted/i.test(document.querySelector('#save-msg')?.textContent || ''));
     assert.equal(await page.evaluate(() => cfg.sensors.throttle_input.rc_pwm), true);
@@ -784,6 +804,14 @@ function installedBrowser() {
     await page.locator('#tab-startup .add-btn', {hasText:'Add block'}).click();
     assert.equal(await page.locator('#block-picker-dlg').isVisible(), true);
     assert.ok(await page.locator('#block-picker-list .block-picker-option').count() > 3);
+    const starterDefinition = await page.evaluate(() => ({
+      label: BLOCKS.StarterSpin.label,
+      keys: BLOCKS.StarterSpin.params.map(param => param.key)
+    }));
+    assert.equal(starterDefinition.label, 'Set Starter');
+    for (const key of ['starter_demand','ramp_pct_per_s','pulsed_assist_enabled',
+      'pulsed_assist_pwm_pct','pulsed_assist_until_rpm','pulsed_assist_on_ms','pulsed_assist_off_ms'])
+      assert.ok(starterDefinition.keys.includes(key));
     for (const viewport of [{width:1000,height:800}, {width:390,height:844}]) {
       await page.setViewportSize(viewport);
       assert.equal(await page.locator('#block-picker-list').evaluate(list =>
@@ -940,8 +968,11 @@ function installedBrowser() {
     assert.equal(await delayInputs.count(), 3);
     assert.deepEqual(await delayInputs.evaluateAll(els => els.map(el => el.value)), ['15000', '10000', '5000']);
     await page.locator('#list-startup .block-card[data-block="TimedDelay"] .block-header').nth(2).click();
-    await delayInputs.nth(2).fill('6000');
-    await delayInputs.nth(2).dispatchEvent('input');
+    await delayInputs.nth(2).click();
+    await delayInputs.nth(2).press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A');
+    await delayInputs.nth(2).type('6000', {delay:20});
+    assert.equal(await delayInputs.nth(2).inputValue(), '6000');
+    assert.equal(await delayInputs.nth(2).evaluate(el => document.activeElement === el), true);
     await page.locator('#save-btn').click();
     await page.locator('#ot-dialog-confirm').click();
     await page.waitForFunction(() => document.querySelector('#reboot-overlay')?.classList.contains('show'));
@@ -1069,11 +1100,9 @@ function installedBrowser() {
     } } });
     await page.goto(`${base}/controllers.html`);
     await page.waitForSelector('#simple-controls');
-    const starterOwnerCard = page.locator('#controller-overview details[data-built-in="starter-support"]');
     const igniterOwnerCard = page.locator('#controller-overview details[data-built-in="relight"]');
-    await starterOwnerCard.locator(':scope > summary').click();
     await igniterOwnerCard.locator(':scope > summary').click();
-    assert.equal(await starterOwnerCard.locator('#starter-support-section').count(), 1);
+    assert.equal(await page.locator('#controller-overview details[data-built-in="starter-support"]').count(), 0);
     assert.equal(await igniterOwnerCard.locator('#relight-section').count(), 1);
     assert.equal(await igniterOwnerCard.locator('#manual-relight-section').count(), 1);
     const creator = page.locator('#controller-overview .controller-create-card');
@@ -1230,6 +1259,16 @@ function installedBrowser() {
     assert.equal(saved.settings.session_log.interval_ms, 750);
     assert.equal(saved.settings.telemetry.snapshot_interval_ms, 12500);
     results.push('Log > Session Data owns channel selection and logging intervals');
+
+    const recoveredRun = await page.evaluate(() => parseRuns([
+      {t:112, ev:'RUN_SUMMARY', runS:86, maxN1:67100, maxTot:676},
+      {t:113, ev:'NORMAL_SHUTDOWN'}
+    ])[0]);
+    assert.equal(recoveredRun.outcome, 'NORMAL_SHUTDOWN');
+    assert.equal(recoveredRun.tStart, 26);
+    assert.equal(recoveredRun.runS, 86);
+    assert.equal(recoveredRun.peakN1, 67100);
+    results.push('completed-run summary recovers from the bounded event window even when START_ATTEMPT is older');
 
     await page.evaluate(() => renderSummary([], 8));
     assert.match(await page.locator('#runs-container').textContent(), /No engine runs in the currently loaded log\. 8 diagnostic events are still available under All Events\./);

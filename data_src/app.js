@@ -445,6 +445,7 @@ function applyData(d) {
   // fields; slow fields (has_*, limits, max_oil_temp, etc.) must persist so
   // that applyData(_lastData) called by the unit-toggle buttons still has them.
   if (!_lastData) _lastData = {};
+  applyFastDiscreteStates(d, _lastData);
   // di_channels: fast frames only carry {state,pin} — merge per-entry so the
   // label/role fields from the /api/data snapshot survive fast WS frames.
   if (d && Array.isArray(d.di_channels) && Array.isArray(_lastData.di_channels)) {
@@ -2044,6 +2045,30 @@ function mergeTelemetryChannels(previousRows, nextRows, completeSnapshot = false
   // frame. Preserve channels not present in this frame; otherwise the UI
   // alternates between partial hardware layouts every few seconds.
   return Array.from(merged.values());
+}
+
+function applyFastDiscreteStates(frame, previous) {
+  if (!frame || !previous) return;
+  const bit = (mask, index) => ((Number(mask) >>> index) & 1) !== 0;
+  if (frame.ri_on !== undefined && Array.isArray(previous.registry_inputs)) {
+    previous.registry_inputs.forEach((channel, index) => {
+      if (!channel) return;
+      if (registryInputIsBinary(channel)) channel.value = bit(frame.ri_on, index) ? 1 : 0;
+      if (frame.ri_ok !== undefined)
+        channel.healthy = bit(frame.ri_ok, index);
+    });
+  }
+  if (frame.ro_on !== undefined && Array.isArray(previous.registry_outputs)) {
+    previous.registry_outputs.forEach((channel, index) => {
+      if (channel && registryOutputIsRelay(channel))
+        channel.demand = bit(frame.ro_on, index) ? 1 : 0;
+    });
+  }
+  if (frame.di_on !== undefined && Array.isArray(previous.di_channels)) {
+    previous.di_channels.forEach((channel, index) => {
+      if (channel) channel.state = bit(frame.di_on, index);
+    });
+  }
 }
 
 const DASHBOARD_CORE_OUTPUT_PURPOSES = new Set([

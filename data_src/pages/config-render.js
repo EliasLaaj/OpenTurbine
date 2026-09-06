@@ -218,7 +218,6 @@ function renderControllerOverview() {
   const builtIn = (id, title, desc) => `<details class="control-definition-card config-group built-in-subsystem" data-built-in="${id}"><summary><span class="group-heading"><span class="group-title">${title}</span><span class="group-desc">${desc}</span></span><span class="group-chevron">›</span></summary><div class="controller-card-body" data-built-in-settings="${id}"></div></details>`;
   const builtIns = [
     purposes.has('main_fuel') ? builtIn('fuel-support','Fuel-metering support','Throttle shaping, automatic idle, and reduced-power behavior') : '',
-    purposes.has('starter') ? builtIn('starter-support','Starter support','Optional pulsed engagement behavior used by startup blocks') : '',
     (purposes.has('igniter') || purposes.has('ab_igniter') || purposes.has('glow_plug')) ? builtIn('relight','Ignition and relight','Automatic and operator-requested relight behavior during RUNNING') : '',
     purposes.has('oil_pump') ? builtIn('windmilling-oil','Windmilling oil protection','Protective oil flow while a fitted shaft rotates outside normal running') : '',
     (purposes.has('ab_pump') || purposes.has('ab_igniter') || purposes.has('ab_fuel') || purposes.has('ab_fuel_shutoff')) ? builtIn('afterburner','Afterburner subsystem','Light-up method, flame confirmation, and lit-running fuel behavior') : ''
@@ -233,7 +232,6 @@ function renderControllerOverview() {
 function _mountControllerLocalSettings(outputs) {
   const sectionMap = {
     'fuel-support':['throttle','idle-control-cfg-section','reduced-power-section'],
-    'starter-support':['starter-support-section'],
     relight:['relight-section','manual-relight-section'],
     'windmilling-oil':['windmilling-oil-section'],
     afterburner:['ab-ign-section','ab-flame-section','ab-run-section']

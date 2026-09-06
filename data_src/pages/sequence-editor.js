@@ -510,7 +510,10 @@ function onParamChange(bname, pkey, configKey, rawVal, tab, idx) {
   if (bname === 'TimedDelay' && pkey === 'timed_delay_ms' && tab !== undefined) {
     ensureDelaySlots(tab);
     hwCfg[delaySeqKey(tab)][idx] = val;
-    renderFast(tab);
+    const card = document.querySelector(`#list-${tab} .block-card[data-idx="${idx}"]`);
+    const summary = card?.querySelector('.block-cond');
+    if (summary) summary.textContent = `${val} ms`;
+    markSequenceDirty('Sequence edited — save to apply');
     return;
   }
   const vk  = bname + '.' + pkey;
@@ -1258,7 +1261,7 @@ function _validateSequence(blocks) {
     const fuelIdx   = blocks.indexOf('FuelOpen');
     const startIdx  = blocks.indexOf('StarterSpin');
     if (fuelIdx < startIdx) {
-      warnings.push('Open Main Fuel Shutoff appears before Starter Spin to Light-Off Speed. Fuel may enter before rotor airflow is established, risking unburned fuel pooling. Move the starter-spin block before main fuel opens.');
+      warnings.push('Open Main Fuel Shutoff appears before Set Starter. Fuel may enter before rotor airflow is established, risking unburned fuel pooling. Move the starter block before main fuel opens.');
     }
   }
   // SafetyHold without Spool - valid but unusual

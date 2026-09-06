@@ -73,7 +73,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <div class="sensor-row" id="oil-press-cal-row" style="display:none">
     <div class="sensor-name"><span id="oil-h-cal" class="dot"></span> Oil Pressure</div>
     <div class="sensor-vals">
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-oil-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin</div><div class="sv-val" id="cal-oil-raw">—</div></div>
       <div class="sv-item"><div class="sv-label">bar</div><div class="sv-val" id="cal-oil">—</div></div>
       <div class="sv-item"><div class="sv-label">Pump %</div><div class="sv-val" id="cal-oil-pct">—</div></div>
       <div class="sv-item"><div class="sv-label">Status</div><div class="sv-val" id="cal-oil-h">—</div></div>
@@ -97,7 +97,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
           <b>1. Capture pump-off pressure.</b> Depressurise the oil line and choose what the sensor should read at ambient pressure: <b>0 bar</b> for a gauge-pressure sensor, or about <b>1 bar</b> for an absolute-pressure sensor. The ECU keeps the pump off and averages the reference before continuing.
         </div>
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.5rem">
-          <label style="font-size:.75rem;color:var(--dim)">Zero reading
+          <label style="font-size:.75rem;color:var(--dim)">Pressure reference
             <select id="oil-zero-reference">
               <option value="0">0 bar (gauge pressure)</option>
               <option value="1.01325">ambient, about 1 bar (absolute pressure)</option>
@@ -258,7 +258,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
   <div class="sensor-row" id="fuelpress-cal-row" style="display:none">
     <div class="sensor-name">Fuel Pressure Sensor <span id="fuelpress-h-cal" class="dot"></span></div>
     <div class="sensor-vals">
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-fuelpress-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin</div><div class="sv-val" id="cal-fuelpress-raw">—</div></div>
       <div class="sv-item"><div class="sv-label">Pressure bar</div><div class="sv-val" id="cal-fuelpress">—</div></div>
       <div class="sv-item"><div class="sv-label">Cal range</div><div class="sv-val" id="cal-fuelpress-range">—</div></div>
     </div>
@@ -267,12 +267,18 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="wizard">
       <div class="wizard-title">Fuel Pressure Two-Point Calibration</div>
       <div class="wizard-steps">
-        1. With fuel pump off / line depressurised, click <b>Capture Zero</b>.<br>
+        1. Choose the pressure reference. With fuel pump off / line depressurised and the sensor open to atmosphere, click <b>Capture Ambient</b>.<br>
         2. Apply a known reference pressure (e.g. 3 bar from a gauge), enter the value below, then click <b>Capture Ref</b>.<br>
         3. Click <b>Save</b> to write calibration to config.
       </div>
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.6rem">
-        <button onclick="fpCapZero()">Capture Zero</button>
+        <label style="font-size:.8rem;color:var(--dim)">Pressure reference:
+          <select id="fuelpress-zero-reference">
+            <option value="0">Gauge (ambient = 0 bar)</option>
+            <option value="1.01325">Absolute (ambient ≈ 1.013 bar)</option>
+          </select>
+        </label>
+        <button onclick="fpCapZero()">Capture Ambient</button>
         <label style="font-size:.8rem;color:var(--dim)">Ref pressure:
           <input type="number" id="fp-ref-bar" value="3" min="0.1" max="1000" step="0.1" style="width:80px;margin-left:.3rem"> bar
         </label>
@@ -292,12 +298,20 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name" id="p1-cal-name">Pressure 1 Sensor</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Reading (bar)</div><div class="sv-val" id="cal-p1">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-p1-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin</div><div class="sv-val" id="cal-p1-raw">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-p1" style="width:0%"></div></div>
     <div class="bar-range"><span>0 bar</span><span id="p1-bar-max-label">10 bar</span></div>
     <div class="wizard">
       <div class="wizard-title" id="p1-cal-wizard-title">Pressure 1 Two-Point Calibration</div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
+        <label style="font-size:.8rem;color:var(--dim)">Pressure reference:
+          <select id="p1-zero-reference">
+            <option value="0">Gauge (ambient = 0 bar)</option>
+            <option value="1.01325">Absolute (ambient ≈ 1.013 bar)</option>
+          </select>
+        </label>
+      </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
         <button style="font-size:.72rem;padding:.25rem .6rem" onclick="p12CalMode('p1','physical')" id="p1-mode-physical" class="primary">Physical capture</button>
         <button style="font-size:.72rem;padding:.25rem .6rem" onclick="p12CalMode('p1','factory')"  id="p1-mode-factory">Factory spec (datasheet)</button>
@@ -305,7 +319,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
       <!-- Physical capture mode -->
       <div id="p1-mode-physical-panel">
         <div class="wizard-steps">
-          <b>Step 1 — Zero:</b> Open sensor port to atmosphere. <button onclick="p12CaptureZero('p1')">Capture Zero</button>
+          <b>Step 1 — Ambient:</b> Open sensor port to atmosphere. <button onclick="p12CaptureZero('p1')">Capture Ambient</button>
           <span id="p1-zero-captured" style="color:var(--green);margin-left:.4rem"></span><br>
           <b>Step 2 — Reference:</b> Apply a known pressure.
           <input type="number" id="p1-ref-bar" min="0.1" max="100" step="0.1" placeholder="bar" style="width:5rem;margin:0 .3rem">
@@ -317,7 +331,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
       <div id="p1-mode-factory-panel" style="display:none">
         <div class="wizard-steps">
           Enter the sensor voltage at the ECU ADC pin after any divider or level shift:<br>
-          ADC-pin voltage at <b>0 bar</b>: <input type="number" id="p1-v-zero" min="0" max="3.3" step="0.01" placeholder="0.5 V" style="width:5rem;margin:0 .3rem"> V
+          ADC-pin voltage with the sensor <b>open to atmosphere</b>: <input type="number" id="p1-v-zero" min="0" max="3.3" step="0.01" placeholder="0.5 V" style="width:5rem;margin:0 .3rem"> V
           &nbsp; ADC-pin voltage at <b>full-scale</b>: <input type="number" id="p1-v-max" min="0" max="3.3" step="0.01" placeholder="3.0 V" style="width:5rem;margin:0 .3rem"> V
           &nbsp; Pressure at full-scale (bar): <input type="number" id="p1-v-valmax" min="0.1" max="1000" step="0.1" placeholder="10 bar" style="width:5rem;margin:0 .3rem"> bar
           <br><span style="font-size:.72rem;color:var(--dim)">For common 0.5-4.5 V automotive transducers, use a divider or 3.3 V-rated sensor and enter the scaled ADC-pin voltage here.</span>
@@ -336,19 +350,27 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
     <div class="sensor-name" id="p2-cal-name">Pressure 2 Sensor</div>
     <div class="sensor-vals">
       <div class="sv-item"><div class="sv-label">Reading (bar)</div><div class="sv-val" id="cal-p2">—</div></div>
-      <div class="sv-item"><div class="sv-label">Raw ADC</div><div class="sv-val" id="cal-p2-raw">—</div></div>
+      <div class="sv-item"><div class="sv-label">ADC pin</div><div class="sv-val" id="cal-p2-raw">—</div></div>
     </div>
     <div class="bar-track"><div class="bar-fill" id="bar-p2" style="width:0%"></div></div>
     <div class="bar-range"><span>0 bar</span><span id="p2-bar-max-label">10 bar</span></div>
     <div class="wizard">
       <div class="wizard-title" id="p2-cal-wizard-title">Pressure 2 Two-Point Calibration</div>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
+        <label style="font-size:.8rem;color:var(--dim)">Pressure reference:
+          <select id="p2-zero-reference">
+            <option value="0">Gauge (ambient = 0 bar)</option>
+            <option value="1.01325">Absolute (ambient ≈ 1.013 bar)</option>
+          </select>
+        </label>
+      </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
         <button style="font-size:.72rem;padding:.25rem .6rem" onclick="p12CalMode('p2','physical')" id="p2-mode-physical" class="primary">Physical capture</button>
         <button style="font-size:.72rem;padding:.25rem .6rem" onclick="p12CalMode('p2','factory')"  id="p2-mode-factory">Factory spec (datasheet)</button>
       </div>
       <div id="p2-mode-physical-panel">
         <div class="wizard-steps">
-          <b>Step 1 — Zero:</b> Open sensor port to atmosphere. <button onclick="p12CaptureZero('p2')">Capture Zero</button>
+          <b>Step 1 — Ambient:</b> Open sensor port to atmosphere. <button onclick="p12CaptureZero('p2')">Capture Ambient</button>
           <span id="p2-zero-captured" style="color:var(--green);margin-left:.4rem"></span><br>
           <b>Step 2 — Reference:</b> Apply a known pressure.
           <input type="number" id="p2-ref-bar" min="0.1" max="100" step="0.1" placeholder="bar" style="width:5rem;margin:0 .3rem">
@@ -359,7 +381,7 @@ document.addEventListener('DOMContentLoaded',function(){var c='';try{var x=new X
       <div id="p2-mode-factory-panel" style="display:none">
         <div class="wizard-steps">
           Enter the sensor voltage at the ECU ADC pin after any divider or level shift:<br>
-          ADC-pin voltage at <b>0 bar</b>: <input type="number" id="p2-v-zero" min="0" max="3.3" step="0.01" placeholder="0.5 V" style="width:5rem;margin:0 .3rem"> V
+          ADC-pin voltage with the sensor <b>open to atmosphere</b>: <input type="number" id="p2-v-zero" min="0" max="3.3" step="0.01" placeholder="0.5 V" style="width:5rem;margin:0 .3rem"> V
           &nbsp; ADC-pin voltage at <b>full-scale</b>: <input type="number" id="p2-v-max" min="0" max="3.3" step="0.01" placeholder="3.0 V" style="width:5rem;margin:0 .3rem"> V
           &nbsp; Pressure at full-scale (bar): <input type="number" id="p2-v-valmax" min="0.1" max="1000" step="0.1" placeholder="10 bar" style="width:5rem;margin:0 .3rem"> bar
           <br><span style="font-size:.72rem;color:var(--dim)">For common 0.5-4.5 V automotive transducers, use a divider or 3.3 V-rated sensor and enter the scaled ADC-pin voltage here.</span>
@@ -887,6 +909,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   setText('fuelpress-bar-max', fpVal.toFixed(1) + ' bar');
   setText('cal-fuelpress-range', fpMin + ' – ' + fpMax + ' raw');
+  for (const [selectId, purpose] of [
+    ['oil-zero-reference', 'oil_pressure'],
+    ['fuelpress-zero-reference', 'fuel_pressure'],
+    ['p1-zero-reference', 'p1_pressure'],
+    ['p2-zero-reference', 'p2_pressure']
+  ]) restorePressureReference(selectId, purpose);
   // Show/hide P1/P2 calibration from hardware fitment, not dashboard display preference.
   const p1RowInit = document.getElementById('p1-cal-row');
   const p2RowInit = document.getElementById('p2-cal-row');
@@ -1095,7 +1123,7 @@ window.applyData = function(d) {
   const fpCalRow = document.getElementById('fuelpress-cal-row');
   if (fpCalRow) fpCalRow.style.display = hasFuelPress ? '' : 'none';
   if (hasFuelPress) {
-    setText('cal-fuelpress-raw', d.fuel_press_raw ?? '—');
+    setText('cal-fuelpress-raw', adcMvText(d.fuel_press_raw));
     if (d.fuel_press !== undefined) {
       const fpValMax = cfg.calibration?.fuel_press_val_max ?? 10;
       setText('cal-fuelpress', Number(d.fuel_press).toFixed(2) + ' bar');
@@ -1110,21 +1138,21 @@ window.applyData = function(d) {
   if (p1Row) p1Row.style.display = hasP1 ? '' : 'none';
   if (p2Row) p2Row.style.display = hasP2 ? '' : 'none';
   if (hasP1) {
-    setText('cal-p1-raw', d.p1_raw ?? '—');
+    setText('cal-p1-raw', adcMvText(d.p1_raw));
     if (d.p1 !== undefined) {
       setText('cal-p1', Number(d.p1).toFixed(3) + ' bar');
       bar('bar-p1', d.p1, 0, cfg.calibration?.p1_val_max ?? 10, true);
     }
   }
   if (hasP2) {
-    setText('cal-p2-raw', d.p2_raw ?? '—');
+    setText('cal-p2-raw', adcMvText(d.p2_raw));
     if (d.p2 !== undefined) {
       setText('cal-p2', Number(d.p2).toFixed(3) + ' bar');
       bar('bar-p2', d.p2, 0, cfg.calibration?.p2_val_max ?? 10, true);
     }
   }
 
-  setText('cal-oil-raw', d.oil_raw ?? '—');
+  setText('cal-oil-raw', adcMvText(d.oil_raw));
   setText('cal-oil',     d.oil !== undefined ? Number(d.oil).toFixed(3) + ' bar' : '—');
   setText('fp-min-saved', d.fuel_pump_min_pct !== undefined ? Number(d.fuel_pump_min_pct).toFixed(1) : '—');
   setText('cal-oil-pct', d.oil_pct !== undefined ? d.oil_pct + ' %' : '—');
@@ -1321,13 +1349,22 @@ function bar(id, val, lo, hi, healthy) {
   el.className = 'bar-fill' + (!healthy ? ' fault' : pct > 90 ? ' warn' : '');
 }
 
+function adcMv(raw) {
+  return Number(raw) * 3300.0 / 4095.0;
+}
+function adcMvText(raw) {
+  return Number.isFinite(Number(raw)) ? Math.round(adcMv(raw)) + ' mV' : '—';
+}
+
 // ── Fuel pressure calibration wizard ─────────────────────────
 function fpCapZero() {
   const raw = live.fuel_press_raw;
   if (raw === undefined) { alert('No fuel pressure raw data yet'); return; }
   fpRawZero = raw;
+  const ambientBar = pressureReferenceValue('fuelpress-zero-reference');
   document.getElementById('fp-pts-status').textContent =
-    'Zero captured: ' + raw + ' raw' + (fpRawRef !== null ? ' | ref: ' + fpRawRef + ' raw — ready to save' : ' | now capture reference point');
+    'Ambient captured: ' + adcMvText(raw) + ' = ' + pressureValueLabel(ambientBar) +
+    (fpRawRef !== null ? ' | ref: ' + adcMvText(fpRawRef) + ' — ready to save' : ' | now capture reference point');
   document.getElementById('btn-fp-save').disabled = (fpRawRef === null);
 }
 
@@ -1336,7 +1373,7 @@ function fpCapRef() {
   if (raw === undefined) { alert('No fuel pressure raw data yet'); return; }
   fpRawRef = raw;
   document.getElementById('fp-pts-status').textContent =
-    'Ref captured: ' + raw + ' raw' + (fpRawZero !== null ? ' | zero: ' + fpRawZero + ' raw — ready to save' : ' | now capture zero point');
+    'Ref captured: ' + adcMvText(raw) + (fpRawZero !== null ? ' | ambient: ' + adcMvText(fpRawZero) + ' — ready to save' : ' | now capture ambient point');
   document.getElementById('btn-fp-save').disabled = (fpRawZero === null);
 }
 
@@ -1344,28 +1381,31 @@ function fpSaveCal() {
   if (fpRawZero === null || fpRawRef === null) { alert('Capture both points first'); return; }
   if (fpRawRef <= fpRawZero) { alert('Reference raw must be greater than zero raw'); return; }
   const refBar = parseFloat(document.getElementById('fp-ref-bar').value);
-  if (isNaN(refBar) || refBar <= 0 || refBar > 1000) {
-    alert('Enter a valid reference pressure between 0 and 1000 bar.');
+  const ambientBar = pressureReferenceValue('fuelpress-zero-reference');
+  if (isNaN(refBar) || refBar <= ambientBar || refBar > 1000) {
+    alert('Reference pressure must be above the selected ambient value (' + pressureValueLabel(ambientBar) + ').');
     return;
   }
-  const fpScale = ((fpRawRef - fpRawZero) * 3300.0 / 4095.0) / refBar;
+  const fpScale = ((fpRawRef - fpRawZero) * 3300.0 / 4095.0) / (refBar - ambientBar);
+  const fpZeroMv = fpRawZero * 3300.0 / 4095.0 - ambientBar * fpScale;
   const fpRegistryPatch = registryCalibrationPatch('fuel_pressure', {
-    analog_zero_mv: fpRawZero * 3300.0 / 4095.0,
+    analog_zero_mv: fpZeroMv,
     analog_mv_per_unit: fpScale,
-    calibration_points: [{raw:fpRawZero,value:0},{raw:fpRawRef,value:refBar}]
+    calibration_points: [{raw:fpRawZero,value:ambientBar},{raw:fpRawRef,value:refBar}]
   });
   patchHardwareThenConfig(fpRegistryPatch, () => {
     const registry = registryInputById('fuel_pressure');
     if (registry) {
-      registry.analog_zero_mv = fpRawZero * 3300.0 / 4095.0;
+      registry.analog_zero_mv = fpZeroMv;
       registry.analog_mv_per_unit = fpScale;
-      registry.calibration_points = [{raw:fpRawZero,value:0},{raw:fpRawRef,value:refBar}];
+      registry.calibration_points = [{raw:fpRawZero,value:ambientBar},{raw:fpRawRef,value:refBar}];
     }
   }, { calibration: {
     fuel_press_raw_min: fpRawZero,
     fuel_press_raw_max: fpRawRef,
     fuel_press_val_max: refBar
-  }}, 'Fuel pressure calibration saved (' + fpRawZero + '–' + fpRawRef + ' raw = 0–' + refBar + ' bar)', () => {
+  }}, 'Fuel pressure calibration saved (' + fpRawZero + '–' + fpRawRef + ' raw = ' +
+      pressureValueLabel(ambientBar) + '–' + refBar + ' bar)', () => {
     if (!cfg.calibration) cfg.calibration = {};
     cfg.calibration.fuel_press_raw_min = fpRawZero;
     cfg.calibration.fuel_press_raw_max = fpRawRef;
@@ -1467,7 +1507,7 @@ function oilCalStart() {
       oilPts = [{ raw: raw0, b: zeroBar }];
       oilMinPctCaptured = null;
       renderOilPts();
-      statusEl.textContent = `Pump-off reference captured: raw=${raw0} → ${zeroBar.toFixed(2)} bar`;
+      statusEl.textContent = `Pump-off reference captured: ${adcMvText(raw0)} → ${zeroBar.toFixed(2)} bar`;
 
       // Continue with the pump stopped. The next step deliberately finds the
       // first reliable pump output rather than asking the operator to guess it.
@@ -1647,7 +1687,7 @@ function renderOilPts() {
   const el = document.getElementById('oil-pts');
   if (oilPts.length === 0) { el.textContent = 'Waiting for first point…'; return; }
   el.textContent = oilPts.map((p,i) =>
-    `  ${i+1}. raw=${Math.round(p.raw)}  →  ${p.b.toFixed(2)} bar${i===0 && p.b===0?' (auto-zero)':''}`
+    `  ${i+1}. ${adcMvText(p.raw)}  →  ${p.b.toFixed(2)} bar${i===0?' (ambient reference)':''}`
   ).join('\n');
 }
 
@@ -2127,6 +2167,20 @@ function registryInputById(id) {
     String(c?.id || '') === id || String(c?.purpose || '') === id) || null;
 }
 
+function pressureReferenceValue(selectId) {
+  const value = Number(document.getElementById(selectId)?.value);
+  return Number.isFinite(value) && value > 0.5 ? 1.01325 : 0;
+}
+function pressureValueLabel(value) {
+  return Number(value).toFixed(value > 0.5 ? 3 : 0) + ' bar';
+}
+function restorePressureReference(selectId, purpose) {
+  const select = document.getElementById(selectId);
+  const points = registryInputById(purpose)?.calibration_points;
+  if (!select || !Array.isArray(points) || !points.length) return;
+  select.value = Number(points[0]?.value) > 0.5 ? '1.01325' : '0';
+}
+
 const ADC_SWITCH_ROLES = new Set([
   'digital_switch','fault','estop','inhibit_start','low_oil_switch',
   'oil_zero_switch','sequence_gate','ab_arm','ab_fire','limp_mode'
@@ -2505,21 +2559,27 @@ function p12CaptureZero(ch) {
   if (raw === undefined) { alert('No live raw ADC data for ' + ch.toUpperCase()); return; }
   if (!_p12State[ch]) _p12State[ch] = {};
   _p12State[ch].zeroRaw = raw;
-  document.getElementById(ch + '-zero-captured').textContent = '✓ ADC ' + raw;
+  const ambientBar = pressureReferenceValue(ch + '-zero-reference');
+  document.getElementById(ch + '-zero-captured').textContent =
+    '✓ ' + adcMvText(raw) + ' = ' + pressureValueLabel(ambientBar);
 }
 function p12CaptureRef(ch) {
   const raw = live[ch + '_raw'];
   const bar = parseFloat(document.getElementById(ch + '-ref-bar').value);
+  const ambientBar = pressureReferenceValue(ch + '-zero-reference');
   if (raw === undefined) { alert('No live raw ADC data for ' + ch.toUpperCase()); return; }
-  if (isNaN(bar) || bar <= 0) { alert('Enter a valid reference pressure in bar'); return; }
+  if (isNaN(bar) || bar <= ambientBar) {
+    alert('Reference pressure must be above the selected ambient value (' + pressureValueLabel(ambientBar) + ').'); return;
+  }
   if (!_p12State[ch]) _p12State[ch] = {};
   _p12State[ch].refRaw = raw;
   _p12State[ch].refBar = bar;
-  document.getElementById(ch + '-ref-captured').textContent = '✓ ADC ' + raw + ' @ ' + bar + ' bar';
+  document.getElementById(ch + '-ref-captured').textContent = '✓ ' + adcMvText(raw) + ' @ ' + bar + ' bar';
 }
 function p12Save(ch) {
   const st = _p12State[ch] || {};
   const mode = st.mode || 'physical';
+  const ambientBar = pressureReferenceValue(ch + '-zero-reference');
   let rawMin, rawMax, valMax;
   if (mode === 'physical') {
     if (st.zeroRaw === undefined || st.refRaw === undefined) {
@@ -2530,7 +2590,7 @@ function p12Save(ch) {
     const vZero   = parseFloat(document.getElementById(ch + '-v-zero').value);
     const vMax    = parseFloat(document.getElementById(ch + '-v-max').value);
     valMax        = parseFloat(document.getElementById(ch + '-v-valmax').value);
-    if (isNaN(vZero) || isNaN(vMax) || isNaN(valMax) || valMax <= 0) {
+    if (isNaN(vZero) || isNaN(vMax) || isNaN(valMax) || valMax <= ambientBar) {
       alert('Enter all three factory spec values'); return;
     }
     if (vZero < 0 || vZero > 3.3 || vMax < 0 || vMax > 3.3) {
@@ -2545,26 +2605,30 @@ function p12Save(ch) {
     [ch + '_raw_min']: rawMin, [ch + '_raw_max']: rawMax, [ch + '_val_max']: valMax
   }};
   const purpose = ch === 'p1' ? 'p1_pressure' : 'p2_pressure';
+  const mvPerUnit = ((rawMax-rawMin)*3300/4095)/(valMax-ambientBar);
+  const zeroMv = rawMin*3300/4095-ambientBar*mvPerUnit;
   const registryPatch = registryCalibrationPatch(purpose, {
-    analog_zero_mv:rawMin*3300/4095,
-    analog_mv_per_unit:((rawMax-rawMin)*3300/4095)/valMax,
-    calibration_points:[{raw:rawMin,value:0},{raw:rawMax,value:valMax}]
+    analog_zero_mv:zeroMv,
+    analog_mv_per_unit:mvPerUnit,
+    calibration_points:[{raw:rawMin,value:ambientBar},{raw:rawMax,value:valMax}]
   });
   patchHardwareThenConfig(registryPatch, () => {
     const registry=registryInputById(purpose);
     if (registry) {
-      registry.analog_zero_mv=rawMin*3300/4095;
-      registry.analog_mv_per_unit=((rawMax-rawMin)*3300/4095)/valMax;
-      registry.calibration_points=[{raw:rawMin,value:0},{raw:rawMax,value:valMax}];
+      registry.analog_zero_mv=zeroMv;
+      registry.analog_mv_per_unit=mvPerUnit;
+      registry.calibration_points=[{raw:rawMin,value:ambientBar},{raw:rawMax,value:valMax}];
     }
-  }, configPatch, ch.toUpperCase() + ' calibration saved — zero=' + rawMin + ', ref=' + rawMax + ' → ' + valMax + ' bar', () => {
+  }, configPatch, ch.toUpperCase() + ' calibration saved — ambient=' + rawMin + ' (' +
+      pressureValueLabel(ambientBar) + '), ref=' + rawMax + ' → ' + valMax + ' bar', () => {
     if (!cfg.calibration) cfg.calibration = {};
     cfg.calibration[ch + '_raw_min'] = rawMin;
     cfg.calibration[ch + '_raw_max'] = rawMax;
     cfg.calibration[ch + '_val_max'] = valMax;
     document.getElementById(ch + '-bar-max-label').textContent = valMax + ' bar';
     document.getElementById(ch + '-cal-status').textContent =
-      '✓ Saved: 0 bar @ ADC ' + rawMin + ',  ' + valMax + ' bar @ ADC ' + rawMax;
+      '✓ Saved: ' + pressureValueLabel(ambientBar) + ' @ ' + adcMvText(rawMin) + ',  ' +
+      valMax + ' bar @ ' + adcMvText(rawMax);
   });
 }
 function p12Clear(ch) {

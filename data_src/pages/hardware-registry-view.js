@@ -339,7 +339,7 @@ function registryCurrentUsers(direction, id) {
 }
 function registryBlockLabel(block) {
   const labels = {
-    OilPrime:'Build Oil Pressure', StarterSpin:'Starter Spin to Light-Off Speed', PreIgnSpark:'Igniter 1 Timed On',
+    OilPrime:'Build Oil Pressure', StarterSpin:'Set Starter', PreIgnSpark:'Igniter 1 Timed On',
     FuelOpen:'Open Main Fuel Shutoff', FlameConfirm:'Confirm Combustion by Flame Sensor', TempConfirm:'Confirm Combustion by Temperature',
     FuelPumpIdle:'Set Main Fuel for Idle', ModifiedIdle:'Set Main Fuel for Raised Idle', Spool:'Accelerate to Idle',
     SafetyHold:'Final Startup Checks', OilPumpOn:'Oil Pump On', OilPumpOff:'Oil Pump Off',
@@ -1135,7 +1135,7 @@ function registryContextLinks(direction, c) {
       add('/controllers.html#cf-th_ru', 'Set fuel response');
       add('/calibration.html#fuelpump-min-cal-row', 'Calibrate minimum fuel command');
     } else if (purpose === 'starter' || purpose === 'starter_enable' || purpose === 'air_starter') {
-      add('/controllers.html#cf-sa_en', 'Set starter assist');
+      add('/sequence.html#tab-startup', 'Set starter spin and assist');
       add('/sequence.html#tab-startup', 'Open startup sequence');
     } else if (purpose === 'oil_pump') {
       add('/controllers.html#cf-oil_mm', 'Set oil-pressure control');

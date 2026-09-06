@@ -1663,6 +1663,14 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     // consume their rotating group and leave the visible UI stale.
     doc["prop_pitch_demand"] = (float)(int)(ed.propPitchDemand * 1000) / 1000.0f;
     doc["ab_fuel_offset"] = (float)(int)(ed.abFuelOffset * 1000) / 1000.0f;
+    // Discrete dashboard state must travel in every frame. Previously these
+    // values lived in a rotating group, so a short ignition pulse could be
+    // over before the browser received the group containing it.
+    // Keep the two ignition aliases for compatibility with dashboards that
+    // do not yet resolve registry masks. Other discrete outputs are covered
+    // by the compact registry bitset below.
+    doc["igniter_on"] = ed.igniterOn;
+    doc["igniter2_on"] = ed.igniter2On;
     doc["stop_switch_active"] = ed.stopSwitchActive;
     doc["start_switch_active"] = ed.startSwitchActive;
     doc["start_switch_healthy"] = ed.startSwitchHealthy;
@@ -1677,6 +1685,23 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
     doc["reset_reason"] = ed.resetReason;
     doc["last_event"] = ed.lastEvent;
     doc["fault_description"] = ed.faultDescription;
+    uint32_t inputOnMask = 0;
+    uint32_t inputHealthyMask = 0;
+    uint32_t outputOnMask = 0;
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.inputCount && i < 32; ++i) {
+        if (ed.registryInputValue[i] >= 0.5f) inputOnMask |= (1UL << i);
+        if (ed.registryInputHealthy[i]) inputHealthyMask |= (1UL << i);
+    }
+    for (uint8_t i = 0; i < HardwareConfig::channelRegistry.outputCount && i < 32; ++i) {
+        if (RelayDemand::requested(ed.registryOutputDemand[i])) outputOnMask |= (1UL << i);
+    }
+    uint32_t diOnMask = 0;
+    for (uint8_t i = 0; i < HardwareConfig::MAX_DI && i < 32; ++i)
+        if (ed.diState[i]) diOnMask |= (1UL << i);
+    doc["ri_on"] = inputOnMask;
+    doc["ri_ok"] = inputHealthyMask;
+    doc["ro_on"] = outputOnMask;
+    doc["di_on"] = diOnMask;
 
     static uint8_t group = 0;
     const uint8_t thisGroup = group++ & 0x03u;
@@ -1688,9 +1713,15 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
         doc["flame_healthy"] = ed.flameHealthy;
         doc["p1"] = (float)(int)(std::max(0.0f, (float)ed.p1) * 100) / 100.0f;
         doc["p2"] = (float)(int)(std::max(0.0f, (float)ed.p2) * 100) / 100.0f;
+        // Calibration must receive each raw pressure sample in the same
+        // rotating frame as its converted value. Keeping these only in the
+        // one-time full snapshot made the displayed ADC count look frozen.
+        doc["p1_raw"] = ed.p1Raw;
+        doc["p2_raw"] = ed.p2Raw;
         doc["p1_healthy"] = ed.p1Healthy;
         doc["p2_healthy"] = ed.p2Healthy;
         doc["fuel_press"] = (float)(int)(ed.fuelPressure * 100) / 100.0f;
+        doc["fuel_press_raw"] = ed.fuelPressRaw;
         doc["fuel_press_healthy"] = ed.fuelPressHealthy;
         doc["fuel_flow"] = (float)(int)(ed.fuelFlow * 100) / 100.0f;
         doc["fuel_flow_healthy"] = ed.fuelFlowHealthy;
@@ -1706,8 +1737,6 @@ static size_t _buildCompactTelemetry(char* buf, size_t len, JsonDocument& doc) {
         doc["starter_demand"] = (float)(int)(ed.starterDemand * 1000) / 1000.0f;
         doc["starter_enabled"] = ed.starterEnabled;
         doc["fuel_sol_open"] = ed.fuelSolOpen;
-        doc["igniter_on"] = ed.igniterOn;
-        doc["igniter2_on"] = ed.igniter2On;
         doc["dynamic_idle_enabled"] = ed.dynamicIdleEnabled;
         doc["idle_controller_state"] = ed.limpMode ? "Reduced-power mode" : ed.idleControllerState;
         doc["manual_relight_active"] = ed.manualRelightActive;

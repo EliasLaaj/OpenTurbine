@@ -561,9 +561,9 @@ expect('core output-current telemetry mirrors the exact sample used by protectio
 expect('NTC divider orientation reaches the resistance calculation',
   ntc.includes('_cal.fixedPullup') && hardware.includes('hw.ntcFixedPullup'));
 expect('sequencer uses turbine startup terminology',
-  sequenceHtml.includes("label:'Starter Spin to Light-Off Speed'") && !sequenceHtml.includes("label:'Crank Engine'"));
+  sequenceHtml.includes("label:'Set Starter'") && !sequenceHtml.includes("label:'Crank Engine'"));
 expect('hardware dependency warnings use the same turbine block names',
-  hardwareHtml.includes("StarterSpin:'Starter Spin to Light-Off Speed'") && !hardwareHtml.includes("StarterSpin:'Crank Engine'"));
+  hardwareHtml.includes("StarterSpin:'Set Starter'") && !hardwareHtml.includes("StarterSpin:'Crank Engine'"));
 expect('zero minimum N1 remains a valid underspeed-disable setting',
   configCpp.includes('if (!isfinite(minRpm) || minRpm < 0.0f)') &&
   configHtml.includes('Set 0 to disable this independent underspeed check'));

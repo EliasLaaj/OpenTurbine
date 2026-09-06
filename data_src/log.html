@@ -331,22 +331,36 @@ function parseRuns(events) {
   let cur = null;
   let runNum = 0;
 
+  const openRun = (entry, startTime = entry.t) => ({
+    num:     ++runNum,
+    tStart:  startTime,
+    tEnd:    null,
+    runS:    null,
+    peakN1:  eventN1(entry)  || 0,
+    peakN2:  eventN2(entry)  || 0,
+    peakTOT: eventTOT(entry) || 0,
+    peakTIT: eventTIT(entry) || 0,
+    outcome: 'IN_PROGRESS',
+    outCode: '',
+    events:  [entry]
+  });
+
   for (const e of events) {
     if (e.ev === 'START_ATTEMPT') {
       if (cur) { runs.push(cur); }   // close unclosed run
-      runNum++;
-      cur = {
-        num:     runNum,
-        tStart:  e.t,
-        tEnd:    null,
-        peakN1:  eventN1(e)  || 0,
-        peakN2:  eventN2(e)  || 0,
-        peakTOT: eventTOT(e) || 0,
-        peakTIT: eventTIT(e) || 0,
-        outcome: 'IN_PROGRESS',
-        outCode: '',
-        events:  [e]
-      };
+      cur = openRun(e);
+    } else if (e.ev === 'RUNNING_ENTRY' && !cur) {
+      // /api/log intentionally exposes only the newest event window. A busy
+      // startup can push START_ATTEMPT outside it while the completed run is
+      // still present. RUNNING_ENTRY is a valid later boundary for recovery.
+      cur = openRun(e);
+    } else if (e.ev === 'RUN_SUMMARY' && !cur) {
+      // RUN_SUMMARY is emitted immediately before the shutdown record and is
+      // authoritative even when both earlier boundaries fell outside the
+      // display window. Reconstruct the running start from its saved duration.
+      const runS = Math.max(0, Number(e.runS) || 0);
+      cur = openRun(e, Number(e.t) - runS);
+      cur.runS = runS;
     } else if (cur) {
       cur.events.push(e);
       const n1 = eventN1(e), n2 = eventN2(e), tot = eventTOT(e), tit = eventTIT(e);
@@ -354,6 +368,9 @@ function parseRuns(events) {
       if (n2  !== undefined && n2  > cur.peakN2)  cur.peakN2  = n2;
       if (tot !== undefined && tot > cur.peakTOT) cur.peakTOT = tot;
       if (tit !== undefined && tit > cur.peakTIT) cur.peakTIT = tit;
+      if (e.ev === 'RUN_SUMMARY' && Number.isFinite(Number(e.runS))) {
+        cur.runS = Math.max(0, Number(e.runS));
+      }
 
       if (e.ev === 'NORMAL_SHUTDOWN') {
         cur.outcome = 'NORMAL_SHUTDOWN'; cur.tEnd = e.t; runs.push(cur); cur = null;
@@ -380,7 +397,9 @@ function renderSummary(runs, eventCount = 0) {
   }
 
   c.innerHTML = runs.map((r, i) => {
-    const dur    = r.tEnd !== null
+    const dur    = r.runS !== null
+                     ? fmtDuration(r.runS)
+                     : r.tEnd !== null
                      ? fmtDuration(r.tEnd - r.tStart)
                      : r.outcome === 'IN_PROGRESS' ? 'in progress' : '—';
     const n1Str  = r.peakN1  > 0 ? fmtInt(r.peakN1)  + ' RPM' : '—';

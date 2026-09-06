@@ -381,7 +381,7 @@ const BLOCKS = {
     ]
   },
   StarterSpin: {
-    label:'Starter Spin to Light-Off Speed', type:'while', badgeClass:'badge-while',
+    label:'Set Starter', type:'while', badgeClass:'badge-while',
     visibleIf: hw => actuatorEnabled('starter') && sensorEnabled('n1_rpm'),
     condition: hw => `N1 < ${hw.pre_ign_rpm ?? 5000} rpm`,
     timeout_action:'fault',
@@ -396,8 +396,24 @@ const BLOCKS = {
     params:[
       {key:'starter_demand',      label:'Starter demand',unit:'%',   type:'float', min:0,   max:100,   step:1,   def:60,    configKey:'starter_demand',
         visibleIf: hw => actuatorHasProportionalOutput('starter')},
-      {key:'ramp_pct_per_s',     label:'Starter output increase rate', unit:'%/s', type:'float', min:0, max:200, step:5, def:30, configKey:'ramp_pct_per_s',
-        visibleIf: hw => actuatorHasProportionalOutput('starter')},
+      {key:'ramp_pct_per_s',     label:'Starter acceleration (ramp rate)', unit:'%/s', type:'float', min:0, max:200, step:5, def:30, configKey:'ramp_pct_per_s',
+        visibleIf: hw => actuatorHasProportionalOutput('starter'),
+        desc:'Limits how quickly Starter Spin reaches its requested demand. Example: 30%/s reaches 60% in 2 seconds. Set 0 for an immediate step. STOP and FAULT always cut the starter immediately.'},
+      {key:'pulsed_assist_enabled', label:'Use pulsed low-speed assist', type:'bool', def:false, configKey:'pulsed_assist_enabled',
+        visibleIf: hw => actuatorHasProportionalOutput('starter'),
+        desc:'Optional engagement aid for Bendix-drive, splined-coupling, and similar starters. Pulses stop at the selected N1 speed, then the normal ramp takes over.'},
+      {key:'pulsed_assist_pwm_pct', label:'Assist pulse demand', unit:'%', type:'float', min:0, max:100, step:1, def:15, configKey:'pulsed_assist_pwm_pct',
+        visibleIf: hw => actuatorHasProportionalOutput('starter'),
+        showWhen: vals => !!vals['StarterSpin.pulsed_assist_enabled']},
+      {key:'pulsed_assist_until_rpm', label:'Assist until N1', unit:'rpm', type:'float', min:0, max:50000, step:100, def:1000, configKey:'pulsed_assist_until_rpm',
+        visibleIf: hw => actuatorHasProportionalOutput('starter') && sensorEnabled('n1_rpm'),
+        showWhen: vals => !!vals['StarterSpin.pulsed_assist_enabled']},
+      {key:'pulsed_assist_on_ms', label:'Assist pulse ON time', unit:'ms', type:'int', min:1, max:60000, step:10, def:500, configKey:'pulsed_assist_on_ms',
+        visibleIf: hw => actuatorHasProportionalOutput('starter'),
+        showWhen: vals => !!vals['StarterSpin.pulsed_assist_enabled']},
+      {key:'pulsed_assist_off_ms', label:'Assist pulse OFF time', unit:'ms', type:'int', min:1, max:60000, step:10, def:250, configKey:'pulsed_assist_off_ms',
+        visibleIf: hw => actuatorHasProportionalOutput('starter'),
+        showWhen: vals => !!vals['StarterSpin.pulsed_assist_enabled']},
       {key:'pre_ign_rpm',        label:'Starter cut target N1', unit:'rpm', type:'float', min:100, max:50000, step:100, def:5000, configKey:'pre_ign_rpm',
         visibleIf: hw => sensorEnabled('n1_rpm'),
         desc:'Starter runs until N1 exceeds this RPM. Without healthy N1 feedback the block runs to its timeout and then causes a fault shutdown.'},
@@ -1021,6 +1037,11 @@ const CONFIG_SECTIONS = {
   oil_scavenge_ms:         {sec:'sequence.shutdown', key:'oil_scavenge_ms'},
   rpm_zero_threshold:      {sec:'sequence.shutdown', key:'rpm_zero_threshold'},
   ramp_pct_per_s:          {sec:'starter_control', key:'startup_ramp_pct_per_s'},
+  pulsed_assist_enabled:   {sec:'starter_control', key:'pulsed_assist_enabled'},
+  pulsed_assist_pwm_pct:   {sec:'starter_control', key:'pulsed_assist_pwm_pct'},
+  pulsed_assist_until_rpm: {sec:'starter_control', key:'pulsed_assist_until_rpm'},
+  pulsed_assist_on_ms:     {sec:'starter_control', key:'pulsed_assist_on_ms'},
+  pulsed_assist_off_ms:    {sec:'starter_control', key:'pulsed_assist_off_ms'},
   // new blocks
   timed_delay_ms:          {sec:'sequence.startup', key:'timed_delay_ms'},
   modified_idle_multiplier:{sec:'sequence.startup', key:'modified_idle_multiplier'},
@@ -2614,7 +2635,10 @@ function onParamChange(bname, pkey, configKey, rawVal, tab, idx) {
   if (bname === 'TimedDelay' && pkey === 'timed_delay_ms' && tab !== undefined) {
     ensureDelaySlots(tab);
     hwCfg[delaySeqKey(tab)][idx] = val;
-    renderFast(tab);
+    const card = document.querySelector(`#list-${tab} .block-card[data-idx="${idx}"]`);
+    const summary = card?.querySelector('.block-cond');
+    if (summary) summary.textContent = `${val} ms`;
+    markSequenceDirty('Sequence edited — save to apply');
     return;
   }
   const vk  = bname + '.' + pkey;
@@ -3362,7 +3386,7 @@ function _validateSequence(blocks) {
     const fuelIdx   = blocks.indexOf('FuelOpen');
     const startIdx  = blocks.indexOf('StarterSpin');
     if (fuelIdx < startIdx) {
-      warnings.push('Open Main Fuel Shutoff appears before Starter Spin to Light-Off Speed. Fuel may enter before rotor airflow is established, risking unburned fuel pooling. Move the starter-spin block before main fuel opens.');
+      warnings.push('Open Main Fuel Shutoff appears before Set Starter. Fuel may enter before rotor airflow is established, risking unburned fuel pooling. Move the starter block before main fuel opens.');
     }
   }
   // SafetyHold without Spool - valid but unusual
